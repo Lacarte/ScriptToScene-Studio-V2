@@ -12,7 +12,7 @@ import traceback
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 
 editor_bp = Blueprint("editor", __name__)
@@ -94,6 +94,21 @@ def editor_list_projects():
 
     projects.sort(key=lambda p: p.get("saved_at", ""), reverse=True)
     return jsonify(projects)
+
+
+OVERLAYS_DIR = os.path.join(APP_ASSETS_DIR, "overlays")
+
+
+@editor_bp.route("/api/editor/overlays", methods=["GET"])
+def list_overlays():
+    """List available overlay PNGs from assets/overlays/."""
+    overlays = []
+    if os.path.isdir(OVERLAYS_DIR):
+        for f in sorted(os.listdir(OVERLAYS_DIR)):
+            if f.lower().endswith(".png"):
+                name = os.path.splitext(f)[0]
+                overlays.append({"name": name, "file": f, "url": f"/assets/overlays/{f}"})
+    return jsonify(overlays)
 
 
 # ---------------------------------------------------------------------------

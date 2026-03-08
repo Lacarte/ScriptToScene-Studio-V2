@@ -160,6 +160,7 @@ const EditorState = {
     savedAudioSettings: null,  // Saved audio settings from localStorage
     captionData: null,      // Caption data { captions: [], style: {} }
     captionsEnabled: false, // Whether caption track is visible
+    overlay: null,          // Global overlay URL applied to entire timeline
     selectedExportProfile: 'yt_shorts',  // Export profile ID
     bgMusic: null,          // DEPRECATED — use audioTracks (type: 'music')
     bgMusicElement: null,   // DEPRECATED — use audioTracks[].element
@@ -275,6 +276,7 @@ async function saveProjectToServer() {
         })),
         captions: EditorState.captionData || null,
         captionsEnabled: !!EditorState.captionsEnabled,
+        overlay: EditorState.overlay || null,
         edit_history: (EditorState.editHistory || []).slice(-50),
         history_index: EditorState.historyIndex,
         disabled_tracks: [...(EditorState.disabledTracks || [])]
@@ -1215,8 +1217,17 @@ async function loadProjectFromServer(projectId) {
             localStorage.setItem('sts-editor-captions', JSON.stringify(saved.captions));
         }
 
-        // Store edit overrides for post-init restoration
-        window._savedEditorState = saved;
+        // Store extra state in sessionStorage so it survives the reload
+        const extraState = {
+            audio_tracks: (saved.audio_tracks || []).filter(t => t.type !== 'voice'),
+            edit_history: saved.edit_history || [],
+            history_index: saved.history_index ?? -1,
+            disabled_tracks: saved.disabled_tracks || [],
+            captionsEnabled: saved.captionsEnabled,
+            overlay: saved.overlay || null,
+            scenes: saved.scenes || []
+        };
+        sessionStorage.setItem('editor_saved_state', JSON.stringify(extraState));
 
         hideNoDataOverlay();
         location.reload();
@@ -1228,12 +1239,36 @@ async function loadProjectFromServer(projectId) {
 }
 
 function _restoreSavedEditorState() {
-    const saved = window._savedEditorState;
-    if (!saved) return;
-    window._savedEditorState = null;
+    const raw = sessionStorage.getItem('editor_saved_state');
+    if (!raw) return;
+    sessionStorage.removeItem('editor_saved_state');
+
+    let saved;
+    try { saved = JSON.parse(raw); } catch (e) { return; }
+
+    // Re-apply scene-level properties from server save (overrides stale localStorage edits)
+    if (saved.scenes?.length) {
+        for (const ss of saved.scenes) {
+            const scene = EditorState.scenes.find(s => s.id === (ss.id ?? ss.scene_id));
+            if (!scene) continue;
+            if (ss.visual_fx !== undefined) scene.visual_fx = ss.visual_fx;
+            if (ss.duration !== undefined) scene.duration = ss.duration;
+            if (ss.text_content !== undefined) scene.text_content = ss.text_content;
+            if (ss.text_color !== undefined) scene.text_color = ss.text_color;
+            if (ss.text_size !== undefined) scene.text_size = ss.text_size;
+            if (ss.font_family !== undefined) scene.font_family = ss.font_family;
+            if (ss.font_style !== undefined) scene.font_style = ss.font_style;
+            if (ss.text_align !== undefined) scene.text_align = ss.text_align;
+            if (ss.vertical_align !== undefined) scene.vertical_align = ss.vertical_align;
+            if (ss.text_x !== undefined) scene.text_x = ss.text_x;
+            if (ss.text_y !== undefined) scene.text_y = ss.text_y;
+            if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
+            if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
+        }
+    }
 
     // Restore non-voice audio tracks (music, fx)
-    const nonVoiceTracks = (saved.audio_tracks || []).filter(t => t.type !== 'voice');
+    const nonVoiceTracks = saved.audio_tracks || [];
     for (const t of nonVoiceTracks) {
         if (!t.file || !t.path) continue;
         const track = createAudioTrack({
@@ -1283,6 +1318,27 @@ function _restoreSavedEditorState() {
     // Restore captions enabled state
     if (saved.captionsEnabled !== undefined) {
         EditorState.captionsEnabled = saved.captionsEnabled;
+        const toggle = document.getElementById('caption-enabled-toggle');
+        if (toggle) toggle.checked = saved.captionsEnabled;
+        if (elements.captionTrackRow) {
+            elements.captionTrackRow.style.display = saved.captionsEnabled ? '' : 'none';
+        }
+        if (EditorState.preview) {
+            if (saved.captionsEnabled && EditorState.captionData) {
+                EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style || {});
+            } else if (!saved.captionsEnabled) {
+                EditorState.preview.setCaptions(null, null);
+            }
+        }
+    }
+
+    // Restore global overlay
+    if (saved.overlay) {
+        EditorState.overlay = saved.overlay;
+        if (EditorState.preview) {
+            EditorState.preview.setOverlay(saved.overlay);
+        }
+        updateOverlaysTab();
     }
 
     renderAllAudioTracks();
@@ -2015,7 +2071,7 @@ function renderProjectAssets(pane, data) {
         <span>Project Assets</span>
         <span style="display:flex;align-items:center;gap:6px">
             <span class="asset-browser-count">${totalFiles} files</span>
-            <button class="asset-reload-btn" onclick="_projectAssetsCache=null;_projectAssetsCacheId=null;loadProjectAssets()" title="Reload assets">
+            <button class="asset-reload-btn" onclick="window.reloadProjectAssets()" title="Reload assets">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             </button>
         </span>
@@ -2996,6 +3052,8 @@ function setupCaptionControls() {
         // Update UI
         _capUpdateUI();
         renderCaptionTrack();
+        _saveCaptionsToStorage();
+        _debouncedServerSave();
     });
 
     // Style controls
@@ -3014,6 +3072,8 @@ function setupCaptionControls() {
         if (EditorState.preview && EditorState.captionsEnabled) {
             EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
         }
+        _saveCaptionsToStorage();
+        _debouncedServerSave();
     };
 
     presetSel?.addEventListener('change', () => {
@@ -3024,7 +3084,7 @@ function setupCaptionControls() {
             subtitle_bar: { font_family: 'Inter', font_size: 48, font_weight: '600', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 85, animation: 'none', text_transform: 'none', bg_bar: true, shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
             karaoke: { font_family: 'Bebas Neue', font_size: 72, font_weight: '400', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 70, animation: 'none', text_transform: 'uppercase', highlight: true, shadow_color: '#000000', shadow_blur: 10, shadow_offset_x: 2, shadow_offset_y: 2 },
             minimal: { font_family: 'DM Sans', font_size: 42, font_weight: '500', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 80, animation: 'none', text_transform: 'none', shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
-            single_line: { font_family: 'Montserrat', font_size: 64, font_weight: '900', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, blend_mode: 'difference', shadow_color: 'rgba(0,0,0,1.00)', shadow_blur: 6, shadow_offset_x: 3, shadow_offset_y: 3, diff_strength: 0.59, overlay_strength: 0.37, overlay_color: '#ffffff' },
+            single_line: { font_family: 'Montserrat', font_size: 80, font_weight: '900', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, blend_mode: 'difference', shadow_color: 'rgba(0,0,0,1.00)', shadow_blur: 10, shadow_offset_x: 3, shadow_offset_y: 3, diff_strength: 0.59, overlay_strength: 0.37, overlay_color: '#ffffff', edge_fade_ms: 90 },
             single_line_highlight: { font_family: 'Montserrat', font_size: 64, font_weight: '900', color: 'rgba(255,255,255,0.35)', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_color: '#FFFFFF' },
         };
         const p = PRESETS[presetSel.value];
@@ -3034,6 +3094,8 @@ function setupCaptionControls() {
             if (EditorState.preview && EditorState.captionsEnabled) {
                 EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
             }
+            _saveCaptionsToStorage();
+            _debouncedServerSave();
         }
     });
 
@@ -3183,6 +3245,16 @@ function _capUpdateUI() {
 }
 
 /**
+ * Save current caption data (style + captions) to localStorage
+ */
+function _saveCaptionsToStorage() {
+    if (!EditorState.captionData) return;
+    try {
+        localStorage.setItem('sts-editor-captions', JSON.stringify(EditorState.captionData));
+    } catch { /* ignore */ }
+}
+
+/**
  * Load captions from localStorage (sent by studio)
  */
 function _loadCaptionsFromStorage() {
@@ -3224,6 +3296,8 @@ function _receiveCaptionData(captionData) {
     _capSyncStyleUI();
     _capUpdateUI();
     renderCaptionTrack();
+    _saveCaptionsToStorage();
+    _debouncedServerSave();
 }
 
 /**
@@ -3367,6 +3441,7 @@ function selectScene(sceneId) {
     renderSceneProperties();
     updateEffectsTab();
     updateTransitionsTab();
+    updateOverlaysTab();
 
     // Sync media grid selection
     document.querySelectorAll('.media-grid-item').forEach(item => {
@@ -4011,9 +4086,10 @@ function setupEventListeners() {
     // Caption controls
     setupCaptionControls();
 
-    // Effects & Transitions tabs
+    // Effects, Transitions & Overlays tabs
     setupEffectsTab();
     setupTransitionsTab();
+    setupOverlaysTab();
 
     // Track toggling
     document.querySelectorAll('.track-toggle').forEach(icon => {
@@ -5339,6 +5415,11 @@ function showMusicPicker() {
 
 // Expose for inline onclick
 window.loadProjectFromServer = loadProjectFromServer;
+window.reloadProjectAssets = function () {
+    _projectAssetsCache = null;
+    _projectAssetsCacheId = null;
+    loadProjectAssets();
+};
 
 window.editorCloseMusicPicker = function () {
     const dialog = document.getElementById('music-picker-dialog');
@@ -5857,6 +5938,81 @@ function updateTransitionsTab() {
     }
 }
 
+// ============================================================
+// Overlays Tab (global — applies to entire timeline)
+// ============================================================
+
+let _overlaysList = null;
+
+async function setupOverlaysTab() {
+    const grid = document.getElementById('ov-grid');
+    if (!grid) return;
+
+    // Fetch available overlays from server
+    try {
+        const res = await fetch('/api/editor/overlays');
+        if (res.ok) _overlaysList = await res.json();
+    } catch { /* ignore */ }
+    if (!_overlaysList) _overlaysList = [];
+
+    // Build cards: "None" + each overlay with preview thumbnail
+    const cardGrid = document.getElementById('ov-card-grid');
+    if (!cardGrid) return;
+
+    let html = `<button class="overlay-card" data-overlay="">
+        <div class="overlay-card-preview">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+        </div>
+        <span class="overlay-card-label">None</span>
+    </button>`;
+
+    for (const ov of _overlaysList) {
+        const esc = (s) => s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        html += `<button class="overlay-card" data-overlay="${esc(ov.url)}" title="${esc(ov.name)}">
+            <div class="overlay-card-preview">
+                <img src="${esc(ov.url)}" alt="${esc(ov.name)}" loading="lazy">
+            </div>
+            <span class="overlay-card-label">${esc(ov.name)}</span>
+        </button>`;
+    }
+    cardGrid.innerHTML = html;
+
+    // Click handler — set global overlay for entire timeline
+    cardGrid.querySelectorAll('.overlay-card[data-overlay]').forEach(card => {
+        card.addEventListener('click', () => {
+            const url = card.dataset.overlay || null;
+            const old = EditorState.overlay;
+            EditorState.overlay = url;
+            recordEdit(`${url ? 'Set' : 'Remove'} overlay`, null, 'overlay', old, url);
+            updateOverlaysTab();
+
+            // Update preview
+            if (EditorState.preview) {
+                EditorState.preview.setOverlay(url);
+            }
+        });
+    });
+
+    // Show grid immediately (no scene selection needed)
+    grid.style.display = '';
+    const noScene = document.getElementById('ov-no-scene');
+    if (noScene) noScene.style.display = 'none';
+
+    updateOverlaysTab();
+}
+
+function updateOverlaysTab() {
+    const grid = document.getElementById('ov-grid');
+    if (!grid) return;
+
+    const activeOverlay = EditorState.overlay || '';
+    grid.querySelectorAll('.overlay-card[data-overlay]').forEach(card => {
+        card.classList.toggle('active', card.dataset.overlay === activeOverlay);
+    });
+}
+
 /**
  * Handle keyboard shortcuts
  */
@@ -5899,6 +6055,7 @@ function handleKeyboard(e) {
         renderSceneProperties();
         updateEffectsTab();
         updateTransitionsTab();
+        updateOverlaysTab();
     }
 }
 

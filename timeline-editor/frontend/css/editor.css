@@ -827,6 +827,65 @@ body.asset-dragging .scene-clip:hover {
     outline-offset: -1px;
 }
 
+/* ---- Overlay Card Grid ---- */
+.overlay-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+}
+
+.overlay-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.overlay-card:hover {
+    background: var(--bg-surface-hover);
+    border-color: var(--border);
+    color: var(--text);
+}
+
+.overlay-card.active {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.overlay-card-preview {
+    width: 100%;
+    aspect-ratio: 9/16;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--bg-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.overlay-card-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.overlay-card-label {
+    font-size: 0.6rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
 /* ---- Preview Panel (CapCut-style) ---- */
 .preview-panel {
     grid-column: 3;

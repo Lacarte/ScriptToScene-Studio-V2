@@ -38,6 +38,9 @@ export class CanvasPreview {
         // Background color
         this.backgroundColor = '#000000';
 
+        // Overlay image cache (keyed by URL)
+        this.overlayCache = new Map();
+
         // Disabled tracks set — synced from EditorState
         this.disabledTracks = new Set();
     }
@@ -87,6 +90,39 @@ export class CanvasPreview {
         } catch (e) {
             console.log('No black text background found at:', bbgPath);
         }
+    }
+
+    /**
+     * Set the global overlay (applied to entire timeline).
+     * Pass null to remove.
+     */
+    setOverlay(url) {
+        this.activeOverlay = url || null;
+        this.activeOverlayImg = null;
+        if (!url) { this.render(); return; }
+
+        // Use cache or load
+        if (this.overlayCache.has(url)) {
+            this.activeOverlayImg = this.overlayCache.get(url);
+            this.render();
+            return;
+        }
+        const img = new Image();
+        img.onload = () => {
+            this.overlayCache.set(url, img);
+            this.activeOverlayImg = img;
+            this.render();
+        };
+        img.onerror = () => console.warn('Failed to load overlay:', url);
+        img.src = url;
+    }
+
+    /**
+     * Render global overlay on top of current frame (full canvas, preserving alpha)
+     */
+    renderOverlay() {
+        if (!this.activeOverlayImg) return;
+        this.ctx.drawImage(this.activeOverlayImg, 0, 0, this.width, this.height);
     }
 
     /**
@@ -300,6 +336,7 @@ export class CanvasPreview {
             } else {
                 this.renderTextScene(scene, progress);
             }
+            this.renderOverlay();
             this.renderCaptionOverlay(this.currentTime);
             return;
         }
@@ -334,6 +371,9 @@ export class CanvasPreview {
                 }
             }
         }
+
+        // Global overlay layer (between scene and captions)
+        this.renderOverlay();
 
         // Caption overlay on top
         this.renderCaptionOverlay(this.currentTime);
@@ -1003,27 +1043,14 @@ export class CanvasPreview {
     renderCaptionOverlay(time) {
         if (!this.captions.length) return;
 
-        const style = this.captionStyle || {};
-        const holdMs = Number(style.caption_hold_ms ?? style.hold_ms ?? 140);
-        const holdSec = Math.max(0, holdMs) / 1000;
-
         // Find active caption
         let active = null;
         for (const cap of this.captions) {
             if (time >= cap.start && time < cap.end) { active = cap; break; }
         }
-        // Keep last caption visible for a tiny window after end to avoid flicker on pause/boundary frames
-        if (!active && holdSec > 0) {
-            for (const cap of this.captions) {
-                if (time >= cap.end && time < cap.end + holdSec) {
-                    active = cap;
-                } else if (cap.start > time) {
-                    break;
-                }
-            }
-        }
         if (!active) return;
 
+        const style = this.captionStyle;
         const fontFamily = style.font_family || 'Montserrat';
         const fontWeight = style.font_weight || '800';
         const scale = this.height / 1920;
@@ -1063,31 +1090,34 @@ export class CanvasPreview {
         // Single-line mode: wrap only if text exceeds canvas width
         const isSingleLine = animation === 'hard_cut' || style.preset === 'single_line';
         let lines, lineHeight, totalHeight, baseY;
+        let renderFontSize = fontSize;
 
         if (isSingleLine) {
             const maxWidth = this.width * 0.9;
             // Set font before measuring
-            this.ctx.font = `${fontWeight} ${fontSize}px "${fontFamily}", sans-serif`;
-            if (this.ctx.measureText(text).width > maxWidth) {
-                lines = this._wrapText(text, maxWidth);
-            } else {
-                lines = [text];
+            this.ctx.font = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
+            const measuredWidth = this.ctx.measureText(text).width;
+            if (measuredWidth > maxWidth) {
+                const fitScale = maxWidth / Math.max(1, measuredWidth);
+                const minFontSize = fontSize * 0.72;
+                renderFontSize = Math.max(minFontSize, fontSize * fitScale);
+                this.ctx.font = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
             }
-            lineHeight = fontSize * 1.1;
+            lines = [text];
+            lineHeight = renderFontSize * 1.1;
             totalHeight = lines.length * lineHeight;
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
         } else {
             const maxWidth = this.width * 0.85;
             lines = this._wrapText(text, maxWidth);
-            lineHeight = fontSize * 1.25;
+            lineHeight = renderFontSize * 1.25;
             totalHeight = lines.length * lineHeight;
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
         }
 
         // Pop animation: scale in
         if (animation === 'pop') {
-            const animTime = Math.min(time, active.end - 0.0001);
-            const capProgress = (animTime - active.start) / (active.end - active.start);
+            const capProgress = (time - active.start) / (active.end - active.start);
             const popScale = capProgress < 0.1 ? (capProgress / 0.1) * 0.1 + 0.9 : 1.0;
             const alpha = capProgress < 0.05 ? capProgress / 0.05 : (capProgress > 0.9 ? (1.0 - capProgress) / 0.1 : 1.0);
             this.ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
@@ -1100,8 +1130,7 @@ export class CanvasPreview {
 
         // Hard-cut animation: instant appear/disappear (no fade, optional fast scale-up)
         if (animation === 'hard_cut') {
-            const animTime = Math.min(time, active.end - 0.0001);
-            const capProgress = (animTime - active.start) / (active.end - active.start);
+            const capProgress = (time - active.start) / (active.end - active.start);
             if (capProgress < 0.05) {
                 const s = 0.9 + (capProgress / 0.05) * 0.1;
                 const cx = this.width / 2;
@@ -1110,10 +1139,20 @@ export class CanvasPreview {
                 this.ctx.scale(s, s);
                 this.ctx.translate(-cx, -cy);
             }
+            // Single-line style gets a short edge fade for a premium, less "chunky" transition.
+            const edgeFadeMs = Number(style.edge_fade_ms ?? 90);
+            const fadeSec = Math.max(0, edgeFadeMs) / 1000;
+            const dur = Math.max(0.001, active.end - active.start);
+            const fadeRatio = Math.min(0.25, fadeSec / dur);
+            if (fadeRatio > 0) {
+                const fadeIn = Math.min(1, capProgress / fadeRatio);
+                const fadeOut = Math.min(1, (1 - capProgress) / fadeRatio);
+                this.ctx.globalAlpha *= Math.max(0, Math.min(1, Math.min(fadeIn, fadeOut)));
+            }
         }
 
         const isDifference = blendMode === 'difference';
-        const fontStr = `${fontWeight} ${fontSize}px "${fontFamily}", sans-serif`;
+        const fontStr = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
 
         if (isDifference) {
             // --- 3-pass difference blend rendering ---

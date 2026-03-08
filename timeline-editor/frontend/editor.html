@@ -134,6 +134,14 @@
                     </svg>
                     <span>Transitions</span>
                 </button>
+                <button class="media-tab" data-tab="overlays">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.8">
+                        <rect x="3" y="3" width="14" height="14" rx="2" opacity="0.4" />
+                        <rect x="7" y="7" width="14" height="14" rx="2" />
+                    </svg>
+                    <span>Overlays</span>
+                </button>
                 <button class="media-tab" data-tab="text">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-width="1.8">
@@ -434,6 +442,17 @@
                                     <span class="fx-btn-label">Randomize all scenes</span>
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane" data-pane="overlays">
+                    <div class="tab-pane-body" style="padding:8px;display:flex;flex-direction:column;gap:8px;overflow-y:auto">
+                        <div id="ov-no-scene" class="fx-empty-state" style="display:none">
+                            <span>No overlays available</span>
+                        </div>
+                        <div id="ov-grid">
+                            <div class="fx-section-label">Timeline Overlay</div>
+                            <div id="ov-card-grid" class="overlay-card-grid"></div>
                         </div>
                     </div>
                 </div>

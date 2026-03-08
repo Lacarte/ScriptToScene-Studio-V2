@@ -250,25 +250,11 @@ function _capTick() {
   const display = $('#cap-time-display');
   if (display) display.textContent = t.toFixed(2) + 's';
 
-  const style = STATE.captionData?.style || {};
-  const holdMs = Number(style.caption_hold_ms ?? style.hold_ms ?? 140);
-  const holdSec = Math.max(0, holdMs) / 1000;
-
   // Find active caption
   const captions = STATE.captionData?.captions || [];
   let activeIdx = -1;
   for (let i = 0; i < captions.length; i++) {
     if (t >= captions[i].start && t < captions[i].end) { activeIdx = i; break; }
-  }
-  // Keep last caption visible briefly to avoid flicker when pausing/stepping near boundaries
-  if (activeIdx < 0 && holdSec > 0) {
-    for (let i = 0; i < captions.length; i++) {
-      if (t >= captions[i].end && t < captions[i].end + holdSec) {
-        activeIdx = i;
-      } else if (captions[i].start > t) {
-        break;
-      }
-    }
   }
 
   if (activeIdx !== _capActiveIdx) {
@@ -287,15 +273,29 @@ function _capTick() {
   // Update caption preview text
   const previewEl = $('#cap-preview-text');
   if (previewEl) {
+    const style = STATE.captionData?.style || {};
     if (activeIdx >= 0) {
       let text = captions[activeIdx].text;
       if (style.text_transform === 'uppercase') text = text.toUpperCase();
+      const cap = captions[activeIdx];
       previewEl.textContent = text;
       previewEl.style.fontFamily = `"${style.font_family || 'Montserrat'}", sans-serif`;
       previewEl.style.fontWeight = style.font_weight || '800';
       previewEl.style.fontSize = '24px';
       previewEl.style.color = style.color || '#FFFFFF';
-      previewEl.style.opacity = '1';
+      let opacity = 1;
+      if (style.animation === 'hard_cut' && cap) {
+        const dur = Math.max(0.001, cap.end - cap.start);
+        const p = (t - cap.start) / dur;
+        const fadeSec = Math.max(0, Number(style.edge_fade_ms ?? 90)) / 1000;
+        const fadeRatio = Math.min(0.25, fadeSec / dur);
+        if (fadeRatio > 0) {
+          const fadeIn = Math.min(1, p / fadeRatio);
+          const fadeOut = Math.min(1, (1 - p) / fadeRatio);
+          opacity = Math.max(0, Math.min(1, Math.min(fadeIn, fadeOut)));
+        }
+      }
+      previewEl.style.opacity = String(opacity);
       const shadows = [];
       if ((style.stroke_width || 0) > 0 && style.stroke_color && style.stroke_color !== 'none') {
         shadows.push(

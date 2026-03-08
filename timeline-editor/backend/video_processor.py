@@ -445,6 +445,36 @@ class VideoProcessor:
 
         return output_path
 
+    def _apply_overlay(self, input_path, output_path, overlay_url):
+        """Composite an overlay PNG on top of the full video using ffmpeg overlay filter."""
+        app_root = os.path.dirname(os.path.dirname(self.project_root))
+        rel = overlay_url.lstrip('/')
+        overlay_path = os.path.join(app_root, rel)
+        if not os.path.exists(overlay_path):
+            logger.warning("Overlay not found: {} (resolved: {})", overlay_url, overlay_path)
+            # Fall back: just copy input to output
+            shutil.copy2(input_path, output_path)
+            return
+
+        logger.info("Applying overlay: {}", os.path.basename(overlay_path))
+        cmd = [
+            FFMPEG_BIN, '-y',
+            '-i', input_path,
+            '-i', overlay_path,
+            '-filter_complex',
+            f'[1:v]scale={self.width}:{self.height}:flags=lanczos,format=rgba[ov];[0:v][ov]overlay=0:0:format=auto',
+            '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'copy',
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            logger.error("Overlay compositing failed: {}", result.stderr[-500:] if result.stderr else '')
+            shutil.copy2(input_path, output_path)
+        else:
+            logger.info("Overlay applied successfully")
+
     def _create_video_from_image_ffmpeg(self, image_path, output_path, duration):
         """Create video from static image using ffmpeg-python"""
         logger.debug("ffmpeg-python: image->video {}s {}", duration, image_path)
@@ -1024,6 +1054,13 @@ class VideoProcessor:
         shadow_x = style.get('shadowOffsetX', style.get('shadow_offset_x', 0))
         shadow_y = style.get('shadowOffsetY', style.get('shadow_offset_y', 0))
         blend_mode = style.get('blendMode', style.get('blend_mode', 'normal'))
+        letter_spacing = style.get('letterSpacing', style.get('letter_spacing', 0))
+        edge_fade_ms = float(style.get('edgeFadeMs', style.get('edge_fade_ms', 90)))
+        preset_id = style.get('preset', '')
+        is_single_line_style = (
+            preset_id in ('single_line', 'single_line_highlight')
+            or blend_mode == 'difference'
+        )
 
         # Highlight settings
         do_highlight = style.get('highlight', False)
@@ -1034,17 +1071,21 @@ class VideoProcessor:
         font_path = self._resolve_font_path(font_family, font_weight)
         font_path_esc = font_path.replace('\\', '/').replace(':', '\\:')
 
-        # Pillow font for word width measurement (used by highlight box mode)
-        pil_font = None
-        if do_highlight:
-            try:
-                pil_font = ImageFont.truetype(font_path, font_size)
-            except (OSError, IOError):
-                pil_font = None
+        # Pillow font cache for width measurement at dynamic sizes
+        _pil_font_cache = {}
+        def _get_pil_font(size):
+            s = max(8, int(size))
+            if s not in _pil_font_cache:
+                try:
+                    _pil_font_cache[s] = ImageFont.truetype(font_path, s)
+                except (OSError, IOError):
+                    _pil_font_cache[s] = None
+            return _pil_font_cache[s]
 
         # Max text width: 85% of video width (matches preview canvas wrapping)
         max_text_width = int(self.width * 0.85)
-        line_height = int(font_size * 1.25)
+        max_single_line_width = int(self.width * 0.90)
+        base_line_height = int(font_size * 1.25)
 
         logger.info("Burning {} captions: font={} {}px color=#{} stroke={}px pos_y={}% max_w={} highlight={}",
                      len(entries), font_family, font_size, font_color, stroke_width, position_y, max_text_width,
@@ -1069,12 +1110,30 @@ class VideoProcessor:
                 return f":borderw={stroke_width}:bordercolor=#{stroke_color}"
             return ''
 
-        def _measure_text(text):
+        def _letter_spacing_suffix():
+            # Note: ffmpeg drawtext does not support letter_spacing, only line_spacing
+            # Letter spacing is handled via preview canvas only; skip in burn-in
+            return ''
+
+        def _measure_text(text, size=font_size):
             """Measure text width in pixels using Pillow."""
+            pil_font = _get_pil_font(size)
             if pil_font:
                 bbox = pil_font.getbbox(text)
-                return bbox[2] - bbox[0] if bbox else int(len(text) * font_size * 0.6)
-            return int(len(text) * font_size * 0.6)
+                return bbox[2] - bbox[0] if bbox else int(len(text) * size * 0.6)
+            return int(len(text) * size * 0.6)
+
+        def _alpha_suffix(start, end):
+            if not is_single_line_style:
+                return ''
+            dur = max(0.001, float(end) - float(start))
+            fade = min(max(0.0, edge_fade_ms) / 1000.0, dur * 0.25)
+            if fade <= 0:
+                return ''
+            return (
+                f":alpha='if(lt(t,{start + fade:.3f}),(t-{start:.3f})/{fade:.3f},"
+                f"if(gt(t,{end - fade:.3f}),({end:.3f}-t)/{fade:.3f},1))'"
+            )
 
         drawtext_parts = []
         for i, entry in enumerate(entries):
@@ -1088,9 +1147,24 @@ class VideoProcessor:
             start = entry.get('start', 0)
             end = entry.get('end', start + 1)
             words = entry.get('words', [])
+            alpha_suffix = _alpha_suffix(start, end)
 
-            # Word-wrap text to fit within video width
-            lines = self._wrap_caption_text(text, font_path, font_size, max_text_width)
+            render_font_size = int(font_size)
+            line_height = base_line_height
+
+            if is_single_line_style:
+                text_w = _measure_text(text, render_font_size)
+                if text_w > max_single_line_width:
+                    fit_scale = max_single_line_width / max(1, text_w)
+                    min_size = max(24, int(font_size * 0.72))
+                    render_font_size = max(min_size, int(font_size * fit_scale))
+                line_height = int(render_font_size * 1.1)
+                lines = [text]
+            else:
+                # Word-wrap text to fit within video width
+                lines = self._wrap_caption_text(text, font_path, render_font_size, max_text_width)
+                line_height = int(render_font_size * 1.25)
+
             num_lines = len(lines)
 
             # Center the block around position_y
@@ -1119,16 +1193,16 @@ class VideoProcessor:
                     n_line_words = len(line_words)
 
                     # Calculate x positions for each word in this line
-                    full_line_w = _measure_text(line_text)
+                    full_line_w = _measure_text(line_text, render_font_size)
                     line_start_x = int((self.width - full_line_w) / 2)
-                    space_w = _measure_text(' ')
+                    space_w = _measure_text(' ', render_font_size)
 
                     word_x = line_start_x
                     for lw_idx in range(n_line_words):
                         if word_idx >= len(word_timings):
                             break
                         wt = word_timings[word_idx]
-                        word_w = _measure_text(wt['text'])
+                        word_w = _measure_text(wt['text'], render_font_size)
                         escaped_word = _escape_text(wt['text'])
 
                         # For each word, render in dim color for full caption duration
@@ -1139,13 +1213,13 @@ class VideoProcessor:
                         dt_dim = (
                             f"drawtext=fontfile='{font_path_esc}'"
                             f":text='{escaped_word}'"
-                            f":fontsize={font_size}"
+                            f":fontsize={render_font_size}"
                             f":fontcolor=#{dim_color}"
                             f":x={word_x}"
                             f":y={line_y}"
                             f":enable='between(t,{start},{end})'"
                         )
-                        dt_dim += _stroke_suffix() + _shadow_suffix()
+                        dt_dim += _letter_spacing_suffix() + alpha_suffix + _stroke_suffix() + _shadow_suffix()
                         drawtext_parts.append(dt_dim)
 
                         # Highlight pass: override with highlight color during this word's time
@@ -1158,11 +1232,11 @@ class VideoProcessor:
 
                         if highlight_mode == 'box':
                             # Draw colored box behind word, then white text on top
-                            box_pad = int(font_size * 0.15)
+                            box_pad = int(render_font_size * 0.15)
                             box_x = word_x - box_pad
-                            box_y = line_y - int(font_size * 0.1) - box_pad
+                            box_y = line_y - int(render_font_size * 0.1) - box_pad
                             box_w = word_w + box_pad * 2
-                            box_h = int(font_size * 1.1) + box_pad * 2
+                            box_h = int(render_font_size * 1.1) + box_pad * 2
 
                             dt_box = (
                                 f"drawbox=x={box_x}:y={box_y}:w={box_w}:h={box_h}"
@@ -1175,24 +1249,26 @@ class VideoProcessor:
                             dt_active = (
                                 f"drawtext=fontfile='{font_path_esc}'"
                                 f":text='{escaped_word}'"
-                                f":fontsize={font_size}"
+                                f":fontsize={render_font_size}"
                                 f":fontcolor=#FFFFFF"
                                 f":x={word_x}"
                                 f":y={line_y}"
                                 f":enable='between(t,{w_begin},{w_active_end})'"
                             )
+                            dt_active += _letter_spacing_suffix() + alpha_suffix
                             drawtext_parts.append(dt_active)
                         else:
                             # Text highlight: redraw word in highlight color
                             dt_active = (
                                 f"drawtext=fontfile='{font_path_esc}'"
                                 f":text='{escaped_word}'"
-                                f":fontsize={font_size}"
+                                f":fontsize={render_font_size}"
                                 f":fontcolor=#{highlight_color_hex}"
                                 f":x={word_x}"
                                 f":y={line_y}"
                                 f":enable='between(t,{w_begin},{w_active_end})'"
                             )
+                            dt_active += _letter_spacing_suffix() + alpha_suffix
                             drawtext_parts.append(dt_active)
 
                         word_x += word_w + space_w
@@ -1206,12 +1282,13 @@ class VideoProcessor:
                     dt = (
                         f"drawtext=fontfile='{font_path_esc}'"
                         f":text='{escaped}'"
-                        f":fontsize={font_size}"
+                        f":fontsize={render_font_size}"
                         f":fontcolor=#{font_color}"
                         f":x=(w-text_w)/2"
                         f":y={line_y}"
                         f":enable='between(t,{start},{end})'"
                     )
+                    dt += _letter_spacing_suffix() + alpha_suffix
                     dt += _stroke_suffix()
 
                     if bg_color and bg_color not in ('transparent', 'none'):
@@ -1368,13 +1445,29 @@ class VideoProcessor:
             self._update_progress(82, "Concatenating scenes and adding audio")
 
             has_captions = bool(self.export_data.get('captions', {}).get('entries'))
-            if has_captions:
+            has_overlay = bool(self.export_data.get('overlay'))
+            needs_post = has_captions or has_overlay
+
+            if needs_post:
                 concat_output = os.path.join(temp_dir, 'concat_output.mp4')
-                logger.debug("Captions detected — concat to temp before burn-in")
+                logger.debug("Post-processing needed (overlay={} captions={}) — concat to temp", has_overlay, has_captions)
             else:
                 concat_output = output_path
 
             self._concat_scenes(scene_clips, concat_output)
+
+            # Apply global overlay (between scenes and captions)
+            if has_overlay:
+                self._update_progress(85, "Applying overlay")
+                overlay_input = concat_output
+                if has_captions:
+                    overlay_output = os.path.join(temp_dir, 'overlay_output.mp4')
+                else:
+                    overlay_output = output_path
+                self._apply_overlay(overlay_input, overlay_output, self.export_data['overlay'])
+                # If captions follow, update concat_output to point to overlay result
+                if has_captions:
+                    concat_output = overlay_output
 
             if has_captions:
                 logger.info("Starting caption burn-in...")

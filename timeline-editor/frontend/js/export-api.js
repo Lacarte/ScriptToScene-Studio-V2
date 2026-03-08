@@ -467,7 +467,10 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
             fade_in: bgMusicConfig.fadeIn ?? 2.0,
             fade_out: bgMusicConfig.fadeOut ?? 3.0,
             loop: bgMusicConfig.loop ?? true
-        } : null
+        } : null,
+
+        // Global overlay PNG (applied to entire video)
+        overlay: EditorState.overlay || null
     };
 
     console.log('[prepareExportData] Export data ready. Total payload keys:', Object.keys(data));
