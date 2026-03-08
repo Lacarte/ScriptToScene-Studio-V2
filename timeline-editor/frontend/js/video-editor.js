@@ -1770,11 +1770,10 @@ function hideLoadingOverlay() {
  */
 function showNoDataOverlay() {
     elements.noDataOverlay?.classList.remove('hidden');
-    _loadNoDataSavedProjects();
-    _loadNoDataAssets();
+    _loadNoDataProjects();
 }
 
-function _loadNoDataAssets() {
+function _loadNoDataProjects() {
     const listEl = document.getElementById('no-data-asset-items');
     const listContainer = document.getElementById('no-data-asset-list');
     const emptyEl = document.getElementById('no-data-empty');
@@ -1782,124 +1781,90 @@ function _loadNoDataAssets() {
 
     listEl.innerHTML = '<p style="text-align:center;color:var(--text-muted,#666);font-size:12px;padding:24px 0">Loading...</p>';
 
-    fetch('/api/assets/history')
-        .then(r => r.json())
-        .then(projects => {
-            if (!projects || !projects.length) {
-                // No assets — show empty state, hide list
-                if (listContainer) listContainer.style.display = 'none';
-                if (emptyEl) emptyEl.style.display = '';
-                return;
-            }
-            if (listContainer) listContainer.style.display = '';
-            if (emptyEl) emptyEl.style.display = 'none';
-
-            const statusColors = { done: '#4ECDC4', downloading: '#FFB347', error: '#FF6B6B', waiting: '#8B8B8B', grabbing: '#A78BFA' };
-            const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
-            const timeAgo = ts => {
-                if (!ts) return '';
-                const diff = (Date.now() - new Date(ts).getTime()) / 1000;
-                if (diff < 60) return 'just now';
-                if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-                if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-                return Math.floor(diff / 86400) + 'd ago';
-            };
-
-            listEl.innerHTML = projects.map(p => {
-                const sc = statusColors[p.status] || '#8B8B8B';
-                const files = p.disk_files || p.total_files || 0;
-                const ready = p.ready_count || 0;
-                const scenes = p.scene_count || 0;
-                const time = timeAgo(p.created_at || p.timestamp);
-                return `
-                <div style="cursor:pointer;padding:10px 14px;border-radius:8px;border:1px solid transparent;transition:all 0.15s;margin-bottom:4px"
-                     onclick="editorImportAssetProject('${esc(p.project_id)}')"
-                     onmouseover="this.style.background='var(--bg-darkest,#111)';this.style.borderColor='var(--border,#2a2a3e)'"
-                     onmouseout="this.style.background='';this.style.borderColor='transparent'">
-                    <div style="display:flex;align-items:center;gap:10px">
-                        ${p.preview
-                        ? '<div style="width:40px;height:40px;border-radius:6px;overflow:hidden;flex-shrink:0;border:1px solid var(--border,#2a2a3e)"><img src="' + esc(p.preview) + '" style="width:100%;height:100%;object-fit:cover" /></div>'
-                        : '<div style="width:40px;height:40px;border-radius:6px;flex-shrink:0;background:var(--bg-darkest,#111);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" fill="none" stroke="var(--text-muted,#666)" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.4"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>'}
-                        <div style="flex:1;min-width:0">
-                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-                                <span style="font-size:12px;font-weight:600;color:var(--text,#e0e0e0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project_id)}</span>
-                                <span style="width:6px;height:6px;border-radius:50%;background:${sc};flex-shrink:0"></span>
-                            </div>
-                            <div style="display:flex;gap:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666)">
-                                <span>${scenes} scene${scenes !== 1 ? 's' : ''}</span>
-                                ${ready > 0 ? '<span style="color:#4ECDC4">' + ready + ' ready</span>' : ''}
-                                ${files > 0 ? '<span>' + files + ' files</span>' : ''}
-                                <span style="opacity:0.7">${time}</span>
-                            </div>
-                        </div>
-                        <svg width="14" height="14" fill="none" stroke="var(--text-muted,#666)" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
-                    </div>
-                </div>`;
-            }).join('');
-        })
-        .catch(() => {
+    // Fetch both asset projects and saved editor projects in parallel
+    Promise.all([
+        fetch('/api/assets/history').then(r => r.json()).catch(() => []),
+        fetch('/api/editor/projects').then(r => r.json()).catch(() => [])
+    ]).then(([assetProjects, savedProjects]) => {
+        if ((!assetProjects || !assetProjects.length) && (!savedProjects || !savedProjects.length)) {
             if (listContainer) listContainer.style.display = 'none';
             if (emptyEl) emptyEl.style.display = '';
-        });
-}
+            return;
+        }
+        if (listContainer) listContainer.style.display = '';
+        if (emptyEl) emptyEl.style.display = 'none';
 
-function _loadNoDataSavedProjects() {
-    const listEl = document.getElementById('no-data-saved-items');
-    const listContainer = document.getElementById('no-data-saved-list');
-    if (!listEl || !listContainer) return;
+        // Build saved project lookup by project_id
+        const savedMap = {};
+        for (const sp of (savedProjects || [])) {
+            savedMap[sp.project_id] = sp;
+        }
 
-    fetch('/api/editor/projects')
-        .then(r => r.json())
-        .then(projects => {
-            if (!projects || !projects.length) {
-                listContainer.style.display = 'none';
-                return;
-            }
-            listContainer.style.display = 'flex';
+        const statusColors = { done: '#4ECDC4', downloading: '#FFB347', error: '#FF6B6B', waiting: '#8B8B8B', grabbing: '#A78BFA' };
+        const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+        const timeAgo = ts => {
+            if (!ts) return '';
+            const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return Math.floor(diff / 86400) + 'd ago';
+        };
 
-            const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
-            const timeAgo = ts => {
-                if (!ts) return '';
-                const diff = (Date.now() - new Date(ts).getTime()) / 1000;
-                if (diff < 60) return 'just now';
-                if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-                if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-                return Math.floor(diff / 86400) + 'd ago';
-            };
-            const fmtDur = d => {
-                if (!d) return '';
-                const m = Math.floor(d / 60);
-                const s = Math.floor(d % 60);
-                return m > 0 ? `${m}m${s}s` : `${s}s`;
-            };
+        const projects = assetProjects || [];
 
-            listEl.innerHTML = projects.map(p => `
-                <div style="cursor:pointer;padding:10px 14px;border-radius:8px;border:1px solid transparent;transition:all 0.15s;margin-bottom:4px"
-                     onclick="loadProjectFromServer('${esc(p.project_id)}')"
-                     onmouseover="this.style.background='var(--bg-darkest,#111)';this.style.borderColor='var(--accent, #4ECDC4)'"
-                     onmouseout="this.style.background='';this.style.borderColor='transparent'">
-                    <div style="display:flex;align-items:center;gap:10px">
-                        <div style="width:40px;height:40px;border-radius:6px;flex-shrink:0;background:rgba(78,205,196,0.08);display:flex;align-items:center;justify-content:center">
-                            <svg width="18" height="18" fill="none" stroke="var(--accent,#4ECDC4)" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.7"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        listEl.innerHTML = projects.map(p => {
+            const sc = statusColors[p.status] || '#8B8B8B';
+            const files = p.disk_files || p.total_files || 0;
+            const ready = p.ready_count || 0;
+            const scenes = p.scene_count || 0;
+            const time = timeAgo(p.created_at || p.timestamp);
+            const saved = savedMap[p.project_id];
+            const isSaved = !!saved;
+
+            // Saved projects load from server save; others import from assets
+            const onclick = isSaved
+                ? `loadProjectFromServer('${esc(p.project_id)}')`
+                : `editorImportAssetProject('${esc(p.project_id)}')`;
+
+            const savedBadge = isSaved
+                ? `<svg width="12" height="12" fill="none" stroke="var(--accent,#4ECDC4)" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0;opacity:0.8" title="Saved project"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`
+                : '';
+
+            const savedTime = isSaved && saved.saved_at
+                ? `<span style="color:var(--accent,#4ECDC4);opacity:0.8">edited ${timeAgo(saved.saved_at)}</span>`
+                : '';
+
+            return `
+            <div style="cursor:pointer;padding:10px 14px;border-radius:8px;border:1px solid transparent;transition:all 0.15s;margin-bottom:4px"
+                 onclick="${onclick}"
+                 onmouseover="this.style.background='var(--bg-darkest,#111)';this.style.borderColor='${isSaved ? 'var(--accent,#4ECDC4)' : 'var(--border,#2a2a3e)'}'"
+                 onmouseout="this.style.background='';this.style.borderColor='transparent'">
+                <div style="display:flex;align-items:center;gap:10px">
+                    ${p.preview
+                    ? '<div style="width:40px;height:40px;border-radius:6px;overflow:hidden;flex-shrink:0;border:1px solid var(--border,#2a2a3e)"><img src="' + esc(p.preview) + '" style="width:100%;height:100%;object-fit:cover" /></div>'
+                    : '<div style="width:40px;height:40px;border-radius:6px;flex-shrink:0;background:var(--bg-darkest,#111);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" fill="none" stroke="var(--text-muted,#666)" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.4"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>'}
+                    <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+                            <span style="font-size:12px;font-weight:600;color:var(--text,#e0e0e0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project_id)}</span>
+                            ${savedBadge}
+                            <span style="width:6px;height:6px;border-radius:50%;background:${sc};flex-shrink:0"></span>
                         </div>
-                        <div style="flex:1;min-width:0">
-                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-                                <span style="font-size:12px;font-weight:600;color:var(--text,#e0e0e0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project_id)}</span>
-                            </div>
-                            <div style="display:flex;gap:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666)">
-                                <span>${p.scene_count || 0} scenes</span>
-                                ${p.total_duration ? '<span>' + fmtDur(p.total_duration) + '</span>' : ''}
-                                <span style="opacity:0.7">${timeAgo(p.saved_at)}</span>
-                            </div>
+                        <div style="display:flex;gap:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666)">
+                            <span>${scenes} scene${scenes !== 1 ? 's' : ''}</span>
+                            ${ready > 0 ? '<span style="color:#4ECDC4">' + ready + ' ready</span>' : ''}
+                            ${files > 0 ? '<span>' + files + ' files</span>' : ''}
+                            ${savedTime || '<span style="opacity:0.7">' + time + '</span>'}
                         </div>
-                        <svg width="14" height="14" fill="none" stroke="var(--accent,#4ECDC4)" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
                     </div>
+                    <svg width="14" height="14" fill="none" stroke="${isSaved ? 'var(--accent,#4ECDC4)' : 'var(--text-muted,#666)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
                 </div>
-            `).join('');
-        })
-        .catch(() => {
-            listContainer.style.display = 'none';
-        });
+            </div>`;
+        }).join('');
+    }).catch(() => {
+        if (listContainer) listContainer.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = '';
+    });
 }
 
 /**
