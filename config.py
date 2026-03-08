@@ -60,7 +60,7 @@ N8N_ASSET_WEBHOOK_URL = os.environ.get(
 # ---------------------------------------------------------------------------
 KIE_AI_API_KEY = os.environ.get("KIE_AI_API_KEY", "")
 KIE_AI_BASE_URL = os.environ.get("KIE_AI_BASE_URL", "https://api.kie.ai/api/v1")
-KIE_AI_MODEL = os.environ.get("KIE_AI_MODEL", "nano-banana-2")
+KIE_AI_MODEL = os.environ.get("KIE_AI_MODEL", "google/nano-banana")
 
 # ---------------------------------------------------------------------------
 # Project ID generator

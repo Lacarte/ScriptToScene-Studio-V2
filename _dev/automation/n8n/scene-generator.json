@@ -8,7 +8,8 @@
         "messages": {
           "messageValues": [
             {
-  ={{ $json.system_prompt }}
+              "type": "system",
+              "message": "={{ $json.system_prompt }}"
             }
           ]
         },

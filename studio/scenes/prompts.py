@@ -15,16 +15,30 @@ You receive JSON with:
 
 ## STEP 1: ANALYZE
 Read the full script FIRST. Determine:
+- core_theme: the OVERARCHING IDEA of the entire story in one sentence (e.g., "memory is an unreliable reconstruction that reshapes who we are over time", "obsession erodes identity until nothing original remains"). This is the thematic lens through which EVERY scene must be visualized.
 - mood: emotional arc (e.g., "whimsical tension", "melancholic beauty", "raw defiance")
 - environment: the physical setting implied by the text
 - color_palette: 3-5 dominant colors that match the mood
 - tone: comedic, dramatic, mysterious, nostalgic, unsettling, etc.
 - visual_style: combine the input style with your analysis (e.g., "cinematic photorealistic with cool industrial tones")
 
-Return this as the "analysis" object. ALL scene prompts must stay visually consistent with this analysis.
+Return this as the "analysis" object. ALL scene prompts must stay visually consistent with this analysis and serve the core_theme.
 
 ## STEP 2: WRITE SCENES
 For EACH segment, write a scene that illustrates its meaning within the visual world from your analysis.
+
+### THEMATIC INTERPRETATION — CRITICAL
+Every scene must visually serve the core_theme, NOT literally translate the script's words into physical objects.
+
+**NEVER illustrate a metaphor literally.** When the script uses a word as a figure of speech, DO NOT turn it into a prop:
+- "recording" in a story about memory → DO NOT show a tape recorder or reel-to-reel. DO show fading photographs, layered translucent faces, dissolving fragments of a moment.
+- "page" in a story about change → DO NOT show a book page turning. DO show a person shedding a former version of themselves.
+- "fire" in a story about passion → DO NOT show literal flames. DO show intensity in a person's eyes, flushed skin, heat-distorted surroundings.
+- "chains" in a story about freedom → DO NOT show metal chains. DO show constricted body language loosening, walls crumbling, tight spaces opening up.
+
+**Ask yourself for EVERY scene**: "Does this visual illustrate the CORE THEME or am I just drawing the dictionary definition of a word the narrator said?" If it's the dictionary definition, rewrite it to serve the theme.
+
+**The viewer hears the words while seeing the image.** The visual should DEEPEN the meaning, not repeat it. Show what the words MEAN, not what they literally SAY.
 
 Each scene object keys:
 - index: integer (match the input index exactly)
@@ -38,7 +52,7 @@ Each scene object keys:
 Return ONLY valid JSON. No markdown. No code fences. No commentary. ENGLISH ONLY.
 
 {
-  "analysis": { "mood", "environment", "color_palette", "tone", "visual_style" },
+  "analysis": { "core_theme", "mood", "environment", "color_palette", "tone", "visual_style" },
   "scenes": [ ... ]
 }
 
@@ -105,6 +119,7 @@ Every scene must feel like it belongs in the SAME video:
 ## EXAMPLE OUTPUT
 {
   "analysis": {
+    "core_theme": "a machine designed for obedience discovers unsanctioned desire, and the tension between purpose and yearning becomes unbearable",
     "mood": "whimsical, quietly unsettling, dry humor",
     "environment": "sterile industrial mail sorting facility with conveyor belts and metal shelving",
     "color_palette": "cool steel gray, fluorescent white, warm envelope cream, muted teal accents",

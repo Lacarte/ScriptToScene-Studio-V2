@@ -123,6 +123,7 @@ def grabber_start():
     # Store Kie AI generation options for the background thread
     if provider == "kie-ai":
         job["_kie_ai_options"] = {
+            "model": data.get("model", "nano-banana"),
             "aspect_ratio": data.get("aspect_ratio", "9:16"),
             "resolution": data.get("resolution", "1"),
             "output_format": data.get("output_format", "jpg"),
@@ -155,12 +156,13 @@ def _kie_ai_generate_all(project_id, job):
     """Background thread: generate images via Kie AI for all scenes sequentially."""
     scenes = job["payload"]["scenes"]
     request_data = job.get("_kie_ai_options", {})
+    model = request_data.get("model", "google/nano-banana")
     aspect_ratio = request_data.get("aspect_ratio", "9:16")
     resolution = request_data.get("resolution", "1")
     output_format = request_data.get("output_format", "jpg")
 
-    logger.info("Kie AI thread started: {} scenes, ar={}, res={}, fmt={}",
-                len(scenes), aspect_ratio, resolution, output_format)
+    logger.info("Kie AI thread started: {} scenes, model={}, ar={}, res={}, fmt={}",
+                len(scenes), model, aspect_ratio, resolution, output_format)
 
     for scene_entry in scenes:
         scene_num = str(scene_entry["scene"])
@@ -177,6 +179,7 @@ def _kie_ai_generate_all(project_id, job):
                 aspect_ratio=aspect_ratio,
                 resolution=resolution,
                 output_format=output_format,
+                model=model,
             )
             image_urls = result.get("all_urls", [result["url"]])
             logger.info("Kie AI scene {} generated: {} URL(s)", scene_num, len(image_urls))

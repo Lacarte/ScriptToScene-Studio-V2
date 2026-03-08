@@ -580,6 +580,7 @@ async function assetsResendSelected() {
     aspect_ratio: $('#assets-aspect')?.value || '9:16',
   };
   if (provider === 'kie-ai') {
+    resendBody.model = $('#assets-kie-model')?.value || 'google/nano-banana';
     resendBody.resolution = $('#assets-kie-resolution')?.value || '1';
     resendBody.output_format = $('#assets-kie-format')?.value || 'jpg';
   }
@@ -702,6 +703,7 @@ async function assetsStartGrabber() {
 
   // Add Kie AI options if applicable
   if (provider === 'kie-ai') {
+    reqBody.model = $('#assets-kie-model')?.value || 'google/nano-banana';
     reqBody.resolution = $('#assets-kie-resolution')?.value || '1';
     reqBody.output_format = $('#assets-kie-format')?.value || 'jpg';
   }
