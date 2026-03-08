@@ -12,7 +12,7 @@ import traceback
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 
 editor_bp = Blueprint("editor", __name__)
@@ -24,8 +24,6 @@ _export_jobs = {}
 EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
 os.makedirs(EXPORT_DIR, exist_ok=True)
 
-EDITOR_SAVE_DIR = os.path.join(OUTPUT_DIR, "editor")
-os.makedirs(EDITOR_SAVE_DIR, exist_ok=True)
 logger.info("Export output directory: {}", EXPORT_DIR)
 logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
 

@@ -16,7 +16,7 @@ from loguru import logger
 from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
-    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR,
+    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR, EDITOR_SAVE_DIR,
 )
 
 # ---------------------------------------------------------------------------
@@ -127,16 +127,16 @@ def open_folder():
 # Settings — Clear all projects
 # ---------------------------------------------------------------------------
 
-# Directories whose project sub-folders get moved to output/TRASH/<dir_name>/
+# Directories whose contents get moved to output/TRASH/<dir_name>/
 _PROJECT_DIRS = [
     ALIGN_DIR, SCENES_DIR, ASSETS_DIR, SEGMENTER_DIR,
-    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR,
+    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR, EDITOR_SAVE_DIR,
 ]
 
 
 @app.route("/api/settings/clear-all-projects", methods=["DELETE"])
 def clear_all_projects():
-    """Move all project folders to output/TRASH/."""
+    """Move all project folders and files to output/TRASH/."""
     total = 0
     errors = []
     for src_dir in _PROJECT_DIRS:
@@ -147,11 +147,14 @@ def clear_all_projects():
         os.makedirs(trash_dir, exist_ok=True)
         for entry in os.listdir(src_dir):
             entry_path = os.path.join(src_dir, entry)
-            if os.path.isdir(entry_path):
+            if os.path.isdir(entry_path) or os.path.isfile(entry_path):
                 try:
                     dest = os.path.join(trash_dir, entry)
                     if os.path.exists(dest):
-                        shutil.rmtree(dest)
+                        if os.path.isdir(dest):
+                            shutil.rmtree(dest)
+                        else:
+                            os.remove(dest)
                     shutil.move(entry_path, dest)
                     total += 1
                 except Exception as e:
