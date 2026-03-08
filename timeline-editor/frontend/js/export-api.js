@@ -523,6 +523,27 @@ function getEffectConfig(effectType) {
             pan_amount: 0.2,
             easing: 'linear'
         },
+        'pan_diagonal_tl': {
+            type: 'pan_diagonal_tl',
+            description: 'Diagonal pan toward top-left',
+            pan_amount: 0.15,
+            easing: 'ease_in_out'
+        },
+        'pan_diagonal_br': {
+            type: 'pan_diagonal_br',
+            description: 'Diagonal pan toward bottom-right',
+            pan_amount: 0.15,
+            easing: 'ease_in_out'
+        },
+        'ken_burns': {
+            type: 'ken_burns',
+            description: 'Slow zoom in with slight pan',
+            start_scale: 1.0,
+            end_scale: 1.15,
+            pan_amount: 0.05,
+            anchor: 'center',
+            easing: 'ease_in_out'
+        },
         'fade': {
             type: 'fade',
             description: 'Fade in from black',

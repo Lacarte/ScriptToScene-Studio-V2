@@ -33,6 +33,7 @@ function loadScenesForAssets() {
   STATE.assetsSceneData = STATE.scenesResult;
   STATE.assetStatuses = {};  // Clear stale statuses from previous project
   STATE.assetSelected = {};  // Clear selection
+  setModuleBadge('assets', STATE.scenesResult.project_id);
   renderAssetsFromScenes();
   loadAssetsHistory(); // refresh to highlight active row
   toast(`Loaded ${STATE.scenesResult.scenes.length} scenes`);
@@ -88,6 +89,7 @@ async function assetsSelectSceneProject(projectId) {
     STATE.assetsSceneData = data;
     STATE.assetStatuses = {};  // Clear stale statuses from previous project
   STATE.assetSelected = {};  // Clear selection
+    setModuleBadge('assets', data.project_id || projectId);
     renderAssetsFromScenes();
     loadAssetsHistory(); // refresh to highlight active row
     toast(`Loaded ${data.scenes.length} scenes from history`);
@@ -120,6 +122,7 @@ function handleAssetsJSONImport(input) {
       STATE.assetsSceneData = data;
       STATE.assetStatuses = {};  // Clear stale statuses from previous project
   STATE.assetSelected = {};  // Clear selection
+      setModuleBadge('assets', data.project_id);
       renderAssetsFromScenes();
       loadAssetsHistory(); // refresh to highlight active row
       toast(`Loaded ${data.scenes.length} scenes from file`);
@@ -985,6 +988,7 @@ async function assetsLoadFromHistory(projectId) {
       scenes.sort((a, b) => a.index - b.index);
       STATE.assetsSceneData = { project_id: projectId, scenes };
     }
+    setModuleBadge('assets', projectId);
 
     // Populate asset statuses from the project data
     // Metadata keys are sequential (0,1,2...) but STATE.assetStatuses must be

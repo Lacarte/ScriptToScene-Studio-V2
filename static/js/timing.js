@@ -51,6 +51,7 @@ async function handleRunAlignment() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Alignment failed');
     STATE.alignResult = data;
+    setModuleBadge('timing', data.project_id);
     renderAlignResults(data);
     toast('Alignment complete');
     loadAlignHistory();
@@ -318,6 +319,7 @@ async function deleteAlignResult() {
   try {
     await api(`/api/timing/${STATE.alignResult.folder}`, { method: 'DELETE' });
     STATE.alignResult = null;
+    setModuleBadge('timing', '');
     $('#align-results').style.display = 'none';
     toast('Alignment deleted');
     loadAlignHistory();
@@ -363,6 +365,7 @@ function loadAlignResult(idx) {
   const h = STATE.alignHistory[idx];
   if (!h) return;
   STATE.alignResult = { project_id: h.project_id, folder: h.folder, source_file: h.source_file, alignment: h.word_alignment, inference_time: h.inference_time, transcript: h.transcript };
+  setModuleBadge('timing', h.project_id);
   renderAlignResults(STATE.alignResult);
   $('#main-content').scrollTo({ top: 0, behavior: 'smooth' });
 }

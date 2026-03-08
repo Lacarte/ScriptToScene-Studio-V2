@@ -250,11 +250,25 @@ function _capTick() {
   const display = $('#cap-time-display');
   if (display) display.textContent = t.toFixed(2) + 's';
 
+  const style = STATE.captionData?.style || {};
+  const holdMs = Number(style.caption_hold_ms ?? style.hold_ms ?? 140);
+  const holdSec = Math.max(0, holdMs) / 1000;
+
   // Find active caption
   const captions = STATE.captionData?.captions || [];
   let activeIdx = -1;
   for (let i = 0; i < captions.length; i++) {
     if (t >= captions[i].start && t < captions[i].end) { activeIdx = i; break; }
+  }
+  // Keep last caption visible briefly to avoid flicker when pausing/stepping near boundaries
+  if (activeIdx < 0 && holdSec > 0) {
+    for (let i = 0; i < captions.length; i++) {
+      if (t >= captions[i].end && t < captions[i].end + holdSec) {
+        activeIdx = i;
+      } else if (captions[i].start > t) {
+        break;
+      }
+    }
   }
 
   if (activeIdx !== _capActiveIdx) {
@@ -273,7 +287,6 @@ function _capTick() {
   // Update caption preview text
   const previewEl = $('#cap-preview-text');
   if (previewEl) {
-    const style = STATE.captionData?.style || {};
     if (activeIdx >= 0) {
       let text = captions[activeIdx].text;
       if (style.text_transform === 'uppercase') text = text.toUpperCase();
@@ -283,13 +296,22 @@ function _capTick() {
       previewEl.style.fontSize = '24px';
       previewEl.style.color = style.color || '#FFFFFF';
       previewEl.style.opacity = '1';
-      if (style.stroke_color && style.stroke_color !== 'none') {
-        previewEl.style.textShadow = `
-          -2px -2px 0 ${style.stroke_color}, 2px -2px 0 ${style.stroke_color},
-          -2px 2px 0 ${style.stroke_color}, 2px 2px 0 ${style.stroke_color}`;
-      } else {
-        previewEl.style.textShadow = 'none';
+      const shadows = [];
+      if ((style.stroke_width || 0) > 0 && style.stroke_color && style.stroke_color !== 'none') {
+        shadows.push(
+          `-2px -2px 0 ${style.stroke_color}`,
+          `2px -2px 0 ${style.stroke_color}`,
+          `-2px 2px 0 ${style.stroke_color}`,
+          `2px 2px 0 ${style.stroke_color}`
+        );
       }
+      if (style.shadow_color && style.shadow_color !== 'none') {
+        const blur = style.shadow_blur || 0;
+        const x = style.shadow_offset_x || 0;
+        const y = style.shadow_offset_y || 0;
+        shadows.push(`${x}px ${y}px ${blur}px ${style.shadow_color}`);
+      }
+      previewEl.style.textShadow = shadows.length ? shadows.join(', ') : 'none';
     } else {
       previewEl.style.opacity = '0.3';
     }

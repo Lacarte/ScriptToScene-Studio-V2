@@ -52,19 +52,25 @@ def _create_task(prompt, aspect_ratio, resolution, output_format, model, api_key
     """POST /jobs/createTask → returns taskId."""
     url = f"{KIE_AI_BASE_URL}/jobs/createTask"
 
-    # Resolution mapping: "1" → "1K", "2" → "2K"
-    res_map = {"1": "1K", "2": "2K"}
-    res_val = res_map.get(resolution, resolution)
-
-    payload = {
-        "model": model,
-        "input": {
+    if model == "google/nano-banana":
+        # Original nano-banana uses different param names
+        fmt = "jpeg" if output_format in ("jpg", "jpeg") else output_format
+        input_params = {
+            "prompt": prompt,
+            "image_size": aspect_ratio,
+            "output_format": fmt,
+        }
+    else:
+        # nano-banana-2, nano-banana-pro
+        res_map = {"1": "1K", "2": "2K"}
+        input_params = {
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
-            "resolution": res_val,
+            "resolution": res_map.get(resolution, resolution),
             "output_format": output_format,
-        },
-    }
+        }
+
+    payload = {"model": model, "input": input_params}
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",

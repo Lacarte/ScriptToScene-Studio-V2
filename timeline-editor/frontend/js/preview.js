@@ -653,6 +653,21 @@ export class CanvasPreview {
             case 'shake':
                 this.applyShake(progress);
                 break;
+            case 'pan_up':
+                this.applyPanUp(progress, drawWidth, drawHeight, offsetX);
+                break;
+            case 'pan_down':
+                this.applyPanDown(progress, drawWidth, drawHeight, offsetX);
+                break;
+            case 'pan_diagonal_tl':
+                this.applyPanDiagonalTL(progress, drawWidth, drawHeight);
+                break;
+            case 'pan_diagonal_br':
+                this.applyPanDiagonalBR(progress, drawWidth, drawHeight);
+                break;
+            case 'ken_burns':
+                this.applyKenBurns(progress, drawWidth, drawHeight, offsetX, offsetY);
+                break;
             case 'static':
             default:
                 // No transform needed
@@ -722,6 +737,43 @@ export class CanvasPreview {
         const shakeX = Math.sin(progress * Math.PI * 2 * frequency) * intensity;
         const shakeY = Math.cos(progress * Math.PI * 2 * frequency) * intensity;
         this.ctx.translate(shakeX, shakeY);
+    }
+
+    applyPanUp(progress, drawWidth, drawHeight, offsetX) {
+        const panAmount = (drawHeight - this.height) * 0.5;
+        const translateY = panAmount * (1 - this.easeInOut(progress));
+        this.ctx.translate(0, -translateY);
+    }
+
+    applyPanDown(progress, drawWidth, drawHeight, offsetX) {
+        const panAmount = (drawHeight - this.height) * 0.5;
+        const translateY = panAmount * this.easeInOut(progress);
+        this.ctx.translate(0, -translateY);
+    }
+
+    applyPanDiagonalTL(progress, drawWidth, drawHeight) {
+        const p = this.easeInOut(progress);
+        const panX = (drawWidth - this.width) * 0.3 * (1 - p);
+        const panY = (drawHeight - this.height) * 0.3 * (1 - p);
+        this.ctx.translate(-panX, -panY);
+    }
+
+    applyPanDiagonalBR(progress, drawWidth, drawHeight) {
+        const p = this.easeInOut(progress);
+        const panX = (drawWidth - this.width) * 0.3 * p;
+        const panY = (drawHeight - this.height) * 0.3 * p;
+        this.ctx.translate(-panX, -panY);
+    }
+
+    applyKenBurns(progress, drawWidth, drawHeight, offsetX, offsetY) {
+        const p = this.easeInOut(progress);
+        const scale = 1.0 + 0.15 * p;
+        const panX = (drawWidth - this.width) * 0.05 * p;
+        const centerX = this.width / 2;
+        const centerY = this.height / 2;
+        this.ctx.translate(centerX, centerY);
+        this.ctx.scale(scale, scale);
+        this.ctx.translate(-centerX - panX, -centerY);
     }
 
     /**
@@ -951,14 +1003,27 @@ export class CanvasPreview {
     renderCaptionOverlay(time) {
         if (!this.captions.length) return;
 
+        const style = this.captionStyle || {};
+        const holdMs = Number(style.caption_hold_ms ?? style.hold_ms ?? 140);
+        const holdSec = Math.max(0, holdMs) / 1000;
+
         // Find active caption
         let active = null;
         for (const cap of this.captions) {
             if (time >= cap.start && time < cap.end) { active = cap; break; }
         }
+        // Keep last caption visible for a tiny window after end to avoid flicker on pause/boundary frames
+        if (!active && holdSec > 0) {
+            for (const cap of this.captions) {
+                if (time >= cap.end && time < cap.end + holdSec) {
+                    active = cap;
+                } else if (cap.start > time) {
+                    break;
+                }
+            }
+        }
         if (!active) return;
 
-        const style = this.captionStyle;
         const fontFamily = style.font_family || 'Montserrat';
         const fontWeight = style.font_weight || '800';
         const scale = this.height / 1920;
@@ -1021,7 +1086,8 @@ export class CanvasPreview {
 
         // Pop animation: scale in
         if (animation === 'pop') {
-            const capProgress = (time - active.start) / (active.end - active.start);
+            const animTime = Math.min(time, active.end - 0.0001);
+            const capProgress = (animTime - active.start) / (active.end - active.start);
             const popScale = capProgress < 0.1 ? (capProgress / 0.1) * 0.1 + 0.9 : 1.0;
             const alpha = capProgress < 0.05 ? capProgress / 0.05 : (capProgress > 0.9 ? (1.0 - capProgress) / 0.1 : 1.0);
             this.ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
@@ -1034,7 +1100,8 @@ export class CanvasPreview {
 
         // Hard-cut animation: instant appear/disappear (no fade, optional fast scale-up)
         if (animation === 'hard_cut') {
-            const capProgress = (time - active.start) / (active.end - active.start);
+            const animTime = Math.min(time, active.end - 0.0001);
+            const capProgress = (animTime - active.start) / (active.end - active.start);
             if (capProgress < 0.05) {
                 const s = 0.9 + (capProgress / 0.05) * 0.1;
                 const cx = this.width / 2;

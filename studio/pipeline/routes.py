@@ -155,14 +155,31 @@ def list_jobs():
                 source = data.get("source_folder", "")
                 # extract short label from source folder
                 label = source.split("_2026")[0].replace("-", " ").strip() if source else entry
-                items.append({
+                item = {
                     "project_id": entry,
                     "label": label[:40],
                     "scene_count": scene_count,
                     "status": "done",
                     "created": mtime,
                     "timestamp": data.get("timestamp", ""),
-                })
+                }
+                # Look up original text, voice, speed from TTS metadata
+                if source:
+                    tts_meta = os.path.join(TTS_DIR, source, source + ".json")
+                    if os.path.isfile(tts_meta):
+                        try:
+                            with open(tts_meta, "r", encoding="utf-8") as mf:
+                                meta = json.load(mf)
+                            item["text"] = meta.get("prompt", "")
+                            item["voice"] = meta.get("voice", "af_heart")
+                            item["speed"] = meta.get("speed", 1.0)
+                        except Exception:
+                            pass
+                # Get style from analysis
+                analysis = data.get("analysis", {})
+                if analysis:
+                    item["style"] = analysis.get("visual_style", "")
+                items.append(item)
             except Exception:
                 continue
     # Also include in-progress jobs from memory

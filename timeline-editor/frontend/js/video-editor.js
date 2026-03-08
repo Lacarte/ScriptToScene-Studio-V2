@@ -226,6 +226,70 @@ function saveProjectEdits() {
     } catch (e) {
         console.warn('Failed to save project edits:', e);
     }
+
+    // Debounced save to server
+    _debouncedServerSave();
+}
+
+// ---- Server-side project persistence ----
+
+let _serverSaveTimer = null;
+function _debouncedServerSave() {
+    if (_serverSaveTimer) clearTimeout(_serverSaveTimer);
+    _serverSaveTimer = setTimeout(() => saveProjectToServer(), 2000);
+}
+
+async function saveProjectToServer() {
+    if (!EditorState.project?.id) return;
+
+    const payload = {
+        project_id: EditorState.project.id,
+        project_name: EditorState.project.name || EditorState.project.id,
+        total_duration: getTotalDuration(),
+        scene_count: EditorState.scenes.length,
+        scenes: EditorState.scenes.map(s => ({
+            id: s.id, type: s.type, duration: s.duration,
+            visual_fx: s.visual_fx,
+            image_url: s.mediaUrl || s.image_url || '',
+            mediaUrl: s.mediaUrl || '',
+            image: s.image || '',
+            image_prompt: s.image_prompt || '',
+            text_content: s.text_content || null,
+            text_color: s.text_color, text_size: s.text_size,
+            font_family: s.font_family, font_style: s.font_style,
+            text_align: s.text_align, vertical_align: s.vertical_align,
+            text_x: s.text_x ?? null, text_y: s.text_y ?? null,
+            timestamp: s.timestamp || 0, status: s.status || 'ready',
+            isVideo: !!s.isVideo, script: s.script || '',
+            narrative_role: s.narrative_role || s.scene_type || ''
+        })),
+        audio_tracks: EditorState.audioTracks.map(t => ({
+            id: t.id, label: t.label, type: t.type,
+            file: t.file || null, path: t.path || null,
+            duration: t.duration || 0,
+            trimmedDuration: t.trimmedDuration || null,
+            volume: t.volume ?? 1.0, loop: !!t.loop, muted: !!t.muted,
+            duckingEnabled: !!t.duckingEnabled,
+            duckingLevel: t.duckingLevel ?? 0.03,
+            fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0
+        })),
+        captions: EditorState.captionData || null,
+        captionsEnabled: !!EditorState.captionsEnabled,
+        edit_history: (EditorState.editHistory || []).slice(-50),
+        history_index: EditorState.historyIndex,
+        disabled_tracks: [...(EditorState.disabledTracks || [])]
+    };
+
+    try {
+        await fetch('/api/editor/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        console.log('Project saved to server');
+    } catch (e) {
+        console.warn('Failed to save project to server:', e);
+    }
 }
 
 /**
@@ -1092,6 +1156,139 @@ function buildFontOptions(selectEl, selectedFamily) {
     }
 }
 
+// ---- Load saved project from server ----
+
+async function loadProjectFromServer(projectId) {
+    showLoadingOverlay('Loading saved project...');
+    try {
+        const res = await fetch(`/api/editor/load/${encodeURIComponent(projectId)}`);
+        if (!res.ok) throw new Error('Project not found');
+        const saved = await res.json();
+
+        // Build staged_timeline from saved data
+        const staged = {
+            project_id: saved.project_id,
+            project_name: saved.project_name || saved.project_id,
+            total_duration: saved.total_duration || 0,
+            scene_count: saved.scene_count || saved.scenes?.length || 0,
+            staged_at: saved.saved_at,
+            scenes: (saved.scenes || []).map((s, i) => ({
+                scene_id: s.id ?? i,
+                type: s.type || 'image',
+                image_prompt: s.image_prompt || '',
+                text_content: s.text_content || null,
+                duration: s.duration || 3,
+                timestamp: s.timestamp || 0,
+                image_url: s.mediaUrl || s.image_url || '',
+                visual_fx: s.visual_fx || 'static',
+                text_color: s.text_color,
+                text_size: s.text_size,
+                font_family: s.font_family,
+                font_style: s.font_style,
+                text_align: s.text_align,
+                vertical_align: s.vertical_align,
+                text_x: s.text_x,
+                text_y: s.text_y,
+                script: s.script || '',
+                narrative_role: s.narrative_role || '',
+                isVideo: s.isVideo || false,
+                image: s.image || '',
+                status: s.status || 'ready'
+            }))
+        };
+
+        // Restore voice audio path from saved tracks
+        const voiceTrack = (saved.audio_tracks || []).find(t => t.type === 'voice');
+        if (voiceTrack?.path) {
+            staged.audio = {
+                url: voiceTrack.path,
+                source_file: voiceTrack.file || '',
+                duration: voiceTrack.duration || 0
+            };
+        }
+
+        // Store as staged_timeline so normal init picks it up
+        sessionStorage.setItem('staged_timeline', JSON.stringify(staged));
+
+        // Store captions if present
+        if (saved.captions) {
+            localStorage.setItem('sts-editor-captions', JSON.stringify(saved.captions));
+        }
+
+        // Store edit overrides for post-init restoration
+        window._savedEditorState = saved;
+
+        hideNoDataOverlay();
+        location.reload();
+    } catch (e) {
+        hideLoadingOverlay();
+        showToast('Failed to load project: ' + e.message, 'error');
+        showNoDataOverlay();
+    }
+}
+
+function _restoreSavedEditorState() {
+    const saved = window._savedEditorState;
+    if (!saved) return;
+    window._savedEditorState = null;
+
+    // Restore non-voice audio tracks (music, fx)
+    const nonVoiceTracks = (saved.audio_tracks || []).filter(t => t.type !== 'voice');
+    for (const t of nonVoiceTracks) {
+        if (!t.file || !t.path) continue;
+        const track = createAudioTrack({
+            label: t.label || t.type,
+            type: t.type,
+            file: t.file,
+            path: t.path,
+            duration: t.duration || 0,
+            trimmedDuration: t.trimmedDuration || null,
+            volume: t.volume ?? 1.0,
+            loop: !!t.loop,
+            duckingEnabled: !!t.duckingEnabled,
+            duckingLevel: t.duckingLevel ?? 0.03,
+            fadeIn: t.fadeIn || 0,
+            fadeOut: t.fadeOut || 0
+        });
+        track.muted = !!t.muted;
+        EditorState.audioTracks.push(track);
+
+        // Load audio element
+        const audio = new Audio(t.path);
+        track.element = audio;
+        audio.volume = track.muted ? 0 : track.volume;
+        audio.loop = track.loop;
+        audio.addEventListener('loadedmetadata', () => {
+            track.loaded = true;
+            track.duration = audio.duration;
+            renderAllAudioTracks();
+        });
+        audio.addEventListener('error', () => {
+            track.error = true;
+            renderAllAudioTracks();
+        });
+    }
+
+    // Restore edit history
+    if (saved.edit_history?.length) {
+        EditorState.editHistory = saved.edit_history;
+        EditorState.historyIndex = saved.history_index ?? saved.edit_history.length - 1;
+    }
+
+    // Restore disabled tracks
+    if (saved.disabled_tracks?.length) {
+        EditorState.disabledTracks = new Set(saved.disabled_tracks);
+    }
+
+    // Restore captions enabled state
+    if (saved.captionsEnabled !== undefined) {
+        EditorState.captionsEnabled = saved.captionsEnabled;
+    }
+
+    renderAllAudioTracks();
+    renderTimeline();
+}
+
 /**
  * Initialize the editor with sequential loading
  */
@@ -1147,6 +1344,9 @@ async function init() {
     });
 
     // Hide loading overlay and show editor
+    // Restore saved editor state (music tracks, history, etc.)
+    _restoreSavedEditorState();
+
     await hideLoadingOverlay();
     showToast('Editor ready', 'success');
 
@@ -1277,6 +1477,7 @@ function loadProjectData(data) {
     // Update UI
     updateProjectInfo();
     renderTimeline();
+    setupTimelineDragDrop();
     renderMediaGrid();
     renderTimeRuler();
     updateTimeScrubber();
@@ -1510,6 +1711,7 @@ function hideLoadingOverlay() {
  */
 function showNoDataOverlay() {
     elements.noDataOverlay?.classList.remove('hidden');
+    _loadNoDataSavedProjects();
     _loadNoDataAssets();
 }
 
@@ -1579,6 +1781,65 @@ function _loadNoDataAssets() {
         .catch(() => {
             if (listContainer) listContainer.style.display = 'none';
             if (emptyEl) emptyEl.style.display = '';
+        });
+}
+
+function _loadNoDataSavedProjects() {
+    const listEl = document.getElementById('no-data-saved-items');
+    const listContainer = document.getElementById('no-data-saved-list');
+    if (!listEl || !listContainer) return;
+
+    fetch('/api/editor/projects')
+        .then(r => r.json())
+        .then(projects => {
+            if (!projects || !projects.length) {
+                listContainer.style.display = 'none';
+                return;
+            }
+            listContainer.style.display = 'flex';
+
+            const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+            const timeAgo = ts => {
+                if (!ts) return '';
+                const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+                if (diff < 60) return 'just now';
+                if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+                if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+                return Math.floor(diff / 86400) + 'd ago';
+            };
+            const fmtDur = d => {
+                if (!d) return '';
+                const m = Math.floor(d / 60);
+                const s = Math.floor(d % 60);
+                return m > 0 ? `${m}m${s}s` : `${s}s`;
+            };
+
+            listEl.innerHTML = projects.map(p => `
+                <div style="cursor:pointer;padding:10px 14px;border-radius:8px;border:1px solid transparent;transition:all 0.15s;margin-bottom:4px"
+                     onclick="loadProjectFromServer('${esc(p.project_id)}')"
+                     onmouseover="this.style.background='var(--bg-darkest,#111)';this.style.borderColor='var(--accent, #4ECDC4)'"
+                     onmouseout="this.style.background='';this.style.borderColor='transparent'">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <div style="width:40px;height:40px;border-radius:6px;flex-shrink:0;background:rgba(78,205,196,0.08);display:flex;align-items:center;justify-content:center">
+                            <svg width="18" height="18" fill="none" stroke="var(--accent,#4ECDC4)" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.7"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        </div>
+                        <div style="flex:1;min-width:0">
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+                                <span style="font-size:12px;font-weight:600;color:var(--text,#e0e0e0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project_id)}</span>
+                            </div>
+                            <div style="display:flex;gap:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666)">
+                                <span>${p.scene_count || 0} scenes</span>
+                                ${p.total_duration ? '<span>' + fmtDur(p.total_duration) + '</span>' : ''}
+                                <span style="opacity:0.7">${timeAgo(p.saved_at)}</span>
+                            </div>
+                        </div>
+                        <svg width="14" height="14" fill="none" stroke="var(--accent,#4ECDC4)" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
+                    </div>
+                </div>
+            `).join('');
+        })
+        .catch(() => {
+            listContainer.style.display = 'none';
         });
 }
 
@@ -1680,6 +1941,248 @@ function renderMediaGrid() {
             if (clip) clip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
         });
     });
+
+    // Load project assets below the scene grid
+    loadProjectAssets();
+}
+
+// ============================================================
+// Project Asset Browser + Drag-to-Replace
+// ============================================================
+
+let _projectAssetsCache = null;
+let _projectAssetsCacheId = null;
+
+async function loadProjectAssets() {
+    const projectId = EditorState.project?.id;
+    if (!projectId) return;
+
+    const pane = document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
+    if (!pane) return;
+
+    // Reuse cache if same project
+    if (_projectAssetsCacheId === projectId && _projectAssetsCache) {
+        renderProjectAssets(pane, _projectAssetsCache);
+        return;
+    }
+
+    // Show loading state
+    let container = pane.querySelector('.project-assets-browser');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'project-assets-browser';
+        pane.appendChild(container);
+    }
+    container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">Loading project assets...</p>';
+
+    try {
+        const data = await fetch(`/api/assets/project/${encodeURIComponent(projectId)}`).then(r => r.ok ? r.json() : null);
+        if (!data || !data.scenes) {
+            container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">No assets found for this project</p>';
+            return;
+        }
+        _projectAssetsCache = data;
+        _projectAssetsCacheId = projectId;
+        renderProjectAssets(pane, data);
+    } catch (e) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">Could not load assets</p>';
+    }
+}
+
+function renderProjectAssets(pane, data) {
+    let container = pane.querySelector('.project-assets-browser');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'project-assets-browser';
+        pane.appendChild(container);
+    }
+
+    const sceneEntries = Object.entries(data.scenes)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b));
+
+    // Collect all asset files across all scenes
+    let totalFiles = 0;
+    sceneEntries.forEach(([, info]) => {
+        totalFiles += (info.files_on_disk || []).length;
+    });
+
+    if (totalFiles === 0) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">No asset files on disk</p>';
+        return;
+    }
+
+    let html = `<div class="asset-browser-header">
+        <span>Project Assets</span>
+        <span style="display:flex;align-items:center;gap:6px">
+            <span class="asset-browser-count">${totalFiles} files</span>
+            <button class="asset-reload-btn" onclick="_projectAssetsCache=null;_projectAssetsCacheId=null;loadProjectAssets()" title="Reload assets">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+        </span>
+    </div>`;
+
+    html += '<div class="asset-browser-scenes">';
+    sceneEntries.forEach(([sceneNum, info]) => {
+        const files = info.files_on_disk || [];
+        if (!files.length) return;
+
+        // Find matching editor scene by index
+        const editorScene = EditorState.scenes.find(s => s.id === parseInt(sceneNum));
+        const sceneLabel = editorScene?.image_prompt
+            ? editorScene.image_prompt.substring(0, 25)
+            : `Scene ${sceneNum}`;
+
+        html += `<div class="asset-scene-group">
+            <div class="asset-scene-label">Scene ${sceneNum}</div>
+            <div class="asset-scene-grid">`;
+
+        files.forEach(file => {
+            const isActive = editorScene && editorScene.mediaUrl === file.url;
+            html += `<div class="asset-thumb${isActive ? ' active' : ''}"
+                          draggable="true"
+                          data-url="${file.url.replace(/"/g, '&quot;')}"
+                          data-scene="${sceneNum}"
+                          title="${sceneLabel} — ${file.filename}">
+                <img src="${file.url}" alt="${file.filename}" loading="lazy">
+                ${isActive ? '<span class="asset-thumb-active">In use</span>' : ''}
+            </div>`;
+        });
+
+        html += '</div></div>';
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    // Attach drag events to asset thumbnails
+    container.querySelectorAll('.asset-thumb[draggable]').forEach(thumb => {
+        thumb.addEventListener('dragstart', (e) => {
+            const url = thumb.dataset.url;
+            e.dataTransfer.setData('text/plain', url);
+            e.dataTransfer.setData('application/x-asset-url', url);
+            e.dataTransfer.effectAllowed = 'copy';
+            thumb.classList.add('dragging');
+            document.body.classList.add('asset-dragging');
+        });
+        thumb.addEventListener('dragend', () => {
+            thumb.classList.remove('dragging');
+            document.body.classList.remove('asset-dragging');
+            // Remove all drop highlights
+            document.querySelectorAll('.scene-clip.drop-target').forEach(el => el.classList.remove('drop-target'));
+        });
+        // Click to apply to selected scene
+        thumb.addEventListener('click', () => {
+            const scene = EditorState.selectedScene;
+            if (!scene) {
+                showToast('Select a scene on the timeline first', 'info');
+                return;
+            }
+            applyAssetToScene(scene, thumb.dataset.url);
+        });
+    });
+}
+
+function applyAssetToScene(scene, url) {
+    const oldUrl = scene.mediaUrl;
+    if (oldUrl === url) return;
+
+    scene.mediaUrl = url;
+    scene.image_url = url;
+    scene.mediaLoaded = true;
+    scene.isVideo = isVideoFile(url);
+
+    recordEdit(`Replace media (Scene ${scene.id})`, scene.id, 'mediaUrl', oldUrl, url);
+    updateSceneClipThumb(scene.id, url, scene.isVideo);
+    renderMediaGrid();
+    renderSceneProperties();
+
+    if (EditorState.preview) {
+        EditorState.preview.imageCache.delete(scene.id);
+        EditorState.preview.setScenes(EditorState.scenes);
+    }
+
+    // Auto-save
+    saveProjectEdits();
+
+    showToast(`Scene ${scene.id} image replaced`, 'success');
+}
+
+function setupTimelineDragDrop() {
+    const track = elements.videoTrack;
+    if (!track) return;
+
+    track.addEventListener('dragover', (e) => {
+        if (!e.dataTransfer.types.includes('application/x-asset-url')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+
+        // Highlight the clip under cursor
+        const clip = e.target.closest('.scene-clip');
+        track.querySelectorAll('.scene-clip.drop-target').forEach(el => el.classList.remove('drop-target'));
+        if (clip) clip.classList.add('drop-target');
+    });
+
+    track.addEventListener('dragleave', (e) => {
+        if (!e.target.closest('.scene-clip')) {
+            track.querySelectorAll('.scene-clip.drop-target').forEach(el => el.classList.remove('drop-target'));
+        }
+    });
+
+    track.addEventListener('drop', (e) => {
+        e.preventDefault();
+        track.querySelectorAll('.scene-clip.drop-target').forEach(el => el.classList.remove('drop-target'));
+        document.body.classList.remove('asset-dragging');
+
+        const url = e.dataTransfer.getData('application/x-asset-url');
+        if (!url) return;
+
+        const clip = e.target.closest('.scene-clip');
+        if (!clip) return;
+
+        const sceneId = parseInt(clip.dataset.id);
+        const scene = EditorState.scenes.find(s => s.id === sceneId);
+        if (!scene) return;
+
+        applyAssetToScene(scene, url);
+    });
+
+    // Also support drop on the media grid items
+    const mediaPane = document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
+    if (mediaPane) {
+        mediaPane.addEventListener('dragover', (e) => {
+            if (!e.dataTransfer.types.includes('application/x-asset-url')) return;
+            const gridItem = e.target.closest('.media-grid-item');
+            if (!gridItem) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            mediaPane.querySelectorAll('.media-grid-item.drop-target').forEach(el => el.classList.remove('drop-target'));
+            gridItem.classList.add('drop-target');
+        });
+
+        mediaPane.addEventListener('dragleave', (e) => {
+            if (!e.target.closest('.media-grid-item')) {
+                mediaPane.querySelectorAll('.media-grid-item.drop-target').forEach(el => el.classList.remove('drop-target'));
+            }
+        });
+
+        mediaPane.addEventListener('drop', (e) => {
+            e.preventDefault();
+            mediaPane.querySelectorAll('.media-grid-item.drop-target').forEach(el => el.classList.remove('drop-target'));
+            document.body.classList.remove('asset-dragging');
+
+            const url = e.dataTransfer.getData('application/x-asset-url');
+            if (!url) return;
+
+            const gridItem = e.target.closest('.media-grid-item');
+            if (!gridItem) return;
+
+            const sceneId = parseInt(gridItem.dataset.sceneId);
+            const scene = EditorState.scenes.find(s => s.id === sceneId);
+            if (!scene) return;
+
+            applyAssetToScene(scene, url);
+        });
+    }
 }
 
 /**
@@ -1793,7 +2296,7 @@ function loadDefaultAudio(stagedData) {
             console.log('Restored audio trim duration:', voiceTrack.trimmedDuration);
         }
 
-        // Extend last scene to fill any trailing gap between segments and actual audio end.
+        // Sync scene durations to audio length
         const audioDur = voiceTrack.trimmedDuration || audio.duration;
         const scenesDur = getScenesDuration();
         if (EditorState.scenes.length > 0 && audioDur > scenesDur + 0.05) {
@@ -1801,6 +2304,14 @@ function loadDefaultAudio(stagedData) {
             const gap = parseFloat((audioDur - scenesDur).toFixed(3));
             lastScene.duration = parseFloat((lastScene.duration + gap).toFixed(3));
             console.log(`Extended last scene by ${gap}s to match audio duration`);
+        } else if (EditorState.scenes.length > 0 && scenesDur > audioDur + 0.05) {
+            // Scale all scenes proportionally to fit audio
+            const ratio = audioDur / scenesDur;
+            EditorState.scenes.forEach(s => {
+                s.duration = parseFloat((s.duration * ratio).toFixed(3));
+            });
+            console.log(`Scaled scenes to fit audio (ratio ${ratio.toFixed(3)})`);
+            renderTimeline();
         }
 
         recalculateDuration();
@@ -1876,6 +2387,12 @@ function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
             const lastScene = EditorState.scenes[EditorState.scenes.length - 1];
             const gap = parseFloat((audioDur - scenesDur).toFixed(3));
             lastScene.duration = parseFloat((lastScene.duration + gap).toFixed(3));
+        } else if (EditorState.scenes.length > 0 && scenesDur > audioDur + 0.05) {
+            const ratio = audioDur / scenesDur;
+            EditorState.scenes.forEach(s => {
+                s.duration = parseFloat((s.duration * ratio).toFixed(3));
+            });
+            renderTimeline();
         }
 
         recalculateDuration();
@@ -2961,6 +3478,11 @@ function renderSceneProperties() {
                     <option value="pan_right" ${scene.visual_fx === 'pan_right' ? 'selected' : ''}>Pan Right</option>
                     <option value="fade" ${scene.visual_fx === 'fade' ? 'selected' : ''}>Fade</option>
                     <option value="shake" ${scene.visual_fx === 'shake' ? 'selected' : ''}>Shake</option>
+                    <option value="pan_up" ${scene.visual_fx === 'pan_up' ? 'selected' : ''}>Pan Up</option>
+                    <option value="pan_down" ${scene.visual_fx === 'pan_down' ? 'selected' : ''}>Pan Down</option>
+                    <option value="pan_diagonal_tl" ${scene.visual_fx === 'pan_diagonal_tl' ? 'selected' : ''}>Pan Diagonal ↗</option>
+                    <option value="pan_diagonal_br" ${scene.visual_fx === 'pan_diagonal_br' ? 'selected' : ''}>Pan Diagonal ↘</option>
+                    <option value="ken_burns" ${scene.visual_fx === 'ken_burns' ? 'selected' : ''}>Ken Burns</option>
                 </select>
             </div>
         `}
@@ -4816,6 +5338,8 @@ function showMusicPicker() {
 }
 
 // Expose for inline onclick
+window.loadProjectFromServer = loadProjectFromServer;
+
 window.editorCloseMusicPicker = function () {
     const dialog = document.getElementById('music-picker-dialog');
     if (dialog) { dialog.classList.add('hidden'); dialog.style.display = ''; }
@@ -5069,9 +5593,9 @@ function setupEffectsTab() {
         if (!EditorState.scenes.length) return;
 
         const roleEffects = {
-            hook: ['zoom_in'], buildup: ['pan_right', 'pan_left', 'zoom_in'],
-            peak: ['shake', 'zoom_in'], transition: ['fade', 'zoom_out'],
-            final: ['zoom_out'], final_statement: ['zoom_out'], cta: ['static'],
+            hook: ['zoom_in', 'ken_burns'], buildup: ['pan_right', 'pan_left', 'pan_diagonal_br', 'zoom_in'],
+            peak: ['shake', 'zoom_in', 'ken_burns'], transition: ['fade', 'zoom_out', 'pan_up'],
+            final: ['zoom_out', 'pan_diagonal_tl'], final_statement: ['zoom_out'], cta: ['static'],
         };
         let lastEffect = '';
 

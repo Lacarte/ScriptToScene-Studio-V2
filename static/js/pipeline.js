@@ -170,6 +170,7 @@ function _plUpdateStep(event) {
     }
     if (event.summary?.scenes) {
       STATE.scenesResult = event.summary.scenes;
+      setModuleBadge('pipeline', event.summary.scenes.project_id);
       localStorage.setItem('sts-editor-scenes', JSON.stringify(event.summary.scenes));
     }
     return;
@@ -210,12 +211,14 @@ async function pipelineLoadHistory() {
       list.innerHTML = '<p style="text-align:center;padding:24px;font-size:12px;color:var(--text-muted)">No pipeline jobs yet</p>';
       return;
     }
-    list.innerHTML = jobs.map(j => {
+    // Store jobs for click handler
+    window._pipelineJobs = jobs;
+    list.innerHTML = jobs.map((j, i) => {
       const color = j.status === 'done' ? '#26DE81' : j.status === 'error' ? '#FF6B6B' : 'var(--accent)';
       const scenes = j.scene_count ? `${j.scene_count} scenes` : '';
       const date = j.timestamp ? timeAgo(j.timestamp) : '';
       return `
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)">
+      <div onclick="pipelineLoadFromHistory(${i})" style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background=''">
         <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
         <div style="min-width:0;flex:1">
           <div class="font-mono" style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(j.label || j.project_id)}</div>
@@ -225,6 +228,24 @@ async function pipelineLoadHistory() {
       </div>`;
     }).join('');
   } catch (e) { console.error('Pipeline history:', e); }
+}
+
+function pipelineLoadFromHistory(index) {
+  const j = (window._pipelineJobs || [])[index];
+  if (!j) return;
+  setModuleBadge('pipeline', j.project_id);
+  if (j.text) $('#pipeline-text').value = j.text;
+  if (j.voice) $('#pipeline-voice').value = j.voice;
+  if (j.speed) $('#pipeline-speed').value = j.speed;
+  if (j.style) {
+    // Try matching by style id first, fallback to visual_style text
+    const sel = $('#pipeline-style');
+    const match = [...sel.options].find(o => j.style.toLowerCase().includes(o.value));
+    if (match) sel.value = match.value;
+  }
+  // Scroll to top so user sees the populated form
+  $('#pipeline-text').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('#pipeline-text').focus();
 }
 
 // ---- Blueprint Selector ----

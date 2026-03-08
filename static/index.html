@@ -256,7 +256,7 @@
         </svg>
         <span class="nav-label">DNA</span>
       </button>
-      <button class="nav-item" onclick="switchPage('pipeline')" data-page="pipeline" title="Pipeline Dashboard">
+      <button class="nav-item active" onclick="switchPage('pipeline')" data-page="pipeline" title="Pipeline Dashboard">
         <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           viewBox="0 0 24 24">
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
@@ -264,7 +264,7 @@
         <span class="nav-label">PIPELINE</span>
       </button>
       <div style="height:1px;background:var(--border);margin:8px 16px;"></div>
-      <button class="nav-item active" onclick="switchPage('tts')" data-page="tts" title="Text to Speech">
+      <button class="nav-item" onclick="switchPage('tts')" data-page="tts" title="Text to Speech">
         <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           viewBox="0 0 24 24">
           <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
@@ -511,13 +511,16 @@
     <!-- ========================================================== -->
     <!-- PAGE: PIPELINE (Auto Pipeline)                             -->
     <!-- ========================================================== -->
-    <div id="page-pipeline" class="page">
+    <div id="page-pipeline" class="page active">
       <div class="mx-auto px-6 py-8" style="max-width:780px">
 
         <!-- Header -->
         <div class="flex items-center justify-between mb-6">
           <div>
-            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Pipeline</h2>
+            <div style="display:flex;align-items:center;gap:10px">
+              <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Pipeline</h2>
+              <span id="badge-pipeline" class="module-project-badge"></span>
+            </div>
             <p class="text-sm mt-1" style="color:var(--text-secondary)">Run the full TTS → Timing → Segment → Scenes
               pipeline</p>
           </div>
@@ -618,13 +621,16 @@
     <!-- ========================================================== -->
     <!-- PAGE: TTS (Kokoro TTS)                                     -->
     <!-- ========================================================== -->
-    <div id="page-tts" class="page active">
+    <div id="page-tts" class="page">
       <div class="mx-auto px-6 py-8" style="max-width:780px">
 
         <!-- Header -->
         <div class="flex items-center justify-between mb-6">
           <div>
-            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Text to Speech</h2>
+            <div style="display:flex;align-items:center;gap:10px">
+              <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Text to Speech</h2>
+              <span id="badge-tts" class="module-project-badge"></span>
+            </div>
             <p class="text-sm mt-1" style="color:var(--text-secondary)">Kokoro TTS with 50+ voices and voice blending
             </p>
           </div>
@@ -798,7 +804,10 @@
 
         <!-- Header -->
         <div class="mb-6">
-          <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Force Alignment</h2>
+          <div style="display:flex;align-items:center;gap:10px">
+            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Force Alignment</h2>
+            <span id="badge-timing" class="module-project-badge"></span>
+          </div>
           <p class="text-sm mt-1" style="color:var(--text-secondary)">Align audio to text with word-level timestamps</p>
         </div>
 
@@ -914,7 +923,10 @@
 
         <!-- Header -->
         <div class="mb-6">
-          <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Segmenter</h2>
+          <div style="display:flex;align-items:center;gap:10px">
+            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Segmenter</h2>
+            <span id="badge-segmenter" class="module-project-badge"></span>
+          </div>
           <p class="text-sm mt-1" style="color:var(--text-secondary)">Split alignment into timed segments for scene
             generation</p>
         </div>
@@ -1022,7 +1034,10 @@
 
         <!-- Header -->
         <div class="mb-6">
-          <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Scene Generator</h2>
+          <div style="display:flex;align-items:center;gap:10px">
+            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Scene Generator</h2>
+            <span id="badge-scenes" class="module-project-badge"></span>
+          </div>
           <p class="text-sm mt-1" style="color:var(--text-secondary)">Transform word-level timestamps into AI-powered
             visual scene scripts</p>
         </div>
@@ -1185,7 +1200,10 @@
 
         <!-- Header -->
         <div class="mb-6">
-          <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Asset Manager</h2>
+          <div style="display:flex;align-items:center;gap:10px">
+            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Asset Manager</h2>
+            <span id="badge-assets" class="module-project-badge"></span>
+          </div>
           <p class="text-sm mt-1" style="color:var(--text-secondary)">Generate and manage visual assets for each scene
           </p>
         </div>

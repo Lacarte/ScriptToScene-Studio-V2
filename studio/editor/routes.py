@@ -23,7 +23,77 @@ editor_bp = Blueprint("editor", __name__)
 _export_jobs = {}
 EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
 os.makedirs(EXPORT_DIR, exist_ok=True)
+
+EDITOR_SAVE_DIR = os.path.join(OUTPUT_DIR, "editor")
+os.makedirs(EDITOR_SAVE_DIR, exist_ok=True)
 logger.info("Export output directory: {}", EXPORT_DIR)
+logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
+
+
+# ---------------------------------------------------------------------------
+# Editor project save / load
+# ---------------------------------------------------------------------------
+
+@editor_bp.route("/api/editor/save", methods=["POST"])
+def editor_save_project():
+    """Save full editor project state to disk."""
+    data = request.get_json(force=True)
+    project_id = data.get("project_id")
+    if not project_id:
+        return jsonify({"error": "project_id required"}), 400
+
+    # Sanitize filename
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+    if not safe_id:
+        return jsonify({"error": "invalid project_id"}), 400
+
+    from datetime import datetime, timezone
+    data["saved_at"] = datetime.now(timezone.utc).isoformat()
+
+    path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+    logger.info("Editor project saved: {} ({} scenes)", safe_id, data.get("scene_count", "?"))
+    return jsonify({"ok": True, "saved_at": data["saved_at"]})
+
+
+@editor_bp.route("/api/editor/load/<project_id>", methods=["GET"])
+def editor_load_project(project_id):
+    """Load a saved editor project."""
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+    path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+    if not os.path.isfile(path):
+        return jsonify({"error": "not found"}), 404
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return jsonify(data)
+
+
+@editor_bp.route("/api/editor/projects", methods=["GET"])
+def editor_list_projects():
+    """List all saved editor projects."""
+    projects = []
+    for fname in os.listdir(EDITOR_SAVE_DIR):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(EDITOR_SAVE_DIR, fname)
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            projects.append({
+                "project_id": data.get("project_id", fname.replace(".json", "")),
+                "project_name": data.get("project_name", ""),
+                "saved_at": data.get("saved_at", ""),
+                "scene_count": data.get("scene_count", 0),
+                "total_duration": data.get("total_duration", 0),
+            })
+        except Exception:
+            continue
+
+    projects.sort(key=lambda p: p.get("saved_at", ""), reverse=True)
+    return jsonify(projects)
 
 
 # ---------------------------------------------------------------------------

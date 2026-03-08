@@ -1058,6 +1058,7 @@ function _ttsFmtTime(s) {
 function ttsPlayAudio(meta) {
   if (!meta || !meta.filename) return;
   _ttsState.nowPlaying = meta;
+  setModuleBadge('tts', meta.folder);
 
   const audioEl = $('#tts-audio-el');
   if (!audioEl) return;

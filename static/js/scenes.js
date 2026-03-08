@@ -29,6 +29,7 @@ function scenesUseCurrentSegment() {
   }
   _scnClearResults();
   STATE.scenesSegData = STATE.segmenterResult;
+  setModuleBadge('scenes', STATE.segmenterResult?.metadata?.project_id);
   _updateScenesSource();
   toast('Segmentation loaded');
 }
@@ -74,6 +75,7 @@ async function scenesSelectSegHistory(folder) {
     if (!res.ok) throw new Error(data.error || 'Failed to load');
     _scnClearResults();
     STATE.scenesSegData = data;
+    setModuleBadge('scenes', data.metadata?.project_id);
     _updateScenesSource();
     toast('Segmentation loaded from history');
   } catch (e) {
@@ -96,6 +98,7 @@ function scenesHandleUpload(input) {
       const data = JSON.parse(e.target.result);
       if (!data.segments || !data.segments.length) throw new Error('No segments array found');
       STATE.scenesSegData = data;
+      setModuleBadge('scenes', data.metadata?.project_id || data.project_id);
       _updateScenesSource();
       toast('Segmentation loaded from file');
     } catch (err) {
@@ -334,6 +337,7 @@ async function scenesSendPreviewToWebhook() {
     if (!res.ok) throw new Error(data.error || 'Send failed');
 
     STATE.scenesResult = data;
+    setModuleBadge('scenes', data.project_id);
     renderSceneResults(data);
     toast('Sent to webhook successfully');
     loadScenesHistory();
@@ -802,6 +806,7 @@ async function loadScenesProject(projectId) {
   try {
     const data = await api(`/api/scenes/${projectId}`);
     STATE.scenesResult = data;
+    setModuleBadge('scenes', data.project_id || projectId);
 
     // Restore segmenter data if missing (needed for segment text display)
     if (!STATE.scenesSegData && data.source_folder) {

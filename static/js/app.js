@@ -175,6 +175,19 @@ function showContinueBar(containerId, nextPage, label, setupFn) {
   container.appendChild(bar);
 }
 
+// ---- Module Project Badge ----
+function setModuleBadge(moduleId, text) {
+  const el = document.getElementById('badge-' + moduleId);
+  if (!el) return;
+  if (text) {
+    el.textContent = text;
+    el.classList.add('visible');
+  } else {
+    el.textContent = '';
+    el.classList.remove('visible');
+  }
+}
+
 // ---- Time Ago ----
 function timeAgo(ts) {
   if (!ts) return '';

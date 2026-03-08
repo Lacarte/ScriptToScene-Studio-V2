@@ -26,6 +26,7 @@ function segUseCurrentResult() {
     return;
   }
   STATE.segmenterAlignment = { ...STATE.alignResult, project_id: STATE.alignResult.project_id };
+  setModuleBadge('segmenter', STATE.alignResult.project_id);
   _updateSegSource();
 }
 
@@ -58,6 +59,7 @@ function segSelectHistory(idx) {
   const h = STATE.alignHistory[idx];
   if (!h) return;
   STATE.segmenterAlignment = { folder: h.folder, alignment: h.word_alignment, transcript: h.transcript, project_id: h.project_id, source_file: h.source_file };
+  setModuleBadge('segmenter', h.project_id);
   segClosePickerModal();
   _updateSegSource();
   toast('Alignment loaded from history');
@@ -84,6 +86,7 @@ function segHandleUpload(input) {
         folder: data.source_folder || data.folder || file.name.replace(/\.json$/, ''),
         project_id: data.project_id || '',
       };
+      setModuleBadge('segmenter', data.project_id);
       _updateSegSource();
       toast('Alignment loaded from file');
     } catch (err) {
@@ -150,6 +153,7 @@ async function handleRunSegmenter() {
     if (!res.ok) throw new Error(data.error || 'Segmentation failed');
 
     STATE.segmenterResult = data;
+    setModuleBadge('segmenter', data.metadata?.project_id || STATE.segmenterAlignment?.project_id);
     renderSegResults(data);
     loadSegHistory();
     toast('Segmentation complete');
@@ -526,6 +530,7 @@ async function loadSegHistoryItem(folder) {
   try {
     const data = await api(`/api/segmenter/${encodeURIComponent(folder)}`);
     STATE.segmenterResult = data;
+    setModuleBadge('segmenter', data.metadata?.project_id || '');
     renderSegResults(data);
     loadSegHistory(); // refresh to highlight active
     toast('Segmentation loaded');
