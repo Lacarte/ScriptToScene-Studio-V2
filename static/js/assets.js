@@ -167,6 +167,7 @@ function renderAssetsFromScenes() {
   _renderTypeMix(data);
   renderAssetGrid(scenes);
   updateAssetsProgress();
+  assetsLoadAudio();
 }
 
 function _renderAnalysisBar(data) {
@@ -994,5 +995,175 @@ async function autoAssembleAndSendToEditor() {
   localStorage.removeItem('sts-editor-captions');
   switchPage('editor');
   toast('Auto-assembling timeline...', 'info');
+}
+
+// ---- Audio Player ----
+
+let _assetsAudio = null;
+let _assetsAudioFrame = null;
+
+async function assetsLoadAudio() {
+  assetsStopAudio();
+  const bar = $('#assets-audio-bar');
+  if (!bar) return;
+
+  const sf = STATE.assetsSceneData?.source_folder;
+  if (!sf) { bar.style.display = 'none'; return; }
+
+  let url = null;
+  // Try to resolve from alignment state first
+  if (STATE.segmenterAlignment?.folder === sf && STATE.segmenterAlignment?.source_file) {
+    url = `/output/alignments/${sf}/${STATE.segmenterAlignment.source_file}`;
+  } else if (STATE.alignResult?.folder === sf && STATE.alignResult?.source_file) {
+    url = `/output/alignments/${sf}/${STATE.alignResult.source_file}`;
+  } else if (STATE.alignHistory) {
+    const match = STATE.alignHistory.find(h => h.folder === sf);
+    if (match) url = `/output/alignments/${match.folder}/${match.source_file}`;
+  }
+
+  // Fallback: ask the API
+  if (!url) {
+    try {
+      const res = await api(`/api/scenes/audio/${encodeURIComponent(sf)}`);
+      if (res?.url) url = res.url;
+    } catch { /* ignore */ }
+  }
+
+  if (!url) { bar.style.display = 'none'; return; }
+
+  _assetsAudio = new Audio(url);
+  _assetsAudio.addEventListener('loadedmetadata', () => {
+    bar.style.display = '';
+    _assetsAudioUpdateTime();
+    _assetsAudioRenderSceneMarkers();
+  });
+  _assetsAudio.addEventListener('ended', () => _assetsAudioReset());
+  _assetsAudio.addEventListener('error', () => { bar.style.display = 'none'; });
+}
+
+function assetsStopAudio() {
+  if (_assetsAudioFrame) { cancelAnimationFrame(_assetsAudioFrame); _assetsAudioFrame = null; }
+  if (_assetsAudio) { _assetsAudio.pause(); _assetsAudio = null; }
+  const bar = $('#assets-audio-bar');
+  if (bar) bar.style.display = 'none';
+}
+
+function assetsToggleAudio() {
+  if (!_assetsAudio) return;
+  if (_assetsAudio.paused) {
+    _assetsAudio.play();
+    _assetsAudioAnimate();
+    $('#assets-audio-icon').innerHTML = '<rect x="5" y="3" width="4" height="18" rx="1"/><rect x="15" y="3" width="4" height="18" rx="1"/>';
+  } else {
+    _assetsAudio.pause();
+    if (_assetsAudioFrame) { cancelAnimationFrame(_assetsAudioFrame); _assetsAudioFrame = null; }
+    $('#assets-audio-icon').innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+  }
+}
+
+function assetsAudioSeek(e) {
+  if (!_assetsAudio || !_assetsAudio.duration) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  _assetsAudio.currentTime = pct * _assetsAudio.duration;
+  _assetsAudioUpdateUI();
+}
+
+function _assetsAudioAnimate() {
+  if (!_assetsAudio || _assetsAudio.paused) return;
+  _assetsAudioUpdateUI();
+  _assetsAudioFrame = requestAnimationFrame(_assetsAudioAnimate);
+}
+
+function _assetsAudioUpdateUI() {
+  if (!_assetsAudio || !_assetsAudio.duration) return;
+  const pct = (_assetsAudio.currentTime / _assetsAudio.duration) * 100;
+  const progress = $('#assets-audio-progress');
+  const playhead = $('#assets-audio-playhead');
+  if (progress) progress.style.width = pct + '%';
+  if (playhead) { playhead.style.left = pct + '%'; playhead.style.opacity = '1'; }
+  _assetsAudioUpdateTime();
+  _assetsAudioHighlightScene();
+}
+
+function _assetsAudioUpdateTime() {
+  const el = $('#assets-audio-time');
+  if (!el || !_assetsAudio) return;
+  const cur = _assetsAudio.currentTime || 0;
+  const dur = _assetsAudio.duration || 0;
+  el.textContent = `${_fmtTime(cur)} / ${_fmtTime(dur)}`;
+}
+
+function _fmtTime(s) {
+  if (!s || !isFinite(s)) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function _assetsAudioReset() {
+  if (_assetsAudioFrame) { cancelAnimationFrame(_assetsAudioFrame); _assetsAudioFrame = null; }
+  $('#assets-audio-icon').innerHTML = '<polygon points="5,3 19,12 5,21"/>';
+  const progress = $('#assets-audio-progress');
+  const playhead = $('#assets-audio-playhead');
+  if (progress) progress.style.width = '0%';
+  if (playhead) playhead.style.opacity = '0';
+  _assetsAudioUpdateTime();
+  // Remove highlight from all cards
+  document.querySelectorAll('.asset-card').forEach(c => c.style.boxShadow = '');
+}
+
+function _assetsAudioRenderSceneMarkers() {
+  const container = $('#assets-audio-scenes');
+  if (!container || !_assetsAudio?.duration || !STATE.assetsSceneData?.scenes) return;
+
+  const scenes = STATE.assetsSceneData.scenes;
+  const totalDur = _assetsAudio.duration;
+  const typeColors = { video: '174,58%,55%', image: '263,68%,65%' };
+
+  // Build timings from scene durations
+  let t = 0;
+  const timings = scenes.map(s => {
+    const start = t;
+    const dur = s.duration || 2.5;
+    t += dur;
+    return { start, end: t, scene: s };
+  });
+
+  container.innerHTML = timings.map((tm, i) => {
+    const left = (tm.start / totalDur * 100).toFixed(2);
+    const width = Math.max((tm.end - tm.start) / totalDur * 100, 0.3).toFixed(2);
+    const hue = typeColors[tm.scene.type_of_scene] || '210,20%,45%';
+    const label = (tm.scene.title || '').split(' ').slice(0, 2).join(' ');
+    return `<div data-scene-idx="${i}" style="position:absolute;left:${left}%;width:${width}%;height:100%;background:hsla(${hue},0.35);display:flex;align-items:center;justify-content:center;overflow:hidden;border-right:1px solid var(--bg-darkest)">
+      <span style="font-size:7px;color:rgba(255,255,255,0.6);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 3px">${esc(label)}</span>
+    </div>`;
+  }).join('');
+}
+
+function _assetsAudioHighlightScene() {
+  if (!_assetsAudio || !STATE.assetsSceneData?.scenes) return;
+  const scenes = STATE.assetsSceneData.scenes;
+  const ct = _assetsAudio.currentTime;
+
+  // Find which scene is playing based on cumulative durations
+  let t = 0;
+  let activeIdx = -1;
+  for (let i = 0; i < scenes.length; i++) {
+    const dur = scenes[i].duration || 2.5;
+    if (ct >= t && ct < t + dur) { activeIdx = i; break; }
+    t += dur;
+  }
+
+  // Highlight active card, remove from others
+  scenes.forEach((s, i) => {
+    const card = document.getElementById(`asset-card-${s.index}`);
+    if (!card) return;
+    if (i === activeIdx) {
+      card.style.boxShadow = 'inset 0 0 0 1px var(--accent), 0 0 12px rgba(78,205,196,0.15)';
+    } else {
+      card.style.boxShadow = '';
+    }
+  });
 }
 

@@ -1227,6 +1227,21 @@
           </div>
         </section>
 
+        <!-- Audio Player (shown when scenes loaded and audio available) -->
+        <section id="assets-audio-bar" class="card mb-4" style="display:none">
+          <div style="padding:10px 16px;display:flex;align-items:center;gap:10px">
+            <button id="assets-audio-play-btn" onclick="assetsToggleAudio()" style="width:28px;height:28px;border-radius:50%;background:var(--accent);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform 0.15s,background 0.15s" onmouseenter="this.style.transform='scale(1.1)'" onmouseleave="this.style.transform=''">
+              <svg id="assets-audio-icon" width="12" height="12" fill="white" viewBox="0 0 24 24"><polygon points="5,3 19,12 5,21"/></svg>
+            </button>
+            <div id="assets-audio-timeline" style="position:relative;flex:1;height:28px;background:var(--bg-darkest);border-radius:6px;overflow:hidden;border:1px solid var(--border);cursor:pointer" onclick="assetsAudioSeek(event)">
+              <div id="assets-audio-progress" style="position:absolute;top:0;left:0;height:100%;width:0%;background:rgba(78,205,196,0.2);border-radius:6px;transition:width 0.1s linear"></div>
+              <div id="assets-audio-playhead" style="position:absolute;top:0;left:0;width:2px;height:100%;background:var(--accent);z-index:2;pointer-events:none;opacity:0"></div>
+              <div id="assets-audio-scenes" style="position:absolute;inset:0;display:flex;align-items:center;pointer-events:none"></div>
+            </div>
+            <span id="assets-audio-time" class="font-mono" style="font-size:10px;color:var(--text-muted);min-width:80px;text-align:right;flex-shrink:0">0:00 / 0:00</span>
+          </div>
+        </section>
+
         <!-- Controls (shown when scenes loaded) -->
         <section id="assets-controls" class="card p-5 mb-4" style="display:none">
           <!-- Provider + Arguments -->
