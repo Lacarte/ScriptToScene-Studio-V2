@@ -15,7 +15,7 @@ import soundfile as sf
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import ALIGN_DIR, ALIGN_TRASH_DIR, BIN_DIR, generate_project_id
+from config import ALIGN_DIR, TRASH_DIR, BIN_DIR, generate_project_id
 
 timing_bp = Blueprint("timing", __name__)
 
@@ -319,7 +319,9 @@ def delete_alignment(folder):
     folder = os.path.basename(folder)
     job_dir = os.path.join(ALIGN_DIR, folder)
     if os.path.isdir(job_dir):
-        shutil.move(job_dir, os.path.join(ALIGN_TRASH_DIR, folder))
+        align_trash = os.path.join(TRASH_DIR, "alignments")
+        os.makedirs(align_trash, exist_ok=True)
+        shutil.move(job_dir, os.path.join(align_trash, folder))
         return jsonify({"status": "deleted", "folder": folder})
     return jsonify({"error": "Folder not found"}), 404
 

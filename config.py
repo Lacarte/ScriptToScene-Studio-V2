@@ -20,15 +20,14 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(ROOT_DIR, "static")
 LOG_DIR = os.path.join(ROOT_DIR, "logs")
 OUTPUT_DIR = os.path.join(ROOT_DIR, "output")
+TRASH_DIR = os.path.join(OUTPUT_DIR, "TRASH")
 ALIGN_DIR = os.path.join(OUTPUT_DIR, "alignments")
-ALIGN_TRASH_DIR = os.path.join(ALIGN_DIR, "TRASH")
 SCENES_DIR = os.path.join(OUTPUT_DIR, "scenes")
 ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets")
 SEGMENTER_DIR = os.path.join(OUTPUT_DIR, "segmenter")
 CAPTIONS_DIR = os.path.join(OUTPUT_DIR, "captions")
 MUSIC_DIR = os.path.join(OUTPUT_DIR, "music")
 TTS_DIR = os.path.join(OUTPUT_DIR, "tts")
-TTS_TRASH_DIR = os.path.join(TTS_DIR, "TRASH")
 MODELS_DIR = os.path.join(ROOT_DIR, "models")
 TIMELINE_EDITOR_DIR = os.path.join(ROOT_DIR, "timeline-editor", "frontend")
 BIN_DIR = os.path.join(ROOT_DIR, "bin")
@@ -40,8 +39,8 @@ NICHE_INPUT_DIR = os.path.join(ROOT_DIR, "assets", "niche-analyzer")
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
-for _d in (LOG_DIR, ALIGN_DIR, ALIGN_TRASH_DIR, SCENES_DIR, ASSETS_DIR,
-           SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, TTS_TRASH_DIR, MODELS_DIR,
+for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, ASSETS_DIR,
+           SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
            DNA_DIR):
     os.makedirs(_d, exist_ok=True)
 

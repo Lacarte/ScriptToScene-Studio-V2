@@ -24,7 +24,7 @@ import urllib.request
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import TTS_DIR, TTS_TRASH_DIR, MODELS_DIR, BIN_DIR
+from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR
 from .normalize import (
     normalize_for_tts, clean_for_tts, tts_breathing_blocks,
     format_breathing_blocks, validate_brackets,
@@ -913,7 +913,9 @@ def delete_audio(filename):
     basename = filename.rsplit(".", 1)[0]
     job_dir = _tts_job_dir(basename)
     if os.path.isdir(job_dir):
-        shutil.move(job_dir, os.path.join(TTS_TRASH_DIR, basename))
+        tts_trash = os.path.join(TRASH_DIR, "tts")
+        os.makedirs(tts_trash, exist_ok=True)
+        shutil.move(job_dir, os.path.join(tts_trash, basename))
         return jsonify({"status": "deleted", "filename": filename})
     return jsonify({"error": "File not found"}), 404
 
@@ -922,10 +924,12 @@ def delete_audio(filename):
 @tts_bp.route("/api/tts/generation", methods=["DELETE"])
 def delete_all_audio():
     count = 0
+    tts_trash = os.path.join(TRASH_DIR, "tts")
+    os.makedirs(tts_trash, exist_ok=True)
     for entry in os.listdir(TTS_DIR):
         entry_path = os.path.join(TTS_DIR, entry)
-        if os.path.isdir(entry_path) and entry != "TRASH":
-            shutil.move(entry_path, os.path.join(TTS_TRASH_DIR, entry))
+        if os.path.isdir(entry_path):
+            shutil.move(entry_path, os.path.join(tts_trash, entry))
             count += 1
     return jsonify({"status": "deleted", "count": count})
 

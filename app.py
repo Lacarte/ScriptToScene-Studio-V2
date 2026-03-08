@@ -14,9 +14,9 @@ from flask_cors import CORS
 from loguru import logger
 
 from config import (
-    LOG_DIR, STATIC_DIR, ALIGN_DIR, ALIGN_TRASH_DIR, N8N_WEBHOOK_URL,
+    LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
-    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, TTS_TRASH_DIR, DNA_DIR,
+    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR,
 )
 
 # ---------------------------------------------------------------------------
@@ -127,34 +127,25 @@ def open_folder():
 # Settings — Clear all projects
 # ---------------------------------------------------------------------------
 
-# Directories to clear and their corresponding TRASH dirs (None = create TRASH subdir)
+# Directories whose project sub-folders get moved to output/TRASH/<dir_name>/
 _PROJECT_DIRS = [
-    (ALIGN_DIR, ALIGN_TRASH_DIR),
-    (SCENES_DIR, None),
-    (ASSETS_DIR, None),
-    (SEGMENTER_DIR, None),
-    (CAPTIONS_DIR, None),
-    (MUSIC_DIR, None),
-    (TTS_DIR, TTS_TRASH_DIR),
-    (DNA_DIR, None),
+    ALIGN_DIR, SCENES_DIR, ASSETS_DIR, SEGMENTER_DIR,
+    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR,
 ]
 
 
 @app.route("/api/settings/clear-all-projects", methods=["DELETE"])
 def clear_all_projects():
-    """Move all project folders to TRASH directories."""
+    """Move all project folders to output/TRASH/."""
     total = 0
     errors = []
-    for src_dir, trash_dir in _PROJECT_DIRS:
+    for src_dir in _PROJECT_DIRS:
         if not os.path.isdir(src_dir):
             continue
-        # Default trash: a TRASH subfolder inside the source dir
-        if trash_dir is None:
-            trash_dir = os.path.join(src_dir, "TRASH")
+        dir_name = os.path.basename(src_dir)
+        trash_dir = os.path.join(TRASH_DIR, dir_name)
         os.makedirs(trash_dir, exist_ok=True)
         for entry in os.listdir(src_dir):
-            if entry == "TRASH":
-                continue
             entry_path = os.path.join(src_dir, entry)
             if os.path.isdir(entry_path):
                 try:
@@ -165,7 +156,7 @@ def clear_all_projects():
                     total += 1
                 except Exception as e:
                     errors.append(f"{entry}: {e}")
-    logger.info("Cleared {} project folders", total)
+    logger.info("Cleared {} project folders to {}", total, TRASH_DIR)
     result = {"status": "cleared", "count": total}
     if errors:
         result["errors"] = errors
