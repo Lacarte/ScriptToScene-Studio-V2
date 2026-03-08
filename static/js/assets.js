@@ -136,8 +136,28 @@ function handleAssetsJSONImport(input) {
 function assetsProviderChanged() {
   const provider = $('#assets-provider').value;
   const argsWrap = $('#assets-args-wrap');
-  argsWrap.style.display = provider === 'midjourney' ? '' : 'none';
+  const kieOpts = $('#assets-kie-opts');
+  argsWrap.style.display = (provider === 'midjourney' || provider === 'meta-ai') ? '' : 'none';
+  kieOpts.style.display = provider === 'kie-ai' ? 'flex' : 'none';
 }
+
+// Sync aspect ratio → Midjourney --ar argument
+document.addEventListener('DOMContentLoaded', () => {
+  const aspectSel = document.getElementById('assets-aspect');
+  if (aspectSel) {
+    aspectSel.addEventListener('change', () => {
+      const argsInput = document.getElementById('assets-arguments');
+      if (!argsInput) return;
+      const ratio = aspectSel.value;
+      const val = argsInput.value;
+      if (/--ar\s+\S+/.test(val)) {
+        argsInput.value = val.replace(/--ar\s+\S+/, `--ar ${ratio}`);
+      } else {
+        argsInput.value = (val ? val + ' ' : '') + `--ar ${ratio}`;
+      }
+    });
+  }
+});
 
 // ---- Main Render ----
 
@@ -168,6 +188,12 @@ function renderAssetsFromScenes() {
   renderAssetGrid(scenes);
   updateAssetsProgress();
   assetsLoadAudio();
+
+  // Show continue bar if any scenes already have assets ready
+  const readyCount = scenes.filter(s => STATE.assetStatuses[s.index]?.status === 'ready' && STATE.assetStatuses[s.index]?.local_files?.length).length;
+  if (readyCount > 0) {
+    showContinueBar('assets-controls', 'editor', 'Auto-Assemble & Edit →', autoAssembleAndSendToEditor);
+  }
 }
 
 function _renderAnalysisBar(data) {
@@ -221,6 +247,7 @@ function _buildAssetCard(scene, sceneNum) {
   const tc = _typeConf(scene.type_of_scene);
   const files = st.local_files || [];
   const hasImage = st.status === 'ready' && files.length > 0;
+  const isGenerating = st.status === 'generating';
   const isDownloading = st.status === 'downloading';
   const isError = st.status === 'error';
   const prompt = st.editedPrompt || scene.image_prompt || '';
@@ -246,6 +273,12 @@ function _buildAssetCard(scene, sceneNum) {
       }
     }
     previewContent += `<span style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.7);color:white;font-size:9px;padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;pointer-events:none">${files.length} file${files.length > 1 ? 's' : ''}</span>`;
+  } else if (isGenerating) {
+    previewContent = `
+      <div style="text-align:center;color:#A78BFA">
+        <div style="width:24px;height:24px;border:2px solid rgba(255,255,255,0.1);border-top-color:#A78BFA;border-radius:50%;animation:spin 1.2s linear infinite;margin:0 auto 8px"></div>
+        <p style="font-size:10px;font-weight:500;opacity:0.8">Generating...</p>
+      </div>`;
   } else if (isDownloading) {
     previewContent = `
       <div style="text-align:center;color:${tc.color}">
@@ -274,10 +307,11 @@ function _buildAssetCard(scene, sceneNum) {
   }
 
   // Status badge — hide when ready with files (file count badge is enough)
-  const statusLabels = { pending: 'Pending', downloading: 'Downloading', ready: 'Ready', error: 'Error' };
+  const statusLabels = { pending: 'Pending', generating: 'Generating', downloading: 'Downloading', ready: 'Ready', error: 'Error' };
+  const statusClass = (st.status === 'downloading' || st.status === 'generating') ? 'generating' : st.status;
   const statusBadge = hasImage
     ? ''
-    : `<span class="status-badge ${st.status === 'downloading' ? 'generating' : st.status}">${statusLabels[st.status] || st.status}</span>`;
+    : `<span class="status-badge ${statusClass}">${statusLabels[st.status] || st.status}</span>`;
 
   // Text content display (for text-type scenes)
   const textContentHTML = scene.text_content
@@ -412,17 +446,19 @@ function updateAssetsProgress() {
   const scenes = STATE.assetsSceneData.scenes;
   const total = scenes.length;
   const ready = scenes.filter(s => STATE.assetStatuses[s.index]?.status === 'ready').length;
+  const generating = scenes.filter(s => STATE.assetStatuses[s.index]?.status === 'generating').length;
   const downloading = scenes.filter(s => STATE.assetStatuses[s.index]?.status === 'downloading').length;
   const totalFiles = scenes.reduce((sum, s) => sum + (STATE.assetStatuses[s.index]?.local_files?.length || 0), 0);
 
   let text = `${ready} / ${total} complete`;
   if (totalFiles > 0) text += ` · ${totalFiles} files`;
+  if (generating > 0) text += ` · ${generating} generating`;
   if (downloading > 0) text += ` · ${downloading} downloading`;
   $('#assets-progress').textContent = text;
 
   // Progress bar
   const barWrap = $('#assets-progress-bar-wrap');
-  if (ready > 0 || downloading > 0) {
+  if (ready > 0 || downloading > 0 || generating > 0) {
     barWrap.style.display = '';
     const pct = total > 0 ? (ready / total) * 100 : 0;
     $('#assets-progress-bar').style.width = pct + '%';
@@ -520,7 +556,7 @@ async function assetsResendSelected() {
   if (!selected.length) { toast('No scenes selected', 'error'); return; }
 
   const provider = $('#assets-provider').value;
-  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '-v 7 -ar 9:16') : '';
+  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '--v 7 --ar 9:16') : '';
   const projectId = STATE.assetsSceneData.project_id || 'default';
 
   // Build payload with original sequential positions
@@ -536,16 +572,23 @@ async function assetsResendSelected() {
 
   _setGrabberStatus('Re-sending selected scenes...');
 
+  const resendBody = {
+    project_id: projectId,
+    provider,
+    arguments: arguments_,
+    scenes: scenesPayload,
+    aspect_ratio: $('#assets-aspect')?.value || '9:16',
+  };
+  if (provider === 'kie-ai') {
+    resendBody.resolution = $('#assets-kie-resolution')?.value || '1';
+    resendBody.output_format = $('#assets-kie-format')?.value || 'jpg';
+  }
+
   try {
     const res = await fetch('/api/assets/grabber/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        project_id: projectId,
-        provider,
-        arguments: arguments_,
-        scenes: scenesPayload,
-      }),
+      body: JSON.stringify(resendBody),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to start grabber');
@@ -557,11 +600,15 @@ async function assetsResendSelected() {
     renderAssetGrid(scenes);
     updateAssetsProgress();
 
-    const providerUrl = _PROVIDER_URLS[provider] || _PROVIDER_URLS.midjourney;
-    window.open(providerUrl, 'sts-provider-tab');
-
-    _setGrabberStatus(`${data.scene_count} selected scenes queued — activate Automa`);
-    toast(`${data.scene_count} scenes re-sent to grabber`);
+    if (provider === 'kie-ai') {
+      _setGrabberStatus(`Generating ${data.scene_count} selected scenes via Kie AI...`);
+      toast(`Kie AI generating ${data.scene_count} selected scenes`);
+    } else {
+      const providerUrl = _PROVIDER_URLS[provider] || _PROVIDER_URLS.midjourney;
+      window.open(providerUrl, 'sts-provider-tab');
+      _setGrabberStatus(`${data.scene_count} selected scenes queued — activate Automa`);
+      toast(`${data.scene_count} scenes re-sent to grabber`);
+    }
 
     _startGrabberPolling(projectId);
     _setGrabberUI(true);
@@ -621,16 +668,16 @@ async function assetsStartGrabber() {
 
   const scenes = STATE.assetsSceneData.scenes;
   const provider = $('#assets-provider').value;
-  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '-v 7 -ar 9:16') : '';
+  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '--v 7 --ar 9:16') : '';
   const projectId = STATE.assetsSceneData.project_id || 'default';
 
   // Build scenes payload (respect edited prompts, sequential folder numbering)
-  const scenesPayload = scenes
-    .filter(s => s.image_prompt || STATE.assetStatuses[s.index]?.editedPrompt)
-    .map((s, i) => ({
-      prompt: STATE.assetStatuses[s.index]?.editedPrompt || s.image_prompt,
-      scene: i,
-    }));
+  // Keep track of which original scenes are included for status updates
+  const scenesWithPrompts = scenes.filter(s => s.image_prompt || STATE.assetStatuses[s.index]?.editedPrompt);
+  const scenesPayload = scenesWithPrompts.map((s, i) => ({
+    prompt: STATE.assetStatuses[s.index]?.editedPrompt || s.image_prompt,
+    scene: i,
+  }));
 
   if (!scenesPayload.length) {
     toast('No prompts available', 'error');
@@ -644,35 +691,50 @@ async function assetsStartGrabber() {
 
   _setGrabberStatus('Initializing grabber job...');
 
+  // Build request body
+  const reqBody = {
+    project_id: projectId,
+    provider: provider,
+    arguments: arguments_,
+    scenes: scenesPayload,
+    aspect_ratio: $('#assets-aspect')?.value || '9:16',
+  };
+
+  // Add Kie AI options if applicable
+  if (provider === 'kie-ai') {
+    reqBody.resolution = $('#assets-kie-resolution')?.value || '1';
+    reqBody.output_format = $('#assets-kie-format')?.value || 'jpg';
+  }
+
   try {
     const res = await fetch('/api/assets/grabber/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        project_id: projectId,
-        provider: provider,
-        arguments: arguments_,
-        scenes: scenesPayload,
-      }),
+      body: JSON.stringify(reqBody),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to start grabber');
 
-    // Mark all scenes as pending
-    scenesPayload.forEach(s => {
-      if (STATE.assetStatuses[s.scene]) {
-        STATE.assetStatuses[s.scene].status = 'pending';
+    // Mark all included scenes as pending (use scene.index, not sequential position)
+    scenesWithPrompts.forEach(s => {
+      if (STATE.assetStatuses[s.index]) {
+        STATE.assetStatuses[s.index].status = 'pending';
       }
     });
     renderAssetGrid(scenes);
     updateAssetsProgress();
 
-    // Open provider tab (reuse existing tab if already open)
-    const providerUrl = _PROVIDER_URLS[provider] || _PROVIDER_URLS.midjourney;
-    window.open(providerUrl, 'sts-provider-tab');
-
-    _setGrabberStatus(`Prompts ready (${data.scene_count} scenes) — activate Automa in the ${provider === 'midjourney' ? 'Midjourney' : 'Meta AI'} tab to start`);
-    toast(`Grabber ready — ${data.scene_count} prompts queued. Activate Automa to begin.`);
+    if (provider === 'kie-ai') {
+      // Kie AI is server-side — no browser tab needed
+      _setGrabberStatus(`Generating ${data.scene_count} images via Kie AI...`);
+      toast(`Kie AI generating ${data.scene_count} images server-side`);
+    } else {
+      // Open provider tab (reuse existing tab if already open)
+      const providerUrl = _PROVIDER_URLS[provider] || _PROVIDER_URLS.midjourney;
+      window.open(providerUrl, 'sts-provider-tab');
+      _setGrabberStatus(`Prompts ready (${data.scene_count} scenes) — activate Automa in the ${provider === 'midjourney' ? 'Midjourney' : 'Meta AI'} tab to start`);
+      toast(`Grabber ready — ${data.scene_count} prompts queued. Activate Automa to begin.`);
+    }
 
     // Start polling for results
     _startGrabberPolling(projectId);
@@ -737,7 +799,7 @@ function _startGrabberPolling(projectId) {
       if (anyChange) updateAssetsProgress();
 
       // Update status message
-      const statusMap = { waiting: 'Waiting for Automa...', grabbing: 'Automa is submitting prompts...', downloading: 'Downloading images...', done: 'All assets downloaded!', error: 'Grabber encountered errors' };
+      const statusMap = { waiting: 'Waiting for Automa...', grabbing: 'Automa is submitting prompts...', generating: 'Generating images via Kie AI...', downloading: 'Downloading images...', done: 'All assets downloaded!', error: 'Grabber encountered errors' };
       _setGrabberStatus(statusMap[data.status] || data.status);
 
       // Stop polling when done

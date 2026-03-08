@@ -11,6 +11,7 @@ from loguru import logger
 
 from config import ASSETS_DIR
 from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
+from .providers.kie_ai import generate_image as kie_ai_generate
 
 assets_bp = Blueprint("assets", __name__)
 
@@ -63,6 +64,7 @@ _load_jobs_from_disk()
 def grabber_start():
     """Initialize a grabber job — prepares prompts for Automa to consume."""
     data = request.get_json(silent=True)
+    logger.info("grabber_start request: {}", json.dumps(data, default=str)[:1000] if data else "None")
     if not data or not data.get("scenes"):
         return jsonify({"error": "No scenes provided"}), 400
 
@@ -114,19 +116,103 @@ def grabber_start():
         "arguments": arguments,
         "payload": automa_payload,
         "scene_statuses": scene_statuses,
-        "status": "waiting",  # waiting | grabbing | downloading | done | error
+        "status": "waiting",  # waiting | grabbing | generating | downloading | done | error
         "created_at": datetime.now().isoformat(),
     }
+
+    # Store Kie AI generation options for the background thread
+    if provider == "kie-ai":
+        job["_kie_ai_options"] = {
+            "aspect_ratio": data.get("aspect_ratio", "9:16"),
+            "resolution": data.get("resolution", "1"),
+            "output_format": data.get("output_format", "jpg"),
+        }
 
     grabber_jobs[project_id] = job
     _save_job(job)
 
-    logger.info("Grabber job created: {} ({} scenes)", grabber_id, len(automa_payload["scenes"]))
+    logger.info("Grabber job created: {} ({} scenes, provider={})", grabber_id, len(automa_payload["scenes"]), provider)
+
+    # Kie AI: fully server-side — spawn background thread to generate + download
+    if provider == "kie-ai":
+        job["status"] = "generating"
+        _save_job(job)
+        threading.Thread(
+            target=_kie_ai_generate_all,
+            args=(project_id, job),
+            daemon=True,
+        ).start()
+
     return jsonify({
         "grabber_id": grabber_id,
         "project_id": project_id,
         "scene_count": len(automa_payload["scenes"]),
+        "provider": provider,
     })
+
+
+def _kie_ai_generate_all(project_id, job):
+    """Background thread: generate images via Kie AI for all scenes sequentially."""
+    scenes = job["payload"]["scenes"]
+    request_data = job.get("_kie_ai_options", {})
+    aspect_ratio = request_data.get("aspect_ratio", "9:16")
+    resolution = request_data.get("resolution", "1")
+    output_format = request_data.get("output_format", "jpg")
+
+    logger.info("Kie AI thread started: {} scenes, ar={}, res={}, fmt={}",
+                len(scenes), aspect_ratio, resolution, output_format)
+
+    for scene_entry in scenes:
+        scene_num = str(scene_entry["scene"])
+        prompt = scene_entry["prompt"]
+        logger.info("Kie AI scene {}: generating (prompt: {})", scene_num, prompt[:80])
+
+        if scene_num in job["scene_statuses"]:
+            job["scene_statuses"][scene_num]["status"] = "generating"
+        _save_job(job)
+
+        try:
+            result = kie_ai_generate(
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                output_format=output_format,
+            )
+            image_urls = result.get("all_urls", [result["url"]])
+            logger.info("Kie AI scene {} generated: {} URL(s)", scene_num, len(image_urls))
+
+            # Download to disk
+            if scene_num in job["scene_statuses"]:
+                job["scene_statuses"][scene_num]["status"] = "downloading"
+                job["scene_statuses"][scene_num]["urls"] = image_urls
+            _save_job(job)
+
+            local_files = organize_grabber_assets(
+                project_id=project_id,
+                scene_num=scene_num,
+                urls=image_urls,
+                assets_dir=ASSETS_DIR,
+            )
+            if scene_num in job["scene_statuses"]:
+                job["scene_statuses"][scene_num]["status"] = "ready"
+                job["scene_statuses"][scene_num]["local_files"] = local_files
+            logger.success("Kie AI scene {} ready: {} files", scene_num, len(local_files))
+
+        except Exception as e:
+            logger.error("Kie AI scene {} failed: {}", scene_num, e)
+            if scene_num in job["scene_statuses"]:
+                job["scene_statuses"][scene_num]["status"] = "error"
+
+        _save_job(job)
+
+    all_done = all(
+        s["status"] in ("ready", "error")
+        for s in job["scene_statuses"].values()
+    )
+    if all_done:
+        job["status"] = "done"
+        _save_job(job)
+        logger.success("Kie AI generation complete for {}", project_id)
 
 
 @assets_bp.route("/api/assets/grabber/pending")

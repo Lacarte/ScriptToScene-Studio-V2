@@ -1058,16 +1058,6 @@
             </div>
             <input type="hidden" id="scenes-style" value="cinematic">
           </div>
-          <!-- Aspect Ratio -->
-          <div>
-            <label class="block text-xs mb-1" style="color:var(--text-secondary)">Aspect Ratio</label>
-            <select id="scenes-aspect" class="input-field"
-              style="width:100%;padding:8px 12px;font-size:12px;font-family:inherit">
-              <option value="9:16">9:16 (Vertical / Reels)</option>
-              <option value="16:9">16:9 (Landscape)</option>
-              <option value="1:1">1:1 (Square)</option>
-            </select>
-          </div>
 
           <!-- Webhook Toggle -->
           <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
@@ -1253,13 +1243,44 @@
                 style="padding:8px 12px;font-size:12px;font-family:inherit" onchange="assetsProviderChanged()">
                 <option value="midjourney">Midjourney</option>
                 <option value="meta-ai">Meta AI (Imagine)</option>
+                <option value="kie-ai">Kie AI</option>
               </select>
             </div>
             <div id="assets-args-wrap">
               <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
                 style="color:var(--text-muted)">Arguments</label>
               <input type="text" id="assets-arguments" class="input-field font-mono"
-                style="padding:8px 12px;font-size:11px;width:200px" value="-v 7 -ar 9:16" placeholder="-v 7 -ar 9:16">
+                style="padding:8px 12px;font-size:11px;width:200px" value="--v 7 --ar 9:16" placeholder="--v 7 --ar 9:16">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
+                style="color:var(--text-muted)">Aspect Ratio</label>
+              <select id="assets-aspect" class="input-field"
+                style="padding:8px 12px;font-size:12px;font-family:inherit">
+                <option value="9:16">9:16 (Vertical)</option>
+                <option value="16:9">16:9 (Landscape)</option>
+                <option value="1:1">1:1 (Square)</option>
+              </select>
+            </div>
+            <div id="assets-kie-opts" style="display:none;gap:12px;align-items:flex-end">
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
+                  style="color:var(--text-muted)">Resolution</label>
+                <select id="assets-kie-resolution" class="input-field"
+                  style="padding:8px 12px;font-size:12px;font-family:inherit">
+                  <option value="1">1K</option>
+                  <option value="2">2K</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
+                  style="color:var(--text-muted)">Format</label>
+                <select id="assets-kie-format" class="input-field"
+                  style="padding:8px 12px;font-size:12px;font-family:inherit">
+                  <option value="jpg">JPG</option>
+                  <option value="png">PNG</option>
+                </select>
+              </div>
             </div>
           </div>
           <!-- Grabber + Progress -->

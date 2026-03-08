@@ -258,7 +258,7 @@ function handleGenerateScenes() {
   const payload = {
     ..._buildWebhookPayload(STATE.scenesSegData),
     source_folder: meta.source_folder || '',
-    aspect_ratio: $('#scenes-aspect').value,
+    aspect_ratio: ($('#assets-aspect')?.value || '9:16'),
   };
 
   // Populate the preview
@@ -321,7 +321,7 @@ async function scenesSendPreviewToWebhook() {
       ..._buildWebhookPayload(STATE.scenesSegData),
       project_id: meta.project_id || '',
       source_folder: meta.source_folder || '',
-      aspect_ratio: $('#scenes-aspect').value,
+      aspect_ratio: ($('#assets-aspect')?.value || '9:16'),
       webhook_url: webhookUrl,
     };
 
@@ -723,11 +723,42 @@ function downloadScenesJSON() {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-function sendToAssets() {
+async function sendToAssets() {
   if (!STATE.scenesResult || !STATE.scenesResult.scenes) { toast('No scenes to send', 'error'); return; }
   STATE.assetsSceneData = STATE.scenesResult;
+  STATE.assetStatuses = {};
+  STATE.assetSelected = {};
   switchPage('assets');
+
+  // Load existing assets from disk if project already has them
+  const projectId = STATE.scenesResult.project_id;
+  if (projectId) {
+    try {
+      const data = await api(`/api/assets/project/${encodeURIComponent(projectId)}`);
+      if (data && data.scenes) {
+        const scenes = STATE.assetsSceneData.scenes;
+        for (const [seqNum, sceneInfo] of Object.entries(data.scenes)) {
+          const pos = parseInt(seqNum);
+          const scene = scenes[pos];
+          const idx = scene ? scene.index : pos;
+          const localFiles = sceneInfo.files_on_disk
+            ? sceneInfo.files_on_disk.map(f => f.url)
+            : sceneInfo.local_files || [];
+          STATE.assetStatuses[idx] = {
+            status: localFiles.length > 0 ? 'ready' : 'pending',
+            urls: sceneInfo.source_urls || [],
+            local_files: localFiles,
+            editedPrompt: null,
+          };
+        }
+      }
+    } catch (e) {
+      // No existing assets — that's fine, will init as pending
+    }
+  }
+
   renderAssetsFromScenes();
+  loadAssetsHistory();
 }
 
 function sendToEditor() {

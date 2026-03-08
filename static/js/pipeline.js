@@ -290,6 +290,29 @@ function pipelineRandomStory() {
   toast('Random story loaded');
 }
 
+// ---- Reset progress on config change ----
+
+function _plResetProgress() {
+  _plStepStatus = {};
+  _plLog = [];
+  const section = $('#pipeline-progress');
+  if (section) section.style.display = 'none';
+  const logSection = $('#pipeline-log-section');
+  if (logSection) logSection.style.display = 'none';
+  const currentStep = $('#pipeline-current-step');
+  if (currentStep) currentStep.innerHTML = '';
+  // Clear menu highlights
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('pipeline-running', 'pipeline-done-scenes'));
+  document.querySelectorAll('#mobile-nav button').forEach(el => el.classList.remove('pipeline-running', 'pipeline-done-scenes'));
+}
+
+['pipeline-text', 'pipeline-voice', 'pipeline-speed', 'pipeline-style', 'pipeline-blueprint'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const evt = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'number') ? 'input' : 'change';
+  el.addEventListener(evt, _plResetProgress);
+});
+
 // Init
 pipelineLoadHistory();
 pipelineLoadBlueprints();

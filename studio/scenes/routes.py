@@ -10,6 +10,7 @@ from loguru import logger
 
 from config import SCENES_DIR, ALIGN_DIR, N8N_WEBHOOK_URL, generate_project_id
 from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
+from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
 
 scenes_bp = Blueprint("scenes", __name__)
 
@@ -48,10 +49,17 @@ def generate_scenes():
     # Build the webhook payload (only what n8n needs)
     style_id = data.get("style", "cinematic")
     template = TEMPLATES_BY_ID.get(style_id, {})
+
+    # Build system prompt: base prompt + style-specific instructions
+    system_prompt = SCENE_GENERATOR_PROMPT
+    style_prompt = data.get("style_prompt") or template.get("style_prompt", "")
+    if style_prompt:
+        system_prompt += f"\n\n## STYLE INSTRUCTIONS\n{style_prompt}"
+
     webhook_payload = {
         "script": data.get("script", ""),
         "style": style_id,
-        "style_prompt": data.get("style_prompt") or template.get("style_prompt", ""),
+        "system_prompt": system_prompt,
         "segments": data.get("segments", []),
     }
 
