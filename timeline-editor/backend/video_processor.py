@@ -8,6 +8,7 @@ import re
 import subprocess
 import tempfile
 import shutil
+import hashlib
 from PIL import Image, ImageDraw, ImageFont
 import platform
 import sys
@@ -1097,6 +1098,29 @@ class VideoProcessor:
             lines.append(current_line)
 
         return lines if lines else [text]
+
+    def _wrap_caption_words(self, text, words_per_line, font_path, font_size, max_width):
+        """Split into short word chunks, then fit each chunk to width."""
+        words = str(text or '').split()
+        if not words or words_per_line <= 0:
+            return self._wrap_caption_text(text, font_path, font_size, max_width)
+
+        lines = []
+        for i in range(0, len(words), words_per_line):
+            chunk = ' '.join(words[i:i + words_per_line])
+            lines.extend(self._wrap_caption_text(chunk, font_path, font_size, max_width))
+        return lines if lines else [text]
+
+    def _wrap_caption_lead_word(self, text, words_per_chunk, font_path, font_size, max_width):
+        """Put the first word on its own line, then chunk the rest."""
+        words = str(text or '').split()
+        if len(words) <= 1:
+            return self._wrap_caption_text(text, font_path, font_size, max_width)
+        first = words[0]
+        rest = ' '.join(words[1:])
+        lines = [first]
+        lines.extend(self._wrap_caption_words(rest, max(1, words_per_chunk), font_path, font_size, max_width))
+        return lines if lines else [text]
     def _burn_captions(self, video_path, output_path):
         """Burn caption overlays into the video using FFmpeg drawtext filter."""
         captions = self.export_data.get('captions')
@@ -1128,6 +1152,11 @@ class VideoProcessor:
         stroke_width = style.get('strokeWidth', style.get('stroke_width', 2))
         stroke_color = style.get('strokeColor', style.get('stroke_color', '#000000')).lstrip('#')
         position_y = style.get('positionY', style.get('position_y', 80))
+        text_align = str(style.get('textAlign', style.get('text_align', 'center'))).lower()
+        if text_align not in ('left', 'center', 'right'):
+            text_align = 'center'
+        position_x = float(style.get('positionX', style.get('position_x', 50)))
+        current_word_scale = min(1.18, max(1.0, float(style.get('currentWordScale', style.get('current_word_scale', 1.0)))))
         box_padding_x = style.get('boxPaddingX', style.get('box_padding_x', 0))
         box_padding_y = style.get('boxPaddingY', style.get('box_padding_y', 0))
         shadow_color = style.get('shadowColor', style.get('shadow_color', ''))
@@ -1136,6 +1165,21 @@ class VideoProcessor:
         blend_mode = style.get('blendMode', style.get('blend_mode', 'normal'))
         letter_spacing = style.get('letterSpacing', style.get('letter_spacing', 0))
         edge_fade_ms = float(style.get('edgeFadeMs', style.get('edge_fade_ms', 90)))
+        wrap_words_per_line = max(0, int(style.get('wrapWordsPerLine', style.get('wrap_words_per_line', 0)) or 0))
+        random_line_emphasis = bool(style.get('randomLineEmphasis', style.get('random_line_emphasis', False)))
+        random_line_scale = max(1.0, float(style.get('randomLineScale', style.get('random_line_scale', 1.14))))
+        random_line_chance = max(0.0, min(1.0, float(style.get('randomLineChance', style.get('random_line_chance', 0.5)))))
+        lead_word_line = bool(style.get('leadWordLine', style.get('lead_word_line', False)))
+        word_by_word_reveal = bool(style.get('wordByWordReveal', style.get('word_by_word_reveal', False)))
+        random_line_targets_raw = style.get('randomLineTargets', style.get('random_line_targets', [1, 3]))
+        if isinstance(random_line_targets_raw, (list, tuple)):
+            random_line_targets = {int(v) for v in random_line_targets_raw if str(v).strip().isdigit()}
+        elif isinstance(random_line_targets_raw, str):
+            random_line_targets = {int(v.strip()) for v in random_line_targets_raw.split(',') if v.strip().isdigit()}
+        else:
+            random_line_targets = {1, 3}
+        if not random_line_targets:
+            random_line_targets = {1, 3}
         preset_id = style.get('preset', '')
         is_single_line_style = (
             preset_id in ('single_line', 'single_line_highlight')
@@ -1163,13 +1207,49 @@ class VideoProcessor:
             return _pil_font_cache[s]
 
         # Max text width: 85% of video width (matches preview canvas wrapping)
+        safe_pad_x = max(24, int(self.width * 0.05))
+        anchor_x = int((position_x / 100.0) * self.width)
+        anchor_x = max(safe_pad_x, min(self.width - safe_pad_x, anchor_x))
         max_text_width = int(self.width * 0.85)
         max_single_line_width = int(self.width * 0.90)
         base_line_height = int(font_size * 1.25)
 
-        logger.info("Burning {} captions: font={} {}px color=#{} stroke={}px pos_y={}% max_w={} highlight={}",
-                     len(entries), font_family, font_size, font_color, stroke_width, position_y, max_text_width,
-                     f"{highlight_mode}({highlight_color_hex})" if do_highlight else "off")
+        def _line_x_expr():
+            if text_align == 'left':
+                return str(anchor_x)
+            if text_align == 'right':
+                return f"{anchor_x}-text_w"
+            return f"{anchor_x}-text_w/2"
+
+        def _line_scale_for(entry, line_no):
+            if not random_line_emphasis:
+                return 1.0
+            if line_no not in random_line_targets:
+                return 1.0
+            key = f"{preset_id}|{entry.get('start',0)}|{entry.get('end',0)}|{entry.get('text','')}|{line_no}"
+            seed = hashlib.md5(key.encode('utf-8')).hexdigest()[:8]
+            unit = int(seed, 16) / 0xFFFFFFFF
+            return random_line_scale if unit < random_line_chance else 1.0
+
+        def _line_start_x(line_width):
+            if text_align == 'left':
+                return anchor_x
+            if text_align == 'right':
+                return anchor_x - line_width
+            return int(anchor_x - line_width / 2)
+
+        def _wrap_limit_for_align():
+            if text_align == 'left':
+                return max(120, self.width - anchor_x - safe_pad_x)
+            if text_align == 'right':
+                return max(120, anchor_x - safe_pad_x)
+            return max_text_width
+
+        wrap_limit_width = _wrap_limit_for_align()
+
+        logger.info("Burning {} captions: font={} {}px color=#{} stroke={}px pos=({},{}%) align={} max_w={} highlight={} scale={:.2f}",
+                     len(entries), font_family, font_size, font_color, stroke_width, position_x, position_y, text_align, wrap_limit_width,
+                     f"{highlight_mode}({highlight_color_hex})" if do_highlight else "off", current_word_scale)
 
         def _escape_text(t):
             return (t.replace("\\", "\\\\")
@@ -1238,12 +1318,22 @@ class VideoProcessor:
                     fit_scale = max_single_line_width / max(1, text_w)
                     min_size = max(24, int(font_size * 0.72))
                     render_font_size = max(min_size, int(font_size * fit_scale))
-                line_height = int(render_font_size * 1.1)
+                line_height = int(render_font_size * 1.1 * (random_line_scale if random_line_emphasis else 1.0))
                 lines = [text]
             else:
                 # Word-wrap text to fit within video width
-                lines = self._wrap_caption_text(text, font_path, render_font_size, max_text_width)
-                line_height = int(render_font_size * 1.25)
+                if wrap_words_per_line > 0:
+                    if lead_word_line:
+                        lines = self._wrap_caption_lead_word(
+                            text, wrap_words_per_line, font_path, render_font_size, wrap_limit_width
+                        )
+                    else:
+                        lines = self._wrap_caption_words(
+                            text, wrap_words_per_line, font_path, render_font_size, wrap_limit_width
+                        )
+                else:
+                    lines = self._wrap_caption_text(text, font_path, render_font_size, wrap_limit_width)
+                line_height = int(render_font_size * 1.25 * (random_line_scale if random_line_emphasis else 1.0))
 
             num_lines = len(lines)
 
@@ -1274,7 +1364,7 @@ class VideoProcessor:
 
                     # Calculate x positions for each word in this line
                     full_line_w = _measure_text(line_text, render_font_size)
-                    line_start_x = int((self.width - full_line_w) / 2)
+                    line_start_x = _line_start_x(full_line_w)
                     space_w = _measure_text(' ', render_font_size)
 
                     word_x = line_start_x
@@ -1329,10 +1419,10 @@ class VideoProcessor:
                             dt_active = (
                                 f"drawtext=fontfile='{font_path_esc}'"
                                 f":text='{escaped_word}'"
-                                f":fontsize={render_font_size}"
+                                f":fontsize={int(render_font_size * current_word_scale) if current_word_scale > 1.0 else render_font_size}"
                                 f":fontcolor=#FFFFFF"
-                                f":x={word_x}"
-                                f":y={line_y}"
+                                f":x={word_x - int((_measure_text(wt['text'], int(render_font_size * current_word_scale)) - word_w) / 2) if current_word_scale > 1.0 else word_x}"
+                                f":y={line_y - int((int(render_font_size * current_word_scale) - render_font_size) / 2) if current_word_scale > 1.0 else line_y}"
                                 f":enable='between(t,{w_begin},{w_active_end})'"
                             )
                             dt_active += _letter_spacing_suffix() + alpha_suffix
@@ -1342,10 +1432,10 @@ class VideoProcessor:
                             dt_active = (
                                 f"drawtext=fontfile='{font_path_esc}'"
                                 f":text='{escaped_word}'"
-                                f":fontsize={render_font_size}"
+                                f":fontsize={int(render_font_size * current_word_scale) if current_word_scale > 1.0 else render_font_size}"
                                 f":fontcolor=#{highlight_color_hex}"
-                                f":x={word_x}"
-                                f":y={line_y}"
+                                f":x={word_x - int((_measure_text(wt['text'], int(render_font_size * current_word_scale)) - word_w) / 2) if current_word_scale > 1.0 else word_x}"
+                                f":y={line_y - int((int(render_font_size * current_word_scale) - render_font_size) / 2) if current_word_scale > 1.0 else line_y}"
                                 f":enable='between(t,{w_begin},{w_active_end})'"
                             )
                             dt_active += _letter_spacing_suffix() + alpha_suffix
@@ -1355,29 +1445,77 @@ class VideoProcessor:
                         word_idx += 1
             else:
                 # --- Standard mode: render full lines ---
-                for line_idx, line_text in enumerate(lines):
-                    escaped = _escape_text(line_text)
-                    line_y = base_y_px + line_idx * line_height
+                if word_by_word_reveal and words:
+                    word_timings = []
+                    for w in words:
+                        wt = w.get('word', '')
+                        if text_transform == 'uppercase':
+                            wt = wt.upper()
+                        word_timings.append({
+                            'text': wt,
+                            'begin': w.get('begin', start),
+                        })
 
-                    dt = (
-                        f"drawtext=fontfile='{font_path_esc}'"
-                        f":text='{escaped}'"
-                        f":fontsize={render_font_size}"
-                        f":fontcolor=#{font_color}"
-                        f":x=(w-text_w)/2"
-                        f":y={line_y}"
-                        f":enable='between(t,{start},{end})'"
-                    )
-                    dt += _letter_spacing_suffix() + alpha_suffix
-                    dt += _stroke_suffix()
+                    word_idx = 0
+                    for line_idx, line_text in enumerate(lines):
+                        line_y = base_y_px + line_idx * line_height
+                        line_scale = _line_scale_for(entry, line_idx + 1)
+                        line_font_size = int(render_font_size * line_scale)
+                        line_y_draw = line_y - int((line_font_size - render_font_size) / 2)
+                        line_words = line_text.split(' ')
+                        full_line_w = _measure_text(line_text, line_font_size)
+                        line_start_x = _line_start_x(full_line_w)
+                        space_w = _measure_text(' ', line_font_size)
 
-                    if bg_color and bg_color not in ('transparent', 'none'):
-                        bg_hex = bg_color.lstrip('#')
-                        pad = max(box_padding_x, box_padding_y, 8)
-                        dt += f":box=1:boxcolor=#{bg_hex}:boxborderw={pad}"
+                        word_x = line_start_x
+                        for lw in line_words:
+                            if word_idx >= len(word_timings):
+                                break
+                            wt = word_timings[word_idx]
+                            word_w = _measure_text(wt['text'], line_font_size)
+                            escaped_word = _escape_text(wt['text'])
 
-                    dt += _shadow_suffix()
-                    drawtext_parts.append(dt)
+                            dt = (
+                                f"drawtext=fontfile='{font_path_esc}'"
+                                f":text='{escaped_word}'"
+                                f":fontsize={line_font_size}"
+                                f":fontcolor=#{font_color}"
+                                f":x={word_x}"
+                                f":y={line_y_draw}"
+                                f":enable='between(t,{wt['begin']},{end})'"
+                            )
+                            dt += _letter_spacing_suffix() + alpha_suffix + _stroke_suffix() + _shadow_suffix()
+                            drawtext_parts.append(dt)
+
+                            word_x += word_w + space_w
+                            word_idx += 1
+                else:
+                    for line_idx, line_text in enumerate(lines):
+                        escaped = _escape_text(line_text)
+                        line_y = base_y_px + line_idx * line_height
+                        line_scale = _line_scale_for(entry, line_idx + 1)
+                        line_font_size = int(render_font_size * line_scale)
+                        line_y_draw = line_y - int((line_font_size - render_font_size) / 2)
+
+                        dt = (
+                            f"drawtext=fontfile='{font_path_esc}'"
+                            f":text='{escaped}'"
+                            f":fontsize={line_font_size}"
+                            f":fontcolor=#{font_color}"
+                            f":x={_line_x_expr()}"
+                            f":y={line_y_draw}"
+                            f":enable='between(t,{start},{end})'"
+                        )
+                        dt += _letter_spacing_suffix() + alpha_suffix
+                        dt += _stroke_suffix()
+
+                        if bg_color and bg_color not in ('transparent', 'none'):
+                            bg_hex = bg_color.lstrip('#')
+                            pad = max(box_padding_x, box_padding_y, 8)
+                            dt += f":box=1:boxcolor=#{bg_hex}:boxborderw={pad}"
+
+                        dt += _shadow_suffix()
+                        drawtext_parts.append(dt)
 
             logger.debug("  Caption {}: [{:.1f}s-{:.1f}s] {} line(s) '{}'{}", i + 1, start, end, num_lines, text[:40],
                          f" [highlight {highlight_mode}]" if do_highlight and words else "")

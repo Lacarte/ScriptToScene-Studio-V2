@@ -1092,6 +1092,17 @@ export class CanvasPreview {
         const strokeColor = style.stroke_color ?? '#000000';
         const strokeWidth = (style.stroke_width ?? 4) * scale;
         const posY = (style.position_y || 75) / 100;
+        const textAlign = (style.text_align || 'center').toLowerCase();
+        const currentWordScale = Math.min(1.18, Math.max(1, Number(style.current_word_scale || 1)));
+        const wrapWordsPerLine = Math.max(0, parseInt(style.wrap_words_per_line || 0, 10) || 0);
+        const randomLineEmphasis = !!style.random_line_emphasis;
+        const randomLineScale = Math.max(1, Number(style.random_line_scale || 1.14));
+        const randomLineChance = Math.max(0, Math.min(1, Number(style.random_line_chance ?? 0.5)));
+        const randomLineTargets = Array.isArray(style.random_line_targets)
+            ? style.random_line_targets.map(v => parseInt(v, 10)).filter(v => Number.isFinite(v) && v > 0)
+            : [1, 3];
+        const wordByWordReveal = !!style.word_by_word_reveal;
+        const leadWordLine = !!style.lead_word_line;
         const transform = style.text_transform || 'uppercase';
         const animation = style.animation || 'pop';
         const letterSpacing = (style.letter_spacing || 0) * scale; // px units, scaled
@@ -1110,7 +1121,7 @@ export class CanvasPreview {
         this.ctx.save();
         this.ctx.globalCompositeOperation = blendMode;
         this.ctx.font = `${fontWeight} ${fontSize}px "${fontFamily}", sans-serif`;
-        this.ctx.textAlign = 'center';
+        this.ctx.textAlign = textAlign === 'left' ? 'left' : (textAlign === 'right' ? 'right' : 'center');
         this.ctx.textBaseline = 'middle';
 
         // Apply letter-spacing via canvas letterSpacing (widely supported)
@@ -1118,15 +1129,27 @@ export class CanvasPreview {
             this.ctx.letterSpacing = `${letterSpacing}px`;
         }
 
-        const x = this.width / 2;
-
         // Keep caption text inside frame with side-safe padding.
         const sideSafePx = Math.max(24 * scale, this.width * 0.05);
         const maxCaptionWidth = Math.max(80, this.width - sideSafePx * 2);
+        const requestedX = (Number(style.position_x) / 100) * this.width;
+        let anchorX = Number.isFinite(requestedX) ? requestedX : (this.width / 2);
+        anchorX = Math.max(sideSafePx, Math.min(this.width - sideSafePx, anchorX));
+        const lineStartX = (lineWidth) => {
+            if (textAlign === 'left') return anchorX;
+            if (textAlign === 'right') return anchorX - lineWidth;
+            return anchorX - lineWidth / 2;
+        };
 
         // Single-line mode: wrap only if text exceeds caption-safe width
-        const isSingleLine = animation === 'hard_cut' || style.preset === 'single_line';
+        const isSingleLine = (
+            style.preset === 'single_line'
+            || style.preset === 'single_line_highlight'
+            || blendMode === 'difference'
+            || style.force_single_line === true
+        ) && wrapWordsPerLine <= 0;
         let lines, lineHeight, totalHeight, baseY;
+        let lineTargetWidth = maxCaptionWidth;
         let renderFontSize = fontSize;
 
         if (isSingleLine) {
@@ -1144,13 +1167,26 @@ export class CanvasPreview {
             lines = finalSingleWidth > maxWidth
                 ? this._wrapText(text, maxWidth, letterSpacing)
                 : [text];
-            lineHeight = renderFontSize * 1.1;
+            lineTargetWidth = maxWidth;
+            lineHeight = renderFontSize * 1.1 * (randomLineEmphasis ? randomLineScale : 1);
             totalHeight = lines.length * lineHeight;
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
         } else {
             const maxWidth = Math.min(this.width * 0.85, maxCaptionWidth);
-            lines = this._wrapText(text, maxWidth, letterSpacing);
-            lineHeight = renderFontSize * 1.25;
+            if (leadWordLine) {
+                lines = this._wrapLeadWordThenChunks(
+                    text,
+                    wrapWordsPerLine > 0 ? wrapWordsPerLine : 3,
+                    maxWidth,
+                    letterSpacing
+                );
+            } else {
+                lines = wrapWordsPerLine > 0
+                    ? this._wrapTextByWordCount(text, wrapWordsPerLine, maxWidth, letterSpacing)
+                    : this._wrapText(text, maxWidth, letterSpacing);
+            }
+            lineTargetWidth = maxWidth;
+            lineHeight = renderFontSize * 1.25 * (randomLineEmphasis ? randomLineScale : 1);
             totalHeight = lines.length * lineHeight;
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
         }
@@ -1161,7 +1197,7 @@ export class CanvasPreview {
             const popScale = capProgress < 0.1 ? (capProgress / 0.1) * 0.1 + 0.9 : 1.0;
             const alpha = capProgress < 0.05 ? capProgress / 0.05 : (capProgress > 0.9 ? (1.0 - capProgress) / 0.1 : 1.0);
             this.ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-            const cx = this.width / 2;
+            const cx = anchorX;
             const cy = this.height * posY;
             this.ctx.translate(cx, cy);
             this.ctx.scale(popScale, popScale);
@@ -1173,7 +1209,7 @@ export class CanvasPreview {
             const capProgress = (time - active.start) / (active.end - active.start);
             if (capProgress < 0.05) {
                 const s = 0.9 + (capProgress / 0.05) * 0.1;
-                const cx = this.width / 2;
+                const cx = anchorX;
                 const cy = this.height * posY;
                 this.ctx.translate(cx, cy);
                 this.ctx.scale(s, s);
@@ -1215,7 +1251,7 @@ export class CanvasPreview {
             this.ctx.restore();
             this.ctx.save();
             this.ctx.font = fontStr;
-            this.ctx.textAlign = 'center';
+            this.ctx.textAlign = textAlign === 'left' ? 'left' : (textAlign === 'right' ? 'right' : 'center');
             this.ctx.textBaseline = 'middle';
             if (letterSpacing) this.ctx.letterSpacing = `${letterSpacing}px`;
             this.ctx.globalCompositeOperation = 'source-over';
@@ -1225,33 +1261,33 @@ export class CanvasPreview {
             this.ctx.shadowOffsetY = shadowOffY || 3 * scale;
             this.ctx.fillStyle = 'rgba(0,0,0,0)';
             for (let i = 0; i < lines.length; i++) {
-                this.ctx.fillText(lines[i], x, baseY + i * lineHeight);
+                this.ctx.fillText(lines[i], anchorX, baseY + i * lineHeight);
             }
             this.ctx.restore();
 
             // Pass 2: difference blend — inverts image inside glyphs
             this.ctx.save();
             this.ctx.font = fontStr;
-            this.ctx.textAlign = 'center';
+            this.ctx.textAlign = textAlign === 'left' ? 'left' : (textAlign === 'right' ? 'right' : 'center');
             this.ctx.textBaseline = 'middle';
             if (letterSpacing) this.ctx.letterSpacing = `${letterSpacing}px`;
             this.ctx.globalCompositeOperation = 'difference';
             this.ctx.fillStyle = diffFill;
             for (let i = 0; i < lines.length; i++) {
-                this.ctx.fillText(lines[i], x, baseY + i * lineHeight);
+                this.ctx.fillText(lines[i], anchorX, baseY + i * lineHeight);
             }
             this.ctx.restore();
 
             // Pass 3: overlay brightness/contrast boost
             this.ctx.save();
             this.ctx.font = fontStr;
-            this.ctx.textAlign = 'center';
+            this.ctx.textAlign = textAlign === 'left' ? 'left' : (textAlign === 'right' ? 'right' : 'center');
             this.ctx.textBaseline = 'middle';
             if (letterSpacing) this.ctx.letterSpacing = `${letterSpacing}px`;
             this.ctx.globalCompositeOperation = 'overlay';
             this.ctx.fillStyle = overlayFill;
             for (let i = 0; i < lines.length; i++) {
-                this.ctx.fillText(lines[i], x, baseY + i * lineHeight);
+                this.ctx.fillText(lines[i], anchorX, baseY + i * lineHeight);
             }
             this.ctx.restore();
         } else {
@@ -1259,6 +1295,13 @@ export class CanvasPreview {
             const doHighlight = style.highlight && active.words?.length > 0;
             const highlightColor = style.highlight_color || '#4ECDC4';
             const highlightMode = style.highlight_mode || 'text'; // 'text' = color word, 'box' = bg rectangle
+            const isRandomLineActive = (lineIdx) => {
+                if (!randomLineEmphasis || doHighlight) return false;
+                const lineNo = lineIdx + 1;
+                if (!randomLineTargets.includes(lineNo)) return false;
+                const key = `${style.preset || ''}|${active.start}|${active.end}|${active.text}|${lineNo}`;
+                return this._hashToUnit(key) < randomLineChance;
+            };
 
             // Find active word index for highlighting
             let activeWordIdx = -1;
@@ -1266,18 +1309,25 @@ export class CanvasPreview {
                 for (let w = active.words.length - 1; w >= 0; w--) {
                     if (time >= active.words[w].begin) { activeWordIdx = w; break; }
                 }
+            } else if (wordByWordReveal && active.words?.length) {
+                for (let w = active.words.length - 1; w >= 0; w--) {
+                    if (time >= active.words[w].begin) { activeWordIdx = w; break; }
+                }
             }
 
             for (let i = 0; i < lines.length; i++) {
                 const ly = baseY + i * lineHeight;
+                let lineScale = isRandomLineActive(i) ? randomLineScale : 1;
+                const lineFontSize = renderFontSize * lineScale;
+                this.ctx.font = `${fontWeight} ${lineFontSize}px "${fontFamily}", sans-serif`;
 
                 // Draw solid background box behind text
                 if (bgColor && bgColor !== 'none' && bgColor !== 'transparent') {
                     const textW = this._measureTextWidth(lines[i], letterSpacing);
-                    const bx = x - textW / 2 - boxPadX;
-                    const by = ly - fontSize / 2 - boxPadY;
+                    const bx = lineStartX(textW) - boxPadX;
+                    const by = ly - lineFontSize / 2 - boxPadY;
                     const bw = textW + boxPadX * 2;
-                    const bh = fontSize + boxPadY * 2;
+                    const bh = lineFontSize + boxPadY * 2;
                     this.ctx.fillStyle = bgColor;
                     this.ctx.fillRect(bx, by, bw, bh);
                 }
@@ -1287,7 +1337,7 @@ export class CanvasPreview {
                     this.ctx.strokeStyle = strokeColor;
                     this.ctx.lineWidth = strokeWidth;
                     this.ctx.lineJoin = 'round';
-                    this.ctx.strokeText(lines[i], x, ly);
+                    this.ctx.strokeText(lines[i], anchorX, ly);
                 }
 
                 // Text shadow
@@ -1309,56 +1359,85 @@ export class CanvasPreview {
                         wordOffset += lines[li].split(' ').length;
                     }
 
-                    // Pass 1: draw full line with shadow (uniform shadow on all words)
-                    this.ctx.fillStyle = color;
-                    this.ctx.fillText(lines[i], x, ly);
-
-                    // Clear shadow for pass 2
-                    if (shadowColor && shadowColor !== 'none') {
-                        this.ctx.shadowColor = 'transparent';
-                        this.ctx.shadowBlur = 0;
-                        this.ctx.shadowOffsetX = 0;
-                        this.ctx.shadowOffsetY = 0;
-                    }
-
-                    // Pass 2: redraw word-by-word with highlight colors (no shadow)
+                    // Draw word-by-word so spacing remains correct when active word is scaled.
                     this.ctx.textAlign = 'left';
                     const spaceW = this._measureTextWidth(' ', letterSpacing);
-                    const boxPad = fontSize * 0.15;
+                    const basePad = fontSize * 0.15;
                     const boxRadius = fontSize * 0.12;
-                    let drawX = x - fullLineW / 2;
+                    const baseFont = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
+                    let drawX = lineStartX(fullLineW);
+
+                    // Measure per-word widths with active word scaling so layout reflects the emphasis.
+                    const wordWidths = [];
+                    for (let w = 0; w < lineWords.length; w++) {
+                        const globalWordIdx = wordOffset + w;
+                        const isActive = globalWordIdx === activeWordIdx;
+                        const wordSize = isActive ? (renderFontSize * currentWordScale) : renderFontSize;
+                        this.ctx.font = `${fontWeight} ${wordSize}px "${fontFamily}", sans-serif`;
+                        wordWidths.push(this._measureTextWidth(lineWords[w], letterSpacing));
+                    }
+                    this.ctx.font = baseFont;
+                    const totalWordsW = wordWidths.reduce((sum, w) => sum + w, 0);
+                    const fullLineScaledW = totalWordsW + spaceW * Math.max(0, lineWords.length - 1);
+                    drawX = lineStartX(fullLineScaledW);
 
                     for (let w = 0; w < lineWords.length; w++) {
                         const globalWordIdx = wordOffset + w;
                         const isActive = globalWordIdx === activeWordIdx;
                         const wordText = lineWords[w];
-                        const wordW = this._measureTextWidth(wordText, letterSpacing);
+                        const wordW = wordWidths[w];
+                        const wordSize = isActive ? (renderFontSize * currentWordScale) : renderFontSize;
+                        this.ctx.font = `${fontWeight} ${wordSize}px "${fontFamily}", sans-serif`;
+                        const yOffset = isActive ? ((renderFontSize - wordSize) * 0.5) : 0;
+                        const wordY = ly + yOffset;
 
                         // Box mode: draw colored rectangle behind active word
                         if (isActive && highlightMode === 'box') {
+                    const boxPad = basePad * Math.max(1, currentWordScale * 0.95);
                             const bx = drawX - boxPad;
-                            const by = ly - fontSize * 0.55 - boxPad;
+                            const by = wordY - wordSize * 0.55 - boxPad;
                             const bw = wordW + boxPad * 2;
-                            const bh = fontSize * 1.1 + boxPad * 2;
+                            const bh = wordSize * 1.1 + boxPad * 2;
                             this.ctx.fillStyle = highlightColor;
                             this.ctx.beginPath();
                             this.ctx.roundRect(bx, by, bw, bh, boxRadius);
                             this.ctx.fill();
                         }
 
-                        // Redraw word: text-mode highlights active word color, box-mode keeps white
-                        if (isActive || highlightMode === 'box') {
-                            this.ctx.fillStyle = (isActive && highlightMode === 'text') ? highlightColor : color;
-                            this.ctx.fillText(wordText, drawX, ly);
-                        }
+                        // Text mode: active word gets highlight color; box mode keeps base color.
+                        this.ctx.fillStyle = (isActive && highlightMode === 'text') ? highlightColor : color;
+                        this.ctx.fillText(wordText, drawX, wordY);
 
                         drawX += wordW + (w < lineWords.length - 1 ? spaceW : 0);
                     }
-                    this.ctx.textAlign = 'center';
+                    this.ctx.font = baseFont;
+                    this.ctx.textAlign = textAlign === 'left' ? 'left' : (textAlign === 'right' ? 'right' : 'center');
                 } else {
-                    // Fill text (no highlight)
-                    this.ctx.fillStyle = color;
-                    this.ctx.fillText(lines[i], x, ly);
+                    if (wordByWordReveal && active.words?.length) {
+                        const lineWords = lines[i].split(' ');
+                        let wordOffset = 0;
+                        for (let li = 0; li < i; li++) wordOffset += lines[li].split(' ').length;
+                        const spaceW = this._measureTextWidth(' ', letterSpacing);
+                        const wordWidths = lineWords.map(w => this._measureTextWidth(w, letterSpacing));
+                        const totalWordsW = wordWidths.reduce((sum, w) => sum + w, 0);
+                        const fullLineW = totalWordsW + spaceW * Math.max(0, lineWords.length - 1);
+                        let drawX = lineStartX(fullLineW);
+
+                        this.ctx.textAlign = 'left';
+                        this.ctx.fillStyle = color;
+                        for (let w = 0; w < lineWords.length; w++) {
+                            const globalWordIdx = wordOffset + w;
+                            if (globalWordIdx <= activeWordIdx) {
+                                this.ctx.fillText(lineWords[w], drawX, ly);
+                            }
+                            drawX += wordWidths[w] + (w < lineWords.length - 1 ? spaceW : 0);
+                        }
+                        this.ctx.textAlign = textAlign === 'left' ? 'left' : (textAlign === 'right' ? 'right' : 'center');
+                    } else {
+                        // Fill text (no highlight)
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillText(lines[i], anchorX, ly);
+                    }
                 }
 
                 // Reset shadow
@@ -1401,6 +1480,34 @@ export class CanvasPreview {
         return lines;
     }
 
+    _wrapTextByWordCount(text, wordsPerLine, maxWidth, letterSpacing = 0) {
+        const words = String(text || '').split(/\s+/).filter(Boolean);
+        if (!words.length || wordsPerLine <= 0) return this._wrapText(text, maxWidth, letterSpacing);
+
+        const chunks = [];
+        for (let i = 0; i < words.length; i += wordsPerLine) {
+            chunks.push(words.slice(i, i + wordsPerLine).join(' '));
+        }
+
+        const out = [];
+        for (const chunk of chunks) {
+            const wrapped = this._wrapText(chunk, maxWidth, letterSpacing);
+            out.push(...wrapped);
+        }
+        return out.length ? out : [''];
+    }
+
+    _wrapLeadWordThenChunks(text, wordsPerChunk, maxWidth, letterSpacing = 0) {
+        const words = String(text || '').split(/\s+/).filter(Boolean);
+        if (words.length <= 1) return this._wrapText(text, maxWidth, letterSpacing);
+        const first = words[0];
+        const rest = words.slice(1).join(' ');
+        const lines = [first];
+        const restLines = this._wrapTextByWordCount(rest, Math.max(1, wordsPerChunk), maxWidth, letterSpacing);
+        lines.push(...restLines);
+        return lines;
+    }
+
     _splitTokenToFit(token, maxWidth, letterSpacing = 0) {
         if (this._measureTextWidth(token, letterSpacing) <= maxWidth) return [token];
         const parts = [];
@@ -1422,6 +1529,17 @@ export class CanvasPreview {
         const width = this.ctx.measureText(text).width;
         if (!letterSpacing || !text) return width;
         return width + Math.max(0, (text.length - 1) * letterSpacing);
+    }
+
+    _hashToUnit(str) {
+        // Stable 32-bit FNV-1a hash mapped to [0,1)
+        let h = 0x811c9dc5;
+        const s = String(str || '');
+        for (let i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 0x01000193);
+        }
+        return (h >>> 0) / 4294967296;
     }
 
     /**

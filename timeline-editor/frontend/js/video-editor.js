@@ -72,6 +72,10 @@ const LOCAL_CAPTION_PRESETS = {
     subtitle_bar: { font_family: 'Inter', font_size: 48, font_weight: '600', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 85, animation: 'none', text_transform: 'none', bg_bar: true, shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
     karaoke: { font_family: 'Bebas Neue', font_size: 72, font_weight: '400', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 70, animation: 'none', text_transform: 'uppercase', highlight: true, shadow_color: '#000000', shadow_blur: 10, shadow_offset_x: 2, shadow_offset_y: 2 },
     minimal: { font_family: 'DM Sans', font_size: 42, font_weight: '500', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 80, animation: 'none', text_transform: 'none', shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
+    focus_word_scale: { font_family: 'Montserrat', font_size: 68, font_weight: '800', color: '#FFFFFF', stroke_color: '#000000', stroke_width: 3, background: 'none', position_y: 75, position_x: 50, text_align: 'center', animation: 'pop', text_transform: 'uppercase', shadow_color: 'rgba(0,0,0,0.85)', shadow_blur: 10, shadow_offset_x: 2, shadow_offset_y: 3, highlight: true, highlight_mode: 'text', highlight_color: '#FFD400', current_word_scale: 1.16 },
+    left_block_white: { font_family: 'Bebas Neue', font_size: 84, font_weight: '700', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 74, position_x: 9, text_align: 'left', animation: 'hard_cut', text_transform: 'uppercase', wrap_words_per_line: 3, lead_word_line: true, random_line_emphasis: true, random_line_scale: 1.22, random_line_chance: 1.0, random_line_targets: [1, 3], word_by_word_reveal: true, letter_spacing: 0, shadow_color: 'rgba(0,0,0,0.9)', shadow_blur: 9, shadow_offset_x: 2, shadow_offset_y: 3, edge_fade_ms: 110 },
+    center_block_white: { font_family: 'Bebas Neue', font_size: 84, font_weight: '700', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 74, position_x: 50, text_align: 'center', animation: 'hard_cut', text_transform: 'uppercase', wrap_words_per_line: 3, lead_word_line: true, random_line_emphasis: true, random_line_scale: 1.22, random_line_chance: 1.0, random_line_targets: [1, 3], word_by_word_reveal: true, letter_spacing: 0, shadow_color: 'rgba(0,0,0,0.9)', shadow_blur: 9, shadow_offset_x: 2, shadow_offset_y: 3, edge_fade_ms: 110 },
+    right_block_white: { font_family: 'Bebas Neue', font_size: 84, font_weight: '700', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 74, position_x: 91, text_align: 'right', animation: 'hard_cut', text_transform: 'uppercase', wrap_words_per_line: 3, lead_word_line: true, random_line_emphasis: true, random_line_scale: 1.22, random_line_chance: 1.0, random_line_targets: [1, 3], word_by_word_reveal: true, letter_spacing: 0, shadow_color: 'rgba(0,0,0,0.9)', shadow_blur: 9, shadow_offset_x: 2, shadow_offset_y: 3, edge_fade_ms: 110 },
     single_line: { font_family: 'Montserrat', font_size: 80, font_weight: '900', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, blend_mode: 'difference', shadow_color: 'rgba(0,0,0,1.00)', shadow_blur: 10, shadow_offset_x: 3, shadow_offset_y: 3, diff_strength: 0.59, overlay_strength: 0.37, overlay_color: '#ffffff', edge_fade_ms: 90 },
     single_line_highlight: { font_family: 'Montserrat', font_size: 64, font_weight: '900', color: 'rgba(255,255,255,0.35)', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_color: '#FFFFFF' },
 };
@@ -1444,11 +1448,15 @@ function _restoreSavedEditorState() {
 async function init() {
     console.log('Video Editor initializing...');
 
+    const editorEntrySource = sessionStorage.getItem('sts-editor-entry-source') || 'internal';
+    // One-shot signal from Studio shell.
+    sessionStorage.removeItem('sts-editor-entry-source');
+
     // Check for staged data FIRST before showing any loading UI
     const stagedData = sessionStorage.getItem('staged_timeline');
     if (!stagedData) {
-        // No data - show overlay immediately without any loading animations
-        showNoDataOverlay();
+        // Show project import list only when editor was opened directly from the menu.
+        showNoDataOverlay(editorEntrySource === 'menu');
         return;
     }
 
@@ -1457,7 +1465,7 @@ async function init() {
         data = JSON.parse(stagedData);
     } catch (error) {
         console.error('Failed to parse staged data:', error);
-        showNoDataOverlay();
+        showNoDataOverlay(editorEntrySource === 'menu');
         return;
     }
 
@@ -1858,9 +1866,16 @@ function hideLoadingOverlay() {
 /**
  * Show the no data overlay — auto-loads asset list
  */
-function showNoDataOverlay() {
+function showNoDataOverlay(showProjects = true) {
     elements.noDataOverlay?.classList.remove('hidden');
-    _loadNoDataProjects();
+    if (showProjects) {
+        _loadNoDataProjects();
+        return;
+    }
+    const listContainer = document.getElementById('no-data-asset-list');
+    const emptyEl = document.getElementById('no-data-empty');
+    if (listContainer) listContainer.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = '';
 }
 
 function _loadNoDataProjects() {

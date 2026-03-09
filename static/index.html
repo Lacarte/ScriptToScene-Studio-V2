@@ -311,7 +311,7 @@
         </svg>
         <span class="nav-label">ASSETS</span>
       </button>
-      <button class="nav-item" onclick="switchPage('editor')" data-page="editor" title="Timeline Editor">
+      <button class="nav-item" onclick="openEditorFromMenu()" data-page="editor" title="Timeline Editor">
         <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round" viewBox="0 0 24 24">
           <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
@@ -400,7 +400,7 @@
       </svg>
       ASSETS
     </button>
-    <button onclick="switchPage('editor')" data-page="editor">
+    <button onclick="openEditorFromMenu()" data-page="editor">
       <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
         <path
           d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
@@ -1266,7 +1266,7 @@
               <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
                 style="color:var(--text-muted)">Arguments</label>
               <input type="text" id="assets-arguments" class="input-field font-mono"
-                style="padding:8px 12px;font-size:11px;width:200px" value="--v 7 --ar 9:16" placeholder="--v 7 --ar 9:16">
+                style="padding:8px 12px;font-size:11px;width:200px" value="--c 70 --v 7 --ar 9:16" placeholder="--c 70 --v 7 --ar 9:16">
             </div>
             <div>
               <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"

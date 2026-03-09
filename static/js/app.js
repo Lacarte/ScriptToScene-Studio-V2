@@ -23,7 +23,7 @@ window.STATE = {
 };
 
 // ---- Navigation ----
-function switchPage(page) {
+function switchPage(page, editorSource = 'internal') {
   $$('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
   $$('.nav-item[data-page]').forEach(n => {
@@ -35,6 +35,9 @@ function switchPage(page) {
     b.classList.toggle('active', isActive);
   });
   if (page === 'editor') {
+    try {
+      sessionStorage.setItem('sts-editor-entry-source', editorSource || 'internal');
+    } catch (_) {}
     $('#main-content').style.overflowY = 'hidden';
     if (!localStorage.getItem('sts-editor-scenes')) {
       // Hide the loading spinner and show empty state
@@ -58,6 +61,11 @@ function switchPage(page) {
   if (page === 'assets' && typeof loadAssetsHistory === 'function') {
     loadAssetsHistory();
   }
+}
+
+// Explicit editor entry from sidebar/mobile menu.
+function openEditorFromMenu() {
+  switchPage('editor', 'menu');
 }
 
 function toggleSidebar() {

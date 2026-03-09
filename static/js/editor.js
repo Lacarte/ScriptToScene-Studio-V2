@@ -24,9 +24,12 @@ function initEditorIframe() {
     $('#editor-loading').style.display = 'none';
     iframe.style.display = 'block';
 
-    // Send scenes data if available
+    const entrySource = sessionStorage.getItem('sts-editor-entry-source') || 'internal';
+
+    // Send scenes data only for internal flows (Auto-Assemble / Send to Editor).
+    // When opened directly from menu, let the editor decide via no-data/import UI.
     const scenesData = localStorage.getItem('sts-editor-scenes');
-    if (scenesData) {
+    if (scenesData && entrySource !== 'menu') {
       try {
         iframe.contentWindow.postMessage({
           type: 'load-scenes',

@@ -559,7 +559,7 @@ async function assetsResendSelected() {
   if (!selected.length) { toast('No scenes selected', 'error'); return; }
 
   const provider = $('#assets-provider').value;
-  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '--v 7 --ar 9:16') : '';
+  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '--c 70 --v 7 --ar 9:16') : '';
   const projectId = STATE.assetsSceneData.project_id || 'default';
 
   // Build payload with original sequential positions
@@ -672,7 +672,7 @@ async function assetsStartGrabber() {
 
   const scenes = STATE.assetsSceneData.scenes;
   const provider = $('#assets-provider').value;
-  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '--v 7 --ar 9:16') : '';
+  const arguments_ = provider === 'midjourney' ? ($('#assets-arguments').value || '--c 70 --v 7 --ar 9:16') : '';
   const projectId = STATE.assetsSceneData.project_id || 'default';
 
   // Build scenes payload (respect edited prompts, sequential folder numbering)
@@ -1052,7 +1052,57 @@ async function autoAssembleAndSendToEditor() {
     }
   }
 
-  // Store scene data with auto-assemble flag
+  // Build staged timeline so the editor opens directly (no import panel).
+  const sourceScenes = STATE.assetsSceneData.scenes || [];
+  let t = 0;
+  const stagedScenes = sourceScenes.map((scene, i) => {
+    const assetScene = assetsData?.scenes?.[String(i)] || {};
+    const filesOnDisk = Array.isArray(assetScene.files_on_disk) ? assetScene.files_on_disk : [];
+    const firstImage = filesOnDisk.length > 0 ? filesOnDisk[0].url : '';
+    const duration = scene.duration || 3;
+    const row = {
+      scene_id: i,
+      type: scene.type_of_scene || scene.type || 'image',
+      image_prompt: scene.image_prompt || '',
+      text_content: scene.text_content || null,
+      duration,
+      timestamp: t,
+      image_url: firstImage,
+      visual_fx: scene.visual_fx || 'none',
+      narrative_role: scene.narrative_role || scene.role || '',
+      status: firstImage ? 'done' : 'pending',
+    };
+    t += duration;
+    return row;
+  });
+
+  const stagedTimeline = {
+    project_id: projectId,
+    project_name: projectId,
+    total_duration: stagedScenes.reduce((sum, s) => sum + (s.duration || 0), 0),
+    scene_count: stagedScenes.length,
+    staged_at: new Date().toISOString(),
+    scenes: stagedScenes,
+  };
+
+  // Add audio if available from current source folder.
+  const sf = STATE.assetsSceneData?.source_folder;
+  if (sf) {
+    try {
+      const audioRes = await api(`/api/scenes/audio/${encodeURIComponent(sf)}`);
+      if (audioRes?.url) {
+        stagedTimeline.audio = {
+          url: audioRes.url,
+          source_file: audioRes.source_file || '',
+          duration: audioRes.duration_seconds || 0,
+        };
+      }
+    } catch (_) { /* optional */ }
+  }
+
+  sessionStorage.setItem('staged_timeline', JSON.stringify(stagedTimeline));
+
+  // Keep bridge payload for compatibility with the older editor flow.
   const storeData = {
     ...STATE.assetsSceneData,
     _autoAssemble: true,
@@ -1061,6 +1111,15 @@ async function autoAssembleAndSendToEditor() {
   localStorage.setItem('sts-editor-scenes', JSON.stringify(storeData));
   // Clear stale captions so they auto-regenerate from current alignment
   localStorage.removeItem('sts-editor-captions');
+
+  // Force a fresh editor iframe boot so stale modal/UI state cannot persist.
+  STATE.editorLoaded = false;
+  const iframe = document.getElementById('editor-iframe');
+  if (iframe) {
+    iframe.style.display = 'none';
+    iframe.src = '';
+  }
+
   switchPage('editor');
   toast('Auto-assembling timeline...', 'info');
 }
