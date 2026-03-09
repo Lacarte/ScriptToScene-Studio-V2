@@ -1,21 +1,67 @@
 @echo off
+setlocal
 title ScriptToScene Studio
+cd /d "%~dp0"
+
 echo.
 echo   ScriptToScene Studio
 echo   ====================
 echo.
 
-:: Activate venv
-if exist "venv\Scripts\activate.bat" (
-    call venv\Scripts\activate.bat
+:: ── Connectivity check ──────────────────────────────────────────────────
+ping -n 1 -w 1000 github.com >nul 2>&1
+if errorlevel 1 (
+    echo   [WARN] No network — skipping git pull
+    echo.
 ) else (
-    echo   [ERROR] Virtual environment not found. Run setup.bat first.
+    git pull
+)
+
+:: ── Virtual environment ─────────────────────────────────────────────────
+if not exist "venv\Scripts\activate.bat" (
+    echo   [ERROR] Virtual environment not found.
+    echo           Run setup.bat first.
+    echo.
     pause
     exit /b 1
 )
+call venv\Scripts\activate.bat
 
-:: Start server
+:: ── Dependency sync ─────────────────────────────────────────────────────
+set "STAMP=venv\.requirements_stamp"
+set "REQS=requirements.txt"
+
+:: Reinstall when requirements.txt is newer than last-synced stamp
+if not exist "%STAMP%" (
+    echo   Syncing dependencies...
+    pip install -r "%REQS%" --quiet && copy /y "%REQS%" "%STAMP%" >nul
+    echo.
+) else (
+    fc /b "%REQS%" "%STAMP%" >nul 2>&1
+    if errorlevel 1 (
+        echo   Requirements changed — syncing dependencies...
+        pip install -r "%REQS%" --quiet && copy /y "%REQS%" "%STAMP%" >nul
+        echo.
+    )
+)
+
+:: ── .env sanity check ───────────────────────────────────────────────────
+if not exist ".env" (
+    if exist ".env.example" (
+        echo   [WARN] No .env file found. Copying .env.example to .env
+        copy .env.example .env >nul
+        echo           Edit .env with your API keys before using webhooks.
+        echo.
+    )
+)
+
+:: ── Launch ───────────────────────────────────────────────────────────────
 echo   Starting server...
 echo.
 python app.py %*
+
+:: ── Exit ─────────────────────────────────────────────────────────────────
+echo.
+echo   Server stopped.
 pause
+endlocal
