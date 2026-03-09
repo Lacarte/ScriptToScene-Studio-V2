@@ -1,0 +1,285 @@
+{
+  "source_file": "the-accident-outside-of-time_20260222_132429.wav",
+  "folder": "the-accident-outside-of-time-20260222-13_20260222_141021",
+  "transcript": "[The Accident Outside of Time. The first thing that disturbed Doctor Sanaa Merrow was not what the signal said.]\r\n\r\n[It was where it came from.]\r\n\r\n[The transmission arrived from a region of sky that should have been silent. No stars. No pulses. No noise. Just darkness. And yet the data came with rhythm. Precise.]\r\n\r\n[Repeating.]",
+  "alignment": [
+    {
+      "word": "[The",
+      "begin": 0.66,
+      "end": 0.66
+    },
+    {
+      "word": "Accident",
+      "begin": 0.66,
+      "end": 1.2
+    },
+    {
+      "word": "Outside",
+      "begin": 1.2,
+      "end": 1.64
+    },
+    {
+      "word": "of",
+      "begin": 1.64,
+      "end": 1.82
+    },
+    {
+      "word": "Time.",
+      "begin": 1.82,
+      "end": 2.16
+    },
+    {
+      "word": "The",
+      "begin": 2.78,
+      "end": 2.78
+    },
+    {
+      "word": "first",
+      "begin": 2.78,
+      "end": 3.06
+    },
+    {
+      "word": "thing",
+      "begin": 3.06,
+      "end": 3.3
+    },
+    {
+      "word": "that",
+      "begin": 3.3,
+      "end": 3.48
+    },
+    {
+      "word": "disturbed",
+      "begin": 3.48,
+      "end": 3.88
+    },
+    {
+      "word": "Doctor",
+      "begin": 3.88,
+      "end": 4.34
+    },
+    {
+      "word": "Sanaa",
+      "begin": 4.34,
+      "end": 4.8
+    },
+    {
+      "word": "Merrow",
+      "begin": 4.8,
+      "end": 5.08
+    },
+    {
+      "word": "was",
+      "begin": 5.36,
+      "end": 5.58
+    },
+    {
+      "word": "not",
+      "begin": 5.58,
+      "end": 5.86
+    },
+    {
+      "word": "what",
+      "begin": 5.86,
+      "end": 6.0
+    },
+    {
+      "word": "the",
+      "begin": 6.0,
+      "end": 6.22
+    },
+    {
+      "word": "signal",
+      "begin": 6.22,
+      "end": 6.38
+    },
+    {
+      "word": "said.]",
+      "begin": 6.38,
+      "end": 7.12
+    },
+    {
+      "word": "[It",
+      "begin": 7.12,
+      "end": 7.12
+    },
+    {
+      "word": "was",
+      "begin": 7.12,
+      "end": 7.3
+    },
+    {
+      "word": "where",
+      "begin": 7.44,
+      "end": 7.54
+    },
+    {
+      "word": "it",
+      "begin": 7.54,
+      "end": 7.6
+    },
+    {
+      "word": "came",
+      "begin": 7.6,
+      "end": 7.84
+    },
+    {
+      "word": "from.]",
+      "begin": 7.84,
+      "end": 8.56
+    },
+    {
+      "word": "[The",
+      "begin": 8.74,
+      "end": 8.74
+    },
+    {
+      "word": "transmission",
+      "begin": 8.74,
+      "end": 9.19
+    },
+    {
+      "word": "arrived",
+      "begin": 11.52,
+      "end": 11.56
+    },
+    {
+      "word": "from",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "a",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "region",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "of",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "sky",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "that",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "should",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "have",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "been",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "silent.",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "No",
+      "begin": 11.56,
+      "end": 11.56
+    },
+    {
+      "word": "stars.",
+      "begin": 11.56,
+      "end": 12.54
+    },
+    {
+      "word": "No",
+      "begin": 13.26,
+      "end": 13.38
+    },
+    {
+      "word": "pulses.",
+      "begin": 13.38,
+      "end": 14.38
+    },
+    {
+      "word": "No",
+      "begin": 15.14,
+      "end": 15.56
+    },
+    {
+      "word": "noise.",
+      "begin": 15.56,
+      "end": 16.46
+    },
+    {
+      "word": "Just",
+      "begin": 16.48,
+      "end": 16.48
+    },
+    {
+      "word": "darkness.",
+      "begin": 16.48,
+      "end": 16.52
+    },
+    {
+      "word": "And",
+      "begin": 16.52,
+      "end": 16.52
+    },
+    {
+      "word": "yet",
+      "begin": 16.52,
+      "end": 19.66
+    },
+    {
+      "word": "the",
+      "begin": 19.66,
+      "end": 22.3
+    },
+    {
+      "word": "data",
+      "begin": 22.3,
+      "end": 22.3
+    },
+    {
+      "word": "came",
+      "begin": 22.3,
+      "end": 22.3
+    },
+    {
+      "word": "with",
+      "begin": 22.3,
+      "end": 22.3
+    },
+    {
+      "word": "rhythm.",
+      "begin": 22.3,
+      "end": 22.3
+    },
+    {
+      "word": "Precise.]",
+      "begin": 22.3,
+      "end": 23.3
+    },
+    {
+      "word": "[Repeating.]",
+      "begin": 23.3,
+      "end": 23.7
+    }
+  ],
+  "word_count": 55,
+  "inference_time": 11.918,
+  "timestamp": "2026-02-22T14:10:33.029956"
+}

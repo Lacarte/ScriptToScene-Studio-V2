@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 from loguru import logger
 
-from config import CAPTIONS_DIR, generate_project_id
+from config import APP_ASSETS_DIR, CAPTIONS_DIR, generate_project_id
 
 captions_bp = Blueprint("captions", __name__)
 
@@ -107,6 +107,45 @@ CAPTION_PRESETS = {
         "edge_fade_ms": 90,
     },
 }
+
+
+def _load_external_presets():
+    """Load additional caption presets from assets/caption-presets/*.json."""
+    preset_path = os.path.join(APP_ASSETS_DIR, "caption-presets", "pro-caption-presets.json")
+    if not os.path.isfile(preset_path):
+        return {}
+
+    try:
+        with open(preset_path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to load caption presets from {}: {}", preset_path, exc)
+        return {}
+
+    # Support both {"presets":[...]} and plain list formats.
+    if isinstance(payload, dict):
+        items = payload.get("presets", [])
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        logger.warning("Invalid caption preset payload type in {}", preset_path)
+        return {}
+
+    loaded = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        preset_id = str(item.get("id", "")).strip()
+        if not preset_id:
+            continue
+        loaded[preset_id] = item
+
+    if loaded:
+        logger.info("Loaded {} external caption presets from {}", len(loaded), preset_path)
+    return loaded
+
+
+CAPTION_PRESETS.update(_load_external_presets())
 
 
 # ---------------------------------------------------------------------------
