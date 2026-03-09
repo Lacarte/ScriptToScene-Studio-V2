@@ -146,6 +146,7 @@ class App {
             const project = {
                 project_id: projectId,
                 script: sceneData.script || '',
+                style: sceneData.style || '',
                 duration: scenes.reduce((sum, s) => sum + (s.duration || 0), 0),
                 created_at: sceneData.timestamp || new Date().toISOString(),
             };
@@ -228,6 +229,12 @@ class App {
 
             const currentSourceId = State.get('studioSourceId');
 
+            // Fetch style templates for resolving names/colors
+            let _styleTemplates = [];
+            try { _styleTemplates = await fetch('/api/scenes/templates').then(r => r.json()); } catch {}
+            const _getStyleName = id => { const t = _styleTemplates.find(t => t.id === id); return t ? t.name : ''; };
+            const _getStyleColor = id => { const t = _styleTemplates.find(t => t.id === id); return t ? t.color : ''; };
+
             list.innerHTML = items.map(item => {
                 const isActive = currentSourceId && item.project_id === currentSourceId;
                 const name = item.project_id || 'Untitled';
@@ -236,6 +243,9 @@ class App {
                     : item.timestamp ? formatRelativeTime(new Date(item.timestamp)) : '';
                 const statusColors = { done: '#4ECDC4', downloading: '#FFB347', error: '#FF6B6B', waiting: '#8B8B8B' };
                 const statusColor = statusColors[item.status] || '#8B8B8B';
+                const styleName = _getStyleName(item.style);
+                const styleColor = _getStyleColor(item.style);
+                const styleHtml = styleName ? ` <span style="display:inline-flex;align-items:center;gap:3px;margin-left:2px"><span style="width:5px;height:5px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${this._escHtml(styleName)}</span></span>` : '';
 
                 // Preview image
                 const previewHtml = item.preview
@@ -246,7 +256,7 @@ class App {
                     <li class="picker-item ${isActive ? 'active' : ''}" data-project-id="${this._escHtml(item.project_id)}">
                         ${previewHtml}
                         <div class="picker-item-info">
-                            <div class="picker-item-name">${this._escHtml(truncated)}</div>
+                            <div class="picker-item-name">${this._escHtml(truncated)}${styleHtml}</div>
                             <div class="picker-item-meta">
                                 ${item.scene_count || 0} scenes ·
                                 ${item.disk_files || 0} files
@@ -328,6 +338,7 @@ class App {
             const project = {
                 project_id: projectId,
                 script: effectiveSceneData.script || '',
+                style: effectiveSceneData.style || '',
                 duration: timelineScenes.reduce((sum, s) => sum + (s.duration || 0), 0),
                 created_at: assetsData.created_at || new Date().toISOString(),
             };
@@ -381,6 +392,7 @@ class App {
         const project = {
             project_id: projectId,
             script: studioData.script || '',
+            style: studioData.style || '',
             duration: scenes.reduce((sum, s) => sum + (s.duration || 0), 0),
             created_at: studioData.timestamp || new Date().toISOString(),
         };
@@ -847,11 +859,23 @@ class App {
 
         this.showStagingOverlay();
 
-        setTimeout(() => {
+        setTimeout(async () => {
+            // Resolve style template name/color
+            let styleName = '', styleColor = '';
+            if (project.style) {
+                try {
+                    const templates = await fetch('/api/scenes/templates').then(r => r.json());
+                    const tmpl = templates.find(t => t.id === project.style);
+                    if (tmpl) { styleName = tmpl.name; styleColor = tmpl.color; }
+                } catch { /* ignore */ }
+            }
             let imageCounter = 1;
             const stagedData = {
                 project_id: project.project_id,
                 project_name: project.name || project.project_id,
+                style: project.style || '',
+                style_name: styleName,
+                style_color: styleColor,
                 total_duration: getTotalDuration(scenes),
                 scene_count: scenes.length,
                 staged_at: new Date().toISOString(),

@@ -222,6 +222,7 @@ function _scnRenderTemplateGrid() {
 function scenesSelectStyle(styleId) {
   $('#scenes-style').value = styleId;
   _scnRenderTemplateGrid();
+  _scnClearResults();
   _updateScenesSource(); // refresh payload preview
 }
 
@@ -382,7 +383,13 @@ function renderSceneResults(data) {
   const scenes = data.scenes || [];
   const totalDuration = scenes.reduce((sum, s) => sum + (s.duration || 0), 0);
   const pid = data.project_id ? `${data.project_id} · ` : '';
-  $('#scenes-stats').textContent = `${pid}${scenes.length} scenes · ${totalDuration.toFixed(1)}s total`;
+  const _rsStyleName = _scnStyleLabel(data.style);
+  const _rsStyleColor = _scnStyleColor(data.style);
+  const _rsTime = data.timestamp ? ` · ${timeAgo(data.timestamp)}` : '';
+  const _rsStyle = _rsStyleName ? ` · <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:7px;height:7px;border-radius:50%;background:${_rsStyleColor};display:inline-block"></span><span style="color:${_rsStyleColor};font-weight:600">${esc(_rsStyleName)}</span></span>` : '';
+  $('#scenes-stats').innerHTML = `<span style="color:var(--accent)">${esc(pid)}</span>${scenes.length} scenes · ${totalDuration.toFixed(1)}s total<span style="color:var(--text-muted)">${_rsTime}</span>${_rsStyle}`;
+  // Update header badge
+  if (data.project_id) setModuleBadge('scenes', data.project_id);
 
   // Compute scene timings from segmenter data
   _scnBuildTimings(scenes);
@@ -806,7 +813,7 @@ async function loadScenesHistory() {
 function _scnStyleLabel(styleId) {
   if (!styleId) return '';
   const tmpl = (_scnTemplates || []).find(t => t.id === styleId);
-  return tmpl ? tmpl.name : styleId;
+  return tmpl ? tmpl.name : '';
 }
 
 function _scnStyleColor(styleId) {
@@ -834,7 +841,7 @@ function renderScenesHistory(items) {
             <p style="font-size:13px;color:var(--text);margin:0">${esc(item.project_id)}</p>
             ${parentLabel}
           </div>
-          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}${styleName ? ` · <span style="color:${styleColor}">${esc(styleName)}</span>` : ''}</p>
+          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}${styleName ? ` · <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${esc(styleName)}</span></span>` : ''}</p>
         </div>
       </div>
     </div>`;
@@ -857,6 +864,9 @@ async function loadScenesProject(projectId) {
         }
       } catch { /* segment text just won't show */ }
     }
+
+    // Sync style template grid to loaded project's style
+    if (data.style) scenesSelectStyle(data.style);
 
     renderSceneResults(data);
     toast('Scenes loaded');

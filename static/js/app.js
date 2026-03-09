@@ -209,6 +209,32 @@ async function settingsClearConfirm() {
     const data = await resp.json();
     settingsClearDialogClose();
     if (data.status === 'cleared') {
+      // Reset all in-memory state
+      STATE.alignFile = null;
+      STATE.alignResult = null;
+      STATE.alignHistory = [];
+      STATE.segmenterResult = null;
+      STATE.segmenterAlignment = null;
+      STATE.scenesSegData = null;
+      STATE.scenesResult = null;
+      STATE.assetsSceneData = null;
+      STATE.assetStatuses = {};
+      STATE.captionData = null;
+      STATE.captionAlignment = null;
+      // Clear localStorage project data
+      localStorage.removeItem('sts-editor-scenes');
+      // Clear module badges
+      ['tts', 'timing', 'segmenter', 'scenes', 'assets', 'pipeline'].forEach(m => setModuleBadge(m, ''));
+      // Refresh history lists
+      if (typeof loadScenesHistory === 'function') loadScenesHistory();
+      if (typeof pipelineLoadHistory === 'function') pipelineLoadHistory();
+      // Clear visible results
+      const scenesResults = document.getElementById('scenes-results');
+      if (scenesResults) scenesResults.style.display = 'none';
+      const assetsControls = document.getElementById('assets-controls');
+      if (assetsControls) assetsControls.style.display = 'none';
+      const assetsEmpty = document.getElementById('assets-empty');
+      if (assetsEmpty) assetsEmpty.style.display = '';
       toast(`Cleared ${data.count} project folder${data.count !== 1 ? 's' : ''}`, 'success');
     } else {
       toast(data.error || 'Failed to clear projects', 'error');

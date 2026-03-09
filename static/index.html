@@ -455,16 +455,14 @@
                 style="color:var(--text-muted)">Style</label>
               <select id="pipeline-style" class="input-field" style="width:140px;font-size:12px">
                 <option value="cinematic">Cinematic</option>
-                <option value="dark_horror">Dark Horror</option>
-                <option value="reddit_story">Reddit Story</option>
-                <option value="motivational">Motivational</option>
-                <option value="nature_doc">Nature Doc</option>
-                <option value="anime">Anime</option>
-                <option value="surreal">Surreal</option>
-                <option value="noir">Noir</option>
-                <option value="minimal">Minimal</option>
               </select>
             </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 10px;border-radius:8px;background:var(--bg-darkest);border:1px solid var(--border)">
+            <input type="checkbox" id="pipeline-auto-scenes" checked style="accent-color:var(--accent);cursor:pointer">
+            <label for="pipeline-auto-scenes" style="font-size:11px;color:var(--text-secondary);cursor:pointer;user-select:none">
+              Auto-generate scenes <span style="color:var(--text-muted)">— run scene generation with the selected style after pipeline completes</span>
+            </label>
           </div>
           <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
             <button id="pipeline-run-btn" class="action-btn hover-accent"
@@ -960,7 +958,7 @@
 
           <!-- Fork per Style -->
           <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--bg-darkest);border:1px solid var(--border)">
-            <input type="checkbox" id="scenes-fork-style" style="accent-color:var(--accent);cursor:pointer">
+            <input type="checkbox" id="scenes-fork-style" checked style="accent-color:var(--accent);cursor:pointer">
             <label for="scenes-fork-style" style="font-size:11px;color:var(--text-secondary);cursor:pointer;user-select:none">
               New project per style <span style="color:var(--text-muted)">— generate a separate project for each template so you can compare results</span>
             </label>
@@ -1042,7 +1040,6 @@
             <div style="display:flex;gap:6px">
               <button onclick="toggleScenesPreview()" id="scenes-preview-btn" class="action-btn hover-accent"
                 style="border-color:#A78BFA;color:#A78BFA">Preview Script</button>
-              <button onclick="copyScenesJSON()" class="action-btn hover-accent">Copy JSON</button>
               <button onclick="downloadScenesJSON()" class="action-btn hover-accent">Download</button>
               <button onclick="sendToAssets()" class="action-btn hover-accent"
                 style="border-color:var(--accent);color:var(--accent)">Send to Assets</button>

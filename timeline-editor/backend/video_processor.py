@@ -882,7 +882,7 @@ class VideoProcessor:
             fade_in = bg_music.get('fade_in', 2.0)
             fade_out = bg_music.get('fade_out', 3.0)
             ducking = bg_music.get('ducking_enabled', True)
-            duck_level = bg_music.get('ducking_level', 0.08)
+            duck_level = max(0.12, float(bg_music.get('ducking_level', 0.2)))
 
             effective_vol = duck_level if (ducking and has_narration) else vol
 

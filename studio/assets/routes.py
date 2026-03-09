@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import ASSETS_DIR
+from config import ASSETS_DIR, SCENES_DIR
 from studio.validation import validate_json
 from .schemas import GrabberStartRequest
 from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
@@ -557,6 +557,16 @@ def assets_history():
             if sub.is_dir() and sub.name not in (".", ".."):
                 total_disk_files += sum(1 for f in sub.iterdir() if f.is_file())
         project_info["disk_files"] = total_disk_files
+
+        # Get style from scenes.json
+        scenes_json = os.path.join(SCENES_DIR, project_id, "scenes.json")
+        if os.path.isfile(scenes_json):
+            try:
+                with open(scenes_json, "r", encoding="utf-8") as f:
+                    sdata = json.load(f)
+                project_info["style"] = sdata.get("style", "")
+            except Exception:
+                pass
 
         # Get a preview image (first file from first scene)
         project_info["preview"] = None

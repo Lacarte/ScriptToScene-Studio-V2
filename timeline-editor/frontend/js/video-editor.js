@@ -139,6 +139,8 @@ const AUDIO_TRACK_COLORS = {
     music: 'rgba(167, 139, 250, 0.8)',
     fx: 'rgba(255, 183, 77, 0.8)',
 };
+const DEFAULT_MUSIC_DUCKING_LEVEL = 0.2;
+const MIN_MUSIC_DUCKING_LEVEL = 0.12;
 
 function _getSavedVolume(type) {
     try { const v = parseFloat(localStorage.getItem(`sts-vol-${type}`)); return isNaN(v) ? null : v; } catch { return null; }
@@ -161,7 +163,7 @@ function createAudioTrack(overrides = {}) {
         volume: 1.0,
         loop: false,
         duckingEnabled: false,
-        duckingLevel: 0.03,
+        duckingLevel: DEFAULT_MUSIC_DUCKING_LEVEL,
         fadeIn: 0,
         fadeOut: 0,
         loaded: false,
@@ -182,6 +184,47 @@ function getVoiceTrack() {
 }
 function getAudioTrackById(id) {
     return EditorState.audioTracks.find(t => t.id === id);
+}
+
+function isVoiceAudible() {
+    const voiceTrack = getVoiceTrack();
+    if (!voiceTrack?.loaded || !voiceTrack.element || voiceTrack.muted) return false;
+    if (voiceTrack.element.paused) return false;
+    const vol = Number(voiceTrack.volume ?? 1.0);
+    return vol > 0.001;
+}
+
+function getEffectiveTrackVolume(track, requestedVol, voiceAudible = isVoiceAudible()) {
+    const vol = Number(requestedVol ?? track?.volume ?? 1.0);
+    if (!track || track.muted) return 0;
+    if (track.type === 'music' && track.duckingEnabled && voiceAudible) {
+        const duck = Math.max(
+            MIN_MUSIC_DUCKING_LEVEL,
+            Number(track.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL)
+        );
+        return Math.min(duck, vol);
+    }
+    return vol;
+}
+
+function ensureTrackGainNode(track) {
+    if (!track?.element || track._gainNode) return;
+    const audio = track.element;
+    try {
+        if (!EditorState._audioCtx) {
+            EditorState._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = EditorState._audioCtx;
+        const source = ctx.createMediaElementSource(audio);
+        const gain = ctx.createGain();
+        gain.gain.value = getEffectiveTrackVolume(track, track.volume, isVoiceAudible());
+        source.connect(gain);
+        gain.connect(ctx.destination);
+        track._gainNode = gain;
+        audio.volume = 1.0;
+    } catch (e) {
+        audio.volume = Math.min(1.0, getEffectiveTrackVolume(track, track.volume, isVoiceAudible()));
+    }
 }
 
 // Load saved settings from localStorage
@@ -360,7 +403,7 @@ async function saveProjectToServer() {
             trimmedDuration: t.trimmedDuration || null,
             volume: t.volume ?? 1.0, loop: !!t.loop, muted: !!t.muted,
             duckingEnabled: !!t.duckingEnabled,
-            duckingLevel: t.duckingLevel ?? 0.03,
+            duckingLevel: t.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL,
             fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0
         })),
         captions: EditorState.captionData || null,
@@ -1257,10 +1300,23 @@ async function loadProjectFromServer(projectId) {
         if (!res.ok) throw new Error('Project not found');
         const saved = await res.json();
 
+        // Resolve style template name/color
+        let styleName = '', styleColor = '';
+        if (saved.style) {
+            try {
+                const templates = await fetch('/api/scenes/templates').then(r => r.json());
+                const tmpl = templates.find(t => t.id === saved.style);
+                if (tmpl) { styleName = tmpl.name; styleColor = tmpl.color; }
+            } catch { /* ignore */ }
+        }
+
         // Build staged_timeline from saved data
         const staged = {
             project_id: saved.project_id,
             project_name: saved.project_name || saved.project_id,
+            style: saved.style || '',
+            style_name: styleName,
+            style_color: styleColor,
             total_duration: saved.total_duration || 0,
             scene_count: saved.scene_count || saved.scenes?.length || 0,
             staged_at: saved.saved_at,
@@ -1372,18 +1428,19 @@ function _restoreSavedEditorState() {
             volume: t.volume ?? 1.0,
             loop: !!t.loop,
             duckingEnabled: !!t.duckingEnabled,
-            duckingLevel: t.duckingLevel ?? 0.03,
+            duckingLevel: t.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL,
             fadeIn: t.fadeIn || 0,
             fadeOut: t.fadeOut || 0
         });
         track.muted = !!t.muted;
         EditorState.audioTracks.push(track);
 
-        // Load audio element
+        // Load audio element with Web Audio gain node for volume boost
         const audio = new Audio(t.path);
         track.element = audio;
-        audio.volume = track.muted ? 0 : track.volume;
         audio.loop = track.loop;
+        ensureTrackGainNode(track);
+
         audio.addEventListener('loadedmetadata', () => {
             track.loaded = true;
             track.duration = audio.duration;
@@ -1485,7 +1542,7 @@ async function init() {
 
     // Load project data
     updateLoadingOverlay('Loading project data...');
-    loadProjectData(data);
+    await loadProjectData(data);
 
     // Load assets with progress
     await loadProjectMediaWithProgress();
@@ -1520,14 +1577,29 @@ function sleep(ms) {
 /**
  * Load project data without media (fast)
  */
-function loadProjectData(data) {
+async function loadProjectData(data) {
     EditorState.project = {
         id: data.project_id,
         name: data.project_name,
+        style: data.style || '',
+        styleName: data.style_name || '',
+        styleColor: data.style_color || '',
         totalDuration: data.total_duration,
         sceneCount: data.scene_count,
         stagedAt: data.staged_at
     };
+
+    // Resolve style name/color from templates if missing
+    if (EditorState.project.style && !EditorState.project.styleName) {
+        try {
+            const templates = await fetch('/api/scenes/templates').then(r => r.json());
+            const tmpl = templates.find(t => t.id === EditorState.project.style);
+            if (tmpl) {
+                EditorState.project.styleName = tmpl.name;
+                EditorState.project.styleColor = tmpl.color;
+            }
+        } catch { /* ignore */ }
+    }
 
     EditorState.scenes = data.scenes.map(scene => ({
         ...scene,
@@ -2401,6 +2473,7 @@ function loadDefaultAudio(stagedData) {
 
     // Stop previous element if any
     if (voiceTrack.element) { voiceTrack.element.pause(); voiceTrack.element.src = ''; }
+    voiceTrack._gainNode = null;
 
     const audio = new Audio(audioPath);
     voiceTrack.element = audio;
@@ -2413,6 +2486,7 @@ function loadDefaultAudio(stagedData) {
     // Legacy compat
     EditorState.audioElement = audio;
     EditorState.audio = voiceTrack;
+    ensureTrackGainNode(voiceTrack);
 
     // When audio metadata is loaded, get the duration
     audio.addEventListener('loadedmetadata', () => {
@@ -2493,6 +2567,7 @@ function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
 
     // Stop previous element
     if (voiceTrack.element) { voiceTrack.element.pause(); voiceTrack.element.src = ''; }
+    voiceTrack._gainNode = null;
 
     const audio = new Audio(audioPath);
     voiceTrack.element = audio;
@@ -2505,6 +2580,7 @@ function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
     // Legacy compat
     EditorState.audioElement = audio;
     EditorState.audio = voiceTrack;
+    ensureTrackGainNode(voiceTrack);
 
     audio.addEventListener('loadedmetadata', () => {
         voiceTrack.duration = audio.duration;
@@ -2862,7 +2938,7 @@ function toggleVolumePopup(trackId, anchorBtn) {
                     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>'
                     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.08"/></svg>'}
             </button>
-            <input type="range" class="volume-slider" min="0" max="100" value="${volPct}" style="width:100px;">
+            <input type="range" class="volume-slider" min="0" max="300" value="${volPct}" style="width:120px;">
             <span class="volume-label" style="font-size:10px; font-family:var(--font-mono); color:var(--text-secondary); min-width:32px; text-align:right;">${volPct}%</span>
         </div>
     `;
@@ -2883,22 +2959,17 @@ function toggleVolumePopup(trackId, anchorBtn) {
         track.volume = vol;
         _saveVolume(track.type, vol);
         label.textContent = `${slider.value}%`;
-        anchorBtn.title = `${track.label} — Vol ${slider.value}%`;
-        // Apply to audio element immediately (respect mute and ducking)
-        if (track.element) {
-            if (track.muted) {
-                track.element.volume = 0;
-            } else if (track.type === 'music' && track.duckingEnabled) {
-                const voiceTrack = getVoiceTrack();
-                const voicePlaying = voiceTrack?.loaded && voiceTrack.element && !voiceTrack.element.paused && !voiceTrack.muted;
-                track.element.volume = voicePlaying ? Math.min(track.duckingLevel || 0.03, vol) : vol;
-            } else {
-                track.element.volume = vol;
-            }
+        anchorBtn.title = `${track.label} - Vol ${slider.value}%`;
+        const effectiveVol = getEffectiveTrackVolume(track, vol, isVoiceAudible());
+        // Apply volume via gain node (supports boost >100%) or native fallback
+        if (track._gainNode) {
+            track._gainNode.gain.value = effectiveVol;
+        } else if (track.element) {
+            track.element.volume = Math.min(1.0, effectiveVol);
         }
     };
     slider.addEventListener('input', applyVolume);
-    slider.addEventListener('change', applyVolume);
+    slider.addEventListener('change', () => { applyVolume(); saveProjectEdits(); });
 
     // Wire mute toggle
     popup.querySelector('.volume-mute-toggle').addEventListener('click', () => {
@@ -2906,6 +2977,7 @@ function toggleVolumePopup(trackId, anchorBtn) {
         if (track.element) track.element.muted = track.muted;
         popup.remove();
         renderAllAudioTracks();
+        saveProjectEdits();
     });
 
     // Close on click outside
@@ -2936,6 +3008,7 @@ function removeAudioTrack(trackId) {
     recalculateDuration();
     renderAllAudioTracks();
     renderTimeRuler();
+    saveProjectEdits();
     showToast(`${track.label} removed`, 'info');
 }
 
@@ -2944,7 +3017,15 @@ function removeAudioTrack(trackId) {
  */
 function updateProjectInfo() {
     if (elements.projectName) {
-        elements.projectName.textContent = EditorState.project.name;
+        const name = EditorState.project.name || '';
+        const styleName = EditorState.project.styleName;
+        const styleColor = EditorState.project.styleColor;
+        const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        if (styleName) {
+            elements.projectName.innerHTML = `${esc(name)} <span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor || 'var(--text-muted)'};display:inline-block"></span><span style="color:${styleColor || 'var(--text-muted)'};font-size:0.75em;font-weight:600">${esc(styleName)}</span></span>`;
+        } else {
+            elements.projectName.textContent = name;
+        }
     }
     if (elements.infoScenes) {
         elements.infoScenes.textContent = EditorState.project.sceneCount;
@@ -4253,6 +4334,7 @@ function showAddTrackMenu(anchor) {
                 });
                 EditorState.audioTracks.push(fxTrack);
                 renderAllAudioTracks();
+                saveProjectEdits();
                 showToast('FX track added — drop an audio file to populate', 'info');
             } else if (action === 'upload') {
                 // File picker for any audio
@@ -4301,8 +4383,8 @@ async function _handleAudioFileUpload(file) {
             loaded: true,
         });
         const audio = new Audio(track.path);
-        audio.volume = track.volume;
         track.element = audio;
+        ensureTrackGainNode(track);
         audio.addEventListener('loadedmetadata', () => {
             track.duration = audio.duration;
             track.loaded = true;
@@ -4310,6 +4392,7 @@ async function _handleAudioFileUpload(file) {
         });
         EditorState.audioTracks.push(track);
         renderAllAudioTracks();
+        saveProjectEdits();
         showToast(`Added: ${file.name}`, 'success');
     } catch (e) {
         showToast('Upload failed: ' + e.message, 'error');
@@ -4695,7 +4778,7 @@ function syncAudioPlayback() {
 
     if (EditorState.isPlaying) {
         // Play all audio tracks
-        const voicePlaying = voiceTrack?.loaded && voiceTrack.element && !voiceTrack.muted;
+        const voicePlaying = isVoiceAudible();
 
         for (const track of EditorState.audioTracks) {
             if (!track.element || !track.file) continue;
@@ -4716,10 +4799,11 @@ function syncAudioPlayback() {
             }
 
             // Apply ducking on music tracks when voice is playing
-            if (track.type === 'music' && track.duckingEnabled && voicePlaying) {
-                track.element.volume = Math.min(track.duckingLevel || 0.03, track.volume);
+            const targetVol = getEffectiveTrackVolume(track, track.volume, voicePlaying);
+            if (track._gainNode) {
+                track._gainNode.gain.value = targetVol;
             } else {
-                track.element.volume = track.volume;
+                track.element.volume = Math.min(1.0, targetVol);
             }
 
             track.element.play().catch(() => {});
@@ -5541,7 +5625,7 @@ window.selectBgMusic = function (filename, path, duration) {
         volume: _getSavedVolume('music') ?? 0.08,
         loop: true,
         duckingEnabled: true,
-        duckingLevel: 0.03,
+        duckingLevel: DEFAULT_MUSIC_DUCKING_LEVEL,
         fadeIn: 2.0,
         fadeOut: 3.0,
         color: AUDIO_TRACK_COLORS.music,
@@ -5550,9 +5634,9 @@ window.selectBgMusic = function (filename, path, duration) {
 
     // Create audio element
     const audio = new Audio(path);
-    audio.volume = musicTrack.volume;
     audio.loop = true;
     musicTrack.element = audio;
+    ensureTrackGainNode(musicTrack);
 
     // Update duration when metadata loads
     audio.addEventListener('loadedmetadata', () => {
@@ -5568,6 +5652,7 @@ window.selectBgMusic = function (filename, path, duration) {
     EditorState.bgMusicElement = audio;
 
     renderAllAudioTracks();
+    saveProjectEdits();
     window.editorCloseMusicPicker();
     showToast('Music track added', 'success');
 };

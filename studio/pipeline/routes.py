@@ -82,6 +82,7 @@ def run_pipeline(data: PipelineRunRequest):
         "style": data.style,
         "segment_config": data.segment_config,
         "webhook_url": data.webhook_url,
+        "auto_scenes": data.auto_scenes,
         "project_id": project_id,
     }
 
@@ -172,10 +173,12 @@ def list_jobs():
                             item["speed"] = meta.get("speed", 1.0)
                         except Exception:
                             pass
-                # Get style from analysis
-                analysis = data.get("analysis", {})
-                if analysis:
-                    item["style"] = analysis.get("visual_style", "")
+                # Get style template ID (stored directly) or fallback to analysis
+                item["style"] = data.get("style", "")
+                if not item["style"]:
+                    analysis = data.get("analysis", {})
+                    if analysis:
+                        item["style"] = analysis.get("visual_style", "")
                 items.append(item)
             except Exception:
                 continue
@@ -241,17 +244,23 @@ def _run_pipeline(job_id):
                        f"avg {stats.get('avg_duration', 0):.1f}s",
         })
 
-        # ── Step 4: Scene Generation (webhook) ──────────────────────
-        _emit(job_id, {"step": "scenes", "status": "running",
-                       "message": "Generating scene scripts..."})
-        scenes_result = _step_scenes(segment_result, config, project_id, job_id)
-        results["scenes"] = scenes_result
-        scene_count = len(scenes_result.get("scenes", []))
-        _emit(job_id, {
-            "step": "scenes", "status": "done",
-            "message": f"{scene_count} scenes generated",
-            "data": scenes_result,
-        })
+        # ── Step 4: Scene Generation (webhook) — optional ────────────
+        if config.get("auto_scenes", True):
+            _emit(job_id, {"step": "scenes", "status": "running",
+                           "message": "Generating scene scripts..."})
+            scenes_result = _step_scenes(segment_result, config, project_id, job_id)
+            results["scenes"] = scenes_result
+            scene_count = len(scenes_result.get("scenes", []))
+            _emit(job_id, {
+                "step": "scenes", "status": "done",
+                "message": f"{scene_count} scenes generated",
+                "data": scenes_result,
+            })
+        else:
+            _emit(job_id, {
+                "step": "scenes", "status": "skipped",
+                "message": "Scene generation skipped",
+            })
 
         # ── Done ────────────────────────────────────────────────────
         _emit(job_id, {
@@ -267,7 +276,7 @@ def _run_pipeline(job_id):
                     "folder": results["timing"]["folder"],
                 },
                 "segment": results["segment"],
-                "scenes": results["scenes"],
+                "scenes": results.get("scenes"),
             },
         })
 
@@ -462,6 +471,13 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     script = config.get("text", "")
     style_id = config.get("style", "cinematic")
     style_prompt = config.get("style_prompt", "")
+
+    # Resolve style_prompt from template if not provided
+    if not style_prompt:
+        from studio.scenes.templates import SCENE_STYLE_TEMPLATES
+        tmpl = next((t for t in SCENE_STYLE_TEMPLATES if t["id"] == style_id), None)
+        if tmpl:
+            style_prompt = tmpl.get("style_prompt", "")
 
     # ── Chapter-based or single request ──
     if should_use_chapters(all_segments):

@@ -463,7 +463,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
             path: bgMusicConfig.path,
             volume: bgMusicConfig.volume ?? 0.08,
             ducking_enabled: bgMusicConfig.duckingEnabled ?? true,
-            ducking_level: bgMusicConfig.duckingLevel ?? 0.03,
+            ducking_level: bgMusicConfig.duckingLevel ?? 0.2,
             fade_in: bgMusicConfig.fadeIn ?? 2.0,
             fade_out: bgMusicConfig.fadeOut ?? 3.0,
             loop: bgMusicConfig.loop ?? true

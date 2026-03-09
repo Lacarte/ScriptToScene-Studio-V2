@@ -13,5 +13,6 @@ class PipelineRunRequest(BaseModel):
     segment_config: Optional[dict] = None
     webhook_url: Optional[str] = None
     style_prompt: Optional[str] = None
+    auto_scenes: bool = True
 
     model_config = {"extra": "allow"}

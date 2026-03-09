@@ -24,11 +24,16 @@ async function pipelineStart() {
   btn.disabled = true;
   btn.textContent = 'Starting...';
 
+  const autoScenes = $('#pipeline-auto-scenes')?.checked !== false;
+  // Use the webhook URL from scenes settings (localStorage) so pipeline hits the same endpoint
+  const webhookUrl = localStorage.getItem('sts-scenes-webhook-url') || $('#scenes-webhook-url')?.value || '';
   const config = {
     text,
     voice: $('#pipeline-voice')?.value || 'af_heart',
     speed: parseFloat($('#pipeline-speed')?.value || '1.0'),
     style: $('#pipeline-style')?.value || 'cinematic',
+    auto_scenes: autoScenes,
+    webhook_url: webhookUrl || undefined,
   };
 
   try {
@@ -84,6 +89,7 @@ function _plRenderProgress(globalStatus) {
     let icon = step.icon;
     if (status === 'running') { dotColor = 'var(--accent)'; textColor = 'var(--accent)'; }
     if (status === 'done') { dotColor = '#26DE81'; textColor = '#26DE81'; icon = '✓'; }
+    if (status === 'skipped') { dotColor = 'var(--text-muted)'; textColor = 'var(--text-muted)'; icon = '—'; }
     if (status === 'error') { dotColor = '#FF6B6B'; textColor = '#FF6B6B'; icon = '✗'; }
 
     const connector = i < _plSteps.length - 1
@@ -165,6 +171,14 @@ function _plUpdateStep(event) {
       STATE.scenesResult = event.summary.scenes;
       setModuleBadge('pipeline', event.summary.scenes.project_id);
       localStorage.setItem('sts-editor-scenes', JSON.stringify(event.summary.scenes));
+      // Refresh scenes history so the new project shows with style
+      if (typeof loadScenesHistory === 'function') loadScenesHistory();
+    }
+
+    // Sync pipeline style to scene generator
+    const _plStyle = $('#pipeline-style')?.value;
+    if (_plStyle && typeof scenesSelectStyle === 'function') {
+      scenesSelectStyle(_plStyle);
     }
 
     // Show continue bar to Scene Generator
@@ -218,12 +232,15 @@ async function pipelineLoadHistory() {
       const color = j.status === 'done' ? '#26DE81' : j.status === 'error' ? '#FF6B6B' : 'var(--accent)';
       const scenes = j.scene_count ? `${j.scene_count} scenes` : '';
       const date = j.timestamp ? timeAgo(j.timestamp) : '';
+      const styleName = typeof _scnStyleLabel === 'function' ? _scnStyleLabel(j.style) : '';
+      const styleColor = typeof _scnStyleColor === 'function' ? _scnStyleColor(j.style) : 'var(--text-muted)';
+      const styleHtml = styleName ? ` · <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${esc(styleName)}</span></span>` : '';
       return `
       <div onclick="pipelineLoadFromHistory(${i})" style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background=''">
         <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
         <div style="min-width:0;flex:1">
           <div class="font-mono" style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(j.label || j.project_id)}</div>
-          <div style="font-size:10px;color:var(--text-muted);margin-top:1px">${esc(j.project_id)}${scenes ? ' · ' + scenes : ''}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:1px">${esc(j.project_id)}${scenes ? ' · ' + scenes : ''}${styleHtml}</div>
         </div>
         <span class="font-mono" style="font-size:10px;color:var(--text-muted);flex-shrink:0;text-align:right">${date}</span>
       </div>`;
@@ -287,5 +304,19 @@ function _plResetProgress() {
   el.addEventListener(evt, _plResetProgress);
 });
 
-// Init
-pipelineLoadHistory();
+// Populate pipeline style dropdown from templates API, then load history
+(async function _plInit() {
+  try {
+    const templates = await api('/api/scenes/templates');
+    const sel = $('#pipeline-style');
+    const current = sel.value;
+    sel.innerHTML = templates.map(t =>
+      `<option value="${t.id}"${t.id === current ? ' selected' : ''}>${t.name}</option>`
+    ).join('');
+    // Store in _scnTemplates if scenes.js hasn't loaded them yet
+    if (typeof _scnTemplates !== 'undefined' && !_scnTemplates.length) {
+      _scnTemplates = templates;
+    }
+  } catch (e) { /* keep fallback option */ }
+  pipelineLoadHistory();
+})();
