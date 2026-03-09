@@ -5,6 +5,8 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
+import time
 import uuid
 import threading
 import traceback
@@ -14,6 +16,8 @@ from loguru import logger
 
 from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
+from studio.validation import validate_json
+from studio.editor.schemas import EditorSaveRequest, ExportRequest
 
 editor_bp = Blueprint("editor", __name__)
 
@@ -21,11 +25,58 @@ editor_bp = Blueprint("editor", __name__)
 # Export job storage & output directory
 # ---------------------------------------------------------------------------
 _export_jobs = {}
+_export_jobs_lock = threading.Lock()
 EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
+EXPORT_MAX_JOB_AGE = 3600  # evict finished jobs after 1 hour
 os.makedirs(EXPORT_DIR, exist_ok=True)
 
 logger.info("Export output directory: {}", EXPORT_DIR)
 logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
+
+
+def _cleanup_old_export_jobs():
+    """Evict completed/failed jobs older than EXPORT_MAX_JOB_AGE."""
+    now = time.time()
+    with _export_jobs_lock:
+        expired = [
+            jid for jid, job in _export_jobs.items()
+            if job["status"] in ("completed", "failed")
+            and now - job.get("created_at", 0) > EXPORT_MAX_JOB_AGE
+        ]
+        for jid in expired:
+            del _export_jobs[jid]
+    if expired:
+        logger.debug("Evicted {} old export job(s)", len(expired))
+
+
+def _cleanup_orphaned_temp_dirs():
+    """Remove leftover video_export_* temp dirs older than 2 hours."""
+    tmp_root = tempfile.gettempdir()
+    cutoff = time.time() - 7200
+    cleaned = 0
+    try:
+        for entry in os.listdir(tmp_root):
+            if not entry.startswith("video_export_"):
+                continue
+            path = os.path.join(tmp_root, entry)
+            if not os.path.isdir(path):
+                continue
+            try:
+                mtime = os.path.getmtime(path)
+                if mtime < cutoff:
+                    import shutil
+                    shutil.rmtree(path, ignore_errors=True)
+                    cleaned += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    if cleaned:
+        logger.info("Cleaned up {} orphaned video_export temp dir(s)", cleaned)
+
+
+# Run orphan cleanup on module load (server start)
+_cleanup_orphaned_temp_dirs()
 
 
 # ---------------------------------------------------------------------------
@@ -33,27 +84,21 @@ logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
 # ---------------------------------------------------------------------------
 
 @editor_bp.route("/api/editor/save", methods=["POST"])
-def editor_save_project():
+@validate_json(EditorSaveRequest)
+def editor_save_project(data: EditorSaveRequest):
     """Save full editor project state to disk."""
-    data = request.get_json(force=True)
-    project_id = data.get("project_id")
-    if not project_id:
-        return jsonify({"error": "project_id required"}), 400
-
-    # Sanitize filename
-    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    if not safe_id:
-        return jsonify({"error": "invalid project_id"}), 400
+    safe_id = data.project_id  # already validated: alphanumeric + _ and -
 
     from datetime import datetime, timezone
-    data["saved_at"] = datetime.now(timezone.utc).isoformat()
+    save_data = data.model_dump(exclude_none=True)
+    save_data["saved_at"] = datetime.now(timezone.utc).isoformat()
 
     path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+        json.dump(save_data, f, ensure_ascii=False)
 
-    logger.info("Editor project saved: {} ({} scenes)", safe_id, data.get("scene_count", "?"))
-    return jsonify({"ok": True, "saved_at": data["saved_at"]})
+    logger.info("Editor project saved: {} ({} scenes)", safe_id, save_data.get("scene_count", "?"))
+    return jsonify({"ok": True, "saved_at": save_data["saved_at"]})
 
 
 @editor_bp.route("/api/editor/load/<project_id>", methods=["GET"])
@@ -191,23 +236,15 @@ def frontend_log():
 # ---------------------------------------------------------------------------
 
 @editor_bp.route("/api/export", methods=["POST"])
-def start_export():
+@validate_json(ExportRequest)
+def start_export(data: ExportRequest):
     """Start a video export job."""
     try:
-        data = request.json
-        if not data:
-            logger.warning("Export request with no JSON body")
-            return jsonify({"error": "No JSON data provided"}), 400
-
-        required = ["project_id", "scenes"]
-        for field in required:
-            if field not in data:
-                logger.warning("Export missing required field: {}", field)
-                return jsonify({"error": f"Missing required field: {field}"}), 400
+        export_data = data.model_dump(exclude_none=True)
 
         job_id = str(uuid.uuid4())
-        project_id = data["project_id"]
-        scene_count = len(data.get("scenes", []))
+        project_id = data.project_id
+        scene_count = len(data.scenes)
         output_filename = f"{project_id}_{job_id[:8]}.mp4"
         output_path = os.path.join(EXPORT_DIR, output_filename)
 
@@ -215,52 +252,60 @@ def start_export():
                      job_id[:8], project_id, scene_count, output_filename)
 
         # Log export settings
-        output_cfg = data.get("output", {})
-        res = output_cfg.get("resolution", {})
+        output_cfg = export_data.get("output", {})
+        res = output_cfg.get("resolution", {}) if isinstance(output_cfg, dict) else {}
         logger.debug("Export settings: {}x{} {}fps crf={} codec={}",
                       res.get("width", "?"), res.get("height", "?"),
                       output_cfg.get("fps", "?"), output_cfg.get("crf", "?"),
                       output_cfg.get("codec", "?"))
 
-        audio_cfg = data.get("audio")
+        audio_cfg = export_data.get("audio")
         if audio_cfg and audio_cfg.get("path"):
             logger.debug("Audio: path={} vol={}",
                           audio_cfg.get("path"), audio_cfg.get("volume", 1.0))
         else:
             logger.debug("Audio: none")
 
-        bg_music = data.get("bgMusic")
+        bg_music = export_data.get("bgMusic")
         if bg_music:
             logger.debug("BgMusic: path={} vol={} loop={} ducking={}",
                           bg_music.get("path"), bg_music.get("volume"),
                           bg_music.get("loop"), bg_music.get("ducking_enabled"))
 
-        captions = data.get("captions", {})
-        cap_entries = captions.get("entries", [])
+        captions = export_data.get("captions", {})
+        cap_entries = captions.get("entries", []) if isinstance(captions, dict) else []
         if cap_entries:
             logger.debug("Captions: {} entries", len(cap_entries))
 
         # Log scene summary
-        for i, sc in enumerate(data.get("scenes", [])):
-            media = sc.get("media", {})
-            effect = sc.get("effect", {})
+        for i, sc in enumerate(export_data.get("scenes", [])):
+            media = sc.get("media", {}) if isinstance(sc, dict) else {}
+            effect = sc.get("effect", {}) if isinstance(sc, dict) else {}
             logger.debug("  Scene {}: type={} dur={}s effect={} path={}",
-                          i + 1, media.get("type", "?"), sc.get("duration", "?"),
+                          i + 1, media.get("type", "?"), sc.get("duration", "?") if isinstance(sc, dict) else "?",
                           effect.get("type", "static"),
                           (media.get("path") or "n/a")[:60])
 
-        _export_jobs[job_id] = {
-            "status": "queued",
-            "progress": 0,
-            "message": "Job queued",
-            "output_path": output_path,
-            "output_filename": output_filename,
-            "error": None,
-        }
+        _cleanup_old_export_jobs()
+
+        with _export_jobs_lock:
+            _export_jobs[job_id] = {
+                "status": "queued",
+                "progress": 0,
+                "message": "Job queued",
+                "step": None,
+                "output_path": output_path,
+                "output_filename": output_filename,
+                "project_id": project_id,
+                "scene_count": scene_count,
+                "error": None,
+                "created_at": time.time(),
+                "completed_at": None,
+            }
 
         thread = threading.Thread(
             target=_process_video,
-            args=(job_id, data, output_path),
+            args=(job_id, export_data, output_path),
             daemon=True,
         )
         thread.start()
@@ -273,20 +318,36 @@ def start_export():
 
 
 def _process_video(job_id, export_data, output_path):
-    """Process video in background thread."""
+    """Process video in background thread with step-level error tracking."""
     short_id = job_id[:8]
+    job = _export_jobs[job_id]
+
+    def _set_step(step, message):
+        job["step"] = step
+        job["message"] = message
+        logger.debug("[{}] Step: {} — {}", short_id, step, message)
+
     try:
         # Import here to avoid circular imports at module load
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "timeline-editor", "backend"))
         from video_processor import VideoProcessor
 
         logger.info("[{}] Processing started", short_id)
-        _export_jobs[job_id]["status"] = "processing"
-        _export_jobs[job_id]["message"] = "Starting video processing"
+        job["status"] = "processing"
+        _set_step("init", "Starting video processing")
 
         def update_progress(progress, message):
-            _export_jobs[job_id]["progress"] = progress
-            _export_jobs[job_id]["message"] = message
+            job["progress"] = progress
+            job["message"] = message
+            # Infer step from progress ranges set by VideoProcessor
+            if progress < 80:
+                job["step"] = "scenes"
+            elif progress < 85:
+                job["step"] = "concat"
+            elif progress < 90:
+                job["step"] = "overlay"
+            elif progress < 100:
+                job["step"] = "captions"
             logger.debug("[{}] Progress: {}% — {}", short_id, progress, message)
 
         processor = VideoProcessor(
@@ -295,20 +356,42 @@ def _process_video(job_id, export_data, output_path):
         )
         processor.process(output_path)
 
-        file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+        # Verify output was actually created
+        if not os.path.exists(output_path):
+            raise RuntimeError("Export finished but output file is missing")
+
+        file_size = os.path.getsize(output_path)
+        if file_size == 0:
+            os.remove(output_path)
+            raise RuntimeError("Export produced an empty file")
+
         logger.success("[{}] Export completed — {} ({:.1f} MB)",
                        short_id, output_path, file_size / (1024 * 1024))
 
-        _export_jobs[job_id]["status"] = "completed"
-        _export_jobs[job_id]["progress"] = 100
-        _export_jobs[job_id]["message"] = "Export completed successfully"
+        job["status"] = "completed"
+        job["progress"] = 100
+        job["step"] = "done"
+        job["message"] = "Export completed successfully"
+        job["completed_at"] = time.time()
 
     except Exception as e:
-        logger.error("[{}] Export FAILED: {}", short_id, e)
+        logger.error("[{}] Export FAILED at step '{}': {}", short_id, job.get("step"), e)
         logger.debug("[{}] Traceback:\n{}", short_id, traceback.format_exc())
-        _export_jobs[job_id]["status"] = "failed"
-        _export_jobs[job_id]["error"] = str(e)
-        _export_jobs[job_id]["message"] = f"Export failed: {str(e)}"
+
+        # Clean up partial output file
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+                logger.debug("[{}] Removed partial output: {}", short_id, output_path)
+            except OSError as rm_err:
+                logger.warning("[{}] Could not remove partial output: {}", short_id, rm_err)
+
+        failed_step = job.get("step") or "unknown"
+        job["status"] = "failed"
+        job["error"] = str(e)
+        job["step"] = failed_step
+        job["message"] = f"Export failed during {failed_step}: {e}"
+        job["completed_at"] = time.time()
 
 
 @editor_bp.route("/api/export/<job_id>/status", methods=["GET"])
@@ -323,6 +406,7 @@ def get_export_status(job_id):
         "status": job["status"],
         "progress": job["progress"],
         "message": job["message"],
+        "step": job.get("step"),
         "error": job["error"],
     })
 
@@ -425,3 +509,26 @@ def open_export_folder(job_id):
     except Exception as e:
         logger.error("Failed to open export folder: {}", e)
         return jsonify({"error": str(e)}), 500
+
+
+@editor_bp.route("/api/export/jobs", methods=["GET"])
+def list_export_jobs():
+    """List all export jobs with their current status."""
+    jobs = []
+    with _export_jobs_lock:
+        for jid, job in _export_jobs.items():
+            jobs.append({
+                "job_id": jid,
+                "status": job["status"],
+                "progress": job["progress"],
+                "message": job["message"],
+                "step": job.get("step"),
+                "error": job["error"],
+                "project_id": job.get("project_id"),
+                "scene_count": job.get("scene_count"),
+                "output_filename": job.get("output_filename"),
+                "created_at": job.get("created_at"),
+                "completed_at": job.get("completed_at"),
+            })
+    jobs.sort(key=lambda j: j.get("created_at") or 0, reverse=True)
+    return jsonify(jobs)
