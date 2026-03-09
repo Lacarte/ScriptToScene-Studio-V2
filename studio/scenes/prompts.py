@@ -3,8 +3,8 @@
 The master prompt is passed as `system_prompt` in the webhook payload,
 allowing iteration without modifying the n8n workflow.
 
-For long scripts, chapters.py appends CHAPTER_MODE_SUFFIX to the base prompt
-for chapter 1, and uses build_chapter_system_prompt() for chapters 2+.
+For long scripts, chapters.py uses build_chapter_system_prompt() to construct
+per-chapter prompts based on this base prompt.
 """
 
 SCENE_GENERATOR_PROMPT = """\
@@ -105,16 +105,4 @@ Example: "dust motes swirl through a golden shaft of light as a weathered hand r
     {"index": 3, "title": "Fondness For Poetry", "narrative_role": "text_accent", "type_of_scene": "text", "image_prompt": "soft blurred cream envelopes on steel surface under cool fluorescent light, cinematic photorealistic bokeh", "text_content": "A FONDNESS FOR POETRY"}
   ]
 }\
-"""
-
-
-# Appended to SCENE_GENERATOR_PROMPT for chapter 1 when using chapter mode.
-# Placeholders {chapter_total} and {chapter_context} are filled at runtime.
-CHAPTER_MODE_SUFFIX = """
-
-## CHAPTER MODE
-This is Chapter 1 of {chapter_total}. You are writing scenes ONLY for the segments provided.
-The full script is given for thematic context — do NOT create scenes for segments outside this chapter.
-Subsequent chapters will be generated separately and will reuse your analysis.
-{chapter_context}\
 """

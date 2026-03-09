@@ -1545,7 +1545,7 @@
         </section>
 
         <!-- Clear All Confirmation Dialog (hidden) -->
-        <div id="settings-clear-dialog" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center">
+        <div id="settings-clear-dialog" onclick="if(event.target===this)settingsClearDialogClose()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center">
           <div style="background:var(--bg-surface);border:1px solid rgba(239,68,68,0.3);border-radius:14px;padding:28px 24px;max-width:400px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5)">
             <div style="text-align:center;margin-bottom:20px">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="1.5" style="margin-bottom:12px">

@@ -248,7 +248,9 @@ function _buildWebhookPayload(segData) {
   };
 
   // Include full segments (with fillers) for chapter-based generation
-  if (allSegments.length > 20) {
+  // Count speech-only segments to match backend threshold (>20 speech segments)
+  const speechCount = allSegments.filter(s => !s.is_filler).length;
+  if (speechCount > 20) {
     payload.full_segments = allSegments;
   }
 

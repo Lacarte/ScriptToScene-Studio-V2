@@ -242,6 +242,8 @@ def _build_chapter(number, speech_segments):
 
 def _build_continuation_prompt(analysis_json, chapter_context):
     """Build system prompt for chapters 2+ with pre-computed analysis."""
+    if not analysis_json:
+        analysis_json = {}
     analysis_str = json.dumps(analysis_json, indent=2) if isinstance(analysis_json, dict) else str(analysis_json)
 
     return f"""\
