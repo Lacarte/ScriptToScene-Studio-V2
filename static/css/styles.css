@@ -366,30 +366,6 @@ body {
   border-left-color: var(--accent);
 }
 
-/* ---- Asset Manager Header ---- */
-.asset-manager-header {
-  position: relative;
-  width: fit-content;
-}
-
-.asset-manager-title {
-  position: relative;
-  text-shadow: 0 0 18px rgba(78, 205, 196, 0.18);
-}
-
-.asset-manager-title::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -6px;
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(78, 205, 196, 0.95), rgba(78, 205, 196, 0.2));
-  box-shadow: 0 0 14px rgba(78, 205, 196, 0.28);
-  pointer-events: none;
-}
-
 /* ---- Asset Cards ---- */
 .asset-card {
   background: var(--bg-surface);
@@ -521,11 +497,6 @@ body {
   #mobile-nav button svg {
     width: 20px;
     height: 20px;
-  }
-
-  .asset-manager-title::after {
-    bottom: -4px;
-    height: 2px;
   }
 }
 
