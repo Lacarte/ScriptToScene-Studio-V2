@@ -1103,6 +1103,10 @@ export class CanvasPreview {
             : [1, 3];
         const wordByWordReveal = !!style.word_by_word_reveal;
         const leadWordLine = !!style.lead_word_line;
+        const wordFontMix = !!style.word_font_mix;
+        const wordFontFamilies = this._parseStyleList(style.word_font_families, [fontFamily]);
+        const wordFontWeights = this._parseStyleList(style.word_font_weights, [fontWeight]);
+        const wordFontStyles = this._parseStyleList(style.word_font_styles, ['normal']);
         const transform = style.text_transform || 'uppercase';
         const animation = style.animation || 'pop';
         const letterSpacing = (style.letter_spacing || 0) * scale; // px units, scaled
@@ -1173,7 +1177,11 @@ export class CanvasPreview {
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
         } else {
             const maxWidth = Math.min(this.width * 0.85, maxCaptionWidth);
-            if (leadWordLine) {
+            if (wordFontMix) {
+                lines = wrapWordsPerLine > 0
+                    ? this._wrapTextByWordCountMixed(text, wrapWordsPerLine, maxWidth, letterSpacing, renderFontSize, fontFamily, fontWeight, wordFontFamilies, wordFontWeights, wordFontStyles)
+                    : this._wrapTextMixed(text, maxWidth, letterSpacing, renderFontSize, fontFamily, fontWeight, wordFontFamilies, wordFontWeights, wordFontStyles);
+            } else if (leadWordLine) {
                 lines = this._wrapLeadWordThenChunks(
                     text,
                     wrapWordsPerLine > 0 ? wrapWordsPerLine : 3,
@@ -1320,10 +1328,15 @@ export class CanvasPreview {
                 let lineScale = isRandomLineActive(i) ? randomLineScale : 1;
                 const lineFontSize = renderFontSize * lineScale;
                 this.ctx.font = `${fontWeight} ${lineFontSize}px "${fontFamily}", sans-serif`;
+                const lineWords = lines[i].split(' ');
+                let lineWordOffset = 0;
+                for (let li = 0; li < i; li++) lineWordOffset += lines[li].split(' ').length;
 
                 // Draw solid background box behind text
                 if (bgColor && bgColor !== 'none' && bgColor !== 'transparent') {
-                    const textW = this._measureTextWidth(lines[i], letterSpacing);
+                    const textW = wordFontMix
+                        ? this._measureMixedLineWidth(lineWords, lineWordOffset, lineFontSize, fontFamily, fontWeight, wordFontFamilies, wordFontWeights, wordFontStyles, letterSpacing)
+                        : this._measureTextWidth(lines[i], letterSpacing);
                     const bx = lineStartX(textW) - boxPadX;
                     const by = ly - lineFontSize / 2 - boxPadY;
                     const bw = textW + boxPadX * 2;
@@ -1348,7 +1361,42 @@ export class CanvasPreview {
                     this.ctx.shadowOffsetY = shadowOffY;
                 }
 
-                if (doHighlight) {
+                if (wordFontMix) {
+                    this.ctx.textAlign = 'left';
+                    const wordWidths = [];
+                    const spaceWidths = [];
+                    for (let w = 0; w < lineWords.length; w++) {
+                        const globalWordIdx = lineWordOffset + w;
+                        wordWidths.push(this._measureMixedWordWidth(lineWords[w], globalWordIdx, lineFontSize, fontFamily, fontWeight, wordFontFamilies, wordFontWeights, wordFontStyles, letterSpacing));
+                        if (w < lineWords.length - 1) {
+                            spaceWidths.push(this._measureMixedWordWidth(' ', globalWordIdx + 1, lineFontSize, fontFamily, fontWeight, wordFontFamilies, wordFontWeights, wordFontStyles, letterSpacing));
+                        }
+                    }
+                    const totalWordsW = wordWidths.reduce((sum, w) => sum + w, 0);
+                    const totalSpacesW = spaceWidths.reduce((sum, w) => sum + w, 0);
+                    let drawX = lineStartX(totalWordsW + totalSpacesW);
+
+                    for (let w = 0; w < lineWords.length; w++) {
+                        const globalWordIdx = lineWordOffset + w;
+                        const wordText = lineWords[w];
+                        const wordW = wordWidths[w];
+                        this.ctx.font = this._mixedWordFont(globalWordIdx, lineFontSize, fontFamily, fontWeight, wordFontFamilies, wordFontWeights, wordFontStyles);
+
+                        if (!wordByWordReveal || !active.words?.length || globalWordIdx <= activeWordIdx) {
+                            if (!isSingleLine && strokeColor && strokeColor !== 'none' && strokeWidth > 0) {
+                                this.ctx.strokeStyle = strokeColor;
+                                this.ctx.lineWidth = strokeWidth;
+                                this.ctx.lineJoin = 'round';
+                                this.ctx.strokeText(wordText, drawX, ly);
+                            }
+                            this.ctx.fillStyle = color;
+                            this.ctx.fillText(wordText, drawX, ly);
+                        }
+                        drawX += wordW + (w < lineWords.length - 1 ? spaceWidths[w] : 0);
+                    }
+                    this.ctx.textAlign = textAlign === 'left' ? 'left' : (textAlign === 'right' ? 'right' : 'center');
+                    this.ctx.font = `${fontWeight} ${lineFontSize}px "${fontFamily}", sans-serif`;
+                } else if (doHighlight) {
                     // Two-pass rendering: shadow pass (full line), then word-by-word color pass
                     const lineWords = lines[i].split(' ');
                     const fullLineW = this._measureTextWidth(lines[i], letterSpacing);
@@ -1480,6 +1528,54 @@ export class CanvasPreview {
         return lines;
     }
 
+    _wrapTextMixed(text, maxWidth, letterSpacing, fontSize, defaultFamily, defaultWeight, families, weights, styles, startWordIndex = 0) {
+        const words = String(text || '').split(/\s+/).filter(Boolean);
+        if (!words.length) return [''];
+
+        const lines = [];
+        let currentWords = [];
+        let currentWidth = 0;
+        let wordIndex = startWordIndex;
+
+        for (const rawWord of words) {
+            const parts = this._splitTokenToFitMixed(rawWord, maxWidth, letterSpacing, wordIndex, fontSize, defaultFamily, defaultWeight, families, weights, styles);
+            for (const part of parts) {
+                const partW = this._measureMixedWordWidth(part, wordIndex, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing);
+                const spaceW = currentWords.length
+                    ? this._measureMixedWordWidth(' ', wordIndex, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing)
+                    : 0;
+                if (currentWords.length && currentWidth + spaceW + partW > maxWidth) {
+                    lines.push(currentWords.join(' '));
+                    currentWords = [part];
+                    currentWidth = partW;
+                } else {
+                    currentWords.push(part);
+                    currentWidth += spaceW + partW;
+                }
+            }
+            wordIndex += 1;
+        }
+
+        if (currentWords.length) lines.push(currentWords.join(' '));
+        return lines.length ? lines : [''];
+    }
+
+    _wrapTextByWordCountMixed(text, wordsPerLine, maxWidth, letterSpacing, fontSize, defaultFamily, defaultWeight, families, weights, styles) {
+        const words = String(text || '').split(/\s+/).filter(Boolean);
+        if (!words.length || wordsPerLine <= 0) return this._wrapTextMixed(text, maxWidth, letterSpacing, fontSize, defaultFamily, defaultWeight, families, weights, styles, 0);
+
+        const out = [];
+        let globalWordIndex = 0;
+        for (let i = 0; i < words.length; i += wordsPerLine) {
+            const chunkWords = words.slice(i, i + wordsPerLine);
+            const chunkText = chunkWords.join(' ');
+            const wrapped = this._wrapTextMixed(chunkText, maxWidth, letterSpacing, fontSize, defaultFamily, defaultWeight, families, weights, styles, globalWordIndex);
+            out.push(...wrapped);
+            globalWordIndex += chunkWords.length;
+        }
+        return out.length ? out : [''];
+    }
+
     _wrapTextByWordCount(text, wordsPerLine, maxWidth, letterSpacing = 0) {
         const words = String(text || '').split(/\s+/).filter(Boolean);
         if (!words.length || wordsPerLine <= 0) return this._wrapText(text, maxWidth, letterSpacing);
@@ -1523,6 +1619,63 @@ export class CanvasPreview {
         }
         if (chunk) parts.push(chunk);
         return parts.length ? parts : [token];
+    }
+
+    _splitTokenToFitMixed(token, maxWidth, letterSpacing, wordIdx, fontSize, defaultFamily, defaultWeight, families, weights, styles) {
+        if (this._measureMixedWordWidth(token, wordIdx, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing) <= maxWidth) return [token];
+        const parts = [];
+        let chunk = '';
+        for (const ch of token) {
+            const test = chunk + ch;
+            if (!chunk || this._measureMixedWordWidth(test, wordIdx, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing) <= maxWidth) {
+                chunk = test;
+            } else {
+                parts.push(chunk);
+                chunk = ch;
+            }
+        }
+        if (chunk) parts.push(chunk);
+        return parts.length ? parts : [token];
+    }
+
+    _measureMixedLineWidth(words, wordOffset, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing = 0) {
+        if (!words.length) return 0;
+        let total = 0;
+        for (let i = 0; i < words.length; i++) {
+            const idx = wordOffset + i;
+            total += this._measureMixedWordWidth(words[i], idx, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing);
+            if (i < words.length - 1) {
+                total += this._measureMixedWordWidth(' ', idx + 1, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing);
+            }
+        }
+        return total;
+    }
+
+    _measureMixedWordWidth(word, wordIdx, fontSize, defaultFamily, defaultWeight, families, weights, styles, letterSpacing = 0) {
+        const prevFont = this.ctx.font;
+        this.ctx.font = this._mixedWordFont(wordIdx, fontSize, defaultFamily, defaultWeight, families, weights, styles);
+        const width = this._measureTextWidth(word, letterSpacing);
+        this.ctx.font = prevFont;
+        return width;
+    }
+
+    _mixedWordFont(wordIdx, fontSize, defaultFamily, defaultWeight, families, weights, styles) {
+        const family = families[wordIdx % families.length] || defaultFamily;
+        const weight = weights[wordIdx % weights.length] || defaultWeight;
+        const style = styles[wordIdx % styles.length] || 'normal';
+        return `${style} ${weight} ${fontSize}px "${family}", sans-serif`;
+    }
+
+    _parseStyleList(raw, fallback = []) {
+        if (Array.isArray(raw)) {
+            const vals = raw.map(v => String(v || '').trim()).filter(Boolean);
+            return vals.length ? vals : fallback;
+        }
+        if (typeof raw === 'string') {
+            const vals = raw.split(',').map(v => v.trim()).filter(Boolean);
+            return vals.length ? vals : fallback;
+        }
+        return fallback;
     }
 
     _measureTextWidth(text, letterSpacing = 0) {

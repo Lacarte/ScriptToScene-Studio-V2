@@ -493,6 +493,7 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     result["timestamp"] = datetime.now().isoformat()
     result["source_folder"] = segment_result.get(
         "metadata", {}).get("source_folder", "")
+    result["style"] = style_id
 
     job_dir = os.path.join(SCENES_DIR, project_id)
     os.makedirs(job_dir, exist_ok=True)

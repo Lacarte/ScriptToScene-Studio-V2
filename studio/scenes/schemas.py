@@ -20,6 +20,7 @@ class SceneGenerateRequest(BaseModel):
     full_segments: Optional[list] = None
     webhook_url: Optional[str] = None
     project_id: Optional[str] = None
+    parent_id: Optional[str] = None
     source_folder: Optional[str] = None
     aspect_ratio: Optional[str] = None
     model_config = {"extra": "allow"}

@@ -63,6 +63,9 @@ async function assetsPickSceneHistory() {
     const activeStyle = isActive
       ? 'background:rgba(78,205,196,0.06);border-left:3px solid var(--accent)'
       : 'border-left:3px solid transparent';
+    const styleName = typeof _scnStyleLabel === 'function' ? _scnStyleLabel(item.style) : '';
+    const styleColor = typeof _scnStyleColor === 'function' ? _scnStyleColor(item.style) : 'var(--text-muted)';
+    const parentLabel = item.parent_id ? `<span style="color:var(--text-muted);font-size:10px">from ${esc(item.parent_id)}</span>` : '';
 
     return `
     <div class="hist-item" style="cursor:pointer;transition:background 0.15s;${activeStyle}" onclick="assetsSelectSceneProject('${esc(item.project_id)}')" onmouseover="this.style.background='var(--bg-darkest)'" onmouseout="this.style.background='${isActive ? 'rgba(78,205,196,0.06)' : ''}'">
@@ -71,8 +74,9 @@ async function assetsPickSceneHistory() {
           <div style="display:flex;align-items:center;gap:8px">
             <p style="font-size:13px;color:${isActive ? 'var(--accent)' : 'var(--text)'};margin:0;font-weight:${isActive ? '600' : '400'}">${esc(item.project_id)}</p>
             ${isActive ? '<span class="font-mono" style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(78,205,196,0.15);color:var(--accent);letter-spacing:0.05em;flex-shrink:0">ACTIVE</span>' : ''}
+            ${parentLabel}
           </div>
-          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}</p>
+          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}${styleName ? ` · <span style="color:${styleColor}">${esc(styleName)}</span>` : ''}</p>
         </div>
         ${item.source_folder ? `<span class="font-mono" style="font-size:9px;color:var(--text-muted);flex-shrink:0;background:var(--bg-darkest);padding:2px 6px;border-radius:4px">${esc(item.source_folder.length > 30 ? item.source_folder.slice(0, 30) + '...' : item.source_folder)}</span>` : ''}
         <svg width="14" height="14" fill="none" stroke="${isActive ? 'var(--accent)' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>
@@ -171,7 +175,10 @@ function renderAssetsFromScenes() {
 
   // Source label
   const pid = data.project_id ? `${data.project_id} · ` : '';
-  $('#assets-source-label').textContent = `${pid}${scenes.length} scenes`;
+  const _astStyleName = typeof _scnStyleLabel === 'function' ? _scnStyleLabel(data.style) : '';
+  const _astStyleColor = typeof _scnStyleColor === 'function' ? _scnStyleColor(data.style) : 'var(--text-muted)';
+  const styleSuffix = _astStyleName ? ` · <span style="color:${_astStyleColor}">${_astStyleName}</span>` : '';
+  $('#assets-source-label').innerHTML = `${pid}${scenes.length} scenes${styleSuffix}`;
   $('#assets-source-label').style.color = 'var(--accent)';
 
   // Show controls, hide empty state

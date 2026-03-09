@@ -284,11 +284,12 @@
         <span class="nav-label">SEGMENTER</span>
       </button>
       <button class="nav-item" onclick="switchPage('scenes')" data-page="scenes" title="Scene Generator">
-        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
           viewBox="0 0 24 24">
-          <rect x="2" y="3" width="20" height="14" rx="2" />
-          <path d="M8 21h8" />
-          <path d="M12 17v4" />
+          <path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+          <path d="M4 11V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" />
+          <path d="M4 11h16" />
+          <path d="M7 5l3 6" /><path d="M11 5l3 6" /><path d="M15 5l3 6" />
         </svg>
         <span class="nav-label">SCENES</span>
       </button>
@@ -955,6 +956,14 @@
               <!-- Populated by JS from /api/scenes/templates -->
             </div>
             <input type="hidden" id="scenes-style" value="cinematic">
+          </div>
+
+          <!-- Fork per Style -->
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--bg-darkest);border:1px solid var(--border)">
+            <input type="checkbox" id="scenes-fork-style" style="accent-color:var(--accent);cursor:pointer">
+            <label for="scenes-fork-style" style="font-size:11px;color:var(--text-secondary);cursor:pointer;user-select:none">
+              New project per style <span style="color:var(--text-muted)">— generate a separate project for each template so you can compare results</span>
+            </label>
           </div>
 
           <!-- Webhook Toggle -->

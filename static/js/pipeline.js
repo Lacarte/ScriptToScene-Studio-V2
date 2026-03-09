@@ -166,6 +166,14 @@ function _plUpdateStep(event) {
       setModuleBadge('pipeline', event.summary.scenes.project_id);
       localStorage.setItem('sts-editor-scenes', JSON.stringify(event.summary.scenes));
     }
+
+    // Show continue bar to Scene Generator
+    showContinueBar('pipeline-progress', 'scenes', 'Go to Scene Generator →', () => {
+      if (STATE.scenesResult) {
+        _updateScenesSource();
+        renderSceneResults(STATE.scenesResult);
+      }
+    });
     return;
   }
   if (step === 'error') {

@@ -323,6 +323,9 @@ async function scenesSendPreviewToWebhook() {
   $('#scenes-webhook-url').value = webhookUrl;
   localStorage.setItem('sts-scenes-webhook-url', webhookUrl);
 
+  // Clear previous results while waiting for new ones
+  _scnClearResults();
+
   const btn = $('#scenes-send-preview-btn');
   const origHTML = btn.innerHTML;
   btn.disabled = true;
@@ -330,9 +333,12 @@ async function scenesSendPreviewToWebhook() {
 
   try {
     const meta = STATE.scenesSegData.metadata || {};
+    const forkPerStyle = $('#scenes-fork-style')?.checked;
+    const originalId = meta.project_id || '';
     const payload = {
       ..._buildWebhookPayload(STATE.scenesSegData),
-      project_id: meta.project_id || '',
+      project_id: forkPerStyle ? '' : originalId,
+      parent_id: forkPerStyle ? originalId : '',
       source_folder: meta.source_folder || '',
       aspect_ratio: ($('#assets-aspect')?.value || '9:16'),
       webhook_url: webhookUrl,
@@ -797,6 +803,17 @@ async function loadScenesHistory() {
   } catch (e) { console.error('Scenes history:', e); }
 }
 
+function _scnStyleLabel(styleId) {
+  if (!styleId) return '';
+  const tmpl = (_scnTemplates || []).find(t => t.id === styleId);
+  return tmpl ? tmpl.name : styleId;
+}
+
+function _scnStyleColor(styleId) {
+  const tmpl = (_scnTemplates || []).find(t => t.id === styleId);
+  return tmpl ? tmpl.color : 'var(--text-muted)';
+}
+
 function renderScenesHistory(items) {
   const list = $('#scenes-history-list');
   if (!items || !items.length) {
@@ -805,16 +822,23 @@ function renderScenesHistory(items) {
     return;
   }
   $('#scenes-history-count').textContent = items.length + ' project' + (items.length !== 1 ? 's' : '');
-  list.innerHTML = items.map(item => `
+  list.innerHTML = items.map(item => {
+    const styleName = _scnStyleLabel(item.style);
+    const styleColor = _scnStyleColor(item.style);
+    const parentLabel = item.parent_id ? `<span style="color:var(--text-muted);font-size:10px;font-weight:400">from ${esc(item.parent_id)}</span>` : '';
+    return `
     <div class="hist-item" style="cursor:pointer" onclick="loadScenesProject('${esc(item.project_id)}')">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px">
         <div style="flex:1;min-width:0">
-          <p style="font-size:13px;color:var(--text);margin:0">${esc(item.project_id)}</p>
-          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}</p>
+          <div style="display:flex;align-items:center;gap:6px">
+            <p style="font-size:13px;color:var(--text);margin:0">${esc(item.project_id)}</p>
+            ${parentLabel}
+          </div>
+          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}${styleName ? ` · <span style="color:${styleColor}">${esc(styleName)}</span>` : ''}</p>
         </div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 async function loadScenesProject(projectId) {
@@ -839,7 +863,6 @@ async function loadScenesProject(projectId) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-// Init
-loadScenesHistory();
+// Init — load templates first so history can resolve style names/colors
+scenesLoadTemplates().then(() => loadScenesHistory());
 scenesInitWebhookUrl();
-scenesLoadTemplates();

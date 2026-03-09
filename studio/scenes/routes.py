@@ -85,6 +85,9 @@ def generate_scenes(data: SceneGenerateRequest):
         result["project_id"] = project_id
         result["timestamp"] = datetime.now().isoformat()
         result["source_folder"] = data.source_folder or ""
+        result["style"] = style_id
+        if data.parent_id:
+            result["parent_id"] = data.parent_id
 
         job_dir = os.path.join(SCENES_DIR, project_id)
         os.makedirs(job_dir, exist_ok=True)
@@ -336,12 +339,16 @@ def list_scenes():
             try:
                 with open(json_path) as f:
                     data = json.load(f)
-                items.append({
+                item = {
                     "project_id": data.get("project_id", entry),
                     "scene_count": len(data.get("scenes", [])),
                     "timestamp": data.get("timestamp", ""),
                     "source_folder": data.get("source_folder", ""),
-                })
+                    "style": data.get("style", ""),
+                }
+                if data.get("parent_id"):
+                    item["parent_id"] = data["parent_id"]
+                items.append(item)
             except (json.JSONDecodeError, OSError):
                 pass
     items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
