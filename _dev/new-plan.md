@@ -169,3 +169,61 @@ Key findings across all scene projects:
 ### Pending
 - Update `studio/scenes/prompts.py` / n8n system prompt with quality improvements from analysis
 - Schema unification across planner/writer/validator (see Priority Improvements above)
+
+## Prompt.py Main Prompt Re-Analysis (SCENE_GENERATOR_PROMPT)
+
+### Strengths
+1. Strong thematic direction (`core_theme`) reduces literal prompt writing.
+2. Clear scene schema and role taxonomy in one place.
+3. Useful motion guidance for `video` scenes.
+4. Explicit consistency intent (environment, palette, style keywords).
+
+### Main Gaps
+1. Missing hard invalidation/rewrite rules for structural errors.
+- Add explicit rewrite triggers for:
+  - duplicate consecutive shot type,
+  - first/last role mismatch,
+  - type mix outside allowed range,
+  - missing `text_content` for text scenes.
+
+2. Continuity anchor is not enforced.
+- Add required analysis fields:
+  - `character_signature`
+  - `recurring_motif`
+  - `palette_lock`
+- Require appearance thresholds across scenes.
+
+3. Style drift is still likely.
+- Force each `image_prompt` to start with a style prefix (e.g. `photorealistic,` / `anime cel-shaded,`).
+- Lock and reuse the same 2-3 style keywords across all scenes.
+
+4. Video prompts are not constrained enough to feel like clips.
+- Require motion triplet in every video prompt:
+  - subject motion,
+  - environmental motion,
+  - camera motion.
+
+5. Generic language is not blocked.
+- Add forbidden vague phrases unless grounded in concrete subject/action (e.g., “beautiful cinematic scene”, “dramatic atmosphere”, “highly detailed”).
+
+6. Potential schema conflict with downstream validators.
+- Prompt allows `text_accent` + `text`; verify end-to-end contract with validator and renderer.
+
+7. No strict pacing table.
+- Add role-by-role duration ranges by type and enforce before output.
+
+8. No mandatory output self-check.
+- Add final internal checklist before returning JSON:
+  - schema valid,
+  - role/type valid,
+  - duration/type mix valid,
+  - continuity constraints met.
+
+### Priority Upgrade Order
+1. Continuity lock fields + enforcement.
+2. Style lock (prefix + fixed keywords).
+3. Hard structural gates with rewrite requirement.
+4. Motion triplet requirement for all video prompts.
+
+### Implementation Note
+Apply these directly in `studio/scenes/prompts.py` first, then mirror into `_dev/prompts/scene-writer-n8n-v2.txt` to keep prompt sources synchronized.
