@@ -65,6 +65,65 @@ const STORAGE_KEYS = {
 // Maximum history entries per project
 const MAX_HISTORY_ENTRIES = 50;
 
+const LOCAL_CAPTION_PRESETS = {
+    bold_popup: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2 },
+    popup_highlight: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_color: '#4ECDC4' },
+    popup_highlight_box: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_mode: 'box', highlight_color: '#2563EB' },
+    subtitle_bar: { font_family: 'Inter', font_size: 48, font_weight: '600', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 85, animation: 'none', text_transform: 'none', bg_bar: true, shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
+    karaoke: { font_family: 'Bebas Neue', font_size: 72, font_weight: '400', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 70, animation: 'none', text_transform: 'uppercase', highlight: true, shadow_color: '#000000', shadow_blur: 10, shadow_offset_x: 2, shadow_offset_y: 2 },
+    minimal: { font_family: 'DM Sans', font_size: 42, font_weight: '500', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 80, animation: 'none', text_transform: 'none', shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
+    single_line: { font_family: 'Montserrat', font_size: 80, font_weight: '900', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, blend_mode: 'difference', shadow_color: 'rgba(0,0,0,1.00)', shadow_blur: 10, shadow_offset_x: 3, shadow_offset_y: 3, diff_strength: 0.59, overlay_strength: 0.37, overlay_color: '#ffffff', edge_fade_ms: 90 },
+    single_line_highlight: { font_family: 'Montserrat', font_size: 64, font_weight: '900', color: 'rgba(255,255,255,0.35)', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_color: '#FFFFFF' },
+};
+let captionPresetMap = { ...LOCAL_CAPTION_PRESETS };
+
+function prettifyPresetName(presetId) {
+    return String(presetId || '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+async function loadCaptionPresetOptions(selectEl, selectedId = 'bold_popup') {
+    if (!selectEl) return;
+
+    let apiPresets = [];
+    try {
+        const res = await fetch('/api/captions/presets');
+        if (res.ok) apiPresets = await res.json();
+    } catch (_) {}
+
+    const fetchedMap = {};
+    for (const preset of apiPresets) {
+        if (!preset || !preset.id) continue;
+        fetchedMap[preset.id] = preset;
+    }
+    captionPresetMap = { ...LOCAL_CAPTION_PRESETS, ...fetchedMap };
+
+    const seen = new Set();
+    const ordered = [];
+    for (const preset of apiPresets) {
+        if (!preset || !preset.id || seen.has(preset.id)) continue;
+        seen.add(preset.id);
+        ordered.push({ id: preset.id, name: preset.name || prettifyPresetName(preset.id) });
+    }
+    for (const presetId of Object.keys(LOCAL_CAPTION_PRESETS)) {
+        if (seen.has(presetId)) continue;
+        seen.add(presetId);
+        ordered.push({ id: presetId, name: prettifyPresetName(presetId) });
+    }
+
+    selectEl.innerHTML = '';
+    for (const item of ordered) {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.textContent = item.name;
+        selectEl.appendChild(opt);
+    }
+
+    const activeId = captionPresetMap[selectedId] ? selectedId : (ordered[0]?.id || 'bold_popup');
+    selectEl.value = activeId;
+}
+
 // ---------------------------------------------------------------------------
 // Universal Audio Track System
 // ---------------------------------------------------------------------------
@@ -3044,18 +3103,10 @@ function setupCaptionControls() {
         _debouncedServerSave();
     };
 
+    loadCaptionPresetOptions(presetSel, EditorState.captionData?.style?.preset || 'bold_popup');
+
     presetSel?.addEventListener('change', () => {
-        const PRESETS = {
-            bold_popup: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2 },
-            popup_highlight: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_color: '#4ECDC4' },
-            popup_highlight_box: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_mode: 'box', highlight_color: '#2563EB' },
-            subtitle_bar: { font_family: 'Inter', font_size: 48, font_weight: '600', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 85, animation: 'none', text_transform: 'none', bg_bar: true, shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
-            karaoke: { font_family: 'Bebas Neue', font_size: 72, font_weight: '400', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 70, animation: 'none', text_transform: 'uppercase', highlight: true, shadow_color: '#000000', shadow_blur: 10, shadow_offset_x: 2, shadow_offset_y: 2 },
-            minimal: { font_family: 'DM Sans', font_size: 42, font_weight: '500', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 80, animation: 'none', text_transform: 'none', shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
-            single_line: { font_family: 'Montserrat', font_size: 80, font_weight: '900', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, blend_mode: 'difference', shadow_color: 'rgba(0,0,0,1.00)', shadow_blur: 10, shadow_offset_x: 3, shadow_offset_y: 3, diff_strength: 0.59, overlay_strength: 0.37, overlay_color: '#ffffff', edge_fade_ms: 90 },
-            single_line_highlight: { font_family: 'Montserrat', font_size: 64, font_weight: '900', color: 'rgba(255,255,255,0.35)', stroke_color: 'none', stroke_width: 0, background: 'none', position_y: 81, animation: 'hard_cut', text_transform: 'uppercase', letter_spacing: -2, shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_color: '#FFFFFF' },
-        };
-        const p = PRESETS[presetSel.value];
+        const p = captionPresetMap[presetSel.value];
         if (p && EditorState.captionData) {
             EditorState.captionData.style = { ...p, preset: presetSel.value };
             _capSyncStyleUI();

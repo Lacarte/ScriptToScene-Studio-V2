@@ -8,6 +8,17 @@ let _capAudio = null;
 let _capAnimFrame = null;
 let _capActiveIdx = -1;
 
+function _capRenderPresetOptions(selectedId) {
+  const sel = $('#cap-preset-select');
+  if (!sel || !_capPresets.length) return;
+
+  const current = selectedId || sel.value || 'bold_popup';
+  sel.innerHTML = _capPresets.map(p => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+
+  const hasSelected = _capPresets.some(p => p.id === current);
+  sel.value = hasSelected ? current : (_capPresets[0]?.id || 'bold_popup');
+}
+
 // ---- Load alignment data ----
 
 function loadCaptionsFromAlignment() {
@@ -391,7 +402,12 @@ async function loadCaptionProject(projectId) {
 // ---- Init ----
 
 async function _capLoadPresets() {
-  try { _capPresets = await api('/api/captions/presets'); } catch (e) { /* ignore */ }
+  const sel = $('#cap-preset-select');
+  const selectedBefore = sel?.value || 'bold_popup';
+  try {
+    _capPresets = await api('/api/captions/presets');
+    _capRenderPresetOptions(selectedBefore);
+  } catch (e) { /* ignore */ }
 }
 
 _capLoadPresets();
