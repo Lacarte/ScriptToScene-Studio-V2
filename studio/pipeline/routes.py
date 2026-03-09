@@ -247,7 +247,7 @@ def _run_pipeline(job_id):
         # ── Step 4: Scene Generation (webhook) ──────────────────────
         _emit(job_id, {"step": "scenes", "status": "running",
                        "message": "Generating scene scripts..."})
-        scenes_result = _step_scenes(segment_result, config, project_id)
+        scenes_result = _step_scenes(segment_result, config, project_id, job_id)
         results["scenes"] = scenes_result
         scene_count = len(scenes_result.get("scenes", []))
         _emit(job_id, {
@@ -528,57 +528,85 @@ def _step_segment(timing_result, config, project_id):
     return result
 
 
-def _step_scenes(segment_result, config, project_id):
-    """Generate scene scripts via webhook."""
+def _step_scenes(segment_result, config, project_id, job_id=None):
+    """Generate scene scripts via webhook (with chapter support)."""
+    from studio.scenes.chapters import (
+        should_use_chapters, group_into_chapters,
+        build_chapter_system_prompt, merge_chapter_results,
+    )
+    from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
+    from studio.scenes.routes import _call_webhook
+
+    all_segments = segment_result.get("segments", [])
     segments = [
         {"index": s["index"], "words": s["words"]}
-        for s in segment_result.get("segments", [])
-        if not s.get("is_filler")
+        for s in all_segments if not s.get("is_filler")
     ]
 
     if not segments:
         raise RuntimeError("No non-filler segments to generate scenes for")
 
     webhook_url = config.get("webhook_url") or N8N_WEBHOOK_URL
+    script = config.get("text", "")
+    style_id = config.get("style", "cinematic")
+    style_prompt = config.get("style_prompt", "")
 
-    payload = {
-        "script": config.get("text", ""),
-        "style": config.get("style", "cinematic"),
-        "style_prompt": config.get("style_prompt", ""),
-        "segments": segments,
-    }
-
-    # Inject DNA context when blueprint is active
+    # DNA context
+    dna_context = {}
     blueprint = _load_blueprint(config.get("blueprint_path"))
     if blueprint:
         consistency_block, constraints_block = _build_dna_context(blueprint)
         if consistency_block:
-            payload["dna_consistency"] = consistency_block
-        payload["dna_constraints"] = constraints_block
-        # Also store raw consistency for downstream asset prefix injection
-        payload["consistency"] = blueprint.get("consistency", {})
+            dna_context["dna_consistency"] = consistency_block
+        dna_context["dna_constraints"] = constraints_block
+        dna_context["consistency"] = blueprint.get("consistency", {})
         logger.info("Injecting DNA context into scene generation webhook")
 
-    resp = http_requests.post(
-        webhook_url,
-        json=payload,
-        timeout=120,
-    )
+    # ── Chapter-based or single request ──
+    if should_use_chapters(all_segments):
+        chapters = group_into_chapters(all_segments)
+        total_ch = len(chapters)
+        if job_id:
+            _emit(job_id, {"step": "scenes", "status": "running",
+                           "message": f"Splitting into {total_ch} chapters..."})
 
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"Webhook returned {resp.status_code}: {resp.text[:200]}")
+        chapter_results = []
+        analysis = None
 
-    body = resp.text.strip()
-    if not body:
-        raise RuntimeError("Webhook returned empty response")
+        for i, ch in enumerate(chapters):
+            if job_id:
+                _emit(job_id, {"step": "scenes", "status": "running",
+                               "message": f"Chapter {i+1}/{total_ch}: {len(ch['segments'])} segments..."})
 
-    result = json.loads(body)
-    if isinstance(result, list):
-        if not result:
-            raise RuntimeError("Webhook returned empty array")
-        result = result[0]
+            prompt = build_chapter_system_prompt(
+                SCENE_GENERATOR_PROMPT, style_prompt, analysis,
+                i, total_ch, chapters,
+            )
+            payload = {
+                "script": script, "style": style_id,
+                "system_prompt": prompt, "segments": ch["segments"],
+                **dna_context,
+            }
+            result = _call_webhook(webhook_url, payload)
+            chapter_results.append(result)
 
+            if i == 0 and result.get("analysis"):
+                analysis = result["analysis"]
+
+        result = merge_chapter_results(chapter_results)
+    else:
+        # Single request (small script)
+        system_prompt = SCENE_GENERATOR_PROMPT
+        if style_prompt:
+            system_prompt += f"\n\n## STYLE INSTRUCTIONS\n{style_prompt}"
+        payload = {
+            "script": script, "style": style_id,
+            "system_prompt": system_prompt, "segments": segments,
+            **dna_context,
+        }
+        result = _call_webhook(webhook_url, payload)
+
+    # Save result
     result["project_id"] = project_id
     result["timestamp"] = datetime.now().isoformat()
     result["source_folder"] = segment_result.get(

@@ -846,6 +846,7 @@ body.asset-dragging .scene-clip:hover {
     cursor: pointer;
     color: var(--text-muted);
     transition: background 0.15s, border-color 0.15s, color 0.15s;
+    position: relative;
 }
 
 .overlay-card:hover {
@@ -869,6 +870,7 @@ body.asset-dragging .scene-clip:hover {
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
 }
 
 .overlay-card-preview img {
@@ -884,6 +886,25 @@ body.asset-dragging .scene-clip:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+}
+
+.overlay-z-badge {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    pointer-events: none;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
 
 /* ---- Preview Panel (CapCut-style) ---- */

@@ -1154,8 +1154,6 @@
               <button onclick="downloadScenesJSON()" class="action-btn hover-accent">Download</button>
               <button onclick="sendToAssets()" class="action-btn hover-accent"
                 style="border-color:var(--accent);color:var(--accent)">Send to Assets</button>
-              <button onclick="sendToEditor()" class="action-btn hover-accent"
-                style="border-color:var(--accent);color:var(--accent)">Send to Editor</button>
             </div>
           </div>
           <div id="scenes-stats" class="font-mono"
@@ -1525,6 +1523,53 @@
             style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--text-muted);margin-bottom:12px">Features</label>
           <div id="settings-feature-status" style="display:flex;flex-direction:column;gap:6px"></div>
         </section>
+
+        <!-- Danger Zone -->
+        <section class="card p-5 mb-4" style="border:1px solid rgba(239,68,68,0.25)">
+          <label
+            style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:#ef4444;margin-bottom:12px">Danger
+            Zone</label>
+
+          <div
+            style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:8px;background:rgba(239,68,68,0.06)">
+            <div style="flex:1;min-width:0">
+              <span style="font-size:13px;color:var(--text);font-weight:500">Clear All Projects</span>
+              <p style="font-size:11px;color:var(--text-muted);margin-top:2px">Move all project data (TTS, alignments,
+                scenes, assets, captions, music, DNA) to trash folders. This cannot be easily undone.</p>
+            </div>
+            <button onclick="settingsClearAllProjects()"
+              style="flex-shrink:0;margin-left:12px;padding:7px 16px;background:transparent;color:#ef4444;border:1px solid rgba(239,68,68,0.4);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s"
+              onmouseenter="this.style.background='#ef4444';this.style.color='#fff'"
+              onmouseleave="this.style.background='transparent';this.style.color='#ef4444'">Clear All</button>
+          </div>
+        </section>
+
+        <!-- Clear All Confirmation Dialog (hidden) -->
+        <div id="settings-clear-dialog" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center">
+          <div style="background:var(--bg-surface);border:1px solid rgba(239,68,68,0.3);border-radius:14px;padding:28px 24px;max-width:400px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5)">
+            <div style="text-align:center;margin-bottom:20px">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="1.5" style="margin-bottom:12px">
+                <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <h3 style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">Clear All Projects?</h3>
+              <p style="font-size:12px;color:var(--text-muted);line-height:1.5">This will move <strong>all</strong> project folders across every module to trash. Type the characters below to confirm.</p>
+            </div>
+            <div style="text-align:center;margin-bottom:16px">
+              <span id="settings-clear-challenge" style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;letter-spacing:0.3em;color:#ef4444;user-select:none"></span>
+            </div>
+            <input id="settings-clear-input" type="text" autocomplete="off" spellcheck="false"
+              placeholder="Type the characters above"
+              style="width:100%;box-sizing:border-box;padding:10px 14px;background:var(--bg-darkest);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14px;text-align:center;letter-spacing:0.2em;outline:none"
+              oninput="settingsClearInputCheck()">
+            <p id="settings-clear-error" style="display:none;font-size:11px;color:#ef4444;text-align:center;margin-top:8px"></p>
+            <div style="display:flex;gap:10px;margin-top:18px">
+              <button onclick="settingsClearDialogClose()"
+                style="flex:1;padding:10px;background:var(--bg-darkest);color:var(--text-muted);border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Cancel</button>
+              <button id="settings-clear-confirm-btn" disabled onclick="settingsClearConfirm()"
+                style="flex:1;padding:10px;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;opacity:0.4;transition:all 0.15s">Delete All</button>
+            </div>
+          </div>
+        </div>
 
         <!-- About -->
         <section class="card p-5">

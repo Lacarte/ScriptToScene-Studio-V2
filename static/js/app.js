@@ -155,6 +155,71 @@ document.addEventListener('DOMContentLoaded', () => {
   if (soundEl) soundEl.checked = window._stsSoundEnabled;
 });
 
+// ---- Settings: Clear All Projects ----
+let _clearChallenge = '';
+
+function settingsClearAllProjects() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  _clearChallenge = '';
+  for (let i = 0; i < 6; i++) _clearChallenge += chars[Math.random() * chars.length | 0];
+  $('#settings-clear-challenge').textContent = _clearChallenge;
+  $('#settings-clear-input').value = '';
+  $('#settings-clear-error').style.display = 'none';
+  const btn = $('#settings-clear-confirm-btn');
+  btn.disabled = true;
+  btn.style.opacity = '0.4';
+  const dlg = $('#settings-clear-dialog');
+  dlg.style.display = 'flex';
+  setTimeout(() => $('#settings-clear-input').focus(), 100);
+}
+
+function settingsClearDialogClose() {
+  $('#settings-clear-dialog').style.display = 'none';
+  _clearChallenge = '';
+}
+
+function settingsClearInputCheck() {
+  const val = $('#settings-clear-input').value.toUpperCase().trim();
+  const match = val === _clearChallenge;
+  const btn = $('#settings-clear-confirm-btn');
+  btn.disabled = !match;
+  btn.style.opacity = match ? '1' : '0.4';
+}
+
+async function settingsClearConfirm() {
+  const val = $('#settings-clear-input').value.toUpperCase().trim();
+  if (val !== _clearChallenge) {
+    $('#settings-clear-error').textContent = 'Characters do not match. Try again.';
+    $('#settings-clear-error').style.display = 'block';
+    return;
+  }
+  const btn = $('#settings-clear-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Clearing...';
+  try {
+    const resp = await fetch('/api/settings/clear-all-projects', { method: 'DELETE' });
+    const data = await resp.json();
+    settingsClearDialogClose();
+    if (data.status === 'cleared') {
+      toast(`Cleared ${data.count} project folder${data.count !== 1 ? 's' : ''}`, 'success');
+    } else {
+      toast(data.error || 'Failed to clear projects', 'error');
+    }
+  } catch (e) {
+    toast('Failed to clear projects: ' + e.message, 'error');
+  } finally {
+    btn.textContent = 'Delete All';
+    btn.disabled = false;
+  }
+}
+
+// Close dialog on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('#settings-clear-dialog').style.display === 'flex') {
+    settingsClearDialogClose();
+  }
+});
+
 // ---- Auto-Forward (Continue to Next Step) ----
 function showContinueBar(containerId, nextPage, label, setupFn) {
   const container = document.getElementById(containerId);

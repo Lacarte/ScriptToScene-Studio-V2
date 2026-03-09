@@ -469,8 +469,8 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
             loop: bgMusicConfig.loop ?? true
         } : null,
 
-        // Global overlay PNG (applied to entire video)
-        overlay: EditorState.overlay || null
+        // Global overlay PNGs (applied to entire video, stacked bottom → top)
+        overlays: EditorState.overlays.length ? EditorState.overlays : null
     };
 
     console.log('[prepareExportData] Export data ready. Total payload keys:', Object.keys(data));

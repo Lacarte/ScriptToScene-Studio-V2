@@ -1186,7 +1186,7 @@ function _assetsAudioRenderSceneMarkers() {
   if (!container || !_assetsAudio?.duration || !STATE.assetsSceneData?.scenes) return;
 
   const scenes = STATE.assetsSceneData.scenes;
-  const totalDur = _assetsAudio.duration;
+  const audioDur = _assetsAudio.duration;
   const typeColors = { video: '174,58%,55%', image: '263,68%,65%' };
 
   // Build timings from scene durations
@@ -1197,6 +1197,8 @@ function _assetsAudioRenderSceneMarkers() {
     t += dur;
     return { start, end: t, scene: s };
   });
+  // Normalize against scene total so markers always fill the full bar
+  const totalDur = t || 1;
 
   container.innerHTML = timings.map((tm, i) => {
     const left = (tm.start / totalDur * 100).toFixed(2);

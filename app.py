@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -12,7 +13,11 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from loguru import logger
 
-from config import LOG_DIR, STATIC_DIR, ALIGN_DIR, N8N_WEBHOOK_URL, N8N_ASSET_WEBHOOK_URL
+from config import (
+    LOG_DIR, STATIC_DIR, ALIGN_DIR, ALIGN_TRASH_DIR, N8N_WEBHOOK_URL,
+    N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
+    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, TTS_TRASH_DIR, DNA_DIR,
+)
 
 # ---------------------------------------------------------------------------
 # Loguru configuration
@@ -116,6 +121,55 @@ def open_folder():
     else:
         subprocess.Popen(["xdg-open", target])
     return jsonify({"status": "ok"})
+
+
+# ---------------------------------------------------------------------------
+# Settings — Clear all projects
+# ---------------------------------------------------------------------------
+
+# Directories to clear and their corresponding TRASH dirs (None = create TRASH subdir)
+_PROJECT_DIRS = [
+    (ALIGN_DIR, ALIGN_TRASH_DIR),
+    (SCENES_DIR, None),
+    (ASSETS_DIR, None),
+    (SEGMENTER_DIR, None),
+    (CAPTIONS_DIR, None),
+    (MUSIC_DIR, None),
+    (TTS_DIR, TTS_TRASH_DIR),
+    (DNA_DIR, None),
+]
+
+
+@app.route("/api/settings/clear-all-projects", methods=["DELETE"])
+def clear_all_projects():
+    """Move all project folders to TRASH directories."""
+    total = 0
+    errors = []
+    for src_dir, trash_dir in _PROJECT_DIRS:
+        if not os.path.isdir(src_dir):
+            continue
+        # Default trash: a TRASH subfolder inside the source dir
+        if trash_dir is None:
+            trash_dir = os.path.join(src_dir, "TRASH")
+        os.makedirs(trash_dir, exist_ok=True)
+        for entry in os.listdir(src_dir):
+            if entry == "TRASH":
+                continue
+            entry_path = os.path.join(src_dir, entry)
+            if os.path.isdir(entry_path):
+                try:
+                    dest = os.path.join(trash_dir, entry)
+                    if os.path.exists(dest):
+                        shutil.rmtree(dest)
+                    shutil.move(entry_path, dest)
+                    total += 1
+                except Exception as e:
+                    errors.append(f"{entry}: {e}")
+    logger.info("Cleared {} project folders", total)
+    result = {"status": "cleared", "count": total}
+    if errors:
+        result["errors"] = errors
+    return jsonify(result)
 
 
 # ---------------------------------------------------------------------------

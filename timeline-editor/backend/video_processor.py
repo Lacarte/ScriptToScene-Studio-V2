@@ -1445,29 +1445,36 @@ class VideoProcessor:
             self._update_progress(82, "Concatenating scenes and adding audio")
 
             has_captions = bool(self.export_data.get('captions', {}).get('entries'))
-            has_overlay = bool(self.export_data.get('overlay'))
+            # Support stacked overlays array or legacy single overlay string
+            overlay_list = self.export_data.get('overlays') or []
+            if not overlay_list and self.export_data.get('overlay'):
+                overlay_list = [self.export_data['overlay']]
+            has_overlay = bool(overlay_list)
             needs_post = has_captions or has_overlay
 
             if needs_post:
                 concat_output = os.path.join(temp_dir, 'concat_output.mp4')
-                logger.debug("Post-processing needed (overlay={} captions={}) — concat to temp", has_overlay, has_captions)
+                logger.debug("Post-processing needed (overlays={} captions={}) — concat to temp", len(overlay_list), has_captions)
             else:
                 concat_output = output_path
 
             self._concat_scenes(scene_clips, concat_output)
 
-            # Apply global overlay (between scenes and captions)
+            # Apply global overlays sequentially (between scenes and captions)
             if has_overlay:
-                self._update_progress(85, "Applying overlay")
-                overlay_input = concat_output
+                self._update_progress(85, f"Applying {len(overlay_list)} overlay(s)")
+                current_input = concat_output
+                for ov_idx, ov_url in enumerate(overlay_list):
+                    is_last_overlay = (ov_idx == len(overlay_list) - 1)
+                    if is_last_overlay and not has_captions:
+                        ov_output = output_path
+                    else:
+                        ov_output = os.path.join(temp_dir, f'overlay_{ov_idx}.mp4')
+                    self._apply_overlay(current_input, ov_output, ov_url)
+                    current_input = ov_output
+                # Point concat_output to final overlay result for caption burn-in
                 if has_captions:
-                    overlay_output = os.path.join(temp_dir, 'overlay_output.mp4')
-                else:
-                    overlay_output = output_path
-                self._apply_overlay(overlay_input, overlay_output, self.export_data['overlay'])
-                # If captions follow, update concat_output to point to overlay result
-                if has_captions:
-                    concat_output = overlay_output
+                    concat_output = current_input
 
             if has_captions:
                 logger.info("Starting caption burn-in...")

@@ -11,6 +11,10 @@ from loguru import logger
 from config import SCENES_DIR, ALIGN_DIR, N8N_WEBHOOK_URL, generate_project_id
 from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
 from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
+from studio.scenes.chapters import (
+    should_use_chapters, group_into_chapters,
+    build_chapter_system_prompt, merge_chapter_results,
+)
 
 scenes_bp = Blueprint("scenes", __name__)
 
@@ -39,6 +43,7 @@ def generate_scenes():
       - script: full transcript text
       - style: visual style preset
       - segments: array of {index, words} (non-filler segments only)
+      - full_segments: optional full segment list (with fillers) for chapter mode
       - source_folder, aspect_ratio: optional metadata
       - webhook_url: optional override for the webhook URL
     """
@@ -46,81 +51,40 @@ def generate_scenes():
     if not data or not data.get("segments"):
         return jsonify({"error": "No segments data provided"}), 400
 
-    # Build the webhook payload (only what n8n needs)
     style_id = data.get("style", "cinematic")
     template = TEMPLATES_BY_ID.get(style_id, {})
-
-    # Build system prompt: base prompt + style-specific instructions
-    system_prompt = SCENE_GENERATOR_PROMPT
     style_prompt = data.get("style_prompt") or template.get("style_prompt", "")
-    if style_prompt:
-        system_prompt += f"\n\n## STYLE INSTRUCTIONS\n{style_prompt}"
-
-    webhook_payload = {
-        "script": data.get("script", ""),
-        "style": style_id,
-        "system_prompt": system_prompt,
-        "segments": data.get("segments", []),
-    }
-
-    # Forward DNA context if present (injected by pipeline or manual request)
-    if data.get("dna_consistency"):
-        webhook_payload["dna_consistency"] = data["dna_consistency"]
-    if data.get("dna_constraints"):
-        webhook_payload["dna_constraints"] = data["dna_constraints"]
-
     webhook_url = data.get("webhook_url") or N8N_WEBHOOK_URL
+    script = data.get("script", "")
+    dna_context = {}
+    if data.get("dna_consistency"):
+        dna_context["dna_consistency"] = data["dna_consistency"]
+    if data.get("dna_constraints"):
+        dna_context["dna_constraints"] = data["dna_constraints"]
 
     try:
-        resp = http_requests.post(webhook_url, json=webhook_payload, timeout=120)
+        # Check if we should use chapter-based generation
+        full_segments = data.get("full_segments")
+        if full_segments and should_use_chapters(full_segments):
+            result = _generate_with_chapters(
+                script, style_id, style_prompt, full_segments,
+                webhook_url, dna_context,
+            )
+        else:
+            system_prompt = SCENE_GENERATOR_PROMPT
+            if style_prompt:
+                system_prompt += f"\n\n## STYLE INSTRUCTIONS\n{style_prompt}"
+            result = _call_webhook(webhook_url, {
+                "script": script,
+                "style": style_id,
+                "system_prompt": system_prompt,
+                "segments": data.get("segments", []),
+                **dna_context,
+            })
 
-        if resp.status_code != 200:
-            # Extract useful error details from n8n response
-            body_text = resp.text[:500]
-            logger.error("Scene webhook returned {} — {}", resp.status_code, body_text)
-            error_msg = f"Webhook returned {resp.status_code}"
-            try:
-                err_data = resp.json()
-                msg = err_data.get("message", "")
-                hint = err_data.get("hint", "")
-                if msg:
-                    error_msg = msg
-                if hint:
-                    error_msg += f". {hint}"
-            except Exception:
-                if body_text:
-                    error_msg += f": {body_text[:200]}"
-            return jsonify({"error": error_msg}), 502
-
-        # Handle empty or non-JSON responses (common with n8n test webhooks)
-        body = resp.text.strip()
-        if not body:
-            logger.warning("Webhook returned empty body")
-            return jsonify({
-                "error": "Webhook returned an empty response. If using n8n, make sure "
-                         "the workflow is activated and uses the production URL (/webhook/) "
-                         "instead of the test URL (/webhook-test/)."
-            }), 502
-
-        try:
-            result = json.loads(body)
-        except json.JSONDecodeError:
-            logger.error("Webhook returned non-JSON response")
-            return jsonify({
-                "error": f"Webhook returned non-JSON response: {body[:200]}"
-            }), 502
-
-        # n8n returns an array — unwrap the first element
-        if isinstance(result, list):
-            if not result:
-                return jsonify({"error": "Webhook returned an empty array"}), 502
-            result = result[0]
-
-        if not isinstance(result, dict):
-            return jsonify({"error": "Webhook returned unexpected format (expected JSON object)"}), 502
-
-        # Save to disk — use incoming project_id from pipeline, fallback to webhook result, fallback to generated
-        project_id = data.get("project_id") or result.get("pp_randomId") or result.get("project_id") or generate_project_id("pm")
+        # Save to disk
+        project_id = (data.get("project_id") or result.get("pp_randomId")
+                      or result.get("project_id") or generate_project_id("pm"))
         result["project_id"] = project_id
         result["timestamp"] = datetime.now().isoformat()
         result["source_folder"] = data.get("source_folder", "")
@@ -142,6 +106,101 @@ def generate_scenes():
         logger.exception("Unexpected error in scene generation")
         return jsonify({"error": f"Server error: {e}"}), 500
 
+
+# ---------------------------------------------------------------------------
+# Chapter-based generation
+# ---------------------------------------------------------------------------
+
+def _generate_with_chapters(script, style_id, style_prompt, full_segments,
+                            webhook_url, dna_context):
+    """Split segments into chapters and generate scenes per chapter."""
+    chapters = group_into_chapters(full_segments)
+    total = len(chapters)
+    logger.info("Chapter mode: {} chapters from {} segments",
+                total, sum(len(c["segments"]) for c in chapters))
+
+    chapter_results = []
+    analysis = None
+
+    for i, ch in enumerate(chapters):
+        prompt = build_chapter_system_prompt(
+            SCENE_GENERATOR_PROMPT, style_prompt, analysis,
+            i, total, chapters,
+        )
+
+        payload = {
+            "script": script,
+            "style": style_id,
+            "system_prompt": prompt,
+            "segments": ch["segments"],
+            **dna_context,
+        }
+
+        logger.info("Generating Chapter {}/{}: {} segments",
+                     i + 1, total, len(ch["segments"]))
+        result = _call_webhook(webhook_url, payload)
+        chapter_results.append(result)
+
+        # Capture analysis from chapter 1 for subsequent chapters
+        if i == 0 and result.get("analysis"):
+            analysis = result["analysis"]
+
+    return merge_chapter_results(chapter_results)
+
+
+# ---------------------------------------------------------------------------
+# Webhook helpers
+# ---------------------------------------------------------------------------
+
+def _call_webhook(webhook_url, payload, timeout=120):
+    """POST payload to webhook, parse and return the result dict."""
+    resp = http_requests.post(webhook_url, json=payload, timeout=timeout)
+
+    if resp.status_code != 200:
+        body_text = resp.text[:500]
+        logger.error("Scene webhook returned {} — {}", resp.status_code, body_text)
+        error_msg = f"Webhook returned {resp.status_code}"
+        try:
+            err_data = resp.json()
+            msg = err_data.get("message", "")
+            hint = err_data.get("hint", "")
+            if msg:
+                error_msg = msg
+            if hint:
+                error_msg += f". {hint}"
+        except Exception:
+            if body_text:
+                error_msg += f": {body_text[:200]}"
+        raise RuntimeError(error_msg)
+
+    body = resp.text.strip()
+    if not body:
+        raise RuntimeError(
+            "Webhook returned an empty response. If using n8n, make sure "
+            "the workflow is activated and uses the production URL (/webhook/) "
+            "instead of the test URL (/webhook-test/)."
+        )
+
+    try:
+        result = json.loads(body)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"Webhook returned non-JSON response: {body[:200]}")
+
+    # n8n returns an array — unwrap the first element
+    if isinstance(result, list):
+        if not result:
+            raise RuntimeError("Webhook returned an empty array")
+        result = result[0]
+
+    if not isinstance(result, dict):
+        raise RuntimeError("Webhook returned unexpected format (expected JSON object)")
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Other routes
+# ---------------------------------------------------------------------------
 
 @scenes_bp.route("/api/scenes/history")
 def list_scenes():

@@ -41,6 +41,10 @@ export class CanvasPreview {
         // Overlay image cache (keyed by URL)
         this.overlayCache = new Map();
 
+        // Stacked overlays — ordered array of URLs (bottom → top)
+        this.activeOverlays = [];
+        this.activeOverlayImgs = [];
+
         // Disabled tracks set — synced from EditorState
         this.disabledTracks = new Set();
     }
@@ -94,35 +98,64 @@ export class CanvasPreview {
 
     /**
      * Set the global overlay (applied to entire timeline).
-     * Pass null to remove.
+     * Accepts a single URL string (legacy) or an array of URLs (stacked, bottom → top).
+     * Pass null/empty to remove all.
      */
-    setOverlay(url) {
-        this.activeOverlay = url || null;
-        this.activeOverlayImg = null;
-        if (!url) { this.render(); return; }
-
-        // Use cache or load
-        if (this.overlayCache.has(url)) {
-            this.activeOverlayImg = this.overlayCache.get(url);
+    setOverlay(urlOrArray) {
+        // Normalise to array
+        if (!urlOrArray || (Array.isArray(urlOrArray) && urlOrArray.length === 0)) {
+            this.activeOverlays = [];
+            this.activeOverlayImgs = [];
+            // Legacy compat
+            this.activeOverlay = null;
+            this.activeOverlayImg = null;
             this.render();
             return;
         }
-        const img = new Image();
-        img.onload = () => {
-            this.overlayCache.set(url, img);
-            this.activeOverlayImg = img;
-            this.render();
-        };
-        img.onerror = () => console.warn('Failed to load overlay:', url);
-        img.src = url;
+        const urls = Array.isArray(urlOrArray) ? urlOrArray : [urlOrArray];
+        this.activeOverlays = urls;
+        this.activeOverlayImgs = new Array(urls.length).fill(null);
+        // Legacy compat (first overlay)
+        this.activeOverlay = urls[0] || null;
+        this.activeOverlayImg = null;
+
+        let loaded = 0;
+        urls.forEach((url, i) => {
+            if (this.overlayCache.has(url)) {
+                this.activeOverlayImgs[i] = this.overlayCache.get(url);
+                loaded++;
+                if (loaded === urls.length) {
+                    this.activeOverlayImg = this.activeOverlayImgs[0] || null;
+                    this.render();
+                }
+                return;
+            }
+            const img = new Image();
+            img.onload = () => {
+                this.overlayCache.set(url, img);
+                this.activeOverlayImgs[i] = img;
+                loaded++;
+                if (loaded === urls.length) {
+                    this.activeOverlayImg = this.activeOverlayImgs[0] || null;
+                    this.render();
+                }
+            };
+            img.onerror = () => {
+                console.warn('Failed to load overlay:', url);
+                loaded++;
+                if (loaded === urls.length) this.render();
+            };
+            img.src = url;
+        });
     }
 
     /**
-     * Render global overlay on top of current frame (full canvas, preserving alpha)
+     * Render global overlay stack on top of current frame (full canvas, preserving alpha)
      */
     renderOverlay() {
-        if (!this.activeOverlayImg) return;
-        this.ctx.drawImage(this.activeOverlayImg, 0, 0, this.width, this.height);
+        for (const img of this.activeOverlayImgs) {
+            if (img) this.ctx.drawImage(img, 0, 0, this.width, this.height);
+        }
     }
 
     /**

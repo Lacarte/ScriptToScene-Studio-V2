@@ -234,17 +234,25 @@ function _scnGetSelectedTemplate() {
 
 function _buildWebhookPayload(segData) {
   const meta = segData.metadata || {};
-  const segments = (segData.segments || [])
+  const allSegments = segData.segments || [];
+  const segments = allSegments
     .filter(s => !s.is_filler)
     .map(s => ({ index: s.index, words: s.words }));
 
   const template = _scnGetSelectedTemplate();
-  return {
+  const payload = {
     script: meta.transcript || '',
     style: $('#scenes-style').value || meta.style || 'cinematic',
     style_prompt: template.style_prompt || '',
     segments: segments,
   };
+
+  // Include full segments (with fillers) for chapter-based generation
+  if (allSegments.length > 20) {
+    payload.full_segments = allSegments;
+  }
+
+  return payload;
 }
 
 // ---- Generate ----
@@ -328,11 +336,16 @@ async function scenesSendPreviewToWebhook() {
       webhook_url: webhookUrl,
     };
 
+    // Chapter mode may take several minutes for long scripts
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 600_000);
     const res = await fetch('/api/scenes/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Send failed');
 

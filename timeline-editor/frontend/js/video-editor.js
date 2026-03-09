@@ -160,7 +160,7 @@ const EditorState = {
     savedAudioSettings: null,  // Saved audio settings from localStorage
     captionData: null,      // Caption data { captions: [], style: {} }
     captionsEnabled: false, // Whether caption track is visible
-    overlay: null,          // Global overlay URL applied to entire timeline
+    overlays: [],           // Stacked overlay URLs applied to entire timeline (bottom → top)
     selectedExportProfile: 'yt_shorts',  // Export profile ID
     bgMusic: null,          // DEPRECATED — use audioTracks (type: 'music')
     bgMusicElement: null,   // DEPRECATED — use audioTracks[].element
@@ -276,7 +276,7 @@ async function saveProjectToServer() {
         })),
         captions: EditorState.captionData || null,
         captionsEnabled: !!EditorState.captionsEnabled,
-        overlay: EditorState.overlay || null,
+        overlays: EditorState.overlays.length ? EditorState.overlays : null,
         edit_history: (EditorState.editHistory || []).slice(-50),
         history_index: EditorState.historyIndex,
         disabled_tracks: [...(EditorState.disabledTracks || [])]
@@ -1224,7 +1224,7 @@ async function loadProjectFromServer(projectId) {
             history_index: saved.history_index ?? -1,
             disabled_tracks: saved.disabled_tracks || [],
             captionsEnabled: saved.captionsEnabled,
-            overlay: saved.overlay || null,
+            overlays: saved.overlays || (saved.overlay ? [saved.overlay] : []),
             scenes: saved.scenes || []
         };
         sessionStorage.setItem('editor_saved_state', JSON.stringify(extraState));
@@ -1332,11 +1332,14 @@ function _restoreSavedEditorState() {
         }
     }
 
-    // Restore global overlay
-    if (saved.overlay) {
-        EditorState.overlay = saved.overlay;
+    // Restore global overlays (support legacy single string or new array)
+    const savedOverlays = saved.overlays
+        ? (Array.isArray(saved.overlays) ? saved.overlays : [saved.overlays])
+        : (saved.overlay ? [saved.overlay] : []);
+    if (savedOverlays.length) {
+        EditorState.overlays = savedOverlays;
         if (EditorState.preview) {
-            EditorState.preview.setOverlay(saved.overlay);
+            EditorState.preview.setOverlay(savedOverlays);
         }
         updateOverlaysTab();
     }
@@ -5979,18 +5982,35 @@ async function setupOverlaysTab() {
     }
     cardGrid.innerHTML = html;
 
-    // Click handler — set global overlay for entire timeline
+    // Click handler — toggle overlay in/out of stack, or clear all with "None"
     cardGrid.querySelectorAll('.overlay-card[data-overlay]').forEach(card => {
         card.addEventListener('click', () => {
             const url = card.dataset.overlay || null;
-            const old = EditorState.overlay;
-            EditorState.overlay = url;
-            recordEdit(`${url ? 'Set' : 'Remove'} overlay`, null, 'overlay', old, url);
+            const oldStack = [...EditorState.overlays];
+
+            if (!url) {
+                // "None" card — clear all
+                EditorState.overlays = [];
+            } else {
+                const idx = EditorState.overlays.indexOf(url);
+                if (idx >= 0) {
+                    // Already active — remove from stack
+                    EditorState.overlays.splice(idx, 1);
+                } else {
+                    // Add to top of stack
+                    EditorState.overlays.push(url);
+                }
+            }
+
+            recordEdit(
+                EditorState.overlays.length ? `Set ${EditorState.overlays.length} overlay(s)` : 'Remove overlays',
+                null, 'overlays', oldStack, [...EditorState.overlays]
+            );
             updateOverlaysTab();
 
             // Update preview
             if (EditorState.preview) {
-                EditorState.preview.setOverlay(url);
+                EditorState.preview.setOverlay(EditorState.overlays.length ? EditorState.overlays : null);
             }
         });
     });
@@ -6007,9 +6027,27 @@ function updateOverlaysTab() {
     const grid = document.getElementById('ov-grid');
     if (!grid) return;
 
-    const activeOverlay = EditorState.overlay || '';
+    const stack = EditorState.overlays || [];
+
+    // Update stack count label
+    const countEl = document.getElementById('ov-stack-count');
+    if (countEl) countEl.textContent = stack.length ? `(${stack.length} active)` : '';
+
     grid.querySelectorAll('.overlay-card[data-overlay]').forEach(card => {
-        card.classList.toggle('active', card.dataset.overlay === activeOverlay);
+        const url = card.dataset.overlay;
+        const idx = url ? stack.indexOf(url) : -1;
+        card.classList.toggle('active', idx >= 0);
+
+        // Remove old badge
+        card.querySelector('.overlay-z-badge')?.remove();
+
+        // Add z-order badge (1-based, 1 = bottom)
+        if (idx >= 0) {
+            const badge = document.createElement('span');
+            badge.className = 'overlay-z-badge';
+            badge.textContent = idx + 1;
+            card.querySelector('.overlay-card-preview').appendChild(badge);
+        }
     });
 }
 
