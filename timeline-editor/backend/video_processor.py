@@ -1038,44 +1038,65 @@ class VideoProcessor:
 
     def _wrap_caption_text(self, text, font_path, font_size, max_width):
         """Word-wrap caption text to fit within max_width using Pillow for measurement."""
+        def split_token_to_fit(token, measure_fn):
+            if measure_fn(token) <= max_width:
+                return [token]
+            parts = []
+            chunk = ''
+            for ch in token:
+                test = chunk + ch
+                if not chunk or measure_fn(test) <= max_width:
+                    chunk = test
+                else:
+                    parts.append(chunk)
+                    chunk = ch
+            if chunk:
+                parts.append(chunk)
+            return parts or [token]
+
         try:
             pil_font = ImageFont.truetype(font_path, font_size)
         except (OSError, IOError):
-            # Can't measure — estimate ~0.6 chars per pixel at this font size
+            # Can't measure - estimate ~0.6 chars per pixel at this font size
             avg_char_w = font_size * 0.6
             chars_per_line = max(1, int(max_width / avg_char_w))
-            words = text.split()
+            words = str(text).split()
             lines, line = [], ''
             for w in words:
-                test = f"{line} {w}".strip()
-                if len(test) > chars_per_line and line:
-                    lines.append(line)
-                    line = w
-                else:
-                    line = test
+                parts = [w[i:i + chars_per_line] for i in range(0, len(w), chars_per_line)] or [w]
+                for part in parts:
+                    test = f"{line} {part}".strip()
+                    if len(test) > chars_per_line and line:
+                        lines.append(line)
+                        line = part
+                    else:
+                        line = test
             if line:
                 lines.append(line)
             return lines
 
-        words = text.split()
+        def measure(s):
+            bbox = pil_font.getbbox(s)
+            return (bbox[2] - bbox[0]) if bbox else 0
+
+        words = str(text).split()
         lines = []
         current_line = ''
 
         for word in words:
-            test_line = f"{current_line} {word}".strip() if current_line else word
-            bbox = pil_font.getbbox(test_line)
-            text_w = bbox[2] - bbox[0] if bbox else 0
-            if text_w > max_width and current_line:
-                lines.append(current_line)
-                current_line = word
-            else:
-                current_line = test_line
+            word_parts = split_token_to_fit(word, measure)
+            for part in word_parts:
+                test_line = f"{current_line} {part}".strip() if current_line else part
+                if measure(test_line) > max_width and current_line:
+                    lines.append(current_line)
+                    current_line = part
+                else:
+                    current_line = test_line
 
         if current_line:
             lines.append(current_line)
 
         return lines if lines else [text]
-
     def _burn_captions(self, video_path, output_path):
         """Burn caption overlays into the video using FFmpeg drawtext filter."""
         captions = self.export_data.get('captions')
@@ -1565,3 +1586,4 @@ class VideoProcessor:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
         return output_path
+

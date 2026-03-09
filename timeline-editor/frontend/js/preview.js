@@ -1120,29 +1120,36 @@ export class CanvasPreview {
 
         const x = this.width / 2;
 
-        // Single-line mode: wrap only if text exceeds canvas width
+        // Keep caption text inside frame with side-safe padding.
+        const sideSafePx = Math.max(24 * scale, this.width * 0.05);
+        const maxCaptionWidth = Math.max(80, this.width - sideSafePx * 2);
+
+        // Single-line mode: wrap only if text exceeds caption-safe width
         const isSingleLine = animation === 'hard_cut' || style.preset === 'single_line';
         let lines, lineHeight, totalHeight, baseY;
         let renderFontSize = fontSize;
 
         if (isSingleLine) {
-            const maxWidth = this.width * 0.9;
+            const maxWidth = maxCaptionWidth;
             // Set font before measuring
             this.ctx.font = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
-            const measuredWidth = this.ctx.measureText(text).width;
+            const measuredWidth = this._measureTextWidth(text, letterSpacing);
             if (measuredWidth > maxWidth) {
                 const fitScale = maxWidth / Math.max(1, measuredWidth);
                 const minFontSize = fontSize * 0.72;
                 renderFontSize = Math.max(minFontSize, fontSize * fitScale);
                 this.ctx.font = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
             }
-            lines = [text];
+            const finalSingleWidth = this._measureTextWidth(text, letterSpacing);
+            lines = finalSingleWidth > maxWidth
+                ? this._wrapText(text, maxWidth, letterSpacing)
+                : [text];
             lineHeight = renderFontSize * 1.1;
             totalHeight = lines.length * lineHeight;
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
         } else {
-            const maxWidth = this.width * 0.85;
-            lines = this._wrapText(text, maxWidth);
+            const maxWidth = Math.min(this.width * 0.85, maxCaptionWidth);
+            lines = this._wrapText(text, maxWidth, letterSpacing);
             lineHeight = renderFontSize * 1.25;
             totalHeight = lines.length * lineHeight;
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
@@ -1266,7 +1273,7 @@ export class CanvasPreview {
 
                 // Draw solid background box behind text
                 if (bgColor && bgColor !== 'none' && bgColor !== 'transparent') {
-                    const textW = this.ctx.measureText(lines[i]).width;
+                    const textW = this._measureTextWidth(lines[i], letterSpacing);
                     const bx = x - textW / 2 - boxPadX;
                     const by = ly - fontSize / 2 - boxPadY;
                     const bw = textW + boxPadX * 2;
@@ -1294,7 +1301,7 @@ export class CanvasPreview {
                 if (doHighlight) {
                     // Two-pass rendering: shadow pass (full line), then word-by-word color pass
                     const lineWords = lines[i].split(' ');
-                    const fullLineW = this.ctx.measureText(lines[i]).width;
+                    const fullLineW = this._measureTextWidth(lines[i], letterSpacing);
 
                     // Compute word offset within the full caption for this line
                     let wordOffset = 0;
@@ -1316,7 +1323,7 @@ export class CanvasPreview {
 
                     // Pass 2: redraw word-by-word with highlight colors (no shadow)
                     this.ctx.textAlign = 'left';
-                    const spaceW = this.ctx.measureText(' ').width;
+                    const spaceW = this._measureTextWidth(' ', letterSpacing);
                     const boxPad = fontSize * 0.15;
                     const boxRadius = fontSize * 0.12;
                     let drawX = x - fullLineW / 2;
@@ -1325,7 +1332,7 @@ export class CanvasPreview {
                         const globalWordIdx = wordOffset + w;
                         const isActive = globalWordIdx === activeWordIdx;
                         const wordText = lineWords[w];
-                        const wordW = this.ctx.measureText(wordText).width;
+                        const wordW = this._measureTextWidth(wordText, letterSpacing);
 
                         // Box mode: draw colored rectangle behind active word
                         if (isActive && highlightMode === 'box') {
@@ -1370,24 +1377,51 @@ export class CanvasPreview {
     /**
      * Wrap text into lines that fit within maxWidth on the canvas
      */
-    _wrapText(text, maxWidth) {
-        const words = text.split(' ');
-        if (words.length <= 1) return [text];
+    _wrapText(text, maxWidth, letterSpacing = 0) {
+        const words = String(text || '').split(/\s+/).filter(Boolean);
+        if (!words.length) return [''];
 
         const lines = [];
-        let currentLine = words[0];
+        let currentLine = '';
 
-        for (let i = 1; i < words.length; i++) {
-            const testLine = currentLine + ' ' + words[i];
-            if (this.ctx.measureText(testLine).width <= maxWidth) {
-                currentLine = testLine;
-            } else {
-                lines.push(currentLine);
-                currentLine = words[i];
+        for (const rawWord of words) {
+            const wordParts = this._splitTokenToFit(rawWord, maxWidth, letterSpacing);
+            for (const part of wordParts) {
+                const candidate = currentLine ? `${currentLine} ${part}` : part;
+                if (!currentLine || this._measureTextWidth(candidate, letterSpacing) <= maxWidth) {
+                    currentLine = candidate;
+                } else {
+                    lines.push(currentLine);
+                    currentLine = part;
+                }
             }
         }
-        lines.push(currentLine);
+
+        if (currentLine) lines.push(currentLine);
         return lines;
+    }
+
+    _splitTokenToFit(token, maxWidth, letterSpacing = 0) {
+        if (this._measureTextWidth(token, letterSpacing) <= maxWidth) return [token];
+        const parts = [];
+        let chunk = '';
+        for (const ch of token) {
+            const test = chunk + ch;
+            if (!chunk || this._measureTextWidth(test, letterSpacing) <= maxWidth) {
+                chunk = test;
+            } else {
+                parts.push(chunk);
+                chunk = ch;
+            }
+        }
+        if (chunk) parts.push(chunk);
+        return parts.length ? parts : [token];
+    }
+
+    _measureTextWidth(text, letterSpacing = 0) {
+        const width = this.ctx.measureText(text).width;
+        if (!letterSpacing || !text) return width;
+        return width + Math.max(0, (text.length - 1) * letterSpacing);
     }
 
     /**
