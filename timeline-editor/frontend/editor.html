@@ -453,6 +453,31 @@
                         <div id="ov-grid">
                             <div class="fx-section-label">Timeline Overlays <span id="ov-stack-count" style="opacity:0.5;font-weight:400"></span></div>
                             <div id="ov-card-grid" class="overlay-card-grid"></div>
+                            <div class="grain-panel" id="grain-panel">
+                                <div class="fx-section-label" style="margin-top:10px">White Dot Grain</div>
+                                <label class="grain-row">
+                                    <input type="checkbox" id="grain-enabled">
+                                    <span>Enable animated grain</span>
+                                </label>
+                                <div class="grain-grid">
+                                    <label class="grain-field">Opacity
+                                        <input id="grain-opacity" type="range" min="0.00" max="0.50" step="0.01" value="0.16">
+                                        <span id="grain-opacity-val">0.16</span>
+                                    </label>
+                                    <label class="grain-field">Fade In (s)
+                                        <input id="grain-fade-in" type="range" min="0.00" max="1.00" step="0.01" value="0.12">
+                                        <span id="grain-fade-in-val">0.12</span>
+                                    </label>
+                                    <label class="grain-field">Hold (s)
+                                        <input id="grain-hold" type="range" min="0.00" max="2.00" step="0.01" value="0.65">
+                                        <span id="grain-hold-val">0.65</span>
+                                    </label>
+                                    <label class="grain-field">Fade Out (s)
+                                        <input id="grain-fade-out" type="range" min="0.00" max="3.00" step="0.01" value="1.20">
+                                        <span id="grain-fade-out-val">1.20</span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

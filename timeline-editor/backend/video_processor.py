@@ -475,6 +475,65 @@ class VideoProcessor:
         else:
             logger.info("Overlay applied successfully")
 
+    def _is_white_dot_grain_overlay(self, overlay_url):
+        """Return True if overlay URL should use animated white-dot grain pass."""
+        if not overlay_url:
+            return False
+        name = os.path.basename(str(overlay_url)).lower()
+        return name in ("grain-noise.png", "white-dot-grain", "white-dot-grain.png")
+
+    def _apply_white_dot_grain_overlay(self, input_path, output_path, cfg=None):
+        """Apply animated white-dot grain (screen blend + fade envelope)."""
+        cfg = cfg or {}
+        opacity = max(0.0, min(1.0, float(cfg.get('opacity', 0.16))))
+        start = max(0.0, float(cfg.get('start', 0.0)))
+        fade_in = max(0.0, float(cfg.get('fade_in', cfg.get('fadeIn', 0.12))))
+        hold = max(0.0, float(cfg.get('hold', 0.65)))
+        fade_out = max(0.0, float(cfg.get('fade_out', cfg.get('fadeOut', 1.2))))
+        noise_strength = max(0, min(100, int(cfg.get('noise_strength', cfg.get('noiseStrength', 88)))))
+        threshold = max(0, min(255, int(cfg.get('threshold', 246))))
+        fade_out_start = start + fade_in + hold
+
+        envelope = (
+            f"fade=t=in:st={start:.3f}:d={fade_in:.3f}:alpha=1,"
+            f"fade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}:alpha=1"
+        )
+        grain_chain = (
+            f"format=gray,noise=alls={noise_strength}:allf=t+u,"
+            f"eq=contrast=2.0:brightness=-0.05,"
+            f"lutyuv=y='if(gt(val\\,{threshold}),255,0)',"
+            f"format=rgba,colorchannelmixer=aa=1.0,{envelope}"
+        )
+        filter_complex = (
+            f"[1:v]{grain_chain}[grain];"
+            f"[0:v]format=rgba[base];"
+            f"[base][grain]blend=all_mode=screen:all_opacity={opacity:.3f},format={self.pixel_format}[v]"
+        )
+
+        logger.info(
+            "Applying white-dot grain: opacity={} start={} fade_in={} hold={} fade_out={} noise={} threshold={}",
+            opacity, start, fade_in, hold, fade_out, noise_strength, threshold
+        )
+        cmd = [
+            FFMPEG_BIN, '-y',
+            '-i', input_path,
+            '-f', 'lavfi', '-i', f"color=c=black:s={self.width}x{self.height}:r={self.fps}",
+            '-filter_complex', filter_complex,
+            '-map', '[v]',
+            '-map', '0:a?',
+            '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
+            '-pix_fmt', self.pixel_format,
+            '-c:a', 'copy',
+            '-shortest',
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        if result.returncode != 0:
+            logger.error("White-dot grain overlay failed: {}", result.stderr[-700:] if result.stderr else '')
+            shutil.copy2(input_path, output_path)
+        else:
+            logger.info("White-dot grain overlay applied")
+
     def _create_video_from_image_ffmpeg(self, image_path, output_path, duration):
         """Create video from static image using ffmpeg-python"""
         logger.debug("ffmpeg-python: image->video {}s {}", duration, image_path)
@@ -1449,8 +1508,11 @@ class VideoProcessor:
             overlay_list = self.export_data.get('overlays') or []
             if not overlay_list and self.export_data.get('overlay'):
                 overlay_list = [self.export_data['overlay']]
+            grain_cfg = self.export_data.get('grain_overlay') or self.export_data.get('grainOverlay') or {}
+            has_grain_cfg = bool(grain_cfg and grain_cfg.get('enabled'))
+            has_grain_overlay = has_grain_cfg or any(self._is_white_dot_grain_overlay(ov) for ov in overlay_list)
             has_overlay = bool(overlay_list)
-            needs_post = has_captions or has_overlay
+            needs_post = has_captions or has_overlay or has_grain_overlay
 
             if needs_post:
                 concat_output = os.path.join(temp_dir, 'concat_output.mp4')
@@ -1466,15 +1528,24 @@ class VideoProcessor:
                 current_input = concat_output
                 for ov_idx, ov_url in enumerate(overlay_list):
                     is_last_overlay = (ov_idx == len(overlay_list) - 1)
-                    if is_last_overlay and not has_captions:
+                    final_post_step = is_last_overlay and not has_captions and not has_grain_overlay
+                    if final_post_step:
                         ov_output = output_path
                     else:
                         ov_output = os.path.join(temp_dir, f'overlay_{ov_idx}.mp4')
-                    self._apply_overlay(current_input, ov_output, ov_url)
+                    if self._is_white_dot_grain_overlay(ov_url):
+                        self._apply_white_dot_grain_overlay(current_input, ov_output, grain_cfg)
+                    else:
+                        self._apply_overlay(current_input, ov_output, ov_url)
                     current_input = ov_output
-                # Point concat_output to final overlay result for caption burn-in
-                if has_captions:
-                    concat_output = current_input
+                concat_output = current_input
+
+            # Apply grain pass even when no explicit overlay card was selected.
+            if has_grain_cfg and not any(self._is_white_dot_grain_overlay(ov) for ov in overlay_list):
+                self._update_progress(88, "Applying grain overlay")
+                grain_output = os.path.join(temp_dir, 'grain_overlay.mp4') if has_captions else output_path
+                self._apply_white_dot_grain_overlay(concat_output, grain_output, grain_cfg)
+                concat_output = grain_output
 
             if has_captions:
                 logger.info("Starting caption burn-in...")

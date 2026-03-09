@@ -907,6 +907,47 @@ body.asset-dragging .scene-clip:hover {
     box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
 
+.grain-panel {
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-surface);
+}
+
+.grain-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.68rem;
+    color: var(--text);
+    margin-bottom: 8px;
+}
+
+.grain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.grain-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+}
+
+.grain-field input[type="range"] {
+    width: 100%;
+}
+
+.grain-field span {
+    font-family: var(--font-mono);
+    color: var(--text);
+    font-size: 0.62rem;
+}
+
 /* ---- Preview Panel (CapCut-style) ---- */
 .preview-panel {
     grid-column: 3;
@@ -3124,6 +3165,7 @@ body.asset-dragging .scene-clip:hover {
     inset: 0;
     background: var(--bg-darkest);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     z-index: 1000;

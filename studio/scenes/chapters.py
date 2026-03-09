@@ -16,6 +16,7 @@ SILENCE_THRESHOLD = 0.65    # filler duration (s) to consider a chapter break
 ACCUMULATION_TARGET = 15.0  # seconds of speech before seeking a break
 MIN_CHAPTER_SEGMENTS = 5
 MAX_CHAPTER_SEGMENTS = 18
+MAX_CHUNK_SEGMENTS = 8      # max segments per webhook call inside a chapter
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +219,42 @@ def merge_chapter_results(chapter_results):
         "chapters_used": len(chapter_results),
     }
     return merged
+
+
+def chunk_segments(segments, chunk_size=MAX_CHUNK_SEGMENTS):
+    """Split a chapter's segments into smaller webhook-sized chunks."""
+    size = max(1, int(chunk_size or MAX_CHUNK_SEGMENTS))
+    return [segments[i:i + size] for i in range(0, len(segments), size)]
+
+
+def build_script_window(chapters, chapter_idx):
+    """Return a compact script context (prev + current + next chapter text)."""
+    parts = []
+    if chapter_idx > 0:
+        parts.append(chapters[chapter_idx - 1]["combined_text"])
+    parts.append(chapters[chapter_idx]["combined_text"])
+    if chapter_idx < len(chapters) - 1:
+        parts.append(chapters[chapter_idx + 1]["combined_text"])
+    return " ".join(p.strip() for p in parts if p and p.strip())
+
+
+def validate_scene_indexes(result, expected_segments):
+    """Validate that webhook returned scenes exactly for expected segment indexes.
+
+    Returns:
+      (missing_indexes, unexpected_indexes)
+    """
+    expected = {int(s["index"]) for s in expected_segments}
+    scenes = result.get("scenes", []) if isinstance(result, dict) else []
+    got = set()
+    for scene in scenes:
+        try:
+            got.add(int(scene.get("index")))
+        except Exception:
+            continue
+    missing = sorted(expected - got)
+    unexpected = sorted(got - expected)
+    return missing, unexpected
 
 
 # ---------------------------------------------------------------------------

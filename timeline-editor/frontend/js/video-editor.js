@@ -220,6 +220,7 @@ const EditorState = {
     captionData: null,      // Caption data { captions: [], style: {} }
     captionsEnabled: false, // Whether caption track is visible
     overlays: [],           // Stacked overlay URLs applied to entire timeline (bottom → top)
+    grainOverlay: null,     // Optional animated white-dot grain config (export-time only)
     selectedExportProfile: 'yt_shorts',  // Export profile ID
     bgMusic: null,          // DEPRECATED — use audioTracks (type: 'music')
     bgMusicElement: null,   // DEPRECATED — use audioTracks[].element
@@ -227,6 +228,31 @@ const EditorState = {
     storageEnabled: localStorage.getItem('editor_storage_enabled') !== 'false', // localStorage toggle (default ON)
     sessionStorageEnabled: localStorage.getItem('editor_session_storage_enabled') !== 'false' // sessionStorage toggle (default ON)
 };
+
+const DEFAULT_GRAIN_OVERLAY = Object.freeze({
+    enabled: false,
+    opacity: 0.16,
+    start: 0.0,
+    fade_in: 0.12,
+    hold: 0.65,
+    fade_out: 1.20,
+    noise_strength: 88,
+    threshold: 246
+});
+
+function normalizeGrainOverlay(cfg) {
+    const src = cfg || {};
+    return {
+        enabled: !!src.enabled,
+        opacity: Number.isFinite(+src.opacity) ? +src.opacity : DEFAULT_GRAIN_OVERLAY.opacity,
+        start: Number.isFinite(+src.start) ? +src.start : DEFAULT_GRAIN_OVERLAY.start,
+        fade_in: Number.isFinite(+src.fade_in) ? +src.fade_in : (Number.isFinite(+src.fadeIn) ? +src.fadeIn : DEFAULT_GRAIN_OVERLAY.fade_in),
+        hold: Number.isFinite(+src.hold) ? +src.hold : DEFAULT_GRAIN_OVERLAY.hold,
+        fade_out: Number.isFinite(+src.fade_out) ? +src.fade_out : (Number.isFinite(+src.fadeOut) ? +src.fadeOut : DEFAULT_GRAIN_OVERLAY.fade_out),
+        noise_strength: Number.isFinite(+src.noise_strength) ? +src.noise_strength : (Number.isFinite(+src.noiseStrength) ? +src.noiseStrength : DEFAULT_GRAIN_OVERLAY.noise_strength),
+        threshold: Number.isFinite(+src.threshold) ? +src.threshold : DEFAULT_GRAIN_OVERLAY.threshold
+    };
+}
 
 // ============================================================
 // Edit History & Persistence System
@@ -336,6 +362,7 @@ async function saveProjectToServer() {
         captions: EditorState.captionData || null,
         captionsEnabled: !!EditorState.captionsEnabled,
         overlays: EditorState.overlays.length ? EditorState.overlays : null,
+        grain_overlay: normalizeGrainOverlay(EditorState.grainOverlay),
         edit_history: (EditorState.editHistory || []).slice(-50),
         history_index: EditorState.historyIndex,
         disabled_tracks: [...(EditorState.disabledTracks || [])]
@@ -1284,6 +1311,7 @@ async function loadProjectFromServer(projectId) {
             disabled_tracks: saved.disabled_tracks || [],
             captionsEnabled: saved.captionsEnabled,
             overlays: saved.overlays || (saved.overlay ? [saved.overlay] : []),
+            grain_overlay: saved.grain_overlay || saved.grainOverlay || null,
             scenes: saved.scenes || []
         };
         sessionStorage.setItem('editor_saved_state', JSON.stringify(extraState));
@@ -1402,6 +1430,9 @@ function _restoreSavedEditorState() {
         }
         updateOverlaysTab();
     }
+
+    EditorState.grainOverlay = normalizeGrainOverlay(saved.grain_overlay || saved.grainOverlay || EditorState.grainOverlay);
+    updateOverlaysTab();
 
     renderAllAudioTracks();
     renderTimeline();
@@ -5097,7 +5128,8 @@ function getExportData() {
         EditorState.captionsEnabled && !EditorState.disabledTracks.has('caption') ? EditorState.captionData : null,
         profile,
         firstMusicTrack || null,
-        EditorState.overlays || []
+        EditorState.overlays || [],
+        EditorState.grainOverlay || null
     );
 
     console.log('[Editor] Export data prepared:', data.scenes?.length, 'scenes,', data.timeline?.total_duration + 's total');
@@ -5967,6 +5999,7 @@ let _overlaysList = null;
 async function setupOverlaysTab() {
     const grid = document.getElementById('ov-grid');
     if (!grid) return;
+    EditorState.grainOverlay = normalizeGrainOverlay(EditorState.grainOverlay);
 
     // Fetch available overlays from server
     try {
@@ -6037,6 +6070,7 @@ async function setupOverlaysTab() {
     const noScene = document.getElementById('ov-no-scene');
     if (noScene) noScene.style.display = 'none';
 
+    setupGrainControls();
     updateOverlaysTab();
 }
 
@@ -6066,6 +6100,75 @@ function updateOverlaysTab() {
             card.querySelector('.overlay-card-preview').appendChild(badge);
         }
     });
+    syncGrainControlsUI();
+}
+
+function setupGrainControls() {
+    const enabled = document.getElementById('grain-enabled');
+    const opacity = document.getElementById('grain-opacity');
+    const fadeIn = document.getElementById('grain-fade-in');
+    const hold = document.getElementById('grain-hold');
+    const fadeOut = document.getElementById('grain-fade-out');
+    if (!enabled || !opacity || !fadeIn || !hold || !fadeOut) return;
+
+    if (enabled.dataset.bound === '1') return;
+    enabled.dataset.bound = '1';
+
+    const readCfg = () => normalizeGrainOverlay({
+        enabled: enabled.checked,
+        opacity: parseFloat(opacity.value),
+        fade_in: parseFloat(fadeIn.value),
+        hold: parseFloat(hold.value),
+        fade_out: parseFloat(fadeOut.value)
+    });
+    const liveUpdate = () => {
+        EditorState.grainOverlay = readCfg();
+        syncGrainControlsUI();
+    };
+    const commitUpdate = () => {
+        const oldCfg = normalizeGrainOverlay(EditorState.grainOverlay);
+        const nextCfg = readCfg();
+        EditorState.grainOverlay = nextCfg;
+        syncGrainControlsUI();
+        recordEdit('Update grain overlay', 'project', 'grain_overlay', oldCfg, nextCfg);
+    };
+
+    enabled.addEventListener('change', commitUpdate);
+    opacity.addEventListener('input', liveUpdate);
+    fadeIn.addEventListener('input', liveUpdate);
+    hold.addEventListener('input', liveUpdate);
+    fadeOut.addEventListener('input', liveUpdate);
+    opacity.addEventListener('change', commitUpdate);
+    fadeIn.addEventListener('change', commitUpdate);
+    hold.addEventListener('change', commitUpdate);
+    fadeOut.addEventListener('change', commitUpdate);
+
+    syncGrainControlsUI();
+}
+
+function syncGrainControlsUI() {
+    const cfg = normalizeGrainOverlay(EditorState.grainOverlay);
+    const enabled = document.getElementById('grain-enabled');
+    const opacity = document.getElementById('grain-opacity');
+    const fadeIn = document.getElementById('grain-fade-in');
+    const hold = document.getElementById('grain-hold');
+    const fadeOut = document.getElementById('grain-fade-out');
+    const vOpacity = document.getElementById('grain-opacity-val');
+    const vFadeIn = document.getElementById('grain-fade-in-val');
+    const vHold = document.getElementById('grain-hold-val');
+    const vFadeOut = document.getElementById('grain-fade-out-val');
+    if (!enabled || !opacity || !fadeIn || !hold || !fadeOut) return;
+
+    enabled.checked = !!cfg.enabled;
+    opacity.value = cfg.opacity.toFixed(2);
+    fadeIn.value = cfg.fade_in.toFixed(2);
+    hold.value = cfg.hold.toFixed(2);
+    fadeOut.value = cfg.fade_out.toFixed(2);
+
+    if (vOpacity) vOpacity.textContent = cfg.opacity.toFixed(2);
+    if (vFadeIn) vFadeIn.textContent = cfg.fade_in.toFixed(2);
+    if (vHold) vHold.textContent = cfg.hold.toFixed(2);
+    if (vFadeOut) vFadeOut.textContent = cfg.fade_out.toFixed(2);
 }
 
 /**

@@ -531,11 +531,10 @@ def _step_segment(timing_result, config, project_id):
 def _step_scenes(segment_result, config, project_id, job_id=None):
     """Generate scene scripts via webhook (with chapter support)."""
     from studio.scenes.chapters import (
-        should_use_chapters, group_into_chapters,
-        build_chapter_system_prompt, merge_chapter_results,
+        should_use_chapters,
     )
     from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
-    from studio.scenes.routes import _call_webhook
+    from studio.scenes.routes import _call_webhook, generate_with_chapters_chunked
 
     all_segments = segment_result.get("segments", [])
     segments = [
@@ -564,36 +563,19 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
 
     # ── Chapter-based or single request ──
     if should_use_chapters(all_segments):
-        chapters = group_into_chapters(all_segments)
-        total_ch = len(chapters)
-        if job_id:
-            _emit(job_id, {"step": "scenes", "status": "running",
-                           "message": f"Splitting into {total_ch} chapters..."})
-
-        chapter_results = []
-        analysis = None
-
-        for i, ch in enumerate(chapters):
+        def _progress(msg):
             if job_id:
-                _emit(job_id, {"step": "scenes", "status": "running",
-                               "message": f"Chapter {i+1}/{total_ch}: {len(ch['segments'])} segments..."})
+                _emit(job_id, {"step": "scenes", "status": "running", "message": msg})
 
-            prompt = build_chapter_system_prompt(
-                SCENE_GENERATOR_PROMPT, style_prompt, analysis,
-                i, total_ch, chapters,
-            )
-            payload = {
-                "script": script, "style": style_id,
-                "system_prompt": prompt, "segments": ch["segments"],
-                **dna_context,
-            }
-            result = _call_webhook(webhook_url, payload)
-            chapter_results.append(result)
-
-            if i == 0 and result.get("analysis"):
-                analysis = result["analysis"]
-
-        result = merge_chapter_results(chapter_results)
+        result = generate_with_chapters_chunked(
+            script=script,
+            style_id=style_id,
+            style_prompt=style_prompt,
+            full_segments=all_segments,
+            webhook_url=webhook_url,
+            dna_context=dna_context,
+            progress_cb=_progress if job_id else None,
+        )
     else:
         # Single request (small script)
         system_prompt = SCENE_GENERATOR_PROMPT
