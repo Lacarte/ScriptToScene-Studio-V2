@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from datetime import datetime
 
 import requests as http_requests
@@ -223,27 +224,83 @@ def _generate_with_chapters(script, style_id, style_prompt, full_segments,
 # Webhook helpers
 # ---------------------------------------------------------------------------
 
+WEBHOOK_MAX_RETRIES = 3
+WEBHOOK_BASE_DELAY = 2  # seconds — doubles each retry (2s, 4s, 8s)
+WEBHOOK_RETRYABLE_STATUS = {502, 503, 504, 429}
+
+
 def _call_webhook(webhook_url, payload, timeout=180):
-    """POST payload to webhook, parse and return the result dict."""
-    resp = http_requests.post(webhook_url, json=payload, timeout=timeout)
+    """POST payload to webhook with retry + exponential backoff.
 
-    if resp.status_code != 200:
-        body_text = resp.text[:500]
-        logger.error("Scene webhook returned {} — {}", resp.status_code, body_text)
-        error_msg = f"Webhook returned {resp.status_code}"
+    Retries on connection errors, timeouts, and 502/503/504/429 responses.
+    Fails immediately on 4xx (except 429), bad JSON, or empty responses.
+    """
+    last_exc = None
+
+    for attempt in range(1, WEBHOOK_MAX_RETRIES + 1):
         try:
-            err_data = resp.json()
-            msg = err_data.get("message", "")
-            hint = err_data.get("hint", "")
-            if msg:
-                error_msg = msg
-            if hint:
-                error_msg += f". {hint}"
-        except Exception:
-            if body_text:
-                error_msg += f": {body_text[:200]}"
-        raise RuntimeError(error_msg)
+            resp = http_requests.post(webhook_url, json=payload, timeout=timeout)
 
+            # ── Retryable HTTP status ──
+            if resp.status_code in WEBHOOK_RETRYABLE_STATUS:
+                body_text = resp.text[:300]
+                logger.warning(
+                    "Webhook returned {} (attempt {}/{}) — {}",
+                    resp.status_code, attempt, WEBHOOK_MAX_RETRIES, body_text,
+                )
+                last_exc = RuntimeError(
+                    f"Webhook returned {resp.status_code}: {body_text[:200]}"
+                )
+                if attempt < WEBHOOK_MAX_RETRIES:
+                    _backoff(attempt)
+                    continue
+                raise last_exc
+
+            # ── Non-retryable HTTP error (4xx etc.) — fail immediately ──
+            if resp.status_code != 200:
+                body_text = resp.text[:500]
+                logger.error("Scene webhook returned {} — {}", resp.status_code, body_text)
+                error_msg = f"Webhook returned {resp.status_code}"
+                try:
+                    err_data = resp.json()
+                    msg = err_data.get("message", "")
+                    hint = err_data.get("hint", "")
+                    if msg:
+                        error_msg = msg
+                    if hint:
+                        error_msg += f". {hint}"
+                except Exception:
+                    if body_text:
+                        error_msg += f": {body_text[:200]}"
+                raise RuntimeError(error_msg)
+
+            # ── Parse response body ──
+            return _parse_webhook_response(resp)
+
+        except (http_requests.ConnectionError, http_requests.Timeout) as e:
+            logger.warning(
+                "Webhook {} (attempt {}/{}): {}",
+                type(e).__name__, attempt, WEBHOOK_MAX_RETRIES, e,
+            )
+            last_exc = e
+            if attempt < WEBHOOK_MAX_RETRIES:
+                _backoff(attempt)
+                continue
+            raise
+
+    # Should never reach here, but just in case
+    raise last_exc  # type: ignore[misc]
+
+
+def _backoff(attempt):
+    """Sleep with exponential backoff: 2s, 4s, 8s..."""
+    delay = WEBHOOK_BASE_DELAY * (2 ** (attempt - 1))
+    logger.info("Retrying webhook in {}s...", delay)
+    time.sleep(delay)
+
+
+def _parse_webhook_response(resp):
+    """Validate and parse a successful webhook response."""
     body = resp.text.strip()
     if not body:
         raise RuntimeError(
