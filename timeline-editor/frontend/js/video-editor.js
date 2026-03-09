@@ -5045,7 +5045,8 @@ function getExportData() {
         audioConfig,
         EditorState.captionsEnabled && !EditorState.disabledTracks.has('caption') ? EditorState.captionData : null,
         profile,
-        firstMusicTrack || null
+        firstMusicTrack || null,
+        EditorState.overlays || []
     );
 
     console.log('[Editor] Export data prepared:', data.scenes?.length, 'scenes,', data.timeline?.total_duration + 's total');

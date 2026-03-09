@@ -306,7 +306,7 @@ export class ExportAPI {
 /**
  * Prepare comprehensive export data for Python backend
  */
-export function prepareExportData(project, scenes, mediaFolder, audioConfig = null, captionData = null, profile = null, bgMusicConfig = null) {
+export function prepareExportData(project, scenes, mediaFolder, audioConfig = null, captionData = null, profile = null, bgMusicConfig = null, overlays = null) {
     console.log('[prepareExportData] Building export payload...');
     console.log('[prepareExportData] Project:', project?.id, project?.name);
     console.log('[prepareExportData] Scenes:', scenes?.length);
@@ -470,7 +470,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
         } : null,
 
         // Global overlay PNGs (applied to entire video, stacked bottom → top)
-        overlays: EditorState.overlays.length ? EditorState.overlays : null
+        overlays: overlays && overlays.length ? overlays : null
     };
 
     console.log('[prepareExportData] Export data ready. Total payload keys:', Object.keys(data));
