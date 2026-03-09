@@ -12,7 +12,6 @@ class PipelineRunRequest(BaseModel):
     style: str = "cinematic"
     segment_config: Optional[dict] = None
     webhook_url: Optional[str] = None
-    blueprint_path: Optional[str] = None
     style_prompt: Optional[str] = None
 
     model_config = {"extra": "allow"}

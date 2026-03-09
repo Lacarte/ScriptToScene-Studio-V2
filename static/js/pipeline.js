@@ -13,7 +13,6 @@ let _plSteps = [
 ];
 let _plStepStatus = {};
 let _plLog = [];
-let _plBlueprints = [];
 
 // ---- Start Pipeline ----
 
@@ -25,18 +24,12 @@ async function pipelineStart() {
   btn.disabled = true;
   btn.textContent = 'Starting...';
 
-  const blueprintPath = $('#pipeline-blueprint')?.value || '';
-
   const config = {
     text,
     voice: $('#pipeline-voice')?.value || 'af_heart',
     speed: parseFloat($('#pipeline-speed')?.value || '1.0'),
     style: $('#pipeline-style')?.value || 'cinematic',
   };
-
-  if (blueprintPath) {
-    config.blueprint_path = blueprintPath;
-  }
 
   try {
     const res = await api('/api/pipeline/run', {
@@ -248,54 +241,6 @@ function pipelineLoadFromHistory(index) {
   $('#pipeline-text').focus();
 }
 
-// ---- Blueprint Selector ----
-
-async function pipelineLoadBlueprints() {
-  try {
-    const blueprints = await api('/api/dna/blueprints');
-    _plBlueprints = blueprints || [];
-    const sel = $('#pipeline-blueprint');
-    if (!sel) return;
-
-    sel.innerHTML = '<option value="">None</option>';
-    for (const bp of _plBlueprints) {
-      const opt = document.createElement('option');
-      opt.value = bp.path;
-      opt.textContent = bp.niche || bp.name || 'Blueprint';
-      sel.appendChild(opt);
-    }
-
-    // Restore from localStorage or STATE
-    const saved = (typeof STATE !== 'undefined' && STATE.activeBlueprintPath)
-      || localStorage.getItem('sts-active-blueprint');
-    if (saved) {
-      sel.value = saved;
-      _plUpdateBlueprintBadge();
-    }
-
-    sel.addEventListener('change', _plUpdateBlueprintBadge);
-  } catch (e) { /* blueprints API not available yet */ }
-}
-
-function _plUpdateBlueprintBadge() {
-  const sel = $('#pipeline-blueprint');
-  const badge = $('#pipeline-blueprint-badge');
-  const nameEl = $('#pipeline-blueprint-name');
-  if (!sel || !badge || !nameEl) return;
-
-  if (sel.value) {
-    const selectedOpt = sel.options[sel.selectedIndex];
-    nameEl.textContent = 'DNA: ' + (selectedOpt?.textContent || 'Active');
-    badge.style.display = 'inline-flex';
-    localStorage.setItem('sts-active-blueprint', sel.value);
-    if (typeof STATE !== 'undefined') STATE.activeBlueprintPath = sel.value;
-  } else {
-    badge.style.display = 'none';
-    localStorage.removeItem('sts-active-blueprint');
-    if (typeof STATE !== 'undefined') STATE.activeBlueprintPath = null;
-  }
-}
-
 // ---- Random Story ----
 let _plLastStoryIdx = -1;
 function pipelineRandomStory() {
@@ -327,7 +272,7 @@ function _plResetProgress() {
   document.querySelectorAll('#mobile-nav button').forEach(el => el.classList.remove('pipeline-running', 'pipeline-done-scenes'));
 }
 
-['pipeline-text', 'pipeline-voice', 'pipeline-speed', 'pipeline-style', 'pipeline-blueprint'].forEach(id => {
+['pipeline-text', 'pipeline-voice', 'pipeline-speed', 'pipeline-style'].forEach(id => {
   const el = document.getElementById(id);
   if (!el) return;
   const evt = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'number') ? 'input' : 'change';
@@ -336,4 +281,3 @@ function _plResetProgress() {
 
 // Init
 pipelineLoadHistory();
-pipelineLoadBlueprints();

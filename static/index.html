@@ -246,16 +246,6 @@
 
     <!-- Navigation -->
     <div class="flex-1 py-3 flex flex-col gap-0.5">
-      <button class="nav-item" onclick="switchPage('dna')" data-page="dna" title="Viral DNA Analyzer">
-        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          viewBox="0 0 24 24">
-          <path d="M12 2v20" />
-          <path d="M6 6c0 2 2.5 3 6 3s6-1 6-3" />
-          <path d="M6 12c0 2 2.5 3 6 3s6-1 6-3" />
-          <path d="M6 18c0 2 2.5 3 6 3s6-1 6-3" />
-        </svg>
-        <span class="nav-label">DNA</span>
-      </button>
       <button class="nav-item active" onclick="switchPage('pipeline')" data-page="pipeline" title="Pipeline Dashboard">
         <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           viewBox="0 0 24 24">
@@ -413,102 +403,6 @@
   <div id="main-content">
 
     <!-- ========================================================== -->
-    <!-- PAGE: DNA (Viral DNA Analyzer)                             -->
-    <!-- ========================================================== -->
-    <div id="page-dna" class="page">
-      <div class="mx-auto px-6 py-8" style="max-width:780px">
-
-        <!-- Header -->
-        <div class="flex items-center justify-between mb-6">
-          <div>
-            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Viral DNA</h2>
-            <p class="text-sm mt-1" style="color:var(--text-secondary)">Analyze viral videos → extract style DNA → generate blueprints</p>
-          </div>
-        </div>
-
-        <!-- Section A: Niche Input -->
-        <section class="card p-5 mb-4">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-3" style="color:var(--text-muted)">Niche Source</label>
-          <div style="display:flex;gap:10px;align-items:center">
-            <select id="dna-niche-select" class="input-field" style="flex:1;font-size:13px;height:40px">
-              <option value="">Loading niches...</option>
-            </select>
-            <button id="dna-analyze-btn" class="action-btn hover-accent" style="padding:0 20px;height:40px;font-size:13px;font-weight:600;white-space:nowrap" onclick="dnaStartAnalysis()">Analyze</button>
-          </div>
-          <div id="dna-niche-info" style="margin-top:10px;font-size:11px;color:var(--text-muted);display:none"></div>
-        </section>
-
-        <!-- Progress -->
-        <section id="dna-progress" class="card p-5 mb-4" style="display:none">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-4" style="color:var(--text-muted)">Analysis Progress</label>
-          <div id="dna-steps"></div>
-        </section>
-
-        <!-- Section B: Raw Features -->
-        <section id="dna-features-section" class="card p-5 mb-4" style="display:none">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-3" style="color:var(--text-muted)">Raw Features</label>
-          <div id="dna-features-grid" style="display:grid;gap:12px"></div>
-        </section>
-
-        <!-- Section C: DNA Profile -->
-        <section id="dna-profile-section" class="card p-5 mb-4" style="display:none">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-3" style="color:var(--text-muted)">DNA Profile</label>
-          <div id="dna-profile-badges" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"></div>
-          <div id="dna-profile-timing"></div>
-        </section>
-
-        <!-- Section D: Visual Consistency Editor -->
-        <section id="dna-consistency-section" class="card p-5 mb-4" style="display:none">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-3" style="color:var(--text-muted)">Visual Consistency</label>
-          <p style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">These fields are prepended to every scene prompt for consistent characters, settings, and mood.</p>
-
-          <div style="display:flex;flex-direction:column;gap:12px">
-            <div>
-              <label class="block text-[9px] font-bold uppercase tracking-[0.1em] mb-1" style="color:var(--text-muted)">Character</label>
-              <textarea id="dna-con-character" class="input-field" rows="2" placeholder="Describe your main character's appearance (e.g. a tall man in a dark wool coat, short grey hair, scar on left cheek)..." style="width:100%;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
-            </div>
-            <div>
-              <label class="block text-[9px] font-bold uppercase tracking-[0.1em] mb-1" style="color:var(--text-muted)">Setting</label>
-              <textarea id="dna-con-setting" class="input-field" rows="2" placeholder="Environment and textures..." style="width:100%;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
-            </div>
-            <div>
-              <label class="block text-[9px] font-bold uppercase tracking-[0.1em] mb-1" style="color:var(--text-muted)">Mood</label>
-              <textarea id="dna-con-mood" class="input-field" rows="2" placeholder="Atmosphere, lighting, tone..." style="width:100%;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
-            </div>
-          </div>
-
-          <!-- Live Preview -->
-          <div id="dna-con-preview" style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--bg-darkest);border:1px solid var(--border);font-size:11px;font-family:'JetBrains Mono',monospace;line-height:1.6;color:var(--text-secondary);white-space:pre-wrap;display:none"></div>
-
-          <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="action-btn hover-accent" style="font-size:12px;padding:6px 16px" onclick="dnaSaveConsistency()">Save</button>
-          </div>
-        </section>
-
-        <!-- Section E: Blueprint Preview -->
-        <section id="dna-blueprint-section" class="card p-5 mb-4" style="display:none">
-          <div class="flex items-center justify-between mb-3">
-            <label class="block text-[10px] font-bold uppercase tracking-[0.15em]" style="color:var(--text-muted)">Blueprint</label>
-            <div style="display:flex;gap:6px">
-              <button class="action-btn hover-accent" style="font-size:10px;padding:4px 12px" onclick="dnaUseInPipeline()">Use in Pipeline</button>
-              <button class="action-btn" style="font-size:10px;padding:4px 12px;color:var(--text-muted)" onclick="dnaExportBlueprint()">Export JSON</button>
-            </div>
-          </div>
-          <div id="dna-blueprint-cards" style="display:grid;gap:10px"></div>
-        </section>
-
-        <!-- History -->
-        <section class="card p-5">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-3" style="color:var(--text-muted)">Analyzed Niches</label>
-          <div id="dna-history-list" style="max-height:300px;overflow-y:auto">
-            <p style="text-align:center;color:var(--text-muted);font-size:11px;padding:24px 0">Loading...</p>
-          </div>
-        </section>
-
-      </div>
-    </div>
-
-    <!-- ========================================================== -->
     <!-- PAGE: PIPELINE (Auto Pipeline)                             -->
     <!-- ========================================================== -->
     <div id="page-pipeline" class="page active">
@@ -570,19 +464,8 @@
                 <option value="minimal">Minimal</option>
               </select>
             </div>
-            <div>
-              <label class="block text-[9px] font-bold uppercase tracking-[0.1em] mb-1"
-                style="color:var(--text-muted)">DNA Blueprint</label>
-              <select id="pipeline-blueprint" class="input-field" style="width:160px;font-size:12px">
-                <option value="">None</option>
-              </select>
-            </div>
           </div>
           <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
-            <div id="pipeline-blueprint-badge" style="display:none;padding:0 14px;height:40px;background:rgba(78,205,196,0.08);border:1px solid rgba(78,205,196,0.2);border-radius:8px;font-size:11px;color:var(--accent);align-items:center;gap:6px">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-              <span id="pipeline-blueprint-name"></span>
-            </div>
             <button id="pipeline-run-btn" class="action-btn hover-accent"
               style="padding:0 24px;height:40px;font-size:13px;font-weight:600" onclick="pipelineStart()">Run
               Pipeline</button>
@@ -1535,7 +1418,7 @@
             <div style="flex:1;min-width:0">
               <span style="font-size:13px;color:var(--text);font-weight:500">Clear All Projects</span>
               <p style="font-size:11px;color:var(--text-muted);margin-top:2px">Move all project data (TTS, alignments,
-                scenes, assets, captions, music, DNA) to trash folders. This cannot be easily undone.</p>
+                scenes, assets, captions, music) to trash folders. This cannot be easily undone.</p>
             </div>
             <button onclick="settingsClearAllProjects()"
               style="flex-shrink:0;margin-left:12px;padding:7px 16px;background:transparent;color:#ef4444;border:1px solid rgba(239,68,68,0.4);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s"
@@ -1605,7 +1488,6 @@
   <script src="js/editor.js"></script>
   <script src="js/pipeline.js"></script>
   <script src="js/captions.js"></script>
-  <script src="js/dna.js"></script>
 </body>
 
 </html>

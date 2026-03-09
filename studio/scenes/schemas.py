@@ -22,7 +22,4 @@ class SceneGenerateRequest(BaseModel):
     project_id: Optional[str] = None
     source_folder: Optional[str] = None
     aspect_ratio: Optional[str] = None
-    dna_consistency: Optional[dict] = None
-    dna_constraints: Optional[str] = None
-
     model_config = {"extra": "allow"}

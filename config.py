@@ -32,17 +32,14 @@ MODELS_DIR = os.path.join(ROOT_DIR, "models")
 TIMELINE_EDITOR_DIR = os.path.join(ROOT_DIR, "timeline-editor", "frontend")
 BIN_DIR = os.path.join(ROOT_DIR, "bin")
 FONTS_DIR = os.path.join(ROOT_DIR, "assets", "fonts")
-DNA_DIR = os.path.join(OUTPUT_DIR, "dna")
 EDITOR_SAVE_DIR = os.path.join(OUTPUT_DIR, "editor")
 APP_ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
-NICHE_INPUT_DIR = os.path.join(ROOT_DIR, "assets", "niche-analyzer")
-
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
 for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, ASSETS_DIR,
            SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
-           DNA_DIR, EDITOR_SAVE_DIR):
+           EDITOR_SAVE_DIR):
     os.makedirs(_d, exist_ok=True)
 
 # ---------------------------------------------------------------------------

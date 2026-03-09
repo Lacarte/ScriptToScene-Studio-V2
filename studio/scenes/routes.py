@@ -57,11 +57,6 @@ def generate_scenes(data: SceneGenerateRequest):
     style_prompt = data.style_prompt or template.get("style_prompt", "")
     webhook_url = data.webhook_url or N8N_WEBHOOK_URL
     script = data.script
-    dna_context = {}
-    if data.dna_consistency:
-        dna_context["dna_consistency"] = data.dna_consistency
-    if data.dna_constraints:
-        dna_context["dna_constraints"] = data.dna_constraints
 
     segments_raw = [s.model_dump() for s in data.segments]
 
@@ -71,7 +66,7 @@ def generate_scenes(data: SceneGenerateRequest):
         if full_segments and should_use_chapters(full_segments):
             result = _generate_with_chapters(
                 script, style_id, style_prompt, full_segments,
-                webhook_url, dna_context,
+                webhook_url,
             )
         else:
             system_prompt = SCENE_GENERATOR_PROMPT
@@ -82,7 +77,6 @@ def generate_scenes(data: SceneGenerateRequest):
                 "style": style_id,
                 "system_prompt": system_prompt,
                 "segments": segments_raw,
-                **dna_context,
             })
 
         # Save to disk
@@ -115,7 +109,7 @@ def generate_scenes(data: SceneGenerateRequest):
 # ---------------------------------------------------------------------------
 
 def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments,
-                                   webhook_url, dna_context, progress_cb=None):
+                                   webhook_url, progress_cb=None):
     """Generate scenes in chapter mode with digestible payload chunks.
 
     Each chapter is split into small segment batches and validated to ensure
@@ -163,7 +157,6 @@ def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments
                         "total_chapters": total,
                         "chapter_chunk": chunk_idx,
                         "chapter_chunk_total": len(seg_chunks),
-                        **dna_context,
                     }
 
                     if progress_cb:
@@ -214,10 +207,10 @@ def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments
 
 
 def _generate_with_chapters(script, style_id, style_prompt, full_segments,
-                            webhook_url, dna_context):
+                            webhook_url):
     """Backward-compatible wrapper used by /api/scenes/generate."""
     return generate_with_chapters_chunked(
-        script, style_id, style_prompt, full_segments, webhook_url, dna_context
+        script, style_id, style_prompt, full_segments, webhook_url
     )
 
 

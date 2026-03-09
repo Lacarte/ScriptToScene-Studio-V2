@@ -16,7 +16,7 @@ from loguru import logger
 from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
-    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR, EDITOR_SAVE_DIR,
+    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,8 +56,6 @@ from studio.editor import editor_bp
 from studio.pipeline import pipeline_bp
 from studio.captions import captions_bp
 from studio.music import music_bp
-from studio.dna import dna_bp
-
 app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
@@ -67,7 +65,6 @@ app.register_blueprint(editor_bp)
 app.register_blueprint(pipeline_bp)
 app.register_blueprint(captions_bp)
 app.register_blueprint(music_bp)
-app.register_blueprint(dna_bp)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +127,7 @@ def open_folder():
 # Directories whose contents get moved to output/TRASH/<dir_name>/
 _PROJECT_DIRS = [
     ALIGN_DIR, SCENES_DIR, ASSETS_DIR, SEGMENTER_DIR,
-    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, DNA_DIR, EDITOR_SAVE_DIR,
+    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
 ]
 
 

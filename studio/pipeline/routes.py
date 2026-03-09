@@ -23,7 +23,7 @@ from flask import Blueprint, Response, jsonify, request
 from loguru import logger
 
 from config import (
-    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, DNA_DIR,
+    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR,
     N8N_WEBHOOK_URL, generate_project_id,
 )
 from studio.validation import validate_json
@@ -82,7 +82,6 @@ def run_pipeline(data: PipelineRunRequest):
         "style": data.style,
         "segment_config": data.segment_config,
         "webhook_url": data.webhook_url,
-        "blueprint_path": data.blueprint_path,
         "project_id": project_id,
     }
 
@@ -411,84 +410,6 @@ def _step_timing(tts_result, config, project_id):
     return result_data
 
 
-def _load_blueprint(blueprint_path):
-    """Load a blueprint JSON file, return dict or None."""
-    if not blueprint_path or not os.path.isfile(blueprint_path):
-        return None
-    try:
-        with open(blueprint_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to load blueprint {}: {}", blueprint_path, e)
-        return None
-
-
-def _blueprint_to_segment_config(blueprint):
-    """Convert blueprint segmentation rules to segmenter config dict."""
-    seg = blueprint.get("segmentation", {})
-    timing = seg.get("timing", {})
-    return {
-        "target_min": timing.get("min_duration", 1.5),
-        "target_max": timing.get("target_duration", 3.0),
-        "hard_max": timing.get("max_duration", 4.0),
-        "hard_min": timing.get("min_duration", 0.8) * 0.7,
-        "gap_filler": timing.get("pause_threshold", 0.3),
-        "break_weights": seg.get("break_weights"),
-    }
-
-
-def _build_dna_context(blueprint):
-    """Build DNA context strings for scene generation injection."""
-    consistency = blueprint.get("consistency", {})
-    visual = blueprint.get("visual", {})
-    hook = blueprint.get("hook", {})
-    seg = blueprint.get("segmentation", {})
-    timing = seg.get("timing", {})
-
-    # Block 1: Visual consistency
-    parts = []
-    if consistency.get("character"):
-        parts.append(f"CHARACTER: {consistency['character']}")
-    if consistency.get("setting"):
-        parts.append(f"SETTING: {consistency['setting']}")
-    if consistency.get("mood"):
-        parts.append(f"MOOD: {consistency['mood']}")
-
-    consistency_block = ""
-    if parts:
-        consistency_block = (
-            "VISUAL CONSISTENCY — Apply these to EVERY scene prompt you generate:\n"
-            + "\n".join(parts)
-            + "\n\nEvery image_prompt you generate MUST include the character description, "
-            "setting elements, and mood/lighting described above to maintain visual "
-            "consistency across all scenes."
-        )
-
-    # Block 2: Structural DNA constraints
-    palette_str = ", ".join(visual.get("dominant_palette", [])[:5])
-    constraints_block = (
-        f"STYLE DNA CONSTRAINTS:\n"
-        f"- Target scene duration: {timing.get('target_duration', 2.5):.1f}s "
-        f"(range {timing.get('min_duration', 0.8):.1f}–{timing.get('max_duration', 5.0):.1f}s)\n"
-        f"- Scene type mix: {_format_type_mix(visual.get('type_mix', {}))}\n"
-        f"- Motion: {visual.get('motion_level', 'dynamic')} | Color palette: {palette_str}\n"
-        f"- Hook ≤ {hook.get('duration', 2.5):.1f}s, {hook.get('visual_intensity', 'medium')} visual intensity\n"
-        f"- Pacing: fast hook → slower body → accelerating close"
-    )
-
-    return consistency_block, constraints_block
-
-
-def _format_type_mix(mix):
-    """Format type_mix dict for display."""
-    if not mix:
-        return "70% video, 20% image, 10% text"
-    parts = []
-    for k, v in mix.items():
-        parts.append(f"{int(v * 100)}% {k}")
-    return ", ".join(parts)
-
-
 def _step_segment(timing_result, config, project_id):
     """Run segmentation on alignment data."""
     from studio.timing.segmenter import run_segmenter, save_output
@@ -500,13 +421,7 @@ def _step_segment(timing_result, config, project_id):
         "transcript": timing_result.get("transcript", ""),
     }
 
-    # Use blueprint segmentation rules if available, else fall back to manual config
     seg_config = config.get("segment_config")
-    blueprint = _load_blueprint(config.get("blueprint_path"))
-    if blueprint:
-        seg_config = _blueprint_to_segment_config(blueprint)
-        logger.info("Using blueprint segmentation: target={}, break_weights={}",
-                     seg_config.get("target_max"), seg_config.get("break_weights"))
 
     result = run_segmenter(
         timing_result["alignment"],
@@ -548,17 +463,6 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     style_id = config.get("style", "cinematic")
     style_prompt = config.get("style_prompt", "")
 
-    # DNA context
-    dna_context = {}
-    blueprint = _load_blueprint(config.get("blueprint_path"))
-    if blueprint:
-        consistency_block, constraints_block = _build_dna_context(blueprint)
-        if consistency_block:
-            dna_context["dna_consistency"] = consistency_block
-        dna_context["dna_constraints"] = constraints_block
-        dna_context["consistency"] = blueprint.get("consistency", {})
-        logger.info("Injecting DNA context into scene generation webhook")
-
     # ── Chapter-based or single request ──
     if should_use_chapters(all_segments):
         def _progress(msg):
@@ -571,7 +475,6 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
             style_prompt=style_prompt,
             full_segments=all_segments,
             webhook_url=webhook_url,
-            dna_context=dna_context,
             progress_cb=_progress if job_id else None,
         )
     else:
@@ -582,7 +485,6 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
         payload = {
             "script": script, "style": style_id,
             "system_prompt": system_prompt, "segments": segments,
-            **dna_context,
         }
         result = _call_webhook(webhook_url, payload)
 
