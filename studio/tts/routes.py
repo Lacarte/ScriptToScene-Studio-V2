@@ -25,6 +25,8 @@ from flask import Blueprint, Response, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR
+from studio.validation import validate_json
+from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
 from .normalize import (
     normalize_for_tts, clean_for_tts, tts_breathing_blocks,
     format_breathing_blocks, validate_brackets,
@@ -576,17 +578,15 @@ def download_model(model_id):
 
 # --- Generate audio ---
 @tts_bp.route("/api/tts/generate", methods=["POST"])
-def generate():
-    data = request.get_json()
-    model_id = data.get("model", "kokoro")
-    voice = data.get("voice", "af_bella")
-    prompt = data.get("prompt", "")
-    speed = max(0.5, min(2.0, float(data.get("speed", 1.0))))
-    max_silence_ms = max(200, min(1000, int(data.get("max_silence_ms", 500))))
-    blend = data.get("blend")
+@validate_json(TtsGenerateRequest)
+def generate(data: TtsGenerateRequest):
+    model_id = data.model
+    voice = data.voice
+    prompt = data.prompt
+    speed = data.speed
+    max_silence_ms = data.max_silence_ms
+    blend = data.blend
 
-    if not prompt.strip():
-        return jsonify({"error": "Prompt is required"}), 400
     if model_id not in MODELS:
         return jsonify({"error": "Unknown model"}), 404
 
@@ -595,10 +595,10 @@ def generate():
     blend_meta = None
 
     if blend:
-        voice_a = blend.get("voice_a", "")
-        voice_b = blend.get("voice_b", "")
-        ratio = max(0.0, min(1.0, float(blend.get("ratio", 0.5))))
-        method = blend.get("method", "slerp")
+        voice_a = blend.voice_a
+        voice_b = blend.voice_b
+        ratio = blend.ratio
+        method = blend.method
         if method not in ("slerp", "lerp"):
             method = "slerp"
         if voice_a not in VOICES:
@@ -628,7 +628,7 @@ def generate():
     lang = _voice_to_lang(voice)
     logger.info("Generate  \033[1m{}\033[0m | {} | {} chars", model_id, voice_for_metadata, len(prompt))
 
-    skip_clean = data.get("skip_clean", False)
+    skip_clean = data.skip_clean
 
     # Match breathing-block brackets [text] but NOT Kokoro links [word](...)
     pre_blocks = re.findall(r'\[([^\[\]]+)\](?!\()', prompt)
@@ -1195,7 +1195,8 @@ def _background_multivoice_generate(job_id, segments, speed, gap_ms, prompt, bas
 
 
 @tts_bp.route("/api/tts/generate-multivoice", methods=["POST"])
-def generate_multivoice():
+@validate_json(TtsMultivoiceRequest)
+def generate_multivoice(data: TtsMultivoiceRequest):
     """Generate audio with different voices per segment.
 
     Accepts: {
@@ -1206,14 +1207,10 @@ def generate_multivoice():
     Returns: {job_id, status: "chunking", total_chunks} (202)
     Progress via /api/tts/generate-progress/<job_id>
     """
-    data = request.get_json(force=True)
-    segments = data.get("segments", [])
-    gap_ms = max(0, min(2000, int(data.get("gap_ms", 80))))
-    prompt = data.get("prompt", "")
-    speed = max(0.5, min(2.0, float(data.get("speed", 1.0))))
-
-    if not segments:
-        return jsonify({"error": "No segments provided"}), 400
+    segments = [s.model_dump() for s in data.segments]
+    gap_ms = data.gap_ms
+    prompt = data.prompt
+    speed = data.speed
 
     # Validate voices
     for i, seg in enumerate(segments):

@@ -9,6 +9,8 @@ from flask import Blueprint, jsonify, request
 from loguru import logger
 
 from config import APP_ASSETS_DIR, CAPTIONS_DIR, generate_project_id
+from studio.validation import validate_json
+from studio.captions.schemas import CaptionGenerateRequest, CaptionSaveRequest
 
 captions_bp = Blueprint("captions", __name__)
 
@@ -210,7 +212,8 @@ def get_presets():
 
 
 @captions_bp.route("/api/captions/generate", methods=["POST"])
-def generate_captions():
+@validate_json(CaptionGenerateRequest)
+def generate_captions(data: CaptionGenerateRequest):
     """Auto-generate caption groups from alignment data.
 
     JSON body:
@@ -220,18 +223,15 @@ def generate_captions():
       - project_id: optional existing project id
       - source_folder: optional source alignment folder
     """
-    data = request.get_json(silent=True) or {}
-    alignment = data.get("alignment")
-    if not alignment or not isinstance(alignment, list):
-        return jsonify({"error": "No alignment data provided"}), 400
+    alignment = [w.model_dump() for w in data.alignment]
 
     # Blueprint overrides take priority when provided
-    blueprint_caption = data.get("blueprint_caption") or {}
+    blueprint_caption = data.blueprint_caption or {}
     words_per_group = max(2, min(5, int(
         blueprint_caption.get("max_words_per_line")
-        or data.get("words_per_group", 3)
+        or data.words_per_group
     )))
-    preset_id = blueprint_caption.get("style_preset") or data.get("preset", "bold_popup")
+    preset_id = blueprint_caption.get("style_preset") or data.preset
     style = dict(CAPTION_PRESETS.get(preset_id, CAPTION_PRESETS["bold_popup"]))
     style["preset"] = preset_id
 
@@ -240,11 +240,11 @@ def generate_captions():
     if not captions:
         return jsonify({"error": "No captions generated"}), 500
 
-    project_id = data.get("project_id") or generate_project_id("cap")
+    project_id = data.project_id or generate_project_id("cap")
 
     result = {
         "project_id": project_id,
-        "source_folder": data.get("source_folder", ""),
+        "source_folder": data.source_folder or "",
         "style": style,
         "captions": captions,
         "word_count": sum(len(c["words"]) for c in captions),
@@ -264,23 +264,22 @@ def generate_captions():
 
 
 @captions_bp.route("/api/captions/save", methods=["POST"])
-def save_captions():
+@validate_json(CaptionSaveRequest)
+def save_captions(data: CaptionSaveRequest):
     """Save edited captions to disk.
 
     JSON body: full caption project data (with project_id, captions, style).
     """
-    data = request.get_json(silent=True) or {}
-    project_id = data.get("project_id")
-    if not project_id or not data.get("captions"):
-        return jsonify({"error": "Missing project_id or captions"}), 400
+    save_data = data.model_dump(exclude_none=True)
+    save_data["timestamp"] = datetime.now().isoformat()
+    project_id = data.project_id
 
-    data["timestamp"] = datetime.now().isoformat()
     job_dir = os.path.join(CAPTIONS_DIR, project_id)
     os.makedirs(job_dir, exist_ok=True)
     with open(os.path.join(job_dir, "captions.json"), "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(save_data, f, indent=2)
 
-    logger.success("Saved {} captions -> {}", len(data["captions"]), project_id)
+    logger.success("Saved {} captions -> {}", len(data.captions), project_id)
     return jsonify({"status": "saved", "project_id": project_id})
 
 

@@ -10,6 +10,8 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import ASSETS_DIR
+from studio.validation import validate_json
+from .schemas import GrabberStartRequest
 from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
 from .providers.kie_ai import generate_image as kie_ai_generate
 
@@ -61,18 +63,16 @@ _load_jobs_from_disk()
 # ---------------------------------------------------------------------------
 
 @assets_bp.route("/api/assets/grabber/start", methods=["POST"])
-def grabber_start():
+@validate_json(GrabberStartRequest)
+def grabber_start(data: GrabberStartRequest):
     """Initialize a grabber job — prepares prompts for Automa to consume."""
-    data = request.get_json(silent=True)
-    logger.info("grabber_start request: {}", json.dumps(data, default=str)[:1000] if data else "None")
-    if not data or not data.get("scenes"):
-        return jsonify({"error": "No scenes provided"}), 400
+    logger.info("grabber_start request: {} scenes, provider={}", len(data.scenes), data.provider)
 
-    project_id = data.get("project_id", "default")
-    provider = data.get("provider", "midjourney")
-    arguments = data.get("arguments", "-v 7 -ar 9:16")
-    scenes = data.get("scenes", [])
-    consistency = data.get("consistency")  # {character, setting, mood} from blueprint
+    project_id = data.project_id
+    provider = data.provider
+    arguments = data.arguments
+    scenes = [s.model_dump() for s in data.scenes]
+    consistency = data.consistency
 
     grabber_id = f"grab_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{project_id}"
 

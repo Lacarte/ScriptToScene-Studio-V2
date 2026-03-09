@@ -26,6 +26,8 @@ from config import (
     TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, DNA_DIR,
     N8N_WEBHOOK_URL, generate_project_id,
 )
+from studio.validation import validate_json
+from studio.pipeline.schemas import PipelineRunRequest
 
 pipeline_bp = Blueprint("pipeline", __name__)
 
@@ -57,7 +59,8 @@ def _cleanup_old_jobs(max_age_s=600):
 # ===================================================================
 
 @pipeline_bp.route("/api/pipeline/run", methods=["POST"])
-def run_pipeline():
+@validate_json(PipelineRunRequest)
+def run_pipeline(data: PipelineRunRequest):
     """Start the full pipeline.
 
     JSON body:
@@ -68,23 +71,18 @@ def run_pipeline():
       - segment_config: segmenter overrides
       - webhook_url: override n8n URL
     """
-    data = request.get_json(silent=True) or {}
-    text = data.get("text", "").strip()
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
-
     _cleanup_old_jobs()
     project_id = generate_project_id(prefix="pp")
     job_id = uuid.uuid4().hex[:12]
 
     config = {
-        "text": text,
-        "voice": data.get("voice", "af_heart"),
-        "speed": max(0.5, min(2.0, float(data.get("speed", 1.0)))),
-        "style": data.get("style", "cinematic"),
-        "segment_config": data.get("segment_config"),
-        "webhook_url": data.get("webhook_url"),
-        "blueprint_path": data.get("blueprint_path"),
+        "text": data.text.strip(),
+        "voice": data.voice,
+        "speed": data.speed,
+        "style": data.style,
+        "segment_config": data.segment_config,
+        "webhook_url": data.webhook_url,
+        "blueprint_path": data.blueprint_path,
         "project_id": project_id,
     }
 

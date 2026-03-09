@@ -1,3 +1,84 @@
+# Project Roadmap
+
+---
+
+## Phase 1 — Lock the Door (Week 1)
+Goal: Prevent unauthorized access and credit burn
+
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 1 | API key auth middleware — shared key in .env, @app.before_request | 30 min | Blocks unauthorized access to all 76 routes |
+| 2 | Flask-Limiter on TTS, export, image gen routes | 20 min | Prevents unlimited credit burn |
+| 3 | Fix CORS — restrict to known origins | 15 min | Blocks cross-origin abuse |
+| 4 | Remove .env from repo, add .env.example | 15 min | Protects API keys |
+
+Exit criteria: No public endpoint, rate-limited expensive ops, secrets secured.
+
+## Phase 2 — Stop Silent Failures (Weeks 2–3)
+Goal: Make the pipeline resilient and debuggable
+
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 5 | Webhook retry — n8n calls with 3 retries + exponential backoff | 30 min | Scene generation stops failing silently |
+| 6 | Image download retry + error propagation in Asset Pipeline | 1 hr | Asset pipeline stops losing images |
+| 7 | Export error recovery — clean up orphaned jobs, report failures | 1 hr | Users know when export fails and why |
+| 8 | Input validation (Pydantic) on top 10 routes | 2–3 hrs | Rejects bad data at the boundary |
+| 9 | Path traversal / subprocess injection hardening | 1 hr | Closes medium-severity security gaps |
+
+Exit criteria: No silent failures, bad input rejected, security holes patched.
+
+## Phase 3 — Prove It Works (Weeks 3–4)
+Goal: Automated quality gate, catch regressions
+
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 10 | Pytest for TTS normalization (contractions, dates, units, ordinals) | 1 hr | Catches 80% of regressions in most complex module |
+| 11 | Pytest for Segmentation (filler detection, duration targets, chapter breaks) | 1 hr | Second most logic-dense module |
+| 12 | Integration tests for core API routes (project CRUD, pipeline trigger) | 2 hrs | Validates happy paths |
+| 13 | CI pipeline — GitHub Actions: ruff lint + pytest on push | 1 hr | Automated quality gate |
+
+Exit criteria: Core logic tested, CI blocks broken commits.
+
+## Phase 4 — Make It Deployable (Weeks 4–5)
+Goal: Anyone can run it, state survives restarts
+
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 14 | Dockerfile + docker-compose | 30 min | Reproducible single-command setup |
+| 15 | Persistent job state — move in-memory dicts to SQLite or Redis | 2–3 hrs | Jobs survive server restart |
+| 16 | CSP headers + HTTPS config | 30 min | Closes remaining security items |
+| 17 | README with setup instructions, env vars, architecture diagram | 1 hr | Others can onboard |
+
+Exit criteria: docker compose up works, state persists, documented.
+
+## Phase 5 — Production Polish (Weeks 6–8)
+Goal: Monitoring, full auth, operational maturity
+
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 18 | Sentry or equivalent error tracking | 1 hr | Know when things break in the wild |
+| 19 | Metrics / health endpoint | 1 hr | Uptime monitoring |
+| 20 | Full user auth (JWT or session-based) replacing API key | 3–4 hrs | Multi-user support |
+| 21 | SQLite migration from JSON file storage | 3–4 hrs | Eliminates race conditions |
+| 22 | Music module hardening — duration validation, metadata | 1 hr | Completes weakest module |
+| 23 | DNA Analysis — confidence scores, validation | 2 hrs | Completes analysis pipeline |
+
+Exit criteria: Production-grade — monitored, multi-user, persistent, fully tested.
+
+### Summary
+
+| Phase | Focus | Timeline | Score After |
+|-------|-------|----------|-------------|
+| 1 — Lock the Door | Security | Week 1 | ~70% |
+| 2 — Stop Silent Failures | Reliability | Weeks 2–3 | ~75% |
+| 3 — Prove It Works | Testing & CI | Weeks 3–4 | ~80% |
+| 4 — Make It Deployable | Deployment | Weeks 4–5 | ~85% |
+| 5 — Production Polish | Ops & scale | Weeks 6–8 | ~95% |
+
+Each phase builds on the previous one and delivers standalone value. Phase 1–2 gets you to "shareable demo," Phase 1–4 gets you to "beta," and all five gets you to production-grade.
+
+---
+
 # Plan: Add Kie AI Provider + Midjourney --cref Character Chaining
 
 ---

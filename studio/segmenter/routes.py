@@ -8,12 +8,15 @@ from flask import Blueprint, jsonify, request
 from loguru import logger
 
 from config import SEGMENTER_DIR
+from studio.validation import validate_json
+from studio.segmenter.schemas import SegmenterRunRequest
 
 segmenter_bp = Blueprint("segmenter", __name__)
 
 
 @segmenter_bp.route("/api/segmenter/run", methods=["POST"])
-def segment_alignment():
+@validate_json(SegmenterRunRequest)
+def segment_alignment(data: SegmenterRunRequest):
     """Run the segmenter on alignment data.
 
     Accepts JSON body:
@@ -24,24 +27,21 @@ def segment_alignment():
     """
     from studio.timing.segmenter import run_segmenter, save_output
 
-    data = request.get_json(silent=True) or {}
-    alignment = data.get("alignment")
-    if not alignment:
-        return jsonify({"error": "No alignment data provided"}), 400
+    alignment = [w.model_dump() for w in data.alignment]
 
     metadata = {
-        "project_id": data.get("project_id", ""),
-        "source_folder": data.get("source_folder", ""),
-        "style": data.get("style", ""),
-        "aspect_ratio": data.get("aspect_ratio", ""),
-        "transcript": data.get("transcript", ""),
+        "project_id": data.project_id,
+        "source_folder": data.source_folder,
+        "style": data.style,
+        "aspect_ratio": data.aspect_ratio,
+        "transcript": data.transcript,
     }
-    config = data.get("config")
+    config = data.config
 
     result = run_segmenter(alignment, config, metadata)
 
     # Save to disk
-    should_save = data.get("save", True)
+    should_save = data.save
     if should_save:
         project = metadata.get("source_folder") or "untitled"
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")

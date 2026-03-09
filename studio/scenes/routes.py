@@ -10,6 +10,8 @@ from flask import Blueprint, jsonify, request
 from loguru import logger
 
 from config import SCENES_DIR, ALIGN_DIR, N8N_WEBHOOK_URL, generate_project_id
+from studio.validation import validate_json
+from studio.scenes.schemas import SceneGenerateRequest
 from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
 from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
 from studio.scenes.chapters import (
@@ -38,7 +40,8 @@ def get_webhook_url():
 
 
 @scenes_bp.route("/api/scenes/generate", methods=["POST"])
-def generate_scenes():
+@validate_json(SceneGenerateRequest)
+def generate_scenes(data: SceneGenerateRequest):
     """Forward segmented data to n8n webhook for AI scene generation.
 
     Accepts JSON body:
@@ -49,24 +52,22 @@ def generate_scenes():
       - source_folder, aspect_ratio: optional metadata
       - webhook_url: optional override for the webhook URL
     """
-    data = request.get_json(silent=True)
-    if not data or not data.get("segments"):
-        return jsonify({"error": "No segments data provided"}), 400
-
-    style_id = data.get("style", "cinematic")
+    style_id = data.style
     template = TEMPLATES_BY_ID.get(style_id, {})
-    style_prompt = data.get("style_prompt") or template.get("style_prompt", "")
-    webhook_url = data.get("webhook_url") or N8N_WEBHOOK_URL
-    script = data.get("script", "")
+    style_prompt = data.style_prompt or template.get("style_prompt", "")
+    webhook_url = data.webhook_url or N8N_WEBHOOK_URL
+    script = data.script
     dna_context = {}
-    if data.get("dna_consistency"):
-        dna_context["dna_consistency"] = data["dna_consistency"]
-    if data.get("dna_constraints"):
-        dna_context["dna_constraints"] = data["dna_constraints"]
+    if data.dna_consistency:
+        dna_context["dna_consistency"] = data.dna_consistency
+    if data.dna_constraints:
+        dna_context["dna_constraints"] = data.dna_constraints
+
+    segments_raw = [s.model_dump() for s in data.segments]
 
     try:
         # Check if we should use chapter-based generation
-        full_segments = data.get("full_segments")
+        full_segments = data.full_segments
         if full_segments and should_use_chapters(full_segments):
             result = _generate_with_chapters(
                 script, style_id, style_prompt, full_segments,
@@ -80,16 +81,16 @@ def generate_scenes():
                 "script": script,
                 "style": style_id,
                 "system_prompt": system_prompt,
-                "segments": data.get("segments", []),
+                "segments": segments_raw,
                 **dna_context,
             })
 
         # Save to disk
-        project_id = (data.get("project_id") or result.get("pp_randomId")
+        project_id = (data.project_id or result.get("pp_randomId")
                       or result.get("project_id") or generate_project_id("pm"))
         result["project_id"] = project_id
         result["timestamp"] = datetime.now().isoformat()
-        result["source_folder"] = data.get("source_folder", "")
+        result["source_folder"] = data.source_folder or ""
 
         job_dir = os.path.join(SCENES_DIR, project_id)
         os.makedirs(job_dir, exist_ok=True)
