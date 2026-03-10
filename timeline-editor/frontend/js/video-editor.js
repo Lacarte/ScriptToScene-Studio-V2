@@ -3052,28 +3052,61 @@ function updateProjectInfo() {
         elements.totalTime.textContent = formatTimecode(displayTotalDuration);
     }
 
-    // Show export-zip button when a project is loaded
-    const zipBtn = document.getElementById('export-zip-btn');
-    if (zipBtn) zipBtn.style.display = EditorState.project?.id ? '' : 'none';
+    // Show share button when a project is loaded
+    const shareBtn = document.getElementById('project-share-btn');
+    if (shareBtn) shareBtn.style.display = EditorState.project?.id ? '' : 'none';
 }
 
-/**
- * Export the current project as a ZIP file (download)
- */
-async function exportProjectZip() {
+// ---------------------------------------------------------------------------
+// Project Share Dialog (Export ZIP / Import ZIP / Open Folder)
+// ---------------------------------------------------------------------------
+
+function openShareDialog() {
+    const modal = document.getElementById('project-share-modal');
+    if (!modal) return;
+
+    // Populate project info
+    const nameEl = document.getElementById('share-project-name');
+    const metaEl = document.getElementById('share-project-meta');
+    if (nameEl) nameEl.textContent = EditorState.project?.name || EditorState.project?.id || '';
+    if (metaEl) metaEl.textContent = `${EditorState.scenes.length} scenes · ${formatTimestamp(getTotalDuration())}`;
+
+    modal.classList.add('active');
+}
+
+function closeShareDialog() {
+    document.getElementById('project-share-modal')?.classList.remove('active');
+}
+
+function _setShareBtnLoading(btn, loading) {
+    if (!btn) return;
+    if (loading) {
+        btn.dataset.busy = '1';
+        btn.style.opacity = '0.6';
+        btn.style.pointerEvents = 'none';
+        const label = btn.querySelector('div > div:first-child');
+        if (label) label.dataset.origText = label.textContent;
+    } else {
+        delete btn.dataset.busy;
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
+        const label = btn.querySelector('div > div:first-child');
+        if (label && label.dataset.origText) {
+            label.textContent = label.dataset.origText;
+            delete label.dataset.origText;
+        }
+    }
+}
+
+async function shareExportZip() {
     const pid = EditorState.project?.id;
     if (!pid) return;
 
-    const btn = document.getElementById('export-zip-btn');
-    if (!btn || btn.dataset.busy) return;
-    btn.dataset.busy = '1';
-
-    // Save original icon, replace with spinner
-    const origHTML = btn.innerHTML;
-    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>`;
-    btn.style.opacity = '0.6';
-    btn.style.pointerEvents = 'none';
-    showToast('Compressing project...', 'info');
+    const btn = document.getElementById('share-export-zip');
+    if (btn?.dataset.busy) return;
+    _setShareBtnLoading(btn, true);
+    const label = btn?.querySelector('div > div:first-child');
+    if (label) label.textContent = 'Compressing...';
 
     try {
         const res = await fetch(`/api/editor/export-zip/${encodeURIComponent(pid)}`);
@@ -3091,14 +3124,79 @@ async function exportProjectZip() {
         a.remove();
         URL.revokeObjectURL(url);
         showToast(`Project ZIP downloaded (${(blob.size / 1024 / 1024).toFixed(1)} MB)`, 'success');
+        closeShareDialog();
     } catch (e) {
         showToast('ZIP export failed: ' + e.message, 'error');
     } finally {
-        btn.innerHTML = origHTML;
-        btn.style.opacity = '';
-        btn.style.pointerEvents = '';
-        delete btn.dataset.busy;
+        _setShareBtnLoading(btn, false);
     }
+}
+
+function shareImportZip() {
+    const fileInput = document.getElementById('share-import-file');
+    if (!fileInput) return;
+    fileInput.value = '';
+    fileInput.click();
+}
+
+async function _handleImportZipFile(file) {
+    if (!file) return;
+
+    const btn = document.getElementById('share-import-zip');
+    _setShareBtnLoading(btn, true);
+    const label = btn?.querySelector('div > div:first-child');
+    if (label) label.textContent = 'Importing...';
+
+    try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch('/api/editor/import-zip', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Import failed');
+        showToast(`Project "${data.project_id}" imported (${data.imported_files} files)`, 'success');
+        closeShareDialog();
+
+        // Offer to load the imported project
+        if (confirm(`Load imported project "${data.project_id}"?`)) {
+            loadProjectFromServer(data.project_id);
+        }
+    } catch (e) {
+        showToast('ZIP import failed: ' + e.message, 'error');
+    } finally {
+        _setShareBtnLoading(btn, false);
+    }
+}
+
+async function shareOpenFolder() {
+    const pid = EditorState.project?.id;
+    if (!pid) return;
+    try {
+        const res = await fetch(`/api/editor/open-folder/${encodeURIComponent(pid)}`, { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed');
+        }
+        closeShareDialog();
+    } catch (e) {
+        showToast('Could not open folder: ' + e.message, 'error');
+    }
+}
+
+function setupShareDialog() {
+    document.getElementById('project-share-btn')?.addEventListener('click', openShareDialog);
+    document.getElementById('close-share-modal')?.addEventListener('click', closeShareDialog);
+    document.getElementById('share-export-zip')?.addEventListener('click', shareExportZip);
+    document.getElementById('share-import-zip')?.addEventListener('click', shareImportZip);
+    document.getElementById('share-open-folder')?.addEventListener('click', shareOpenFolder);
+    document.getElementById('share-import-file')?.addEventListener('change', (e) => {
+        _handleImportZipFile(e.target.files?.[0]);
+    });
+
+    // Close on backdrop click
+    const modal = document.getElementById('project-share-modal');
+    modal?.addEventListener('click', (e) => {
+        if (e.target === modal) closeShareDialog();
+    });
 }
 
 /**
@@ -4194,8 +4292,8 @@ function setupEventListeners() {
     document.getElementById('undo-btn')?.addEventListener('click', undoEdit);
     document.getElementById('redo-btn')?.addEventListener('click', redoEdit);
 
-    // Export ZIP
-    document.getElementById('export-zip-btn')?.addEventListener('click', exportProjectZip);
+    // Project share dialog
+    setupShareDialog();
 
     // History dropdown
     setupHistoryDropdown();

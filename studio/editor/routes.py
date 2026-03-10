@@ -326,6 +326,131 @@ def export_project_zip(project_id):
     )
 
 
+@editor_bp.route("/api/editor/import-zip", methods=["POST"])
+def import_project_zip():
+    """Import a project from an uploaded ZIP file."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    zfile = request.files["file"]
+    if not zfile.filename or not zfile.filename.lower().endswith(".zip"):
+        return jsonify({"error": "File must be a .zip"}), 400
+
+    try:
+        data = zfile.read()
+        zio = io.BytesIO(data)
+        with zipfile.ZipFile(zio, "r") as zf:
+            names = zf.namelist()
+            if not names:
+                return jsonify({"error": "ZIP is empty"}), 400
+
+            # Detect project_id from manifest or top-level folder
+            project_id = None
+            manifest = None
+            for n in names:
+                if n.endswith("manifest.json"):
+                    manifest = json.loads(zf.read(n))
+                    project_id = manifest.get("project_id")
+                    break
+            if not project_id:
+                # Infer from first path component
+                project_id = names[0].split("/")[0]
+
+            safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+            if not safe_id:
+                return jsonify({"error": "Cannot determine project ID from ZIP"}), 400
+
+            source_folder = manifest.get("source_folder", "") if manifest else ""
+            prefix = f"{safe_id}/"
+
+            # Extract each file to its correct output location
+            imported = []
+            for name in names:
+                if name.endswith("/"):
+                    continue  # skip directories
+
+                # Strip the project prefix to get relative path
+                rel = name[len(prefix):] if name.startswith(prefix) else name
+                raw = zf.read(name)
+
+                if rel == "project.json":
+                    dest = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as f:
+                        f.write(raw)
+                    imported.append(rel)
+
+                elif rel == "scenes.json":
+                    dest_dir = os.path.join(SCENES_DIR, safe_id)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    with open(os.path.join(dest_dir, "scenes.json"), "wb") as f:
+                        f.write(raw)
+                    imported.append(rel)
+
+                elif rel.startswith("assets/"):
+                    sub = rel[len("assets/"):]
+                    dest = os.path.join(ASSETS_DIR, safe_id, sub)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as f:
+                        f.write(raw)
+                    imported.append(rel)
+
+                elif rel.startswith("audio/") and source_folder:
+                    sub = rel[len("audio/"):]
+                    dest = os.path.join(ALIGN_DIR, source_folder, sub)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as f:
+                        f.write(raw)
+                    imported.append(rel)
+
+                elif rel.startswith("tts/") and source_folder:
+                    sub = rel[len("tts/"):]
+                    dest = os.path.join(TTS_DIR, source_folder, sub)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as f:
+                        f.write(raw)
+                    imported.append(rel)
+
+            logger.info("Project ZIP imported: {} ({} files)", safe_id, len(imported))
+            return jsonify({
+                "project_id": safe_id,
+                "imported_files": len(imported),
+                "source_folder": source_folder,
+            })
+
+    except zipfile.BadZipFile:
+        return jsonify({"error": "Invalid ZIP file"}), 400
+    except Exception as e:
+        logger.error("ZIP import failed: {}", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@editor_bp.route("/api/editor/open-folder/<project_id>", methods=["POST"])
+def open_project_folder(project_id):
+    """Open the project's assets folder in the OS file explorer."""
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+
+    # Try assets dir first, then editor save dir
+    folder = os.path.join(ASSETS_DIR, safe_id)
+    if not os.path.isdir(folder):
+        folder = os.path.join(SCENES_DIR, safe_id)
+    if not os.path.isdir(folder):
+        return jsonify({"error": "Project folder not found"}), 404
+
+    folder = os.path.abspath(folder)
+    try:
+        if platform.system() == "Windows":
+            subprocess.run(["explorer", folder], check=False)
+        elif platform.system() == "Darwin":
+            subprocess.run(["open", folder], check=False)
+        else:
+            subprocess.run(["xdg-open", folder], check=False)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        logger.error("Failed to open project folder: {}", e)
+        return jsonify({"error": str(e)}), 500
+
+
 OVERLAYS_DIR = os.path.join(APP_ASSETS_DIR, "overlays")
 
 
