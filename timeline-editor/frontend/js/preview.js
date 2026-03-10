@@ -58,42 +58,31 @@ export class CanvasPreview {
     }
 
     /**
+     * Load a background image only if it exists (HEAD check first to avoid 404 noise).
+     */
+    async _loadBgImage(path) {
+        try {
+            const check = await fetch(path, { method: 'HEAD' });
+            if (!check.ok) return null;
+            const img = new Image();
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = path;
+            });
+            return img;
+        } catch { return null; }
+    }
+
+    /**
      * Load text background images from working-assets/{project_id}/
      * wbg.png = background for white text (typically dark)
      * bbg.png = background for black text (typically light)
      */
     async loadTextBackgrounds() {
         if (!this.projectBasePath) return;
-
-        // Load white text background (wbg.png)
-        const wbgPath = `${this.projectBasePath}/wbg.png`;
-        try {
-            const wbgImg = new Image();
-            await new Promise((resolve, reject) => {
-                wbgImg.onload = resolve;
-                wbgImg.onerror = reject;
-                wbgImg.src = wbgPath;
-            });
-            this.textBackgrounds.white = wbgImg;
-            console.log('Loaded white text background:', wbgPath);
-        } catch (e) {
-            console.log('No white text background found at:', wbgPath);
-        }
-
-        // Load black text background (bbg.png)
-        const bbgPath = `${this.projectBasePath}/bbg.png`;
-        try {
-            const bbgImg = new Image();
-            await new Promise((resolve, reject) => {
-                bbgImg.onload = resolve;
-                bbgImg.onerror = reject;
-                bbgImg.src = bbgPath;
-            });
-            this.textBackgrounds.black = bbgImg;
-            console.log('Loaded black text background:', bbgPath);
-        } catch (e) {
-            console.log('No black text background found at:', bbgPath);
-        }
+        this.textBackgrounds.white = await this._loadBgImage(`${this.projectBasePath}/wbg.png`);
+        this.textBackgrounds.black = await this._loadBgImage(`${this.projectBasePath}/bbg.png`);
     }
 
     /**
