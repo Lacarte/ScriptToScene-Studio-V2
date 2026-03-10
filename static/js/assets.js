@@ -13,11 +13,28 @@ const _ASSET_TYPES = {
 
 const _PROVIDER_URLS = {
   midjourney: 'https://www.midjourney.com/imagine',
+  grok: 'https://grok.com/imagine',
   'meta-ai': 'https://www.meta.ai/media',
 };
 
 function _typeConf(type) {
   return _ASSET_TYPES[type] || _ASSET_TYPES.video;
+}
+
+const _VIDEO_EXTS = /\.(mp4|webm|mov|avi|mkv)$/i;
+function _isVideoFile(url) { return _VIDEO_EXTS.test(url); }
+function _mediaTag(url, idx, i, opts = '') {
+  if (_isVideoFile(url)) {
+    return `<div style="position:relative;width:100%;height:100%" onclick="assetsOpenLightbox(${idx},${i})"
+      onmouseenter="this.querySelector('video').play();this.querySelector('.vid-play-icon').style.opacity='0'"
+      onmouseleave="var v=this.querySelector('video');v.pause();v.currentTime=0.1;this.querySelector('.vid-play-icon').style.opacity='1'">
+      <video src="${esc(url)}#t=0.1" muted preload="auto" style="width:100%;height:100%;object-fit:cover;${opts}"></video>
+      <span class="vid-play-icon" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity 0.2s">
+        <svg width="10" height="10" fill="white" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg>
+      </span>
+    </div>`;
+  }
+  return `<img src="${esc(url)}" alt="Scene ${idx} #${i}" style="width:100%;height:100%;object-fit:cover;${opts}" />`;
 }
 
 // ---- Grabber polling state ----
@@ -267,12 +284,12 @@ function _buildAssetCard(scene, sceneNum) {
   if (hasImage) {
     if (files.length === 1) {
       previewContent = `
-        <img src="${esc(files[0])}" alt="Scene ${idx}" style="width:100%;height:100%;object-fit:cover;cursor:pointer" onclick="assetsOpenLightbox(${idx},0)" />`;
+        ${_mediaTag(files[0], idx, 0, 'cursor:pointer')}`;
     } else {
       // Multi-image grid (2x2 for 4, 1x2/1x3 for 2-3)
       const thumbs = files.slice(0, 4).map((f, i) => `
         <div style="overflow:hidden;cursor:pointer;position:relative" onclick="assetsOpenLightbox(${idx},${i})">
-          <img src="${esc(f)}" alt="Scene ${idx} #${i}" style="width:100%;height:100%;object-fit:cover;display:block;transition:transform 0.2s" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform=''" />
+          ${_mediaTag(f, idx, i, 'display:block;transition:transform 0.2s')}
         </div>`).join('');
 
       const cols = Math.min(files.length, 2);
@@ -333,7 +350,7 @@ function _buildAssetCard(scene, sceneNum) {
   const checked = STATE.assetSelected?.[idx] ? 'checked' : '';
 
   return `
-  <div class="asset-card" id="asset-card-${idx}" style="border-left:3px solid ${tc.color}">
+  <div class="asset-card" id="asset-card-${idx}">
     <div class="asset-preview" style="height:180px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden">
       ${previewContent}
       ${statusBadge}
@@ -361,6 +378,9 @@ function _buildAssetCard(scene, sceneNum) {
       <div id="asset-prompt-wrap-${idx}">
         <div id="asset-prompt-view-${idx}" style="display:flex;gap:6px;align-items:flex-start">
           <p style="flex:1;font-size:11px;color:var(--text-secondary);line-height:1.5;margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">${esc(prompt)}</p>
+          <button onclick="event.stopPropagation();assetsCopyPrompt(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-muted);padding:2px;flex-shrink:0;opacity:0.5;transition:opacity 0.2s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'" title="Copy prompt">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
           <button onclick="assetsEditPrompt(${idx})" style="background:none;border:none;cursor:pointer;color:var(--text-muted);padding:2px;flex-shrink:0;opacity:0.5;transition:opacity 0.2s" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'" title="Edit prompt">
             <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -405,12 +425,15 @@ function assetsOpenLightbox(sceneIndex, fileIndex) {
         <span class="font-mono" style="font-size:11px;color:rgba(255,255,255,0.5);padding:6px 12px;background:rgba(255,255,255,0.08);border-radius:6px">Scene #${sceneIndex} · ${currentIdx + 1}/${files.length}</span>
         <button onclick="document.getElementById('assets-lightbox').remove()" style="background:rgba(255,255,255,0.1);border:none;color:white;width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center">&times;</button>
       </div>
-      <img src="${esc(files[currentIdx])}" style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />
+      ${_isVideoFile(files[currentIdx])
+        ? `<video src="${esc(files[currentIdx])}" controls autoplay muted style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.5)"></video>`
+        : `<img src="${esc(files[currentIdx])}" style="max-width:90vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.5)" />`
+      }
       ${files.length > 1 ? `
         <div style="display:flex;gap:8px;margin-top:16px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.05)">
           ${files.map((f, i) => `
             <div onclick="event.stopPropagation();document.getElementById('assets-lightbox')._goto(${i})" style="width:56px;height:56px;border-radius:6px;overflow:hidden;cursor:pointer;border:2px solid ${i === currentIdx ? 'var(--accent)' : 'transparent'};opacity:${i === currentIdx ? '1' : '0.6'};transition:all 0.2s">
-              <img src="${esc(f)}" style="width:100%;height:100%;object-fit:cover" />
+              ${_isVideoFile(f) ? `<video src="${esc(f)}#t=0.1" muted preload="auto" style="width:100%;height:100%;object-fit:cover"></video>` : `<img src="${esc(f)}" style="width:100%;height:100%;object-fit:cover" />`}
             </div>
           `).join('')}
         </div>
@@ -513,6 +536,15 @@ function assetsCancelPromptEdit(sceneIndex) {
   const scene = STATE.assetsSceneData?.scenes?.find(s => s.index === sceneIndex);
   const currentPrompt = STATE.assetStatuses[sceneIndex]?.editedPrompt || scene?.image_prompt || '';
   $(`#asset-prompt-input-${sceneIndex}`).value = currentPrompt;
+}
+
+function assetsCopyPrompt(sceneIndex) {
+  const scene = STATE.assetsSceneData?.scenes?.find(s => s.index === sceneIndex);
+  const prompt = STATE.assetStatuses[sceneIndex]?.editedPrompt || scene?.image_prompt || '';
+  if (!prompt) { toast('No prompt to copy', 'error'); return; }
+  navigator.clipboard.writeText(prompt)
+    .then(() => toast('Prompt copied'))
+    .catch(() => toast('Copy failed', 'error'));
 }
 
 // ---- Scene Selection ----
@@ -744,7 +776,8 @@ async function assetsStartGrabber() {
       // Open provider tab (reuse existing tab if already open)
       const providerUrl = _PROVIDER_URLS[provider] || _PROVIDER_URLS.midjourney;
       window.open(providerUrl, 'sts-provider-tab');
-      _setGrabberStatus(`Prompts ready (${data.scene_count} scenes) — activate Automa in the ${provider === 'midjourney' ? 'Midjourney' : 'Meta AI'} tab to start`);
+      const providerLabel = { midjourney: 'Midjourney', grok: 'Grok', 'meta-ai': 'Meta AI' }[provider] || provider;
+      _setGrabberStatus(`Prompts ready (${data.scene_count} scenes) — activate Automa in the ${providerLabel} tab to start`);
       toast(`Grabber ready — ${data.scene_count} prompts queued. Activate Automa to begin.`);
     }
 

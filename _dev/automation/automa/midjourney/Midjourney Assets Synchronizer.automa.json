@@ -1,6 +1,6 @@
 {
   "extVersion": "1.30.01",
-  "name": "Assets Synchronizer",
+  "name": "Midjourney Assets Synchronizer",
   "icon": "riRefreshLine",
   "table": [],
   "version": "1.30.01",
@@ -237,6 +237,6 @@
     "saveLog": true
   },
   "globalData": "{\"key\": \"value\"}",
-  "description": "All-in-one Midjourney sync dashboard: types prompts, monitors generations, sends results back to ScriptToScene Studio.",
+  "description": "All-in-one Midjourney assets synchronizer: types prompts, monitors generations, sends results back to ScriptToScene Studio.",
   "includedWorkflows": {}
 }

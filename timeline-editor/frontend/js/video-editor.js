@@ -2244,7 +2244,9 @@ function renderProjectAssets(pane, data) {
                           data-url="${file.url.replace(/"/g, '&quot;')}"
                           data-scene="${sceneNum}"
                           title="${sceneLabel} — ${file.filename}">
-                <img src="${file.url}" alt="${file.filename}" loading="lazy">
+                ${/\.(mp4|webm|mov|avi|mkv)$/i.test(file.url) ? `<video src="${file.url}#t=0.1" muted preload="auto" style="width:100%;height:100%;object-fit:cover"
+                    onmouseenter="this.play();this.nextElementSibling.style.opacity='0'"
+                    onmouseleave="this.pause();this.currentTime=0.1;this.nextElementSibling.style.opacity='1'"></video><span class="vid-play-icon" style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity 0.2s;z-index:1"><svg width="8" height="8" fill="white" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>` : `<img src="${file.url}" alt="${file.filename}" loading="lazy">`}
                 ${isActive ? '<span class="asset-thumb-active">In use</span>' : ''}
             </div>`;
         });
