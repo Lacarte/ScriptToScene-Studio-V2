@@ -18,6 +18,7 @@ from config import (
     N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
 )
+from studio.security import is_loopback_remote
 
 # ---------------------------------------------------------------------------
 # Loguru configuration
@@ -45,7 +46,9 @@ logger.add(os.path.join(LOG_DIR, "studio_{time:YYYY-MM-DD}.log"),
 # ---------------------------------------------------------------------------
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB max request body
-CORS(app)
+_cors_env = os.environ.get("STS_CORS_ORIGINS", "http://localhost:5050,http://127.0.0.1:5050")
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+CORS(app, origins=_cors_origins or None)
 
 from studio.tts import tts_bp
 from studio.timing import timing_bp
@@ -106,6 +109,8 @@ def health():
 
 @app.route("/api/open-folder", methods=["POST"])
 def open_folder():
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
     data = request.get_json(silent=True) or {}
     folder = os.path.basename(data.get("folder", ""))
     target = os.path.join(ALIGN_DIR, folder)
@@ -134,6 +139,8 @@ _PROJECT_DIRS = [
 @app.route("/api/settings/clear-all-projects", methods=["DELETE"])
 def clear_all_projects():
     """Move all project folders and files to output/TRASH/."""
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
     total = 0
     errors = []
     for src_dir in _PROJECT_DIRS:
@@ -199,4 +206,5 @@ if __name__ == "__main__":
     print()
 
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    bind_host = os.environ.get("STS_BIND_HOST", "127.0.0.1")
+    app.run(host=bind_host, port=port, debug=False, threaded=True)

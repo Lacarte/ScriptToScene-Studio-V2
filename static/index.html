@@ -316,6 +316,13 @@
         </svg>
         <span class="nav-label">EDITOR</span>
       </button>
+      <button class="nav-item" onclick="switchPage('export-library')" data-page="export-library" title="Export Library">
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" />
+          <polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none" />
+        </svg>
+        <span class="nav-label">EXPORTS</span>
+      </button>
     </div>
 
     <!-- Bottom sticky: Settings + Collapse -->
@@ -349,14 +356,11 @@
       PIPELINE
     </button>
     <div style="width:1px;background:var(--border);margin:12px 0;"></div>
-    <button class="active" onclick="switchPage('tts')" data-page="tts">
+    <button class="active" onclick="switchPage('pipeline')" data-page="pipeline">
       <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
-        <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-        <path d="M19 10v2a7 7 0 01-14 0v-2" />
-        <line x1="12" y1="19" x2="12" y2="23" />
-        <line x1="8" y1="23" x2="16" y2="23" />
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
       </svg>
-      TTS
+      PIPELINE
     </button>
     <button onclick="switchPage('timing')" data-page="timing">
       <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
@@ -397,6 +401,13 @@
           d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
       </svg>
       EDITOR
+    </button>
+    <button onclick="switchPage('export-library')" data-page="export-library">
+      <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" />
+        <polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none" />
+      </svg>
+      EXPORTS
     </button>
   </div>
 
@@ -466,8 +477,9 @@
           </div>
           <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
             <button id="pipeline-run-btn" class="action-btn hover-accent"
-              style="padding:0 24px;height:40px;font-size:13px;font-weight:600" onclick="pipelineStart()">Run
-              Pipeline</button>
+              style="padding:0 24px;height:40px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:8px" onclick="pipelineStart()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run Pipeline</button>
           </div>
         </section>
 
@@ -1115,11 +1127,17 @@
 
         <!-- AI Analysis Bar (shown when scenes loaded, collapsible) -->
         <section id="assets-analysis-bar" class="card mb-4" style="display:none;overflow:hidden">
-          <div style="padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center">
-            <span id="assets-analysis-toggle"
-              style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--accent);margin-right:4px;cursor:pointer;user-select:none">
-              <span id="assets-analysis-arrow" style="display:inline-block;transition:transform 0.2s;font-size:8px">&#9660;</span> Analysis</span>
-            <div id="assets-analysis-chips" style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center"></div>
+          <div style="padding:12px 16px">
+            <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center">
+              <span id="assets-analysis-toggle"
+                style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--accent);margin-right:4px;cursor:pointer;user-select:none">
+                <span id="assets-analysis-arrow" style="display:inline-block;transition:transform 0.2s;font-size:8px">&#9660;</span> Analysis</span>
+              <div id="assets-analysis-chips" style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center"></div>
+            </div>
+            <div id="assets-analysis-script" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--bg-darkest);border:1px solid var(--border)">
+              <span style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);display:block;margin-bottom:6px">Script</span>
+              <p id="assets-analysis-script-text" style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin:0;white-space:pre-wrap"></p>
+            </div>
           </div>
         </section>
 
@@ -1136,7 +1154,6 @@
                 style="padding:6px 14px;font-size:11px">Use Current Result</button>
               <button onclick="assetsPickSceneHistory()" class="action-btn hover-accent"
                 style="padding:6px 14px;font-size:11px">Pick from History</button>
-
             </div>
           </div>
         </section>
@@ -1187,6 +1204,35 @@
                 <option value="1:1">1:1 (Square)</option>
               </select>
             </div>
+            <div id="assets-grok-opts" style="display:flex;gap:12px;align-items:flex-end">
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
+                  style="color:var(--text-muted)">Mode</label>
+                <select id="assets-grok-mode" class="input-field"
+                  style="padding:8px 12px;font-size:12px;font-family:inherit">
+                  <option value="video" selected>Video</option>
+                  <option value="image">Image</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
+                  style="color:var(--text-muted)">Quality</label>
+                <select id="assets-grok-quality" class="input-field"
+                  style="padding:8px 12px;font-size:12px;font-family:inherit">
+                  <option value="480p" selected>480p</option>
+                  <option value="720p">720p</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
+                  style="color:var(--text-muted)">Duration</label>
+                <select id="assets-grok-duration" class="input-field"
+                  style="padding:8px 12px;font-size:12px;font-family:inherit">
+                  <option value="6s" selected>6s</option>
+                  <option value="10s">10s</option>
+                </select>
+              </div>
+            </div>
             <div id="assets-kie-opts" style="display:none;gap:12px;align-items:flex-end">
               <div>
                 <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2"
@@ -1231,6 +1277,12 @@
                 </svg>
                 <span id="assets-grabber-label">Start Grabber</span>
               </button>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none">
+                <input type="checkbox" id="assets-auto-type"
+                  style="accent-color:var(--accent);cursor:pointer"
+                  onchange="localStorage.setItem('sts-auto-type', this.checked)">
+                <span style="font-size:11px;color:var(--text-muted)">Auto‑type</span>
+              </label>
               <span id="assets-progress" class="font-mono text-xs" style="color:var(--text-muted)">0 / 0 complete</span>
               <button id="assets-redownload-btn" onclick="assetsRedownload()" class="action-btn"
                 style="padding:6px 14px;font-size:11px;margin-left:auto;color:var(--text-muted)"
@@ -1326,7 +1378,33 @@
         </div>
       </div>
       <iframe id="editor-iframe" style="display:none;width:100%;height:100%;border:none"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads"></iframe>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- PAGE: SETTINGS                                             -->
+    <!-- ========================================================== -->
+    <div id="page-export-library" class="page">
+      <div class="max-w-6xl mx-auto px-6 py-8">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="font-display text-2xl font-bold tracking-tight" style="color:var(--text)">Export Library</h2>
+            <p class="text-sm mt-1" style="color:var(--text-secondary)">Browse all exported videos and download video or project ZIP</p>
+          </div>
+          <button onclick="loadExportLibrary(true)" class="action-btn hover-accent" style="padding:7px 14px;font-size:11px">
+            Refresh
+          </button>
+        </div>
+
+        <section class="card p-4 mb-4">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <span class="font-mono text-xs" style="color:var(--text-muted)">Source: output/exports</span>
+            <span id="export-library-count" class="font-mono text-xs" style="color:var(--text-muted)">0 videos</span>
+          </div>
+        </section>
+
+        <div id="export-library-list"></div>
+      </div>
     </div>
 
     <!-- ========================================================== -->
@@ -1511,6 +1589,7 @@
   <script src="js/segmenter.js"></script>
   <script src="js/scenes.js"></script>
   <script src="js/assets.js"></script>
+  <script src="js/export-library.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/pipeline.js"></script>
   <script src="js/captions.js"></script>

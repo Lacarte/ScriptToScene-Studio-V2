@@ -99,6 +99,14 @@
                 </svg>
                 JSON
             </button>
+            <button id="export-project-zip" class="btn btn-secondary" title="Export project as ZIP" style="display:none">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Project
+            </button>
             <button id="export-mp4" class="btn btn-stage" title="Export MP4 Video">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -1031,52 +1039,72 @@
 
     <!-- Project Share Dialog -->
     <div id="project-share-modal" class="modal">
-        <div class="modal-content modal-sm">
-            <div class="modal-header">
-                <h3>Project</h3>
-                <button class="modal-close" id="close-share-modal" title="Close">&times;</button>
-            </div>
-            <div class="modal-body" style="padding:16px 20px">
-                <div id="share-project-info" style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 12px;background:var(--bg-darkest);border-radius:8px;border:1px solid var(--border)">
-                    <div style="width:36px;height:36px;border-radius:6px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                        <svg width="16" height="16" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <div class="modal-content modal-sm" style="border-radius:16px;overflow:hidden">
+            <!-- Header with gradient accent -->
+            <div style="position:relative;padding:20px 20px 16px;background:linear-gradient(135deg,rgba(78,205,196,0.08) 0%,rgba(78,205,196,0.02) 100%);border-bottom:1px solid var(--border)">
+                <button class="modal-close" id="close-share-modal" title="Close" style="position:absolute;top:12px;right:12px">&times;</button>
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#3BA99C);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 4px 12px rgba(78,205,196,0.25)">
+                        <svg width="18" height="18" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                     </div>
-                    <div style="min-width:0">
-                        <div id="share-project-name" style="font-size:13px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
-                        <div id="share-project-meta" style="font-size:11px;color:var(--text-muted)"></div>
+                    <div style="min-width:0;flex:1">
+                        <div style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:-0.02em">Project Manager</div>
+                        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+                            <span id="share-project-name" style="font-size:12px;font-weight:600;color:var(--accent);font-family:'JetBrains Mono',monospace"></span>
+                            <span style="color:var(--border)">|</span>
+                            <span id="share-project-meta" style="font-size:11px;color:var(--text-muted)"></span>
+                        </div>
                     </div>
                 </div>
-                <div style="display:flex;flex-direction:column;gap:8px">
-                    <button id="share-export-zip" class="btn btn-secondary" style="display:flex;align-items:center;gap:10px;padding:10px 14px;text-align:left;width:100%;justify-content:flex-start;border-radius:8px">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        <div>
-                            <div style="font-size:13px;font-weight:600">Export ZIP</div>
-                            <div style="font-size:10px;color:var(--text-muted);font-weight:400">Download project with all assets, audio & data</div>
-                        </div>
-                    </button>
-                    <button id="share-import-zip" class="btn btn-secondary" style="display:flex;align-items:center;gap:10px;padding:10px 14px;text-align:left;width:100%;justify-content:flex-start;border-radius:8px">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                        <div>
-                            <div style="font-size:13px;font-weight:600">Import ZIP</div>
-                            <div style="font-size:10px;color:var(--text-muted);font-weight:400">Restore a project from a shared ZIP file</div>
-                        </div>
-                    </button>
-                    <button id="share-open-folder" class="btn btn-secondary" style="display:flex;align-items:center;gap:10px;padding:10px 14px;text-align:left;width:100%;justify-content:flex-start;border-radius:8px">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
-                            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
-                        </svg>
-                        <div>
-                            <div style="font-size:13px;font-weight:600">Open Folder</div>
-                            <div style="font-size:10px;color:var(--text-muted);font-weight:400">Open project assets folder in file explorer</div>
-                        </div>
-                    </button>
-                </div>
-                <input type="file" id="share-import-file" accept=".zip" style="display:none" />
             </div>
+            <!-- Actions -->
+            <div style="padding:14px 16px 18px;display:flex;flex-direction:column;gap:6px">
+                <!-- Export ZIP -->
+                <div>
+                    <button id="share-export-zip" class="btn btn-secondary" style="display:flex;align-items:center;gap:12px;padding:12px 14px;text-align:left;width:100%;justify-content:flex-start;border-radius:10px;transition:all 0.15s ease">
+                        <div id="share-export-icon" style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:rgba(78,205,196,0.1);display:flex;align-items:center;justify-content:center">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                        </div>
+                        <div style="flex:1;min-width:0">
+                            <div id="share-export-label" style="font-size:13px;font-weight:600">Export ZIP</div>
+                            <div id="share-export-desc" style="font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px">Download project with all assets, audio & data</div>
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <div id="share-export-progress" style="display:none;margin:6px 16px 2px">
+                        <div style="height:3px;border-radius:2px;background:var(--bg-darkest);overflow:hidden">
+                            <div id="share-export-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.3s ease"></div>
+                        </div>
+                        <div id="share-export-status" style="font-size:10px;color:var(--text-muted);margin-top:4px"></div>
+                    </div>
+                </div>
+                <!-- Divider -->
+                <div style="height:1px;background:var(--border);margin:2px 8px;opacity:0.5"></div>
+                <!-- Import ZIP -->
+                <div>
+                    <button id="share-import-zip" class="btn btn-secondary" style="display:flex;align-items:center;gap:12px;padding:12px 14px;text-align:left;width:100%;justify-content:flex-start;border-radius:10px;transition:all 0.15s ease">
+                        <div id="share-import-icon" style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:rgba(167,139,250,0.1);display:flex;align-items:center;justify-content:center">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                        </div>
+                        <div style="flex:1;min-width:0">
+                            <div id="share-import-label" style="font-size:13px;font-weight:600">Import ZIP</div>
+                            <div id="share-import-desc" style="font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px">Restore a project from a shared ZIP file</div>
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <div id="share-import-progress" style="display:none;margin:6px 16px 2px">
+                        <div style="height:3px;border-radius:2px;background:var(--bg-darkest);overflow:hidden">
+                            <div id="share-import-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.3s ease"></div>
+                        </div>
+                        <div id="share-import-status" style="font-size:10px;color:var(--text-muted);margin-top:4px"></div>
+                    </div>
+                </div>
+            </div>
+            <input type="file" id="share-import-file" accept=".zip" style="display:none" />
         </div>
     </div>
 

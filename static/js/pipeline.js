@@ -22,7 +22,7 @@ async function pipelineStart() {
 
   const btn = $('#pipeline-run-btn');
   btn.disabled = true;
-  btn.textContent = 'Starting...';
+  btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"/></svg> Starting...';
 
   const autoScenes = $('#pipeline-auto-scenes')?.checked !== false;
   // Use the webhook URL from scenes settings (localStorage) so pipeline hits the same endpoint
@@ -52,7 +52,7 @@ async function pipelineStart() {
     toast(e.message || 'Pipeline failed to start', 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Run Pipeline';
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Pipeline';
   }
 }
 

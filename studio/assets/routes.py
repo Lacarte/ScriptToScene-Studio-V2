@@ -2,6 +2,7 @@
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import threading
@@ -13,6 +14,7 @@ from loguru import logger
 
 from config import ASSETS_DIR, SCENES_DIR, KIE_AI_MODEL
 from studio.io_utils import safe_json_write
+from studio.security import sanitize_project_id
 
 BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "bin")
 
@@ -52,6 +54,17 @@ assets_bp = Blueprint("assets", __name__)
 
 # In-memory grabber job tracking
 grabber_jobs = {}
+grabber_jobs_lock = threading.Lock()
+
+
+def _get_job(project_id):
+    with grabber_jobs_lock:
+        return grabber_jobs.get(project_id)
+
+
+def _set_job(project_id, job):
+    with grabber_jobs_lock:
+        grabber_jobs[project_id] = job
 
 
 def _save_job(job):
@@ -79,7 +92,7 @@ def _load_jobs_from_disk():
         try:
             with open(job_path, "r") as f:
                 job = json.load(f)
-            grabber_jobs[pid] = job
+            _set_job(pid, job)
         except (json.JSONDecodeError, OSError, KeyError) as e:
             logger.warning("Skipped loading job from {}: {}", pid, e)
 
@@ -98,7 +111,9 @@ def grabber_start(data: GrabberStartRequest):
     """Initialize a grabber job — prepares prompts for Automa to consume."""
     logger.info("grabber_start request: {} scenes, provider={}", len(data.scenes), data.provider)
 
-    project_id = data.project_id
+    project_id = sanitize_project_id(data.project_id)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
     provider = data.provider
     arguments = data.arguments
     scenes = [s.model_dump() for s in data.scenes]
@@ -124,11 +139,20 @@ def grabber_start(data: GrabberStartRequest):
     automa_payload = {
         "projectId": project_id,
         "arguments": arguments if provider == "midjourney" else "",
+        "aspect_ratio": data.aspect_ratio or "9:16",
         "scenes": [
             {"prompt": consistency_prefix + s["prompt"], "scene": s["scene"]}
             for s in scenes if s.get("prompt")
         ],
     }
+
+    # Pass Grok-specific options for Automa to configure the UI
+    if provider == "grok":
+        request_data = request.get_json(silent=True) or {}
+        automa_payload["grok_mode"] = request_data.get("grok_mode", "video")
+        automa_payload["grok_quality"] = request_data.get("grok_quality", "480p")
+        automa_payload["grok_duration"] = request_data.get("grok_duration", "6s")
+        automa_payload["auto_type"] = request_data.get("auto_type", False)
 
     # Per-scene status tracking
     scene_statuses = {}
@@ -159,7 +183,7 @@ def grabber_start(data: GrabberStartRequest):
             "output_format": data.output_format or "jpg",
         }
 
-    grabber_jobs[project_id] = job
+    _set_job(project_id, job)
     _save_job(job)
 
     logger.info("Grabber job created: {} ({} scenes, provider={})", grabber_id, len(automa_payload["scenes"]), provider)
@@ -252,7 +276,9 @@ def _kie_ai_generate_all(project_id, job):
 def grabber_pending():
     """Return the most recent pending grabber payload for Automa to consume."""
     latest = None
-    for job in grabber_jobs.values():
+    with grabber_jobs_lock:
+        jobs_snapshot = list(grabber_jobs.values())
+    for job in jobs_snapshot:
         if job["status"] in ("waiting", "grabbing"):
             if not latest or job["created_at"] > latest["created_at"]:
                 latest = job
@@ -276,8 +302,10 @@ def grabber_results():
     results = data if isinstance(data, list) else [data]
 
     for project in results:
-        project_id = project.get("projectId", "")
-        job = grabber_jobs.get(project_id)
+        project_id = sanitize_project_id(project.get("projectId", ""))
+        if not project_id:
+            continue
+        job = _get_job(project_id)
         if not job:
             logger.warning("Grabber results for unknown project: {}", project_id)
             continue
@@ -361,12 +389,12 @@ def grabber_upload():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    project_id = data.get("projectId", "")
+    project_id = sanitize_project_id(data.get("projectId", ""))
     scenes = data.get("scenes", [])
     if not project_id or not scenes:
         return jsonify({"error": "Missing projectId or scenes"}), 400
 
-    job = grabber_jobs.get(project_id)
+    job = _get_job(project_id)
     if job:
         job["status"] = "downloading"
 
@@ -428,7 +456,10 @@ def grabber_upload():
 @assets_bp.route("/api/assets/grabber/status/<project_id>")
 def grabber_status(project_id):
     """Poll grabber job status — frontend calls this every 5s."""
-    job = grabber_jobs.get(project_id)
+    project_id = sanitize_project_id(project_id)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
+    job = _get_job(project_id)
     if not job:
         return jsonify({"error": "No grabber job found"}), 404
 
@@ -447,7 +478,10 @@ def grabber_status(project_id):
 @assets_bp.route("/api/assets/redownload/<project_id>", methods=["POST"])
 def redownload_assets(project_id):
     """Re-attempt downloads for scenes with URLs but no local files."""
-    job = grabber_jobs.get(project_id)
+    project_id = sanitize_project_id(project_id)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
+    job = _get_job(project_id)
     if not job:
         return jsonify({"error": "No grabber job found"}), 404
 
@@ -651,6 +685,9 @@ def assets_history():
 @assets_bp.route("/api/assets/reconcile/<project_id>", methods=["POST"])
 def reconcile_assets(project_id):
     """Force reconcile disk files with metadata.json + grabber_job.json."""
+    project_id = sanitize_project_id(project_id)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
     project_dir = os.path.join(ASSETS_DIR, project_id)
     if not os.path.isdir(project_dir):
         return jsonify({"error": "Project not found"}), 404
@@ -660,13 +697,16 @@ def reconcile_assets(project_id):
         job_path = os.path.join(project_dir, "grabber_job.json")
         if os.path.isfile(job_path):
             with open(job_path, "r") as f:
-                grabber_jobs[project_id] = json.load(f)
+                _set_job(project_id, json.load(f))
     return jsonify({"updated": updated})
 
 
 @assets_bp.route("/api/assets/project/<project_id>")
 def get_asset_project(project_id):
     """Get full asset project details — all scenes with local files."""
+    project_id = sanitize_project_id(project_id)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
     project_dir = os.path.join(ASSETS_DIR, project_id)
     if not os.path.isdir(project_dir):
         return jsonify({"error": "Project not found"}), 404
@@ -731,6 +771,30 @@ def get_asset_project(project_id):
 # ---------------------------------------------------------------------------
 # Asset serving
 # ---------------------------------------------------------------------------
+
+@assets_bp.route("/api/assets/open-folder/<project_id>/<int:scene_index>", methods=["POST"])
+def open_asset_scene_folder(project_id, scene_index):
+    """Open a specific scene's asset folder in the OS file explorer."""
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+    folder = os.path.join(ASSETS_DIR, safe_id, str(scene_index))
+    if not os.path.isdir(folder):
+        # Fall back to project root
+        folder = os.path.join(ASSETS_DIR, safe_id)
+    if not os.path.isdir(folder):
+        return jsonify({"error": "Folder not found"}), 404
+    folder = os.path.abspath(folder)
+    try:
+        if platform.system() == "Windows":
+            subprocess.run(["explorer", folder], check=False)
+        elif platform.system() == "Darwin":
+            subprocess.run(["open", folder], check=False)
+        else:
+            subprocess.run(["xdg-open", folder], check=False)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        logger.error("Failed to open asset folder: {}", e)
+        return jsonify({"error": str(e)}), 500
+
 
 @assets_bp.route("/output/assets/<path:filename>")
 def serve_asset(filename):

@@ -3233,9 +3233,11 @@ function updateProjectInfo() {
         elements.totalTime.textContent = formatTimecode(displayTotalDuration);
     }
 
-    // Show share button when a project is loaded
+    // Show share / export buttons when a project is loaded
     const shareBtn = document.getElementById('project-share-btn');
     if (shareBtn) shareBtn.style.display = EditorState.project?.id ? '' : 'none';
+    const exportProjectBtn = document.getElementById('export-project-zip');
+    if (exportProjectBtn) exportProjectBtn.style.display = EditorState.project?.id ? '' : 'none';
 }
 
 // ---------------------------------------------------------------------------
@@ -3252,6 +3254,10 @@ function openShareDialog() {
     if (nameEl) nameEl.textContent = EditorState.project?.name || EditorState.project?.id || '';
     if (metaEl) metaEl.textContent = `${EditorState.scenes.length} scenes · ${formatTimestamp(getTotalDuration())}`;
 
+    // Reset progress indicators
+    _resetShareStatus('export');
+    _resetShareStatus('import');
+
     modal.classList.add('active');
 }
 
@@ -3259,24 +3265,83 @@ function closeShareDialog() {
     document.getElementById('project-share-modal')?.classList.remove('active');
 }
 
+// --- Share dialog helpers ---
+const _spinnerSvg16 = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"/></svg>';
+const _checkSvg16 = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+const _errorSvg16 = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+const _exportIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+const _importIconSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+const _exportIconBg = 'rgba(78,205,196,0.1)';
+const _importIconBg = 'rgba(167,139,250,0.1)';
+
+function _shareSetIcon(prefix, svg, bg) {
+    const el = document.getElementById(`share-${prefix}-icon`);
+    if (el) {
+        el.innerHTML = svg;
+        if (bg) el.style.background = bg;
+    }
+}
+
+function _shareSetLabel(prefix, label, desc, descColor) {
+    const lbl = document.getElementById(`share-${prefix}-label`);
+    const dsc = document.getElementById(`share-${prefix}-desc`);
+    if (lbl) lbl.textContent = label;
+    if (dsc) { dsc.textContent = desc; dsc.style.color = descColor || 'var(--text-muted)'; }
+}
+
 function _setShareBtnLoading(btn, loading) {
     if (!btn) return;
     if (loading) {
         btn.dataset.busy = '1';
-        btn.style.opacity = '0.6';
+        btn.style.opacity = '0.7';
         btn.style.pointerEvents = 'none';
-        const label = btn.querySelector('div > div:first-child');
-        if (label) label.dataset.origText = label.textContent;
     } else {
         delete btn.dataset.busy;
         btn.style.opacity = '';
         btn.style.pointerEvents = '';
-        const label = btn.querySelector('div > div:first-child');
-        if (label && label.dataset.origText) {
-            label.textContent = label.dataset.origText;
-            delete label.dataset.origText;
-        }
     }
+}
+
+function _resetShareStatus(prefix) {
+    const progress = document.getElementById(`share-${prefix}-progress`);
+    const bar = document.getElementById(`share-${prefix}-bar`);
+    const status = document.getElementById(`share-${prefix}-status`);
+    if (progress) progress.style.display = 'none';
+    if (bar) { bar.style.width = '0%'; bar.style.background = 'var(--accent)'; }
+    if (status) { status.textContent = ''; status.style.color = ''; }
+    // Reset icon and labels
+    if (prefix === 'export') {
+        _shareSetIcon('export', _exportIconSvg, _exportIconBg);
+        _shareSetLabel('export', 'Export ZIP', 'Download project with all assets, audio & data');
+    } else if (prefix === 'import') {
+        _shareSetIcon('import', _importIconSvg, _importIconBg);
+        _shareSetLabel('import', 'Import ZIP', 'Restore a project from a shared ZIP file');
+    }
+}
+
+function _showShareProgress(prefix, pct, text) {
+    const progress = document.getElementById(`share-${prefix}-progress`);
+    const bar = document.getElementById(`share-${prefix}-bar`);
+    const status = document.getElementById(`share-${prefix}-status`);
+    if (progress) progress.style.display = '';
+    if (bar) bar.style.width = pct + '%';
+    if (status) status.textContent = text || '';
+}
+
+function _showShareDone(prefix, text) {
+    const bar = document.getElementById(`share-${prefix}-bar`);
+    const status = document.getElementById(`share-${prefix}-status`);
+    if (bar) { bar.style.width = '100%'; bar.style.background = '#26DE81'; }
+    if (status) { status.textContent = text || 'Done'; status.style.color = '#26DE81'; }
+    _shareSetIcon(prefix, _checkSvg16, '#26DE81');
+}
+
+function _showShareError(prefix, text) {
+    const bar = document.getElementById(`share-${prefix}-bar`);
+    const status = document.getElementById(`share-${prefix}-status`);
+    if (bar) { bar.style.width = '100%'; bar.style.background = '#FF6B6B'; }
+    if (status) { status.textContent = text || 'Failed'; status.style.color = '#FF6B6B'; }
+    _shareSetIcon(prefix, _errorSvg16, '#FF6B6B');
 }
 
 async function shareExportZip() {
@@ -3285,9 +3350,13 @@ async function shareExportZip() {
 
     const btn = document.getElementById('share-export-zip');
     if (btn?.dataset.busy) return;
+    _resetShareStatus('export');
     _setShareBtnLoading(btn, true);
-    const label = btn?.querySelector('div > div:first-child');
-    if (label) label.textContent = 'Compressing...';
+
+    // Step 1: Compressing
+    _shareSetIcon('export', _spinnerSvg16, 'rgba(78,205,196,0.15)');
+    _shareSetLabel('export', 'Compressing...', 'Packaging all project files');
+    _showShareProgress('export', 15, 'Compressing scenes, assets & audio...');
 
     try {
         const res = await fetch(`/api/editor/export-zip/${encodeURIComponent(pid)}`);
@@ -3295,7 +3364,16 @@ async function shareExportZip() {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Export failed (${res.status})`);
         }
+
+        // Step 2: Downloading
+        _shareSetLabel('export', 'Downloading...', 'Receiving compressed data');
+        _showShareProgress('export', 50, 'Downloading ZIP...');
         const blob = await res.blob();
+        const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+
+        // Step 3: Saving
+        _shareSetLabel('export', 'Saving...', `${sizeMB} MB ready`);
+        _showShareProgress('export', 85, 'Saving to downloads folder...');
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -3304,9 +3382,14 @@ async function shareExportZip() {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-        showToast(`Project ZIP downloaded (${(blob.size / 1024 / 1024).toFixed(1)} MB)`, 'success');
-        closeShareDialog();
+
+        // Done
+        _shareSetLabel('export', 'Exported', `${pid}.zip · ${sizeMB} MB`, '#26DE81');
+        _showShareDone('export', `${pid}.zip saved to downloads (${sizeMB} MB)`);
+        showToast(`Project ZIP downloaded (${sizeMB} MB)`, 'success');
     } catch (e) {
+        _shareSetLabel('export', 'Export Failed', e.message, '#FF6B6B');
+        _showShareError('export', e.message);
         showToast('ZIP export failed: ' + e.message, 'error');
     } finally {
         _setShareBtnLoading(btn, false);
@@ -3324,24 +3407,69 @@ async function _handleImportZipFile(file) {
     if (!file) return;
 
     const btn = document.getElementById('share-import-zip');
+    if (btn?.dataset.busy) return;
+    _resetShareStatus('import');
     _setShareBtnLoading(btn, true);
-    const label = btn?.querySelector('div > div:first-child');
-    if (label) label.textContent = 'Importing...';
+
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(1);
+
+    // Step 1: Validate locally
+    _shareSetIcon('import', _spinnerSvg16, 'rgba(167,139,250,0.15)');
+    _shareSetLabel('import', 'Validating...', file.name + ' (' + fileSizeMB + ' MB)');
+    _showShareProgress('import', 10, 'Checking file format...');
 
     try {
+        if (!file.name.toLowerCase().endsWith('.zip')) throw new Error('File must be a .zip archive');
+        if (file.size < 100) throw new Error('File is too small to be a valid project ZIP');
+        if (file.size > 2 * 1024 * 1024 * 1024) throw new Error('File exceeds 2 GB limit');
+
+        // Step 2: Upload
+        _shareSetLabel('import', 'Uploading...', fileSizeMB + ' MB');
+        _showShareProgress('import', 25, 'Uploading ' + fileSizeMB + ' MB...');
+
         const form = new FormData();
         form.append('file', file);
         const res = await fetch('/api/editor/import-zip', { method: 'POST', body: form });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Import failed');
-        showToast(`Project "${data.project_id}" imported (${data.imported_files} files)`, 'success');
-        closeShareDialog();
 
-        // Offer to load the imported project
-        if (confirm(`Load imported project "${data.project_id}"?`)) {
-            loadProjectFromServer(data.project_id);
+        // Step 3: Processing
+        _shareSetLabel('import', 'Processing...', 'Extracting and validating files');
+        _showShareProgress('import', 70, 'Extracting project structure...');
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'Import failed');
+
+        // Step 4: Done
+        const pid = data.project_id;
+        const renamed = data.renamed_from;
+        const fileCount = data.imported_files || 0;
+
+        let titleMsg, descMsg;
+        if (renamed) {
+            titleMsg = 'Imported (renamed)';
+            descMsg = `"${renamed}" → "${pid}" (name existed) · ${fileCount} files`;
+        } else {
+            titleMsg = 'Imported';
+            descMsg = `${pid} · ${fileCount} files`;
+        }
+
+        _shareSetLabel('import', titleMsg, descMsg, '#26DE81');
+        _showShareDone('import', descMsg);
+
+        if (renamed) {
+            showToast(`Project renamed: "${renamed}" → "${pid}" (${fileCount} files)`, 'success');
+        } else {
+            showToast(`Project "${pid}" imported (${fileCount} files)`, 'success');
+        }
+
+        // Show load button
+        const statusEl = document.getElementById('share-import-status');
+        if (statusEl) {
+            statusEl.innerHTML = statusEl.textContent +
+                ` <a href="#" onclick="event.preventDefault(); loadProjectFromServer('${pid.replace(/'/g, "\\'")}'); closeShareDialog();" style="color:var(--accent);font-weight:600;text-decoration:underline;margin-left:6px">Load project →</a>`;
         }
     } catch (e) {
+        _shareSetLabel('import', 'Import Failed', e.message, '#FF6B6B');
+        _showShareError('import', e.message);
         showToast('ZIP import failed: ' + e.message, 'error');
     } finally {
         _setShareBtnLoading(btn, false);
@@ -3357,9 +3485,45 @@ async function shareOpenFolder() {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || 'Failed');
         }
-        closeShareDialog();
     } catch (e) {
         showToast('Could not open folder: ' + e.message, 'error');
+    }
+}
+
+async function headerExportProjectZip() {
+    const pid = EditorState.project?.id;
+    if (!pid) return;
+    const btn = document.getElementById('export-project-zip');
+    if (!btn || btn.dataset.busy) return;
+    btn.dataset.busy = '1';
+    const origHTML = btn.innerHTML;
+    btn.style.opacity = '0.6';
+    btn.style.pointerEvents = 'none';
+    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"/></svg> Exporting...`;
+    try {
+        const res = await fetch(`/api/editor/export-zip/${encodeURIComponent(pid)}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Export failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${pid}.zip`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#26DE81" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ${sizeMB} MB`;
+        showToast(`Project ZIP downloaded (${sizeMB} MB)`, 'success');
+        setTimeout(() => { btn.innerHTML = origHTML; }, 3000);
+    } catch (e) {
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF6B6B" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Failed`;
+        showToast('ZIP export failed: ' + e.message, 'error');
+        setTimeout(() => { btn.innerHTML = origHTML; }, 3000);
+    } finally {
+        delete btn.dataset.busy;
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
     }
 }
 
@@ -3369,6 +3533,7 @@ function setupShareDialog() {
     document.getElementById('share-export-zip')?.addEventListener('click', shareExportZip);
     document.getElementById('share-import-zip')?.addEventListener('click', shareImportZip);
     document.getElementById('share-open-folder')?.addEventListener('click', shareOpenFolder);
+    document.getElementById('export-project-zip')?.addEventListener('click', headerExportProjectZip);
     document.getElementById('share-import-file')?.addEventListener('change', (e) => {
         _handleImportZipFile(e.target.files?.[0]);
     });

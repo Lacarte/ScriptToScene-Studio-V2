@@ -10,6 +10,7 @@ from loguru import logger
 
 from config import APP_ASSETS_DIR, CAPTIONS_DIR, generate_project_id
 from studio.io_utils import safe_json_write
+from studio.security import sanitize_folder_name, sanitize_project_id
 from studio.validation import validate_json
 from studio.captions.schemas import CaptionGenerateRequest, CaptionSaveRequest
 
@@ -241,11 +242,13 @@ def generate_captions(data: CaptionGenerateRequest):
     if not captions:
         return jsonify({"error": "No captions generated"}), 500
 
-    project_id = data.project_id or generate_project_id("cap")
+    project_id = sanitize_project_id(data.project_id or generate_project_id("cap"))
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
 
     result = {
         "project_id": project_id,
-        "source_folder": data.source_folder or "",
+        "source_folder": sanitize_folder_name(data.source_folder or ""),
         "style": style,
         "captions": captions,
         "word_count": sum(len(c["words"]) for c in captions),
@@ -270,7 +273,9 @@ def save_captions(data: CaptionSaveRequest):
     """
     save_data = data.model_dump(exclude_none=True)
     save_data["timestamp"] = datetime.now().isoformat()
-    project_id = data.project_id
+    project_id = sanitize_project_id(data.project_id)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
 
     safe_json_write(os.path.join(CAPTIONS_DIR, project_id, "captions.json"), save_data, indent=2)
 

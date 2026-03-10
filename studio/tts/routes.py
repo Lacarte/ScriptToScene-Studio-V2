@@ -26,6 +26,7 @@ from loguru import logger
 
 from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR
 from studio.io_utils import safe_json_write
+from studio.security import safe_join, sanitize_project_id
 from studio.validation import validate_json
 from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
 from .normalize import (
@@ -217,6 +218,19 @@ def _get_metadata_lock(basename):
 
 def _tts_job_dir(basename):
     return os.path.join(TTS_DIR, basename)
+
+
+def _safe_job_dir_from_filename(filename: str, require_wav: bool = False) -> tuple[str, str, str]:
+    safe_file = os.path.basename(filename or "")
+    if not safe_file:
+        raise ValueError("Missing filename")
+    if require_wav and not safe_file.endswith(".wav"):
+        raise ValueError("Only .wav files are supported")
+    folder = _folder_for_file(safe_file)
+    safe_folder = sanitize_project_id(folder)
+    if not safe_folder:
+        raise ValueError("Invalid filename")
+    return safe_join(TTS_DIR, safe_folder), safe_file, safe_folder
 
 
 def _folder_for_file(filename):
@@ -844,9 +858,9 @@ def stream_audio():
                 q.put(("done", None, None))
 
             loop.run_until_complete(_produce())
-        except Exception:
+        except Exception as e:
             logger.exception("Stream generation failed")
-            q.put(("error", str(Exception), None))
+            q.put(("error", str(e), None))
         finally:
             loop.close()
             _stream_active.clear()
@@ -905,13 +919,15 @@ def list_audio():
 # --- Delete generation (move to TRASH) ---
 @tts_bp.route("/api/tts/generation/<filename>", methods=["DELETE"])
 def delete_audio(filename):
-    basename = filename.rsplit(".", 1)[0]
-    job_dir = _tts_job_dir(basename)
+    try:
+        job_dir, _safe_file, basename = _safe_job_dir_from_filename(filename)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     if os.path.isdir(job_dir):
         tts_trash = os.path.join(TRASH_DIR, "tts")
         os.makedirs(tts_trash, exist_ok=True)
         shutil.move(job_dir, os.path.join(tts_trash, basename))
-        return jsonify({"status": "deleted", "filename": filename})
+        return jsonify({"status": "deleted", "filename": _safe_file})
     return jsonify({"error": "File not found"}), 404
 
 
@@ -961,22 +977,23 @@ def open_audio_folder():
 # --- MP3 check ---
 @tts_bp.route("/api/tts/generation/<filename>/mp3-check")
 def check_mp3(filename):
-    if not filename.endswith(".wav"):
+    try:
+        job_dir, safe_file, _ = _safe_job_dir_from_filename(filename, require_wav=True)
+    except ValueError:
         return jsonify({"exists": False})
-    folder = _folder_for_file(filename)
-    mp3_name = filename.rsplit(".", 1)[0] + ".mp3"
-    mp3_path = os.path.join(_tts_job_dir(folder), mp3_name)
+    mp3_name = safe_file.rsplit(".", 1)[0] + ".mp3"
+    mp3_path = os.path.join(job_dir, mp3_name)
     return jsonify({"exists": os.path.exists(mp3_path)})
 
 
 # --- Serve cached MP3 ---
 @tts_bp.route("/api/tts/generation/<filename>/mp3")
 def serve_mp3(filename):
-    if not filename.endswith(".wav"):
-        return jsonify({"error": "Only .wav files can be converted"}), 400
-    folder = _folder_for_file(filename)
-    mp3_name = filename.rsplit(".", 1)[0] + ".mp3"
-    job_dir = _tts_job_dir(folder)
+    try:
+        job_dir, safe_file, _ = _safe_job_dir_from_filename(filename, require_wav=True)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    mp3_name = safe_file.rsplit(".", 1)[0] + ".mp3"
     mp3_path = os.path.join(job_dir, mp3_name)
     if not os.path.exists(mp3_path):
         return jsonify({"error": "MP3 not found - convert first"}), 404
@@ -986,15 +1003,15 @@ def serve_mp3(filename):
 # --- Convert WAV to MP3 with SSE progress ---
 @tts_bp.route("/api/tts/generation/<filename>/mp3-convert")
 def convert_to_mp3(filename):
-    if not filename.endswith(".wav"):
-        return jsonify({"error": "Only .wav files can be converted"}), 400
-    folder = _folder_for_file(filename)
-    job_dir = _tts_job_dir(folder)
-    wav_path = os.path.join(job_dir, filename)
+    try:
+        job_dir, safe_file, _ = _safe_job_dir_from_filename(filename, require_wav=True)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    wav_path = os.path.join(job_dir, safe_file)
     if not os.path.exists(wav_path):
         return jsonify({"error": "File not found"}), 404
 
-    mp3_name = filename.rsplit(".", 1)[0] + ".mp3"
+    mp3_name = safe_file.rsplit(".", 1)[0] + ".mp3"
     mp3_path = os.path.join(job_dir, mp3_name)
 
     if os.path.exists(mp3_path):

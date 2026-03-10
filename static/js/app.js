@@ -61,6 +61,9 @@ function switchPage(page, editorSource = 'internal') {
   if (page === 'assets' && typeof loadAssetsHistory === 'function') {
     loadAssetsHistory();
   }
+  if (page === 'export-library' && typeof loadExportLibrary === 'function') {
+    loadExportLibrary();
+  }
 }
 
 // Explicit editor entry from sidebar/mobile menu.
@@ -125,6 +128,41 @@ async function api(path, opts = {}) {
   const res = await fetch(path, opts);
   if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
   return res.json();
+}
+
+function _downloadFilenameFromDisposition(disposition) {
+  if (!disposition) return '';
+  const utf8Match = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utf8Match && utf8Match[1]) {
+    try { return decodeURIComponent(utf8Match[1]); } catch (_) { return utf8Match[1]; }
+  }
+  const plainMatch = disposition.match(/filename\s*=\s*"?([^"]+)"?/i);
+  return plainMatch && plainMatch[1] ? plainMatch[1] : '';
+}
+
+async function downloadFileFromApi(url, fallbackFilename = 'download.bin') {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || `Download failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const contentDisposition = res.headers.get('Content-Disposition') || '';
+  const filename = _downloadFilenameFromDisposition(contentDisposition) || fallbackFilename;
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  return { filename, sizeBytes: blob.size };
+}
+
+async function downloadProjectZip(projectId) {
+  if (!projectId) throw new Error('Missing project id');
+  return downloadFileFromApi(`/api/editor/export-zip/${encodeURIComponent(projectId)}`, `${projectId}.zip`);
 }
 
 // ---- Settings ----

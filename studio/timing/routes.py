@@ -14,6 +14,7 @@ import numpy as np
 import soundfile as sf
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
+from werkzeug.utils import secure_filename
 
 from config import ALIGN_DIR, TRASH_DIR, BIN_DIR, generate_project_id
 from studio.io_utils import safe_json_write
@@ -144,7 +145,9 @@ def force_align():
         return jsonify({"error": "No transcript text provided"}), 400
 
     audio_file = request.files["audio"]
-    original_name = audio_file.filename
+    original_name = secure_filename(audio_file.filename or "")
+    if not original_name:
+        return jsonify({"error": "Invalid filename"}), 400
     ext = os.path.splitext(original_name)[1].lower()
     if ext not in (".wav", ".mp3", ".flac", ".ogg"):
         return jsonify({"error": f"Unsupported format: {ext}"}), 400
@@ -226,7 +229,9 @@ def align_and_segment():
         return jsonify({"error": "No transcript text provided"}), 400
 
     audio_file = request.files["audio"]
-    original_name = audio_file.filename
+    original_name = secure_filename(audio_file.filename or "")
+    if not original_name:
+        return jsonify({"error": "Invalid filename"}), 400
     ext = os.path.splitext(original_name)[1].lower()
     if ext not in (".wav", ".mp3", ".flac", ".ogg"):
         return jsonify({"error": f"Unsupported format: {ext}"}), 400

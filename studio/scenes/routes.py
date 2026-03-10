@@ -11,6 +11,7 @@ from loguru import logger
 
 from config import SCENES_DIR, ALIGN_DIR, N8N_WEBHOOK_URL, generate_project_id
 from studio.io_utils import safe_json_write
+from studio.security import is_safe_webhook_url, sanitize_folder_name, sanitize_project_id
 from studio.validation import validate_json
 from studio.scenes.schemas import SceneGenerateRequest
 from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
@@ -57,6 +58,9 @@ def generate_scenes(data: SceneGenerateRequest):
     template = TEMPLATES_BY_ID.get(style_id, {})
     style_prompt = data.style_prompt or template.get("style_prompt", "")
     webhook_url = data.webhook_url or N8N_WEBHOOK_URL
+    allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
+    if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
+        return jsonify({"error": "Unsafe webhook URL"}), 400
     script = data.script
 
     segments_raw = [s.model_dump() for s in data.segments]
@@ -81,11 +85,14 @@ def generate_scenes(data: SceneGenerateRequest):
             })
 
         # Save to disk
-        project_id = (data.project_id or result.get("pp_randomId")
-                      or result.get("project_id") or generate_project_id("pm"))
+        project_id_raw = (data.project_id or result.get("pp_randomId")
+                          or result.get("project_id") or generate_project_id("pm"))
+        project_id = sanitize_project_id(project_id_raw)
+        if not project_id:
+            return jsonify({"error": "Invalid project id"}), 400
         result["project_id"] = project_id
         result["timestamp"] = datetime.now().isoformat()
-        result["source_folder"] = data.source_folder or ""
+        result["source_folder"] = sanitize_folder_name(data.source_folder or "")
         result["style"] = style_id
         if data.parent_id:
             result["parent_id"] = data.parent_id
@@ -378,3 +385,6 @@ def get_scene_audio(source_folder):
         if f.endswith((".wav", ".mp3")):
             return jsonify({"url": f"/output/alignments/{source_folder}/{f}"})
     return jsonify({"error": "No audio file found"}), 404
+    allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
+    if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
+        raise RuntimeError("Unsafe webhook URL")

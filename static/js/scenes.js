@@ -833,10 +833,18 @@ function sendToEditor() {
 
 // ---- Scenes History ----
 async function loadScenesHistory() {
+  renderScenesHistoryLoading(1, 3, 'Requesting projects...');
   try {
     const items = await api('/api/scenes/history');
+    renderScenesHistoryLoading(2, 3, 'Processing response...');
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    renderScenesHistoryLoading(3, 3, 'Rendering history...');
+    await new Promise(resolve => requestAnimationFrame(resolve));
     renderScenesHistory(items);
-  } catch (e) { console.error('Scenes history:', e); }
+  } catch (e) {
+    console.error('Scenes history:', e);
+    renderScenesHistoryError();
+  }
 }
 
 function _scnStyleLabel(styleId) {
@@ -848,6 +856,53 @@ function _scnStyleLabel(styleId) {
 function _scnStyleColor(styleId) {
   const tmpl = (_scnTemplates || []).find(t => t.id === styleId);
   return tmpl ? tmpl.color : 'var(--text-muted)';
+}
+
+function renderScenesHistoryLoading(step = 1, total = 3, label = 'Loading history...') {
+  const list = $('#scenes-history-list');
+  if (!list) return;
+  const safeTotal = Math.max(1, total || 1);
+  const safeStep = Math.min(Math.max(1, step || 1), safeTotal);
+  const pct = Math.round((safeStep / safeTotal) * 100);
+  // Skeleton placeholders
+  const skeletons = Array.from({ length: 3 }, (_, i) => `
+    <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;animation:skeleton-fade 1.2s ease-in-out ${i * 0.15}s infinite">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="height:12px;width:${55 + i * 15}%;background:rgba(255,255,255,0.04);border-radius:4px;margin-bottom:6px"></div>
+          <div style="height:9px;width:${35 + i * 10}%;background:rgba(255,255,255,0.03);border-radius:3px"></div>
+        </div>
+        <div style="width:50px;height:24px;background:rgba(255,255,255,0.03);border-radius:6px"></div>
+      </div>
+    </div>
+  `).join('');
+  list.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="history-loading-card" role="status" aria-live="polite" style="padding:16px 18px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="width:24px;height:24px;border:2px solid rgba(255,255,255,0.06);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">${esc(label)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Step <span style="color:var(--accent);font-weight:600">${safeStep}</span> of ${safeTotal}</div>
+          </div>
+        </div>
+        <div class="history-loading-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${safeTotal}" aria-valuenow="${safeStep}" aria-label="History loading progress">
+          <span class="history-loading-progress-bar" style="width:${pct}%"></span>
+        </div>
+      </div>
+      ${skeletons}
+    </div>
+  `;
+  const count = $('#scenes-history-count');
+  if (count) count.textContent = `Loading ${safeStep}/${safeTotal}...`;
+}
+
+function renderScenesHistoryError() {
+  const list = $('#scenes-history-list');
+  if (!list) return;
+  list.innerHTML = '<p style="text-align:center;padding:24px 0;font-size:12px;color:var(--coral)">Failed to load history</p>';
+  const count = $('#scenes-history-count');
+  if (count) count.textContent = '0 projects';
 }
 
 function renderScenesHistory(items) {

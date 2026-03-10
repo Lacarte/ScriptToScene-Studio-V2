@@ -162,9 +162,11 @@ function assetsProviderChanged() {
   const argsWrap = $('#assets-args-wrap');
   const argsInput = $('#assets-arguments');
   const kieOpts = $('#assets-kie-opts');
+  const grokOpts = $('#assets-grok-opts');
   const showArgs = provider === 'midjourney' || provider === 'meta-ai';
   argsWrap.style.display = showArgs ? '' : 'none';
   kieOpts.style.display = provider === 'kie-ai' ? 'flex' : 'none';
+  grokOpts.style.display = provider === 'grok' ? 'flex' : 'none';
   // Set default arguments per provider
   if (provider === 'midjourney') {
     if (!argsInput.value) argsInput.value = '--c 70 --v 7 --ar 9:16';
@@ -189,6 +191,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+  // Init auto-type checkbox from localStorage
+  const autoTypeCb = document.getElementById('assets-auto-type');
+  if (autoTypeCb) autoTypeCb.checked = localStorage.getItem('sts-auto-type') === 'true';
 });
 
 // ---- Main Render ----
@@ -237,7 +242,12 @@ function _renderAnalysisBar(data) {
   if (!a) { bar.style.display = 'none'; return; }
   bar.style.display = '';
 
+  const labelColors = {
+    Mood: '#FF6B6B', Env: '#4ECDC4', Palette: '#A78BFA',
+    Tone: '#FFB347', Style: '#45B7D1', Theme: '#F7DC6F',
+  };
   const chips = [];
+  if (a.core_theme) chips.push({ label: 'Theme', value: a.core_theme });
   if (a.mood) chips.push({ label: 'Mood', value: a.mood });
   if (a.environment) chips.push({ label: 'Env', value: a.environment });
   if (a.color_palette) chips.push({ label: 'Palette', value: a.color_palette });
@@ -245,12 +255,25 @@ function _renderAnalysisBar(data) {
   if (a.visual_style) chips.push({ label: 'Style', value: a.visual_style });
 
   const chipsEl = $('#assets-analysis-chips');
-  chipsEl.innerHTML = chips.map((c, i) => `
-    <div style="display:flex;align-items:center;gap:5px${i > 0 ? ';padding-left:16px;border-left:1px solid var(--border)' : ''}">
-      <span style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted)">${c.label}</span>
+  chipsEl.innerHTML = chips.map((c, i) => {
+    const color = labelColors[c.label] || 'var(--text-muted)';
+    return `
+    <div style="display:flex;align-items:baseline;gap:5px${i > 0 ? ';padding-left:16px;border-left:1px solid var(--border)' : ''}">
+      <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${color};white-space:nowrap">${c.label}</span>
       <span style="font-size:11px;color:var(--text-secondary)">${esc(c.value)}</span>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
+
+  // Show script/story text from segmenter data
+  const scriptEl = $('#assets-analysis-script');
+  const scriptText = $('#assets-analysis-script-text');
+  const script = STATE.scenesSegData?.metadata?.transcript || '';
+  if (script && scriptEl && scriptText) {
+    scriptEl.style.display = '';
+    scriptText.textContent = script;
+  } else if (scriptEl) {
+    scriptEl.style.display = 'none';
+  }
 
   // Collapse by default, restore from localStorage
   const collapsed = localStorage.getItem('sts-analysis-collapsed') !== 'false';
@@ -423,9 +446,27 @@ function _buildAssetCard(scene, sceneNum) {
       <!-- Actions -->
       <div style="display:flex;gap:6px;margin-top:10px">
         <button onclick="downloadAssetImage(${idx})" class="action-btn hover-accent" ${hasImage ? '' : 'disabled style="opacity:0.4"'}>${hasImage ? `Download (${files.length})` : 'Download'}</button>
+        <button onclick="openAssetFolder(${idx})" class="action-btn" style="color:var(--text-muted);padding:6px 10px" title="Open folder" ${hasImage ? '' : 'disabled style="opacity:0.4"'}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        </button>
       </div>
     </div>
   </div>`;
+}
+
+// ---- Open Asset Folder ----
+async function openAssetFolder(sceneIndex) {
+  const pid = STATE.assetsSceneData?.project_id;
+  if (!pid) { toast('No project loaded', 'error'); return; }
+  try {
+    const res = await fetch(`/api/assets/open-folder/${encodeURIComponent(pid)}/${sceneIndex}`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to open folder');
+    }
+  } catch (e) {
+    toast('Could not open folder: ' + e.message, 'error');
+  }
 }
 
 // ---- Lightbox for viewing full-size images ----
@@ -768,6 +809,14 @@ async function assetsStartGrabber() {
     scenes: scenesPayload,
     aspect_ratio: $('#assets-aspect')?.value || '9:16',
   };
+
+  // Add Grok options if applicable
+  if (provider === 'grok') {
+    reqBody.grok_mode = $('#assets-grok-mode')?.value || 'video';
+    reqBody.grok_quality = $('#assets-grok-quality')?.value || '480p';
+    reqBody.grok_duration = $('#assets-grok-duration')?.value || '6s';
+    reqBody.auto_type = $('#assets-auto-type')?.checked || false;
+  }
 
   // Add Kie AI options if applicable
   if (provider === 'kie-ai') {
