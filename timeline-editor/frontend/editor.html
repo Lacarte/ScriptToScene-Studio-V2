@@ -1293,7 +1293,7 @@
         </div>
     </div>
 
-    <script type="module" src="js/video-editor.js?v=2"></script>
+    <script type="module" src="js/video-editor.js?v=3"></script>
     <script>
         // ---- Asset History Picker ----
 
@@ -1567,7 +1567,14 @@
 
             ratioBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                dropdown.classList.toggle('open');
+                const isOpen = dropdown.classList.toggle('open');
+                if (isOpen) {
+                    // Position dropdown above the button using fixed positioning
+                    const rect = ratioBtn.getBoundingClientRect();
+                    dropdown.style.left = (rect.left + rect.width / 2 - 80) + 'px';
+                    dropdown.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+                    dropdown.style.top = 'auto';
+                }
             });
 
             document.addEventListener('click', (e) => {

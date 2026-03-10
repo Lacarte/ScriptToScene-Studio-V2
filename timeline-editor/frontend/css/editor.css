@@ -1085,10 +1085,12 @@ body.asset-dragging .scene-clip:hover {
     padding: 0;
     position: relative;
     z-index: 10;
+    transition: box-shadow 0.3s ease;
 }
 
 .time-scrubber:hover {
-    height: 5px;
+    /* height: 5px; */
+    box-shadow: 0 0 3px rgb(56 198 188), 0 0 2px rgba(255, 255, 255, 0.6);
 }
 
 .time-scrubber::-webkit-slider-thumb {
@@ -1263,16 +1265,13 @@ body.asset-dragging .scene-clip:hover {
 
 .ratio-dropdown {
     display: none;
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
+    position: fixed;
     width: 160px;
     background: var(--bg-darkest, #0d0d1a);
     border: 1px solid var(--border, #2a2a3e);
     border-radius: 8px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-    z-index: 100;
+    z-index: 10000;
     padding: 4px;
     overflow: hidden;
 }

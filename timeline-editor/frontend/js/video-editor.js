@@ -1695,6 +1695,12 @@ function _restoreSavedEditorState() {
 async function init() {
     console.log('Video Editor initializing...');
 
+    // Always set up event listeners, even if no project is staged yet.
+    // This ensures play, scrubber, effects, overlays, etc. work when
+    // a project is loaded later via loadProjectFromServer().
+    setupEventListeners();
+    applySavedSettings();
+
     const editorEntrySource = sessionStorage.getItem('sts-editor-entry-source') || 'internal';
     // One-shot signal from Studio shell.
     sessionStorage.removeItem('sts-editor-entry-source');
@@ -1726,9 +1732,7 @@ async function init() {
     updateLoadingOverlay('Loading fonts...');
     await loadFontRegistry();
 
-    // Setup UI now that fonts and other dependencies are ready
-    setupEventListeners();
-    applySavedSettings();
+    // (setupEventListeners + applySavedSettings already called at top of init)
 
     // Load project data
     updateLoadingOverlay('Loading project data...');
@@ -1878,8 +1882,9 @@ async function loadProjectData(data) {
         });
 
         EditorState.preview.setProjectPath(`working-assets/${EditorState.project.id}`);
+        // setScenes triggers async preload + render; the main await
+        // happens in loadProjectMediaWithProgress after URLs are verified.
         EditorState.preview.setScenes(EditorState.scenes);
-        EditorState.preview.render();
 
         EditorState.preview.enableTextDrag((x, y, scene) => {
             if (!EditorState._textDragDebounce) {
@@ -2027,14 +2032,12 @@ async function loadProjectMediaWithProgress() {
         await sleep(50);
     }
 
-    updateLoadingOverlay(`Loaded ${loadedCount}/${totalScenes} assets. Finalizing...`);
-
     const scenesWithMedia = EditorState.scenes.filter(s => s.mediaUrl);
     console.log(`Auto-load complete: ${scenesWithMedia.length} scenes have mediaUrl`);
 
     if (EditorState.preview) {
-        EditorState.preview.setScenes(EditorState.scenes);
-        EditorState.preview.render();
+        updateLoadingOverlay(`Preloading ${scenesWithMedia.length} media elements...`);
+        await EditorState.preview.setScenes(EditorState.scenes);
     }
 
     // Recalculate total duration (video scenes may have updated durations)
@@ -4612,7 +4615,11 @@ function setupPlayheadDrag() {
 }
 
 
+let _eventListenersReady = false;
 function setupEventListeners() {
+    if (_eventListenersReady) return;
+    _eventListenersReady = true;
+
     // Play/Pause
     elements.playBtn?.addEventListener('click', togglePlayback);
 

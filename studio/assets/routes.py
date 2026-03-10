@@ -798,5 +798,8 @@ def open_asset_scene_folder(project_id, scene_index):
 
 @assets_bp.route("/output/assets/<path:filename>")
 def serve_asset(filename):
-    """Serve generated asset images."""
-    return send_from_directory(ASSETS_DIR, filename)
+    """Serve generated asset files (images and videos)."""
+    resp = send_from_directory(ASSETS_DIR, filename)
+    # Ensure browsers know range requests are supported (needed for video seeking)
+    resp.headers.setdefault("Accept-Ranges", "bytes")
+    return resp

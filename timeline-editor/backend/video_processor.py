@@ -624,38 +624,70 @@ class VideoProcessor:
             raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:] if result.stderr else ''}")
 
     def _create_effect_scene(self, media_path, output_path, duration, effect):
-        """Create scene with zoom/pan effects using zoompan filter"""
+        """Create scene with zoom/pan effects using zoompan filter (for image sources)"""
         effect_type = effect.get('type', 'static')
         frames = int(duration * self.fps)
+        zoompan_fps = 25
+        zoompan_frames = int(duration * zoompan_fps)
 
         if effect_type == 'zoom_in':
             start_scale = effect.get('start_scale', 1.0)
             end_scale = effect.get('end_scale', 1.2)
-            z_expr = f"'min({start_scale}+on*{(end_scale-start_scale)/frames},{end_scale})'"
+            z_expr = f"'min({start_scale}+on*{(end_scale-start_scale)/zoompan_frames},{end_scale})'"
             x_expr = "'iw/2-(iw/zoom/2)'"
             y_expr = "'ih/2-(ih/zoom/2)'"
         elif effect_type == 'zoom_out':
             start_scale = effect.get('start_scale', 1.2)
             end_scale = effect.get('end_scale', 1.0)
-            z_expr = f"'max({start_scale}-on*{(start_scale-end_scale)/frames},{end_scale})'"
+            z_expr = f"'max({start_scale}-on*{(start_scale-end_scale)/zoompan_frames},{end_scale})'"
             x_expr = "'iw/2-(iw/zoom/2)'"
             y_expr = "'ih/2-(ih/zoom/2)'"
         elif effect_type == 'pan_left':
             pan_amount = effect.get('pan_amount', 0.2)
             z_expr = "'1.1'"
-            x_expr = f"'iw*{pan_amount}*(1-on/{frames})'"
+            x_expr = f"'iw*{pan_amount}*(1-on/{zoompan_frames})'"
             y_expr = "'(ih-oh)/2'"
         elif effect_type == 'pan_right':
             pan_amount = effect.get('pan_amount', 0.2)
             z_expr = "'1.1'"
-            x_expr = f"'iw*{pan_amount}*on/{frames}'"
+            x_expr = f"'iw*{pan_amount}*on/{zoompan_frames}'"
             y_expr = "'(ih-oh)/2'"
+        elif effect_type == 'pan_up':
+            pan_amount = effect.get('pan_amount', 0.2)
+            z_expr = "'1.1'"
+            x_expr = "'iw/2-(iw/zoom/2)'"
+            y_expr = f"'ih*{pan_amount}*(1-on/{zoompan_frames})'"
+        elif effect_type == 'pan_down':
+            pan_amount = effect.get('pan_amount', 0.2)
+            z_expr = "'1.1'"
+            x_expr = "'iw/2-(iw/zoom/2)'"
+            y_expr = f"'ih*{pan_amount}*on/{zoompan_frames}'"
+        elif effect_type == 'pan_diagonal_tl':
+            pan_amount = effect.get('pan_amount', 0.15)
+            z_expr = "'1.1'"
+            x_expr = f"'iw*{pan_amount}*(1-on/{zoompan_frames})'"
+            y_expr = f"'ih*{pan_amount}*(1-on/{zoompan_frames})'"
+        elif effect_type == 'pan_diagonal_br':
+            pan_amount = effect.get('pan_amount', 0.15)
+            z_expr = "'1.1'"
+            x_expr = f"'iw*{pan_amount}*on/{zoompan_frames}'"
+            y_expr = f"'ih*{pan_amount}*on/{zoompan_frames}'"
+        elif effect_type == 'ken_burns':
+            start_scale = effect.get('start_scale', 1.0)
+            end_scale = effect.get('end_scale', 1.15)
+            pan_amount = effect.get('pan_amount', 0.05)
+            z_expr = f"'min({start_scale}+on*{(end_scale-start_scale)/zoompan_frames},{end_scale})'"
+            x_expr = f"'iw/2-(iw/zoom/2)+iw*{pan_amount}*on/{zoompan_frames}'"
+            y_expr = "'ih/2-(ih/zoom/2)'"
+        elif effect_type == 'shake':
+            intensity = effect.get('intensity', 5)
+            frequency = effect.get('frequency', 20)
+            z_expr = "'1.05'"
+            x_expr = f"'iw/2-(iw/zoom/2)+{intensity}*sin({frequency}*2*PI*on/{zoompan_frames})'"
+            y_expr = f"'ih/2-(ih/zoom/2)+{intensity}*cos({frequency}*2*PI*on/{zoompan_frames})'"
         else:
             self._create_simple_scene(media_path, output_path, duration, 'static')
             return
-
-        zoompan_fps = 25
-        zoompan_frames = int(duration * zoompan_fps)
 
         vf = f"zoompan=z={z_expr}:x={x_expr}:y={y_expr}:d={zoompan_frames}:s={self.width}x{self.height}:fps={zoompan_fps},fps={self.fps}"
 
@@ -680,16 +712,108 @@ class VideoProcessor:
             raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:] if result.stderr else ''}")
 
     def _create_scene_from_video(self, video_path, output_path, duration, effect):
-        """Create a scene clip from a video source — trim, scale, and re-encode."""
-        effect_type = effect.get('type', 'static')
+        """Create a scene clip from a video source — trim, scale, and re-encode.
 
+        For motion effects (zoom, pan, shake, ken_burns) on video sources, the
+        strategy is:
+        1. Scale the video *larger* than the target resolution (headroom).
+        2. Use FFmpeg ``crop`` with time-based expressions to animate the
+           visible viewport, producing the motion effect.
+        3. Scale back to the target resolution if the crop size varies (zoom).
+        """
+        effect_type = effect.get('type', 'static')
+        W, H = self.width, self.height
+        dur = duration
+
+        # ── Determine headroom multiplier ────────────────────────────
+        needs_motion = effect_type in (
+            'zoom_in', 'zoom_out', 'pan_left', 'pan_right',
+            'pan_up', 'pan_down', 'pan_diagonal_tl', 'pan_diagonal_br',
+            'ken_burns', 'shake',
+        )
+
+        if effect_type in ('zoom_in', 'zoom_out', 'ken_burns'):
+            headroom = 1.3
+        elif needs_motion:
+            headroom = 1.25
+        else:
+            headroom = 1.0
+
+        # Scaled dimensions (even numbers required by most codecs)
+        sw = (int(W * headroom) // 2) * 2
+        sh = (int(H * headroom) // 2) * 2
+
+        # ── Build filter chain ───────────────────────────────────────
         filters = [
-            f"scale='if(gte(iw/ih,{self.width}/{self.height}),-2,{self.width})':'if(gte(iw/ih,{self.width}/{self.height}),{self.height},-2)'",
-            f"crop={self.width}:{self.height}",
+            f"scale='if(gte(iw/ih,{sw}/{sh}),-2,{sw})':'if(gte(iw/ih,{sw}/{sh}),{sh},-2)'",
+            f"crop={sw}:{sh}",
             f"fps={self.fps}",
         ]
 
-        if effect_type == 'fade':
+        if needs_motion:
+            pan_amount = effect.get('pan_amount', 0.2)
+            pan_px_x = sw - W          # horizontal headroom pixels
+            pan_px_y = sh - H          # vertical headroom pixels
+            cx = f"({sw}-{W})/2"       # centered x offset
+            cy = f"({sh}-{H})/2"       # centered y offset
+
+            if effect_type in ('zoom_in', 'zoom_out', 'ken_burns'):
+                # For zoom: scale to exact target first, then use per-frame
+                # upscale + fixed crop.  crop can't have varying output dims,
+                # so we scale UP over time and crop the center at WxH.
+                # Replace the initial oversized scale+crop with target-fit.
+                filters[0] = (
+                    f"scale='if(gte(iw/ih,{W}/{H}),-2,{W})':"
+                    f"'if(gte(iw/ih,{W}/{H}),{H},-2)'"
+                )
+                filters[1] = f"crop={W}:{H}"
+
+                start_s = effect.get('start_scale', 1.0 if effect_type != 'zoom_out' else 1.2)
+                end_s = effect.get('end_scale', 1.2 if effect_type == 'zoom_in' else (1.15 if effect_type == 'ken_burns' else 1.0))
+                delta = end_s - start_s  # positive for zoom_in, negative for zoom_out
+                # Per-frame upscale then center-crop back to WxH
+                scale_expr_w = f"trunc(iw*({start_s}+{delta}*t/{dur})/2)*2"
+                scale_expr_h = f"trunc(ih*({start_s}+{delta}*t/{dur})/2)*2"
+                filters.append(
+                    f"scale=w='{scale_expr_w}':h='{scale_expr_h}':eval=frame:flags=lanczos"
+                )
+                if effect_type == 'ken_burns':
+                    # Subtle rightward + downward drift while zooming
+                    pan_drift = int(W * 0.03)
+                    filters.append(
+                        f"crop={W}:{H}:'(iw-{W})/2+{pan_drift}*t/{dur}':'(ih-{H})/2'"
+                    )
+                else:
+                    filters.append(f"crop={W}:{H}:(iw-{W})/2:(ih-{H})/2")
+
+            elif effect_type == 'pan_left':
+                filters.append(f"crop={W}:{H}:'{pan_px_x}*(1-t/{dur})':{cy}")
+
+            elif effect_type == 'pan_right':
+                filters.append(f"crop={W}:{H}:'{pan_px_x}*t/{dur}':{cy}")
+
+            elif effect_type == 'pan_up':
+                filters.append(f"crop={W}:{H}:{cx}:'{pan_px_y}*(1-t/{dur})'")
+
+            elif effect_type == 'pan_down':
+                filters.append(f"crop={W}:{H}:{cx}:'{pan_px_y}*t/{dur}'")
+
+            elif effect_type == 'pan_diagonal_tl':
+                filters.append(f"crop={W}:{H}:'{pan_px_x}*(1-t/{dur})':'{pan_px_y}*(1-t/{dur})'")
+
+            elif effect_type == 'pan_diagonal_br':
+                filters.append(f"crop={W}:{H}:'{pan_px_x}*t/{dur}':'{pan_px_y}*t/{dur}'")
+
+            elif effect_type == 'shake':
+                intensity = effect.get('intensity', 5)
+                frequency = effect.get('frequency', 20)
+                filters.append(
+                    f"crop={W}:{H}:"
+                    f"'{cx}+{intensity}*sin({frequency}*2*PI*t)':"
+                    f"'{cy}+{intensity}*cos({frequency}*2*PI*t)'"
+                )
+
+        elif effect_type == 'fade':
             fade_dur = min(0.5, duration / 2)
             filters.append(f"fade=t=in:st=0:d={fade_dur}")
             filters.append(f"fade=t=out:st={duration - fade_dur}:d={fade_dur}")
@@ -801,6 +925,8 @@ class VideoProcessor:
                 fade_out = audio_config.get('fade_out', 0.5)
                 total_duration = self.export_data.get('timeline', {}).get('total_duration', 60)
                 audio = audio.filter('afade', type='out', start_time=total_duration - fade_out, duration=fade_out)
+                # Pad audio with silence so it never ends before the video
+                audio = audio.filter('apad', whole_dur=total_duration)
 
                 logger.debug("Audio: vol={} fade_out={}s total_dur={}s", volume, fade_out, total_duration)
 
@@ -812,7 +938,6 @@ class VideoProcessor:
                         vcodec='copy',
                         acodec='aac',
                         audio_bitrate='192k',
-                        shortest=None
                     )
                     .overwrite_output()
                     .run(cmd=FFMPEG_BIN, quiet=True)
@@ -874,7 +999,12 @@ class VideoProcessor:
             vol = audio_config.get('volume', 1.0)
             fade_out = audio_config.get('fade_out', 0.5)
             fade_start = max(0, total_duration - fade_out)
-            filters.append(f"[1:a]volume={vol},afade=t=out:st={fade_start}:d={fade_out}[narration]")
+            # apad pads with silence so audio never ends before video
+            filters.append(
+                f"[1:a]volume={vol},"
+                f"afade=t=out:st={fade_start}:d={fade_out},"
+                f"apad=whole_dur={total_duration}[narration]"
+            )
             narration_label = '[narration]'
             logger.debug("Audio filter: narration vol={} fade_out={}s", vol, fade_out)
 
@@ -968,7 +1098,7 @@ class VideoProcessor:
         else:
             cmd += ['-map', '0:v', '-an']
 
-        cmd += ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', output_path]
+        cmd += ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', str(total_duration), output_path]
 
         logger.info("Concat with audio: {} inputs, filter_complex={}",
                      2 + (1 if bgmusic_path else 0), bool(filter_str))

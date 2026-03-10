@@ -159,16 +159,28 @@ export class CanvasPreview {
     }
 
     /**
-     * Set scenes for preview
+     * Set scenes for preview.
+     * Returns a Promise that resolves once all media is preloaded and the
+     * first frame has been rendered.  Callers that need assets ready before
+     * proceeding (e.g. the loading-overlay flow) can `await` this.
      */
     setScenes(scenes) {
         this.scenes = scenes;
         const withMedia = scenes.filter(s => s.mediaUrl).length;
         console.log(`Preview: setScenes called with ${scenes.length} scenes (${withMedia} with mediaUrl)`);
-        this.preloadImages().then(() => {
-            console.log(`Preview: preloadImages complete, cache has ${this.imageCache.size} images`);
+        this._preloadPromise = this.preloadImages().then(() => {
+            console.log(`Preview: preloadImages complete, cache has ${this.imageCache.size} entries`);
             this.render();
         });
+        return this._preloadPromise;
+    }
+
+    /**
+     * Wait for any in-flight preload kicked off by setScenes().
+     * Resolves immediately if nothing is loading.
+     */
+    waitForPreload() {
+        return this._preloadPromise || Promise.resolve();
     }
 
     /**
