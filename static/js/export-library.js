@@ -7,6 +7,29 @@ const _expLibState = {
   items: [],
 };
 
+function _expLibStopOtherVideos(activeVideo) {
+  if (typeof window.stsAudioStopAll === 'function') {
+    window.stsAudioStopAll(activeVideo);
+  }
+  const list = document.getElementById('export-library-list');
+  if (!list) return;
+  const videos = list.querySelectorAll('video');
+  videos.forEach(video => {
+    if (video === activeVideo) return;
+    if (!video.paused) video.pause();
+    video.currentTime = 0;
+  });
+}
+
+function _expLibBindSinglePlayback() {
+  const list = document.getElementById('export-library-list');
+  if (!list) return;
+  const videos = list.querySelectorAll('video');
+  videos.forEach(video => {
+    video.addEventListener('play', () => _expLibStopOtherVideos(video));
+  });
+}
+
 function _expLibFmtBytes(bytes) {
   const n = Number(bytes || 0);
   if (!Number.isFinite(n) || n <= 0) return '0 B';
@@ -105,6 +128,7 @@ function _expLibRender() {
     }
   }, { rootMargin: '200px' });
   list.querySelectorAll('video[data-src]').forEach(v => observer.observe(v));
+  _expLibBindSinglePlayback();
 }
 
 async function loadExportLibrary(force = false) {
@@ -163,3 +187,4 @@ async function expLibDownloadZip(index, btn) {
     if (btn) { btn.disabled = false; btn.textContent = old || 'Download Project ZIP'; }
   }
 }
+

@@ -26,6 +26,23 @@ window.STATE = {
 // Tracks all audio instances across modules so they can be stopped from one place.
 window._stsAudioRegistry = {};
 
+window.stsStopExportVideos = function (exceptVideo = null) {
+  const list = document.getElementById('export-library-list');
+  if (!list) return [];
+  const stopped = [];
+  list.querySelectorAll('video').forEach(video => {
+    if (!video || video === exceptVideo) return;
+    if (!video.paused) {
+      video.pause();
+      video.currentTime = 0;
+      stopped.push('Export Library');
+    } else if (video.currentTime > 0) {
+      video.currentTime = 0;
+    }
+  });
+  return stopped;
+};
+
 /**
  * Register an Audio element (or HTMLMediaElement) with a label.
  * @param {string} label  — e.g. "Captions", "Alignment", "TTS"
@@ -34,6 +51,20 @@ window._stsAudioRegistry = {};
 window.stsAudioRegister = function (label, audioEl) {
   if (!audioEl) return;
   window._stsAudioRegistry[label] = audioEl;
+  if (audioEl.__stsExclusiveBound) return;
+  audioEl.__stsExclusiveBound = true;
+  audioEl.addEventListener('play', () => {
+    for (const [otherLabel, otherEl] of Object.entries(window._stsAudioRegistry)) {
+      if (!otherEl || otherEl === audioEl) continue;
+      if (!otherEl.paused) {
+        otherEl.pause();
+        otherEl.currentTime = 0;
+      }
+    }
+    if (typeof window.stsStopExportVideos === 'function') {
+      window.stsStopExportVideos();
+    }
+  });
 };
 
 /** Unregister an audio element by label */
@@ -42,7 +73,7 @@ window.stsAudioUnregister = function (label) {
 };
 
 /** Stop all registered audio and return which ones were playing */
-window.stsAudioStopAll = function () {
+window.stsAudioStopAll = function (exceptExportVideo = null) {
   const stopped = [];
   for (const [label, el] of Object.entries(window._stsAudioRegistry)) {
     if (el && !el.paused) {
@@ -50,6 +81,10 @@ window.stsAudioStopAll = function () {
       el.currentTime = 0;
       stopped.push(label);
     }
+  }
+  if (typeof window.stsStopExportVideos === 'function') {
+    const exportStopped = window.stsStopExportVideos(exceptExportVideo);
+    if (exportStopped.length) stopped.push(...exportStopped);
   }
   return stopped;
 };
@@ -445,5 +480,7 @@ function timeAgo(ts) {
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
   return Math.floor(diff / 86400) + 'd ago';
 }
+
+
 
 
