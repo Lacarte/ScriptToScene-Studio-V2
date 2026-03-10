@@ -698,6 +698,7 @@ class VideoProcessor:
         cmd = [
             FFMPEG_BIN, '-y',
             '-i', video_path,
+            '-map', '0:v:0',
             '-t', str(duration),
             '-vf', vf,
             '-c:v', self.codec,
