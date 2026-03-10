@@ -262,7 +262,7 @@ def export_project_zip(project_id):
     }
 
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         prefix = f"{safe_id}/"
 
         # 1) Editor save JSON
