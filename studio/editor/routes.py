@@ -14,7 +14,7 @@ import traceback
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.validation import validate_json
 from studio.editor.schemas import EditorSaveRequest, ExportRequest
@@ -34,13 +34,17 @@ logger.info("Export output directory: {}", EXPORT_DIR)
 logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
 
 
+class ExportCancelled(Exception):
+    """Raised when an export job is cancelled while processing."""
+
+
 def _cleanup_old_export_jobs():
     """Evict completed/failed jobs older than EXPORT_MAX_JOB_AGE."""
     now = time.time()
     with _export_jobs_lock:
         expired = [
             jid for jid, job in _export_jobs.items()
-            if job["status"] in ("completed", "failed")
+            if job["status"] in ("completed", "failed", "cancelled")
             and now - job.get("created_at", 0) > EXPORT_MAX_JOB_AGE
         ]
         for jid in expired:
@@ -77,6 +81,74 @@ def _cleanup_orphaned_temp_dirs():
 
 # Run orphan cleanup on module load (server start)
 _cleanup_orphaned_temp_dirs()
+
+
+# ---------------------------------------------------------------------------
+# Audio / caption resolution helpers
+# ---------------------------------------------------------------------------
+
+def _get_source_folder(project_id: str) -> str | None:
+    """Look up source_folder from scenes.json for a given project."""
+    scenes_path = os.path.join(SCENES_DIR, project_id, "scenes.json")
+    if not os.path.isfile(scenes_path):
+        return None
+    try:
+        with open(scenes_path, "r", encoding="utf-8") as f:
+            return json.load(f).get("source_folder")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _resolve_audio_url(source_folder: str) -> dict | None:
+    """Resolve audio file URL from the alignment folder."""
+    folder_path = os.path.join(ALIGN_DIR, source_folder)
+    if not os.path.isdir(folder_path):
+        return None
+    try:
+        for f in os.listdir(folder_path):
+            if f.endswith((".wav", ".mp3")):
+                return {
+                    "url": f"/output/alignments/{source_folder}/{f}",
+                    "source_file": f,
+                }
+    except OSError:
+        pass
+    return None
+
+
+def _resolve_project_audio(data: dict, project_id: str):
+    """Replace saved voice track with the correct audio for this project."""
+    source_folder = _get_source_folder(project_id)
+    if not source_folder:
+        return
+    resolved = _resolve_audio_url(source_folder)
+    if not resolved:
+        return
+    correct_url = resolved["url"]
+    # Fix voice track in audio_tracks if it points to wrong audio
+    for track in data.get("audio_tracks", []):
+        if track.get("type") == "voice" and track.get("path") != correct_url:
+            logger.info("Fixing voice track for {}: {} -> {}", project_id, track.get("path"), correct_url)
+            track["path"] = correct_url
+            track["file"] = resolved["source_file"]
+            break
+
+
+def _resolve_project_captions(data: dict, project_id: str):
+    """Clear captions if their project_id doesn't match the current project."""
+    captions = data.get("captions")
+    if not captions:
+        return
+    cap_project_id = captions.get("project_id", "")
+    # Captions have their own project_id (cap_XXXXX). Check if source_folder
+    # matches to determine if captions belong to this project.
+    source_folder = _get_source_folder(project_id)
+    if not source_folder:
+        return
+    cap_source = captions.get("source_folder", "")
+    if cap_source and cap_source != source_folder:
+        logger.info("Clearing stale captions for {}: cap source={} != project source={}", project_id, cap_source, source_folder)
+        data["captions"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +192,14 @@ def editor_load_project(project_id):
     except (json.JSONDecodeError, OSError) as e:
         logger.error("Failed to load editor project {}: {}", safe_id, e)
         return jsonify({"error": f"Corrupted project file: {e}"}), 500
+
+    # Resolve correct audio from scenes.json source_folder to prevent
+    # cross-project audio bleed (saved voice track may belong to another project).
+    _resolve_project_audio(data, safe_id)
+
+    # Resolve correct captions from the alignment folder
+    _resolve_project_captions(data, safe_id)
+
     return jsonify(data)
 
 
@@ -329,7 +409,11 @@ def start_export(data: ExportRequest):
 def _process_video(job_id, export_data, output_path):
     """Process video in background thread with step-level error tracking."""
     short_id = job_id[:8]
-    job = _export_jobs[job_id]
+    with _export_jobs_lock:
+        job = _export_jobs.get(job_id)
+    if job is None:
+        logger.warning("[{}] Export job disappeared before processing started", short_id)
+        return
 
     def _set_step(step, message):
         job["step"] = step
@@ -346,6 +430,8 @@ def _process_video(job_id, export_data, output_path):
         _set_step("init", "Starting video processing")
 
         def update_progress(progress, message):
+            if job.get("status") == "cancelled":
+                raise ExportCancelled("Export cancelled by user")
             job["progress"] = progress
             job["message"] = message
             # Infer step from progress ranges set by VideoProcessor
@@ -365,6 +451,9 @@ def _process_video(job_id, export_data, output_path):
         )
         processor.process(output_path)
 
+        if job.get("status") == "cancelled":
+            raise ExportCancelled("Export cancelled by user")
+
         # Verify output was actually created
         if not os.path.exists(output_path):
             raise RuntimeError("Export finished but output file is missing")
@@ -381,6 +470,21 @@ def _process_video(job_id, export_data, output_path):
         job["progress"] = 100
         job["step"] = "done"
         job["message"] = "Export completed successfully"
+        job["completed_at"] = time.time()
+
+    except ExportCancelled as e:
+        logger.info("[{}] Export cancelled", short_id)
+
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+                logger.debug("[{}] Removed cancelled output: {}", short_id, output_path)
+            except OSError as rm_err:
+                logger.warning("[{}] Could not remove cancelled output: {}", short_id, rm_err)
+
+        job["status"] = "cancelled"
+        job["error"] = None
+        job["message"] = str(e)
         job["completed_at"] = time.time()
 
     except Exception as e:
@@ -475,6 +579,18 @@ def cancel_export(job_id):
 
     job = _export_jobs[job_id]
     logger.info("Cancelling export job: {} (status={})", job_id[:8], job["status"])
+    if job["status"] in ("queued", "processing"):
+        job["status"] = "cancelled"
+        job["message"] = "Cancellation requested"
+        job["completed_at"] = time.time()
+        if os.path.exists(job["output_path"]):
+            try:
+                os.remove(job["output_path"])
+                logger.debug("Removed partial export file: {}", job["output_path"])
+            except OSError as e:
+                logger.warning("Could not remove partial export file: {}", e)
+        return jsonify({"message": "Cancellation requested", "status": "cancelled"}), 202
+
     if os.path.exists(job["output_path"]):
         try:
             os.remove(job["output_path"])
