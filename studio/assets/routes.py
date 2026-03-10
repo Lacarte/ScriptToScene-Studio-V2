@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import ASSETS_DIR, SCENES_DIR
+from config import ASSETS_DIR, SCENES_DIR, KIE_AI_MODEL
 
 BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "bin")
 
@@ -155,10 +155,10 @@ def grabber_start(data: GrabberStartRequest):
     # Store Kie AI generation options for the background thread
     if provider == "kie-ai":
         job["_kie_ai_options"] = {
-            "model": data.get("model", "nano-banana"),
-            "aspect_ratio": data.get("aspect_ratio", "9:16"),
-            "resolution": data.get("resolution", "1"),
-            "output_format": data.get("output_format", "jpg"),
+            "model": data.model or KIE_AI_MODEL,
+            "aspect_ratio": data.aspect_ratio or "9:16",
+            "resolution": data.resolution or "1",
+            "output_format": data.output_format or "jpg",
         }
 
     grabber_jobs[project_id] = job
