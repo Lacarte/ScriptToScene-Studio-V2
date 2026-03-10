@@ -1311,8 +1311,8 @@ async function loadProjectFromServer(projectId) {
             } catch { /* ignore */ }
         }
 
-        // Build staged_timeline from saved data
-        const staged = {
+        // Build project data directly (no sessionStorage)
+        const projectData = {
             project_id: saved.project_id,
             project_name: saved.project_name || saved.project_id,
             style: saved.style || '',
@@ -1350,30 +1350,31 @@ async function loadProjectFromServer(projectId) {
         // Restore voice audio path from saved tracks
         const voiceTrack = (saved.audio_tracks || []).find(t => t.type === 'voice');
         if (voiceTrack?.path) {
-            staged.audio = {
+            projectData.audio = {
                 url: voiceTrack.path,
                 source_file: voiceTrack.file || '',
                 duration: voiceTrack.duration || 0
             };
         }
 
-        // Store as staged_timeline so normal init picks it up
-        sessionStorage.setItem('staged_timeline', JSON.stringify(staged));
+        // Reset editor state for new project
+        _resetEditorForNewProject();
+        hideNoDataOverlay();
 
-        // Store source_folder so the parent shell can scope caption auto-generation
-        if (saved.source_folder) {
-            localStorage.setItem('sts-editor-source-folder', saved.source_folder);
+        // Load project data directly
+        updateLoadingOverlay('Loading project data...');
+        await loadProjectData(projectData);
+
+        // Load media assets
+        await loadProjectMediaWithProgress();
+
+        // Apply captions directly from saved data
+        if (saved.captions?.captions?.length) {
+            _receiveCaptionData(saved.captions);
         }
 
-        // Store captions if present, clear stale ones if not
-        if (saved.captions && saved.captions.captions && saved.captions.captions.length) {
-            localStorage.setItem('sts-editor-captions', JSON.stringify(saved.captions));
-        } else {
-            localStorage.removeItem('sts-editor-captions');
-        }
-
-        // Store extra state in sessionStorage so it survives the reload
-        const extraState = {
+        // Restore extra state directly from saved data
+        _applyExtraState({
             audio_tracks: (saved.audio_tracks || []).filter(t => t.type !== 'voice'),
             edit_history: saved.edit_history || [],
             history_index: saved.history_index ?? -1,
@@ -1382,16 +1383,161 @@ async function loadProjectFromServer(projectId) {
             overlays: saved.overlays || (saved.overlay ? [saved.overlay] : []),
             grain_overlay: saved.grain_overlay || saved.grainOverlay || null,
             scenes: saved.scenes || []
-        };
-        sessionStorage.setItem('editor_saved_state', JSON.stringify(extraState));
+        });
 
-        hideNoDataOverlay();
-        location.reload();
+        await hideLoadingOverlay();
+        showToast('Project loaded', 'success');
     } catch (e) {
         hideLoadingOverlay();
         showToast('Failed to load project: ' + e.message, 'error');
         showNoDataOverlay();
     }
+}
+
+/**
+ * Reset editor state before loading a new project (no page reload needed).
+ */
+function _resetEditorForNewProject() {
+    // Stop playback
+    if (EditorState.isPlaying && EditorState.preview) {
+        EditorState.preview.toggle();
+    }
+    EditorState.isPlaying = false;
+
+    // Stop and remove all audio elements
+    for (const track of EditorState.audioTracks) {
+        if (track.element) { track.element.pause(); track.element.src = ''; }
+    }
+    EditorState.audioTracks = [];
+    EditorState.audio = null;
+    EditorState.audioElement = null;
+
+    // Reset state
+    EditorState.scenes = [];
+    EditorState.originalScenes = [];
+    EditorState.selectedScene = null;
+    EditorState.playbackPosition = 0;
+    EditorState.editHistory = [];
+    EditorState.historyIndex = -1;
+    EditorState.sceneErrors = new Map();
+    EditorState.savedAudioSettings = null;
+    EditorState.captionData = null;
+    EditorState.captionsEnabled = false;
+    EditorState.overlays = [];
+    EditorState.grainOverlay = null;
+    EditorState.disabledTracks = new Set();
+
+    // Clear preview
+    if (EditorState.preview) {
+        EditorState.preview.setCaptions(null, null);
+        EditorState.preview.setOverlay([]);
+    }
+}
+
+/**
+ * Apply extra saved state (music tracks, overlays, history, etc.)
+ * directly from data, without going through sessionStorage.
+ */
+function _applyExtraState(saved) {
+    // Re-apply scene-level properties from server save
+    if (saved.scenes?.length) {
+        for (const ss of saved.scenes) {
+            const scene = EditorState.scenes.find(s => s.id === (ss.id ?? ss.scene_id));
+            if (!scene) continue;
+            if (ss.visual_fx !== undefined) scene.visual_fx = ss.visual_fx;
+            if (ss.duration !== undefined) scene.duration = ss.duration;
+            if (ss.text_content !== undefined) scene.text_content = ss.text_content;
+            if (ss.text_color !== undefined) scene.text_color = ss.text_color;
+            if (ss.text_size !== undefined) scene.text_size = ss.text_size;
+            if (ss.font_family !== undefined) scene.font_family = ss.font_family;
+            if (ss.font_style !== undefined) scene.font_style = ss.font_style;
+            if (ss.text_align !== undefined) scene.text_align = ss.text_align;
+            if (ss.vertical_align !== undefined) scene.vertical_align = ss.vertical_align;
+            if (ss.text_x !== undefined) scene.text_x = ss.text_x;
+            if (ss.text_y !== undefined) scene.text_y = ss.text_y;
+            if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
+            if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
+        }
+    }
+
+    // Restore non-voice audio tracks (music, fx)
+    for (const t of (saved.audio_tracks || [])) {
+        if (!t.file || !t.path) continue;
+        const track = createAudioTrack({
+            label: t.label || t.type,
+            type: t.type,
+            file: t.file,
+            path: t.path,
+            duration: t.duration || 0,
+            trimmedDuration: t.trimmedDuration || null,
+            volume: t.volume ?? 1.0,
+            loop: !!t.loop,
+            duckingEnabled: !!t.duckingEnabled,
+            duckingLevel: t.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL,
+            fadeIn: t.fadeIn || 0,
+            fadeOut: t.fadeOut || 0
+        });
+        track.muted = !!t.muted;
+        EditorState.audioTracks.push(track);
+
+        const audio = new Audio(t.path);
+        track.element = audio;
+        audio.loop = track.loop;
+        ensureTrackGainNode(track);
+        audio.addEventListener('loadedmetadata', () => {
+            track.loaded = true;
+            track.duration = audio.duration;
+            renderAllAudioTracks();
+        });
+        audio.addEventListener('error', () => {
+            track.error = true;
+            renderAllAudioTracks();
+        });
+    }
+
+    // Restore edit history
+    if (saved.edit_history?.length) {
+        EditorState.editHistory = saved.edit_history;
+        EditorState.historyIndex = saved.history_index ?? saved.edit_history.length - 1;
+    }
+
+    // Restore disabled tracks
+    if (saved.disabled_tracks?.length) {
+        EditorState.disabledTracks = new Set(saved.disabled_tracks);
+    }
+
+    // Restore captions enabled state
+    if (saved.captionsEnabled !== undefined) {
+        EditorState.captionsEnabled = saved.captionsEnabled;
+        const toggle = document.getElementById('caption-enabled-toggle');
+        if (toggle) toggle.checked = saved.captionsEnabled;
+        if (elements.captionTrackRow) {
+            elements.captionTrackRow.style.display = saved.captionsEnabled ? '' : 'none';
+        }
+        if (EditorState.preview) {
+            if (saved.captionsEnabled && EditorState.captionData) {
+                EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style || {});
+            } else if (!saved.captionsEnabled) {
+                EditorState.preview.setCaptions(null, null);
+            }
+        }
+    }
+
+    // Restore global overlays
+    const savedOverlays = saved.overlays
+        ? (Array.isArray(saved.overlays) ? saved.overlays : [saved.overlays])
+        : (saved.overlay ? [saved.overlay] : []);
+    if (savedOverlays.length) {
+        EditorState.overlays = savedOverlays;
+        if (EditorState.preview) EditorState.preview.setOverlay(savedOverlays);
+        updateOverlaysTab();
+    }
+
+    EditorState.grainOverlay = normalizeGrainOverlay(saved.grain_overlay || saved.grainOverlay || EditorState.grainOverlay);
+    updateOverlaysTab();
+
+    renderAllAudioTracks();
+    renderTimeline();
 }
 
 function _restoreSavedEditorState() {
