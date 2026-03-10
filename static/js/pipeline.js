@@ -181,13 +181,15 @@ function _plUpdateStep(event) {
       scenesSelectStyle(_plStyle);
     }
 
-    // Show continue bar to Scene Generator
-    showContinueBar('pipeline-progress', 'scenes', 'Go to Scene Generator →', () => {
+    // Auto-navigate to Scene Generator after pipeline completes
+    setTimeout(() => {
+      switchPage('scenes');
+      if (typeof loadScenesHistory === 'function') loadScenesHistory();
       if (STATE.scenesResult) {
         _updateScenesSource();
         renderSceneResults(STATE.scenesResult);
       }
-    });
+    }, 800);
     return;
   }
   if (step === 'error') {

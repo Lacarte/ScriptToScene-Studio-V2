@@ -222,8 +222,28 @@ function _scnRenderTemplateGrid() {
 function scenesSelectStyle(styleId) {
   $('#scenes-style').value = styleId;
   _scnRenderTemplateGrid();
+  _scnUpdateStyleBadge();
   _scnClearResults();
   _updateScenesSource(); // refresh payload preview
+}
+
+function _scnUpdateStyleBadge() {
+  const badge = $('#scenes-style-badge');
+  if (!badge) return;
+  const tmpl = _scnGetSelectedTemplate();
+  if (tmpl && tmpl.name) {
+    badge.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:${tmpl.color || 'var(--text-muted)'};display:inline-block"></span> ${esc(tmpl.name)}`;
+  } else {
+    badge.textContent = '';
+  }
+}
+
+function toggleStyleGrid() {
+  const body = $('#scenes-style-body');
+  const chevron = $('#scenes-style-chevron');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chevron.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
 }
 
 function _scnGetSelectedTemplate() {
@@ -843,6 +863,10 @@ function renderScenesHistory(items) {
           </div>
           <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}${styleName ? ` · <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${esc(styleName)}</span></span>` : ''}</p>
         </div>
+        <button class="btn-ghost" title="Go to Assets" onclick="event.stopPropagation(); goToAssetsFromHistory('${esc(item.project_id)}')" style="padding:6px 8px;font-size:11px;color:var(--text-muted);border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:4px;flex-shrink:0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          Assets
+        </button>
       </div>
     </div>`;
   }).join('');
@@ -873,6 +897,15 @@ async function loadScenesProject(projectId) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+async function goToAssetsFromHistory(projectId) {
+  try {
+    const data = await api(`/api/scenes/${projectId}`);
+    STATE.scenesResult = data;
+    setModuleBadge('scenes', data.project_id || projectId);
+    await sendToAssets();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 // Init — load templates first so history can resolve style names/colors
-scenesLoadTemplates().then(() => loadScenesHistory());
+scenesLoadTemplates().then(() => { _scnUpdateStyleBadge(); loadScenesHistory(); });
 scenesInitWebhookUrl();
