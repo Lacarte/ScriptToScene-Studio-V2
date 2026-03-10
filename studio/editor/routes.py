@@ -473,7 +473,9 @@ def list_overlays():
 @editor_bp.route("/timeline-editor/<path:filename>")
 def serve_timeline_editor(filename):
     """Serve timeline editor static files."""
-    return send_from_directory(TIMELINE_EDITOR_DIR, filename)
+    resp = send_from_directory(TIMELINE_EDITOR_DIR, filename)
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
 
 
 
