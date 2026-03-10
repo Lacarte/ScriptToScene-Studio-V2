@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, request
 from loguru import logger
 
 from config import APP_ASSETS_DIR, CAPTIONS_DIR, generate_project_id
+from studio.io_utils import safe_json_write
 from studio.validation import validate_json
 from studio.captions.schemas import CaptionGenerateRequest, CaptionSaveRequest
 
@@ -253,10 +254,7 @@ def generate_captions(data: CaptionGenerateRequest):
     }
 
     # Auto-save
-    job_dir = os.path.join(CAPTIONS_DIR, project_id)
-    os.makedirs(job_dir, exist_ok=True)
-    with open(os.path.join(job_dir, "captions.json"), "w") as f:
-        json.dump(result, f, indent=2)
+    safe_json_write(os.path.join(CAPTIONS_DIR, project_id, "captions.json"), result, indent=2)
 
     logger.success("Generated {} captions from {} words -> {}",
                    len(captions), len(alignment), project_id)
@@ -274,10 +272,7 @@ def save_captions(data: CaptionSaveRequest):
     save_data["timestamp"] = datetime.now().isoformat()
     project_id = data.project_id
 
-    job_dir = os.path.join(CAPTIONS_DIR, project_id)
-    os.makedirs(job_dir, exist_ok=True)
-    with open(os.path.join(job_dir, "captions.json"), "w") as f:
-        json.dump(save_data, f, indent=2)
+    safe_json_write(os.path.join(CAPTIONS_DIR, project_id, "captions.json"), save_data, indent=2)
 
     logger.success("Saved {} captions -> {}", len(data.captions), project_id)
     return jsonify({"status": "saved", "project_id": project_id})

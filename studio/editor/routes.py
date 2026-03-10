@@ -18,6 +18,7 @@ from loguru import logger
 
 from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
+from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
 from studio.editor.schemas import EditorSaveRequest, ExportRequest
 
@@ -169,9 +170,7 @@ def editor_save_project(data: EditorSaveRequest):
 
     path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
     try:
-        os.makedirs(EDITOR_SAVE_DIR, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(save_data, f, ensure_ascii=False)
+        safe_json_write(path, save_data)
     except OSError as e:
         logger.error("Failed to save editor project {}: {}", safe_id, e)
         return jsonify({"error": f"Failed to save: {e}"}), 500
@@ -185,12 +184,11 @@ def editor_load_project(project_id):
     """Load a saved editor project."""
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
     path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
-    if not os.path.isfile(path):
-        return jsonify({"error": "not found"}), 404
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = safe_json_read(path)
+    except FileNotFoundError:
+        return jsonify({"error": "not found"}), 404
     except (json.JSONDecodeError, OSError) as e:
         logger.error("Failed to load editor project {}: {}", safe_id, e)
         return jsonify({"error": f"Corrupted project file: {e}"}), 500
@@ -219,8 +217,7 @@ def editor_list_projects():
             continue
         fpath = os.path.join(EDITOR_SAVE_DIR, fname)
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = safe_json_read(fpath)
             projects.append({
                 "project_id": data.get("project_id", fname.replace(".json", "")),
                 "project_name": data.get("project_name", ""),

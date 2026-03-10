@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 import requests as http_requests
 from loguru import logger
 
+from studio.io_utils import safe_json_write
+
 # Midjourney CDN blocks bare requests — mimic a real browser
 _DL_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -247,8 +249,7 @@ def reconcile_project(assets_dir, project_id):
 
     # --- Write back only if something changed ---
     if updated > 0:
-        with open(meta_path, "w") as f:
-            json.dump(meta, f, indent=2)
+        safe_json_write(meta_path, meta, indent=2)
 
         # Fix overall job status
         if job.get("scene_statuses"):
@@ -258,8 +259,7 @@ def reconcile_project(assets_dir, project_id):
             )
             if all_ready:
                 job["status"] = "done"
-            with open(job_path, "w") as f:
-                json.dump(job, f, indent=2)
+            safe_json_write(job_path, job, indent=2)
 
         logger.info("Reconciled project {}: {} scenes updated", project_id, updated)
 
@@ -289,5 +289,4 @@ def _update_project_metadata(assets_dir, project_id, scene_num, source_urls, loc
         "file_count": len(local_files),
     }
 
-    with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
+    safe_json_write(meta_path, meta, indent=2)

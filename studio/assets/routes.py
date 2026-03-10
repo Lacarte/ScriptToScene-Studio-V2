@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import ASSETS_DIR, SCENES_DIR, KIE_AI_MODEL
+from studio.io_utils import safe_json_write
 
 BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "bin")
 
@@ -56,10 +57,7 @@ grabber_jobs = {}
 def _save_job(job):
     """Persist grabber job state to disk."""
     try:
-        job_dir = os.path.join(ASSETS_DIR, job["project_id"])
-        os.makedirs(job_dir, exist_ok=True)
-        with open(os.path.join(job_dir, "grabber_job.json"), "w") as f:
-            json.dump(job, f, indent=2)
+        safe_json_write(os.path.join(ASSETS_DIR, job["project_id"], "grabber_job.json"), job, indent=2)
     except Exception as e:
         logger.error("Failed to persist job {}: {}", job.get("grabber_id", "?"), e)
 

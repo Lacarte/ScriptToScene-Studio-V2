@@ -1,0 +1,91 @@
+"""Reliable JSON read/write utilities with atomic saves and backup recovery."""
+
+import json
+import os
+import shutil
+import tempfile
+
+from loguru import logger
+
+
+def safe_json_write(path: str, data: dict, *, indent: int | None = None, ensure_ascii: bool = False) -> None:
+    """Write JSON atomically: tmp file → flush/fsync → rename over target.
+
+    On Windows ``os.rename`` fails if the target exists, so we fall back to
+    ``shutil.move`` after removing the old file.  A ``.bak`` copy of the
+    previous version is kept so ``safe_json_read`` can recover from
+    corruption.
+
+    Raises ``OSError`` on failure (caller should handle).
+    """
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+
+    # 1. Write to a temp file in the SAME directory (same filesystem → rename is atomic on POSIX)
+    fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp", prefix=".save_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
+            f.flush()
+            os.fsync(f.fileno())
+
+        # 2. Rotate current file → .bak (keep one backup)
+        if os.path.isfile(path):
+            bak_path = path + ".bak"
+            try:
+                shutil.copy2(path, bak_path)
+            except OSError:
+                pass  # non-fatal — best-effort backup
+
+        # 3. Atomic rename (POSIX) / replace (Windows)
+        #    os.replace is atomic on both POSIX and modern Windows (NTFS).
+        os.replace(tmp_path, path)
+    except BaseException:
+        # Clean up temp file on any failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def safe_json_read(path: str) -> dict:
+    """Read JSON with automatic .bak fallback on corruption.
+
+    Returns the parsed dict.  Raises ``FileNotFoundError`` if neither the
+    main file nor the backup exist, or ``json.JSONDecodeError`` if both are
+    corrupt.
+    """
+    # Try primary file
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Primary JSON corrupt ({}), trying .bak: {}", path, e)
+
+    # Try backup
+    bak_path = path + ".bak"
+    if os.path.isfile(bak_path):
+        try:
+            with open(bak_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # Restore backup → primary so next read is clean
+            try:
+                shutil.copy2(bak_path, path)
+                logger.info("Restored {} from backup", path)
+            except OSError:
+                pass
+            return data
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("Backup also corrupt ({}): {}", bak_path, e)
+            raise json.JSONDecodeError(
+                f"Both primary and backup corrupt for {path}", "", 0
+            ) from e
+
+    # Neither exists
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"No such file: {path}")
+
+    # Primary exists but was corrupt and no backup
+    raise json.JSONDecodeError(f"Corrupted JSON: {path}", "", 0)

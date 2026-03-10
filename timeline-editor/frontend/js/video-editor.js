@@ -367,15 +367,31 @@ function saveProjectEdits() {
 // ---- Server-side project persistence ----
 
 let _serverSaveTimer = null;
+let _serverSaveRetries = 0;
+const _MAX_SAVE_RETRIES = 3;
+const _SAVE_DEBOUNCE_MS = 2000;
+let _saveStatusTimer = null;
+
 function _debouncedServerSave() {
     if (_serverSaveTimer) clearTimeout(_serverSaveTimer);
-    _serverSaveTimer = setTimeout(() => saveProjectToServer(), 2000);
+    _serverSaveTimer = setTimeout(() => saveProjectToServer(), _SAVE_DEBOUNCE_MS);
 }
 
-async function saveProjectToServer() {
-    if (!EditorState.project?.id) return;
+function _showSaveStatus(status, text) {
+    const el = document.getElementById('save-status');
+    if (!el) return;
+    if (_saveStatusTimer) clearTimeout(_saveStatusTimer);
+    el.style.display = '';
+    el.className = 'save-status ' + status;
+    el.textContent = text;
+    if (status === 'saved') {
+        _saveStatusTimer = setTimeout(() => { el.classList.add('fade-out'); }, 2000);
+        _saveStatusTimer = setTimeout(() => { el.style.display = 'none'; }, 2500);
+    }
+}
 
-    const payload = {
+function _buildSavePayload() {
+    return {
         project_id: EditorState.project.id,
         project_name: EditorState.project.name || EditorState.project.id,
         source_folder: EditorState.project.sourceFolder || '',
@@ -415,16 +431,35 @@ async function saveProjectToServer() {
         history_index: EditorState.historyIndex,
         disabled_tracks: [...(EditorState.disabledTracks || [])]
     };
+}
+
+async function saveProjectToServer() {
+    if (!EditorState.project?.id) return;
+
+    _showSaveStatus('saving', 'Saving...');
+    const payload = _buildSavePayload();
 
     try {
-        await fetch('/api/editor/save', {
+        const res = await fetch('/api/editor/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        console.log('Project saved to server');
+        if (!res.ok) throw new Error(`Server ${res.status}`);
+        _serverSaveRetries = 0;
+        _showSaveStatus('saved', 'Saved');
     } catch (e) {
-        console.warn('Failed to save project to server:', e);
+        _serverSaveRetries++;
+        if (_serverSaveRetries <= _MAX_SAVE_RETRIES) {
+            const delay = _SAVE_DEBOUNCE_MS * _serverSaveRetries;
+            console.warn(`Save failed (attempt ${_serverSaveRetries}/${_MAX_SAVE_RETRIES}), retrying in ${delay}ms:`, e.message);
+            _showSaveStatus('save-error', `Save failed, retrying...`);
+            _serverSaveTimer = setTimeout(() => saveProjectToServer(), delay);
+        } else {
+            console.error('Save failed after max retries:', e.message);
+            _showSaveStatus('save-error', 'Save failed');
+            _serverSaveRetries = 0;
+        }
     }
 }
 

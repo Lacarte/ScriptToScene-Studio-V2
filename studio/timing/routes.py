@@ -16,6 +16,7 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import ALIGN_DIR, TRASH_DIR, BIN_DIR, generate_project_id
+from studio.io_utils import safe_json_write
 
 timing_bp = Blueprint("timing", __name__)
 
@@ -192,8 +193,7 @@ def force_align():
             "inference_time": round(elapsed, 3),
             "timestamp": datetime.now().isoformat(),
         }
-        with open(os.path.join(job_dir, "alignment.json"), "w") as f:
-            json.dump(result_data, f, indent=2)
+        safe_json_write(os.path.join(job_dir, "alignment.json"), result_data, indent=2)
 
         logger.success("Force-aligned  {} | {} words in {:.2f}s -> {}", original_name, len(alignment), elapsed, folder_name)
         return jsonify(result_data)
@@ -276,8 +276,7 @@ def align_and_segment():
             "inference_time": round(align_elapsed, 3),
             "timestamp": datetime.now().isoformat(),
         }
-        with open(os.path.join(job_dir, "alignment.json"), "w") as f:
-            json.dump(align_data, f, indent=2)
+        safe_json_write(os.path.join(job_dir, "alignment.json"), align_data, indent=2)
 
         # ── Segmentation ──
         seg_config_str = request.form.get("segment_config", "")

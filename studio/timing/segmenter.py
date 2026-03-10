@@ -15,6 +15,8 @@ import re
 import sys
 from datetime import datetime
 
+from studio.io_utils import safe_json_write
+
 # ---------------------------------------------------------------------------
 # Default config
 # ---------------------------------------------------------------------------
@@ -352,9 +354,7 @@ def run_segmenter(alignment, config=None, metadata=None):
 
 def save_output(result, output_path):
     """Write segmenter result JSON to disk."""
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    safe_json_write(output_path, result, indent=2)
     return output_path
 
 

@@ -25,6 +25,7 @@ from flask import Blueprint, Response, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR
+from studio.io_utils import safe_json_write
 from studio.validation import validate_json
 from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
 from .normalize import (
@@ -233,14 +234,11 @@ def _folder_for_file(filename):
 def _update_metadata(basename, updates):
     lock = _get_metadata_lock(basename)
     json_path = os.path.join(_tts_job_dir(basename), basename + ".json")
-    tmp_path = json_path + ".tmp"
     with lock:
         with open(json_path, "r") as f:
             metadata = json.load(f)
         metadata.update(updates)
-        with open(tmp_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-        os.replace(tmp_path, json_path)
+        safe_json_write(json_path, metadata, indent=2)
     return metadata
 
 
@@ -424,9 +422,7 @@ def _background_chunked_generate(job_id, voice_param, voice_name, sentences, spe
         if blend_meta:
             metadata["blend"] = blend_meta
 
-        json_path = os.path.join(job_dir, basename + ".json")
-        with open(json_path, "w") as f:
-            json.dump(metadata, f, indent=2)
+        safe_json_write(os.path.join(job_dir, basename + ".json"), metadata, indent=2)
 
         q.put({"phase": "done", "metadata": metadata})
         with generation_jobs_lock:
@@ -723,8 +719,7 @@ def generate(data: TtsGenerateRequest):
     }
     if blend_meta:
         metadata["blend"] = blend_meta
-    with open(os.path.join(job_dir, json_name), "w") as f:
-        json.dump(metadata, f, indent=2)
+    safe_json_write(os.path.join(job_dir, json_name), metadata, indent=2)
 
     return jsonify(metadata)
 
@@ -1178,9 +1173,7 @@ def _background_multivoice_generate(job_id, segments, speed, gap_ms, prompt, bas
             "segments": [{"voice": s.get("voice"), "text": s.get("text", "")[:50]} for s in segments],
         }
 
-        json_path = os.path.join(job_dir, basename + ".json")
-        with open(json_path, "w") as f:
-            json.dump(metadata, f, indent=2)
+        safe_json_write(os.path.join(job_dir, basename + ".json"), metadata, indent=2)
 
         q.put({"phase": "done", "metadata": metadata})
         with generation_jobs_lock:

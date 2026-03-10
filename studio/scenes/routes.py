@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request
 from loguru import logger
 
 from config import SCENES_DIR, ALIGN_DIR, N8N_WEBHOOK_URL, generate_project_id
+from studio.io_utils import safe_json_write
 from studio.validation import validate_json
 from studio.scenes.schemas import SceneGenerateRequest
 from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
@@ -89,10 +90,7 @@ def generate_scenes(data: SceneGenerateRequest):
         if data.parent_id:
             result["parent_id"] = data.parent_id
 
-        job_dir = os.path.join(SCENES_DIR, project_id)
-        os.makedirs(job_dir, exist_ok=True)
-        with open(os.path.join(job_dir, "scenes.json"), "w") as f:
-            json.dump(result, f, indent=2)
+        safe_json_write(os.path.join(SCENES_DIR, project_id, "scenes.json"), result, indent=2)
 
         logger.success("Generated {} scenes -> {}", len(result.get("scenes", [])), project_id)
         return jsonify(result)

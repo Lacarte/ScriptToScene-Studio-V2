@@ -59,6 +59,32 @@
     white-space: nowrap;
 }
 
+/* ---- Save Status Indicator ---- */
+.save-status {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: var(--radius-xs);
+    transition: opacity 0.3s ease;
+    white-space: nowrap;
+}
+.save-status.saving {
+    color: var(--accent, #5ac8c8);
+    opacity: 1;
+}
+.save-status.saved {
+    color: var(--text-muted);
+    opacity: 1;
+}
+.save-status.save-error {
+    color: #ff6b6b;
+    opacity: 1;
+}
+.save-status.fade-out {
+    opacity: 0;
+}
+
 /* ---- Panel Resize Handles (inside 1rem gutter, thin accent line on hover) ---- */
 .panel-resize-handle {
     grid-row: 1;

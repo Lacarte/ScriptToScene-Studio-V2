@@ -26,6 +26,7 @@ from config import (
     TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR,
     N8N_WEBHOOK_URL, generate_project_id,
 )
+from studio.io_utils import safe_json_write
 from studio.validation import validate_json
 from studio.pipeline.schemas import PipelineRunRequest
 
@@ -366,10 +367,11 @@ def _step_tts(config, project_id):
         "wav_path": wav_path,
     }
 
-    json_path = os.path.join(job_dir, basename + ".json")
-    with open(json_path, "w") as f:
-        json.dump({k: v for k, v in metadata.items() if k != "wav_path"},
-                  f, indent=2)
+    safe_json_write(
+        os.path.join(job_dir, basename + ".json"),
+        {k: v for k, v in metadata.items() if k != "wav_path"},
+        indent=2,
+    )
 
     logger.success("Pipeline TTS: {:.1f}s audio in {:.2f}s",
                    duration, total_inference)
@@ -411,8 +413,7 @@ def _step_timing(tts_result, config, project_id):
         "timestamp": datetime.now().isoformat(),
     }
 
-    with open(os.path.join(align_dir, "alignment.json"), "w") as f:
-        json.dump(result_data, f, indent=2)
+    safe_json_write(os.path.join(align_dir, "alignment.json"), result_data, indent=2)
 
     logger.success("Pipeline Timing: {} words in {:.2f}s",
                    len(alignment), elapsed)
@@ -511,10 +512,7 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
         "metadata", {}).get("source_folder", "")
     result["style"] = style_id
 
-    job_dir = os.path.join(SCENES_DIR, project_id)
-    os.makedirs(job_dir, exist_ok=True)
-    with open(os.path.join(job_dir, "scenes.json"), "w") as f:
-        json.dump(result, f, indent=2)
+    safe_json_write(os.path.join(SCENES_DIR, project_id, "scenes.json"), result, indent=2)
 
     logger.success("Pipeline Scenes: {} scenes",
                    len(result.get("scenes", [])))
