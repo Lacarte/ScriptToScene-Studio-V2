@@ -94,8 +94,13 @@ def editor_save_project(data: EditorSaveRequest):
     save_data["saved_at"] = datetime.now(timezone.utc).isoformat()
 
     path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(save_data, f, ensure_ascii=False)
+    try:
+        os.makedirs(EDITOR_SAVE_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(save_data, f, ensure_ascii=False)
+    except OSError as e:
+        logger.error("Failed to save editor project {}: {}", safe_id, e)
+        return jsonify({"error": f"Failed to save: {e}"}), 500
 
     logger.info("Editor project saved: {} ({} scenes)", safe_id, save_data.get("scene_count", "?"))
     return jsonify({"ok": True, "saved_at": save_data["saved_at"]})
@@ -109,8 +114,12 @@ def editor_load_project(project_id):
     if not os.path.isfile(path):
         return jsonify({"error": "not found"}), 404
 
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("Failed to load editor project {}: {}", safe_id, e)
+        return jsonify({"error": f"Corrupted project file: {e}"}), 500
     return jsonify(data)
 
 

@@ -464,6 +464,7 @@ class VideoProcessor:
             '-i', overlay_path,
             '-filter_complex',
             f'[1:v]scale={self.width}:{self.height}:flags=lanczos,format=rgba[ov];[0:v][ov]overlay=0:0:format=auto',
+            '-map', '0:a?',
             '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
             '-pix_fmt', 'yuv420p',
             '-c:a', 'copy',
@@ -570,7 +571,7 @@ class VideoProcessor:
             output_path
         ]
         logger.debug("subprocess: image->video cmd={}", ' '.join(cmd[:8]) + '...')
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             logger.error("FFmpeg image->video failed: {}", result.stderr[:500])
             raise RuntimeError(f"FFmpeg failed: {result.stderr[:200]}")
@@ -596,7 +597,7 @@ class VideoProcessor:
         ]
 
         if effect_type == 'fade':
-            fade_dur = 0.5
+            fade_dur = min(0.5, duration / 2)
             filters.append(f"fade=t=in:st=0:d={fade_dur}")
             filters.append(f"fade=t=out:st={duration - fade_dur}:d={fade_dur}")
 
@@ -616,7 +617,7 @@ class VideoProcessor:
         ]
 
         logger.debug("Simple scene cmd: {}", ' '.join(cmd[:10]) + '...')
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             logger.error("FFmpeg simple scene failed:\nstdout: {}\nstderr: {}",
                           result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
@@ -672,7 +673,7 @@ class VideoProcessor:
 
         logger.info("Zoompan effect: {} {}s", effect_type, duration)
         logger.debug("Zoompan cmd: {}", ' '.join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             logger.error("FFmpeg zoompan failed:\nstdout: {}\nstderr: {}",
                           result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
@@ -689,7 +690,7 @@ class VideoProcessor:
         ]
 
         if effect_type == 'fade':
-            fade_dur = 0.5
+            fade_dur = min(0.5, duration / 2)
             filters.append(f"fade=t=in:st=0:d={fade_dur}")
             filters.append(f"fade=t=out:st={duration - fade_dur}:d={fade_dur}")
 
@@ -712,7 +713,7 @@ class VideoProcessor:
         logger.info("Video source scene: {}s effect={} src={}",
                      duration, effect_type, os.path.basename(video_path))
         logger.debug("Video scene cmd: {}", ' '.join(cmd[:12]) + '...')
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             logger.error("FFmpeg video scene failed:\nstdout: {}\nstderr: {}",
                           result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
@@ -728,7 +729,7 @@ class VideoProcessor:
         ]
 
         if effect_type == 'fade':
-            fade_duration = effect.get('fade_duration', 0.5)
+            fade_duration = min(effect.get('fade_duration', 0.5), duration / 2)
             vf_filters.append(f"fade=t=in:st=0:d={fade_duration}")
             vf_filters.append(f"fade=t=out:st={duration-fade_duration}:d={fade_duration}")
 
@@ -748,7 +749,7 @@ class VideoProcessor:
             output_path
         ]
         logger.debug("Subprocess scene cmd: {}", ' '.join(cmd[:10]) + '...')
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             logger.error("FFmpeg subprocess scene failed:\nstdout: {}\nstderr: {}",
                           result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
@@ -938,7 +939,7 @@ class VideoProcessor:
                 output_path
             ]
             logger.debug("Concat cmd: {}", ' '.join(cmd))
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             if result.returncode != 0:
                 logger.error("FFmpeg concat (no audio) failed:\nstderr: {}", result.stderr[-1000:] if result.stderr else "")
                 raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:] if result.stderr else ''}")
@@ -972,7 +973,7 @@ class VideoProcessor:
         logger.info("Concat with audio: {} inputs, filter_complex={}",
                      2 + (1 if bgmusic_path else 0), bool(filter_str))
         logger.debug("Full concat cmd: {}", ' '.join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             logger.error("FFmpeg concat failed:\nstdout: {}\nstderr: {}",
                           result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
@@ -1610,7 +1611,7 @@ class VideoProcessor:
                 ]
 
             logger.debug("Caption cmd: {} ... (vf file={})", ' '.join(cmd[:6]), vf_file)
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             if result.returncode != 0:
                 logger.error("Caption burn-in failed:\nstdout: {}\nstderr: {}",
                               result.stdout[:300], result.stderr[-1000:] if result.stderr else "")

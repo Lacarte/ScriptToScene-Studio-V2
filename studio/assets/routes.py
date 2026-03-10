@@ -540,7 +540,12 @@ def assets_history():
     if not os.path.isdir(ASSETS_DIR):
         return jsonify(projects)
 
-    for entry in sorted(os.scandir(ASSETS_DIR), key=lambda e: e.stat().st_mtime, reverse=True):
+    try:
+        entries = sorted(os.scandir(ASSETS_DIR), key=lambda e: e.stat().st_mtime, reverse=True)
+    except OSError:
+        return jsonify(projects)
+
+    for entry in entries:
         if not entry.is_dir():
             continue
 
@@ -585,9 +590,15 @@ def assets_history():
 
         # Count actual files on disk
         total_disk_files = 0
-        for sub in Path(entry.path).iterdir():
-            if sub.is_dir() and sub.name not in (".", ".."):
-                total_disk_files += sum(1 for f in sub.iterdir() if f.is_file())
+        try:
+            for sub in Path(entry.path).iterdir():
+                if sub.is_dir() and sub.name not in (".", ".."):
+                    try:
+                        total_disk_files += sum(1 for f in sub.iterdir() if f.is_file())
+                    except OSError:
+                        pass
+        except OSError:
+            pass
         project_info["disk_files"] = total_disk_files
 
         # Get style from scenes.json
@@ -603,11 +614,19 @@ def assets_history():
         # Get a preview image (first file from first scene)
         # For video-only projects, generate a thumbnail frame via FFmpeg
         project_info["preview"] = None
-        for scene_num in sorted(os.listdir(entry.path)):
+        try:
+            scene_dirs = sorted(os.listdir(entry.path))
+        except OSError:
+            scene_dirs = []
+        for scene_num in scene_dirs:
             scene_path = os.path.join(entry.path, scene_num)
             if not os.path.isdir(scene_path) or scene_num in (".", ".."):
                 continue
-            for fname in sorted(os.listdir(scene_path)):
+            try:
+                scene_files = sorted(os.listdir(scene_path))
+            except OSError:
+                continue
+            for fname in scene_files:
                 fpath = os.path.join(scene_path, fname)
                 if not os.path.isfile(fpath):
                     continue
