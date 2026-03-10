@@ -22,6 +22,78 @@ window.STATE = {
   captionAlignment: null,
 };
 
+// ---- Global Audio Registry ----
+// Tracks all audio instances across modules so they can be stopped from one place.
+window._stsAudioRegistry = {};
+
+/**
+ * Register an Audio element (or HTMLMediaElement) with a label.
+ * @param {string} label  — e.g. "Captions", "Alignment", "TTS"
+ * @param {HTMLMediaElement} audioEl
+ */
+window.stsAudioRegister = function (label, audioEl) {
+  if (!audioEl) return;
+  window._stsAudioRegistry[label] = audioEl;
+};
+
+/** Unregister an audio element by label */
+window.stsAudioUnregister = function (label) {
+  delete window._stsAudioRegistry[label];
+};
+
+/** Stop all registered audio and return which ones were playing */
+window.stsAudioStopAll = function () {
+  const stopped = [];
+  for (const [label, el] of Object.entries(window._stsAudioRegistry)) {
+    if (el && !el.paused) {
+      el.pause();
+      el.currentTime = 0;
+      stopped.push(label);
+    }
+  }
+  return stopped;
+};
+
+/** Get the label of the currently-playing audio (first found), or null */
+window.stsAudioGetPlaying = function () {
+  for (const [label, el] of Object.entries(window._stsAudioRegistry)) {
+    if (el && !el.paused) return label;
+  }
+  return null;
+};
+
+// Poll for audio state changes and update the sidebar indicator
+let _stsAudioPollId = null;
+function _stsAudioStartPoll() {
+  if (_stsAudioPollId) return;
+  _stsAudioPollId = setInterval(() => {
+    const btn = document.getElementById('sidebar-audio-btn');
+    if (!btn) return;
+    const playing = window.stsAudioGetPlaying();
+    const labelEl = btn.querySelector('.audio-source-label');
+    if (playing) {
+      btn.classList.add('audio-playing');
+      btn.title = `Playing: ${playing} — click to stop`;
+      if (labelEl) labelEl.textContent = playing;
+    } else {
+      btn.classList.remove('audio-playing');
+      btn.title = 'No audio playing';
+      if (labelEl) labelEl.textContent = '';
+    }
+  }, 250);
+}
+document.addEventListener('DOMContentLoaded', _stsAudioStartPoll);
+
+function stsAudioToggle() {
+  const playing = window.stsAudioGetPlaying();
+  if (playing) {
+    window.stsAudioStopAll();
+    toast(`Stopped: ${playing}`, 'info');
+  } else {
+    toast('No audio playing', 'info');
+  }
+}
+
 // ---- Navigation ----
 function switchPage(page, editorSource = 'internal') {
   $$('.page').forEach(p => p.classList.remove('active'));
@@ -203,19 +275,52 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ---- Settings: Clear All Projects ----
 let _clearChallenge = '';
+function _renderClearPreview(modules, totalItems) {
+  const box = $('#settings-clear-preview');
+  if (!box) return;
+  const rows = (modules || []).map(m => {
+    const count = Number(m.items || 0);
+    const entries = Array.isArray(m.entries) ? m.entries : [];
+    const list = entries.length
+      ? `<div style="margin-top:4px;display:flex;flex-direction:column;gap:2px">${entries.map(name => `<span class="font-mono" style="font-size:10px;color:var(--text-muted)">${esc(name)}</span>`).join('')}</div>`
+      : '<div style="margin-top:4px"><span class="font-mono" style="font-size:10px;color:var(--text-muted)">empty</span></div>';
+    return `<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
+      <div style="display:flex;justify-content:space-between;gap:10px">
+        <span style="font-size:11px;color:var(--text-secondary)">${esc(m.page)} � ${esc(m.module)}</span>
+        <span class="font-mono" style="font-size:11px;color:${count > 0 ? '#ef4444' : 'var(--text-muted)'}">${count}</span>
+      </div>
+      ${list}
+    </div>`;
+  }).join('');
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);font-weight:700">Items that will be moved to TRASH</span>
+      <span class="font-mono" style="font-size:11px;color:#ef4444;font-weight:700">${totalItems || 0} total</span>
+    </div>
+    ${rows || '<p style="font-size:11px;color:var(--text-muted);text-align:center;margin:0">Nothing to clear</p>'}
+  `;
+}
 
-function settingsClearAllProjects() {
+async function settingsClearAllProjects() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   _clearChallenge = '';
   for (let i = 0; i < 6; i++) _clearChallenge += chars[Math.random() * chars.length | 0];
   $('#settings-clear-challenge').textContent = _clearChallenge;
   $('#settings-clear-input').value = '';
   $('#settings-clear-error').style.display = 'none';
+  const preview = $('#settings-clear-preview');
+  if (preview) preview.innerHTML = '<p class="font-mono" style="font-size:11px;color:var(--text-muted);margin:0;text-align:center">Loading modules to clear...</p>';
   const btn = $('#settings-clear-confirm-btn');
   btn.disabled = true;
   btn.style.opacity = '0.4';
   const dlg = $('#settings-clear-dialog');
   dlg.style.display = 'flex';
+  try {
+    const data = await api('/api/settings/clear-all-projects/preview');
+    _renderClearPreview(data.modules || [], data.total_items || 0);
+  } catch (e) {
+    if (preview) preview.innerHTML = `<p style="font-size:11px;color:var(--coral);margin:0;text-align:center">Failed to load preview: ${esc(e.message || 'unknown error')}</p>`;
+  }
   setTimeout(() => $('#settings-clear-input').focus(), 100);
 }
 
@@ -263,9 +368,14 @@ async function settingsClearConfirm() {
       localStorage.removeItem('sts-editor-scenes');
       // Clear module badges
       ['tts', 'timing', 'segmenter', 'scenes', 'assets', 'pipeline'].forEach(m => setModuleBadge(m, ''));
-      // Refresh history lists
+      // Refresh ALL history lists across every module
       if (typeof loadScenesHistory === 'function') loadScenesHistory();
       if (typeof pipelineLoadHistory === 'function') pipelineLoadHistory();
+      if (typeof loadAlignHistory === 'function') loadAlignHistory();
+      if (typeof loadSegHistory === 'function') loadSegHistory();
+      if (typeof loadCaptionsHistory === 'function') loadCaptionsHistory();
+      if (typeof loadAssetsHistory === 'function') loadAssetsHistory();
+      if (typeof loadExportLibrary === 'function') loadExportLibrary(true);
       // Clear visible results
       const scenesResults = document.getElementById('scenes-results');
       if (scenesResults) scenesResults.style.display = 'none';
@@ -273,7 +383,8 @@ async function settingsClearConfirm() {
       if (assetsControls) assetsControls.style.display = 'none';
       const assetsEmpty = document.getElementById('assets-empty');
       if (assetsEmpty) assetsEmpty.style.display = '';
-      toast(`Cleared ${data.count} project folder${data.count !== 1 ? 's' : ''}`, 'success');
+      const exportsMsg = data.exports_deleted ? ` (${data.exports_deleted} export item${data.exports_deleted !== 1 ? 's' : ''} deleted)` : '';
+      toast(`Cleared ${data.count} project item${data.count !== 1 ? 's' : ''}${exportsMsg}`, 'success');
     } else {
       toast(data.error || 'Failed to clear projects', 'error');
     }
@@ -334,3 +445,5 @@ function timeAgo(ts) {
   if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
   return Math.floor(diff / 86400) + 'd ago';
 }
+
+

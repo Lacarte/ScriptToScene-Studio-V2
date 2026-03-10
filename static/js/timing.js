@@ -139,6 +139,7 @@ function _alnLoadAudio(data) {
   }
   _alnAudio = new Audio(url);
   _alnAudio.addEventListener('ended', () => _alnResetPlayback());
+  stsAudioRegister('Alignment', _alnAudio);
   _alnAudio.addEventListener('error', () => {
     const btn = $('#aln-play-btn');
     if (btn) btn.style.display = 'none';

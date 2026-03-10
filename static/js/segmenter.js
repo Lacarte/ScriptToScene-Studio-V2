@@ -311,6 +311,7 @@ function _segLoadAudio() {
   _segAudio.addEventListener('ended', () => {
     _segResetPlayback();
   });
+  stsAudioRegister('Segmenter', _segAudio);
   _segAudio.addEventListener('error', () => {
     const btn = $('#seg-play-btn');
     if (btn) btn.style.display = 'none';

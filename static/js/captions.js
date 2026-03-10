@@ -91,6 +91,7 @@ function _capLoadAudio(align) {
   if (align?.folder && align?.source_file) {
     _capAudio = new Audio(`/output/alignments/${align.folder}/${align.source_file}`);
     _capAudio.addEventListener('ended', _capStopPreview);
+    stsAudioRegister('Captions', _capAudio);
   }
 }
 

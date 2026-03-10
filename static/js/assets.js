@@ -1280,6 +1280,7 @@ async function assetsLoadAudio() {
   if (!url) { bar.style.display = 'none'; return; }
 
   _assetsAudio = new Audio(url);
+  stsAudioRegister('Assets', _assetsAudio);
   _assetsAudio.addEventListener('loadedmetadata', () => {
     bar.style.display = '';
     _assetsAudioUpdateTime();

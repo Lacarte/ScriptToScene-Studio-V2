@@ -33,13 +33,14 @@ TIMELINE_EDITOR_DIR = os.path.join(ROOT_DIR, "timeline-editor", "frontend")
 BIN_DIR = os.path.join(ROOT_DIR, "bin")
 FONTS_DIR = os.path.join(ROOT_DIR, "assets", "fonts")
 EDITOR_SAVE_DIR = os.path.join(OUTPUT_DIR, "editor")
+EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
 APP_ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
 for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, ASSETS_DIR,
            SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
-           EDITOR_SAVE_DIR):
+           EDITOR_SAVE_DIR, EXPORT_DIR):
     os.makedirs(_d, exist_ok=True)
 
 # ---------------------------------------------------------------------------

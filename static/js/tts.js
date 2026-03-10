@@ -1155,6 +1155,7 @@ function ttsUpdateSeekBar() {
   el.addEventListener('pause', ttsUpdatePlayIcon);
   el.addEventListener('ended', ttsUpdatePlayIcon);
   el.addEventListener('timeupdate', ttsUpdateSeekBar);
+  stsAudioRegister('TTS', el);
 })();
 
 // ---- History ----

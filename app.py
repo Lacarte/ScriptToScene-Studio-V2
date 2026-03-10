@@ -17,6 +17,7 @@ from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
+    EXPORT_DIR,
 )
 from studio.security import is_loopback_remote
 
@@ -130,10 +131,57 @@ def open_folder():
 # ---------------------------------------------------------------------------
 
 # Directories whose contents get moved to output/TRASH/<dir_name>/
+_CLEAR_MODULES = [
+    {"page": "TTS", "module": "Text to Speech", "dir": TTS_DIR},
+    {"page": "Alignment", "module": "Force Alignment", "dir": ALIGN_DIR},
+    {"page": "Segmenter", "module": "Scene Segmenter", "dir": SEGMENTER_DIR},
+    {"page": "Scenes", "module": "Scene Generator", "dir": SCENES_DIR},
+    {"page": "Assets", "module": "Asset Manager", "dir": ASSETS_DIR},
+    {"page": "Captions", "module": "Captions", "dir": CAPTIONS_DIR},
+    {"page": "Editor", "module": "Timeline Editor", "dir": EDITOR_SAVE_DIR},
+    {"page": "Music", "module": "Music Library", "dir": MUSIC_DIR},
+    {"page": "Exports", "module": "Export Library", "dir": EXPORT_DIR},
+]
 _PROJECT_DIRS = [
     ALIGN_DIR, SCENES_DIR, ASSETS_DIR, SEGMENTER_DIR,
     CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
+    EXPORT_DIR,
 ]
+
+
+@app.route("/api/settings/clear-all-projects/preview", methods=["GET"])
+def clear_all_projects_preview():
+    """Preview what clear-all-projects will move to TRASH."""
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
+
+    modules = []
+    total_items = 0
+    for mod in _CLEAR_MODULES:
+        path = mod["dir"]
+        entries = []
+        if os.path.isdir(path):
+            try:
+                entries = sorted(
+                    [
+                        name for name in os.listdir(path)
+                        if os.path.isdir(os.path.join(path, name)) or os.path.isfile(os.path.join(path, name))
+                    ],
+                    key=lambda s: s.lower(),
+                )
+            except OSError:
+                entries = []
+        count = len(entries)
+        total_items += count
+        modules.append({
+            "page": mod["page"],
+            "module": mod["module"],
+            "dir_name": os.path.basename(path),
+            "items": count,
+            "entries": entries,
+        })
+
+    return jsonify({"modules": modules, "total_items": total_items})
 
 
 @app.route("/api/settings/clear-all-projects", methods=["DELETE"])

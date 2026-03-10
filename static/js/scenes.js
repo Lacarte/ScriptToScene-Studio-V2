@@ -598,6 +598,7 @@ async function _scnLoadAudio() {
   }
   _scnAudio = new Audio(url);
   _scnAudio.addEventListener('ended', () => _scnResetPlayback());
+  stsAudioRegister('Scenes', _scnAudio);
   _scnAudio.addEventListener('error', () => {
     const btn = $('#scn-play-btn');
     if (btn) btn.style.display = 'none';

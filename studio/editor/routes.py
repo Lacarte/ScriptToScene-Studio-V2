@@ -17,7 +17,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.io_utils import safe_json_write, safe_json_read
@@ -31,10 +31,8 @@ editor_bp = Blueprint("editor", __name__)
 # ---------------------------------------------------------------------------
 _export_jobs = {}
 _export_jobs_lock = threading.Lock()
-EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
 EXPORT_DIR_ABS = os.path.abspath(EXPORT_DIR)
 EXPORT_MAX_JOB_AGE = 3600  # evict finished jobs after 1 hour
-os.makedirs(EXPORT_DIR, exist_ok=True)
 
 logger.info("Export output directory: {}", EXPORT_DIR)
 logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
