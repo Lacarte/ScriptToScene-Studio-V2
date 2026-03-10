@@ -3400,9 +3400,9 @@ function _capUpdateUI() {
 function _saveCaptionsToStorage() {
     if (!EditorState.captionData) return;
     try {
-        // Stamp project_id so we can detect cross-project stale captions
+        // Stamp _editor_project so we can detect cross-project stale captions
         const data = { ...EditorState.captionData };
-        if (EditorState.project?.id) data.project_id = EditorState.project.id;
+        if (EditorState.project?.id) data._editor_project = EditorState.project.id;
         localStorage.setItem('sts-editor-captions', JSON.stringify(data));
     } catch { /* ignore */ }
 }
@@ -3416,9 +3416,9 @@ function _loadCaptionsFromStorage() {
         const stored = localStorage.getItem('sts-editor-captions');
         if (stored) {
             const data = JSON.parse(stored);
-            // Skip if captions have a project_id that doesn't match current project
-            if (data.project_id && EditorState.project?.id && data.project_id !== EditorState.project.id) {
-                console.log('Skipping stale captions from project', data.project_id, '(current:', EditorState.project.id + ')');
+            // Skip if captions were saved for a different editor project
+            if (data._editor_project && EditorState.project?.id && data._editor_project !== EditorState.project.id) {
+                console.log('Skipping stale captions from project', data._editor_project, '(current:', EditorState.project.id + ')');
                 localStorage.removeItem('sts-editor-captions');
                 return;
             }
