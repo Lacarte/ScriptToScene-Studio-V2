@@ -160,9 +160,17 @@ function handleAssetsJSONImport(input) {
 function assetsProviderChanged() {
   const provider = $('#assets-provider').value;
   const argsWrap = $('#assets-args-wrap');
+  const argsInput = $('#assets-arguments');
   const kieOpts = $('#assets-kie-opts');
-  argsWrap.style.display = (provider === 'midjourney' || provider === 'meta-ai') ? '' : 'none';
+  const showArgs = provider === 'midjourney' || provider === 'meta-ai';
+  argsWrap.style.display = showArgs ? '' : 'none';
   kieOpts.style.display = provider === 'kie-ai' ? 'flex' : 'none';
+  // Set default arguments per provider
+  if (provider === 'midjourney') {
+    if (!argsInput.value) argsInput.value = '--c 70 --v 7 --ar 9:16';
+  } else if (!showArgs) {
+    argsInput.value = '';
+  }
 }
 
 // Sync aspect ratio → Midjourney --ar argument
