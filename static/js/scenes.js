@@ -114,7 +114,7 @@ function _updateScenesSource() {
   if (!d || !d.segments) {
     $('#scenes-source-info').textContent = 'No segmentation selected';
     $('#scenes-source-info').style.color = 'var(--text-muted)';
-    $('#scenes-json-preview').style.display = 'none';
+    $('#scenes-json-collapse').style.display = 'none';
     return;
   }
   const stats = d.stats || {};
@@ -123,13 +123,22 @@ function _updateScenesSource() {
   const dur = meta.total_duration || 0;
   const src = meta.source_folder || d.output_folder || 'uploaded';
   const pid = meta.project_id ? `${meta.project_id} · ` : '';
-  $('#scenes-source-info').textContent = `${pid}${segCount} segments · ${dur.toFixed(1)}s from ${src}`;
+  const summary = `${pid}${segCount} segments · ${dur.toFixed(1)}s from ${src}`;
+  $('#scenes-source-info').textContent = summary;
   $('#scenes-source-info').style.color = 'var(--accent)';
 
   // Preview the full webhook payload that will be sent
   const preview = _buildWebhookPayload(d);
-  $('#scenes-json-preview').style.display = '';
+  $('#scenes-json-collapse').style.display = '';
   $('#scenes-json-preview').textContent = JSON.stringify(preview, null, 2);
+}
+
+function toggleSegsSource() {
+  const body = $('#scenes-segsource-body');
+  const chevron = $('#scenes-segsource-chevron');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chevron.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
 }
 
 // ---- Webhook Toggle ----
