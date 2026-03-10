@@ -1358,9 +1358,11 @@ async function loadProjectFromServer(projectId) {
         // Store as staged_timeline so normal init picks it up
         sessionStorage.setItem('staged_timeline', JSON.stringify(staged));
 
-        // Store captions if present
-        if (saved.captions) {
+        // Store captions if present, clear stale ones if not
+        if (saved.captions && saved.captions.entries && saved.captions.entries.length) {
             localStorage.setItem('sts-editor-captions', JSON.stringify(saved.captions));
+        } else {
+            localStorage.removeItem('sts-editor-captions');
         }
 
         // Store extra state in sessionStorage so it survives the reload
@@ -3398,18 +3400,28 @@ function _capUpdateUI() {
 function _saveCaptionsToStorage() {
     if (!EditorState.captionData) return;
     try {
-        localStorage.setItem('sts-editor-captions', JSON.stringify(EditorState.captionData));
+        // Stamp project_id so we can detect cross-project stale captions
+        const data = { ...EditorState.captionData };
+        if (EditorState.project?.id) data.project_id = EditorState.project.id;
+        localStorage.setItem('sts-editor-captions', JSON.stringify(data));
     } catch { /* ignore */ }
 }
 
 /**
  * Load captions from localStorage (sent by studio)
+ * Validates that captions belong to the current project to prevent cross-project bleed.
  */
 function _loadCaptionsFromStorage() {
     try {
         const stored = localStorage.getItem('sts-editor-captions');
         if (stored) {
             const data = JSON.parse(stored);
+            // Skip if captions have a project_id that doesn't match current project
+            if (data.project_id && EditorState.project?.id && data.project_id !== EditorState.project.id) {
+                console.log('Skipping stale captions from project', data.project_id, '(current:', EditorState.project.id + ')');
+                localStorage.removeItem('sts-editor-captions');
+                return;
+            }
             _receiveCaptionData(data);
         }
     } catch { /* ignore */ }

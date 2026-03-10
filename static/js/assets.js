@@ -236,12 +236,30 @@ function _renderAnalysisBar(data) {
   if (a.tone) chips.push({ label: 'Tone', value: a.tone });
   if (a.visual_style) chips.push({ label: 'Style', value: a.visual_style });
 
-  $('#assets-analysis-chips').innerHTML = chips.map((c, i) => `
+  const chipsEl = $('#assets-analysis-chips');
+  chipsEl.innerHTML = chips.map((c, i) => `
     <div style="display:flex;align-items:center;gap:5px${i > 0 ? ';padding-left:16px;border-left:1px solid var(--border)' : ''}">
       <span style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted)">${c.label}</span>
       <span style="font-size:11px;color:var(--text-secondary)">${esc(c.value)}</span>
     </div>
   `).join('');
+
+  // Collapse by default, restore from localStorage
+  const collapsed = localStorage.getItem('sts-analysis-collapsed') !== 'false';
+  chipsEl.style.display = collapsed ? 'none' : 'flex';
+  const arrow = $('#assets-analysis-arrow');
+  if (arrow) arrow.style.transform = collapsed ? 'rotate(-90deg)' : '';
+
+  const toggle = $('#assets-analysis-toggle');
+  if (toggle && !toggle._bound) {
+    toggle._bound = true;
+    toggle.addEventListener('click', () => {
+      const hidden = chipsEl.style.display === 'none';
+      chipsEl.style.display = hidden ? 'flex' : 'none';
+      if (arrow) arrow.style.transform = hidden ? '' : 'rotate(-90deg)';
+      localStorage.setItem('sts-analysis-collapsed', !hidden);
+    });
+  }
 }
 
 function _renderTypeMix(data) {

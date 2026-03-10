@@ -2,6 +2,8 @@
 
 import json
 import os
+import shutil
+import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +12,36 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import ASSETS_DIR, SCENES_DIR
+
+BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "bin")
+
+VIDEO_EXTS = (".mp4", ".webm", ".mov")
+
+
+def _find_ffmpeg():
+    local = os.path.join(BIN_DIR, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    return local if os.path.isfile(local) else shutil.which("ffmpeg")
+
+
+def _video_thumbnail(video_path):
+    """Extract a thumbnail jpg from a video file. Returns thumbnail path or None."""
+    thumb_path = video_path.rsplit(".", 1)[0] + "_thumb.jpg"
+    if os.path.isfile(thumb_path):
+        return thumb_path
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        return None
+    try:
+        subprocess.run(
+            [ffmpeg, "-y", "-i", video_path, "-map", "0:v:0",
+             "-vframes", "1", "-ss", "0.1", "-q:v", "3", thumb_path],
+            capture_output=True, timeout=10,
+        )
+        if os.path.isfile(thumb_path):
+            return thumb_path
+    except Exception:
+        pass
+    return None
 from studio.validation import validate_json
 from .schemas import GrabberStartRequest
 from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
@@ -569,6 +601,7 @@ def assets_history():
                 pass
 
         # Get a preview image (first file from first scene)
+        # For video-only projects, generate a thumbnail frame via FFmpeg
         project_info["preview"] = None
         for scene_num in sorted(os.listdir(entry.path)):
             scene_path = os.path.join(entry.path, scene_num)
@@ -576,10 +609,19 @@ def assets_history():
                 continue
             for fname in sorted(os.listdir(scene_path)):
                 fpath = os.path.join(scene_path, fname)
-                if os.path.isfile(fpath) and fname.lower().endswith(
-                    (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov")
-                ):
+                if not os.path.isfile(fpath):
+                    continue
+                lower = fname.lower()
+                if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
                     project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{fname}"
+                    break
+                if lower.endswith(VIDEO_EXTS):
+                    thumb = _video_thumbnail(fpath)
+                    if thumb:
+                        thumb_name = os.path.basename(thumb)
+                        project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{thumb_name}"
+                    else:
+                        project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{fname}"
                     break
             if project_info["preview"]:
                 break
