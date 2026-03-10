@@ -3060,11 +3060,45 @@ function updateProjectInfo() {
 /**
  * Export the current project as a ZIP file (download)
  */
-function exportProjectZip() {
+async function exportProjectZip() {
     const pid = EditorState.project?.id;
     if (!pid) return;
-    showToast('Preparing project ZIP...', 'info');
-    window.location.href = `/api/editor/export-zip/${encodeURIComponent(pid)}`;
+
+    const btn = document.getElementById('export-zip-btn');
+    if (!btn || btn.dataset.busy) return;
+    btn.dataset.busy = '1';
+
+    // Save original icon, replace with spinner
+    const origHTML = btn.innerHTML;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="10"/></svg>`;
+    btn.style.opacity = '0.6';
+    btn.style.pointerEvents = 'none';
+    showToast('Compressing project...', 'info');
+
+    try {
+        const res = await fetch(`/api/editor/export-zip/${encodeURIComponent(pid)}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Export failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${pid}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showToast(`Project ZIP downloaded (${(blob.size / 1024 / 1024).toFixed(1)} MB)`, 'success');
+    } catch (e) {
+        showToast('ZIP export failed: ' + e.message, 'error');
+    } finally {
+        btn.innerHTML = origHTML;
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
+        delete btn.dataset.busy;
+    }
 }
 
 /**
@@ -4159,6 +4193,9 @@ function setupEventListeners() {
     // Undo/Redo buttons
     document.getElementById('undo-btn')?.addEventListener('click', undoEdit);
     document.getElementById('redo-btn')?.addEventListener('click', redoEdit);
+
+    // Export ZIP
+    document.getElementById('export-zip-btn')?.addEventListener('click', exportProjectZip);
 
     // History dropdown
     setupHistoryDropdown();
