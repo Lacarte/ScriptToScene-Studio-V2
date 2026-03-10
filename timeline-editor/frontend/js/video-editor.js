@@ -378,6 +378,7 @@ async function saveProjectToServer() {
     const payload = {
         project_id: EditorState.project.id,
         project_name: EditorState.project.name || EditorState.project.id,
+        source_folder: EditorState.project.sourceFolder || '',
         total_duration: getTotalDuration(),
         scene_count: EditorState.scenes.length,
         scenes: EditorState.scenes.map(s => ({
@@ -1317,6 +1318,7 @@ async function loadProjectFromServer(projectId) {
             style: saved.style || '',
             style_name: styleName,
             style_color: styleColor,
+            source_folder: saved.source_folder || '',
             total_duration: saved.total_duration || 0,
             scene_count: saved.scene_count || saved.scenes?.length || 0,
             staged_at: saved.saved_at,
@@ -1586,6 +1588,7 @@ async function loadProjectData(data) {
         style: data.style || '',
         styleName: data.style_name || '',
         styleColor: data.style_color || '',
+        sourceFolder: data.source_folder || '',
         totalDuration: data.total_duration,
         sceneCount: data.scene_count,
         stagedAt: data.staged_at
@@ -3400,9 +3403,10 @@ function _capUpdateUI() {
 function _saveCaptionsToStorage() {
     if (!EditorState.captionData) return;
     try {
-        // Stamp _editor_project so we can detect cross-project stale captions
+        // Stamp project identifiers so we can detect cross-project stale captions
         const data = { ...EditorState.captionData };
         if (EditorState.project?.id) data._editor_project = EditorState.project.id;
+        if (EditorState.project?.sourceFolder) data.source_folder = EditorState.project.sourceFolder;
         localStorage.setItem('sts-editor-captions', JSON.stringify(data));
     } catch { /* ignore */ }
 }
@@ -3416,9 +3420,18 @@ function _loadCaptionsFromStorage() {
         const stored = localStorage.getItem('sts-editor-captions');
         if (stored) {
             const data = JSON.parse(stored);
-            // Skip if captions were saved for a different editor project
-            if (data._editor_project && EditorState.project?.id && data._editor_project !== EditorState.project.id) {
-                console.log('Skipping stale captions from project', data._editor_project, '(current:', EditorState.project.id + ')');
+            const currentSF = EditorState.project?.sourceFolder;
+            const currentPID = EditorState.project?.id;
+
+            // Skip if source_folder doesn't match (most reliable check)
+            if (currentSF && data.source_folder && data.source_folder !== currentSF) {
+                console.log('Skipping stale captions (source_folder mismatch):', data.source_folder, '!=', currentSF);
+                localStorage.removeItem('sts-editor-captions');
+                return;
+            }
+            // Skip if _editor_project doesn't match
+            if (data._editor_project && currentPID && data._editor_project !== currentPID) {
+                console.log('Skipping stale captions (project mismatch):', data._editor_project, '!=', currentPID);
                 localStorage.removeItem('sts-editor-captions');
                 return;
             }

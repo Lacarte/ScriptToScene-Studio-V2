@@ -193,6 +193,11 @@ def editor_load_project(project_id):
         logger.error("Failed to load editor project {}: {}", safe_id, e)
         return jsonify({"error": f"Corrupted project file: {e}"}), 500
 
+    # Inject source_folder so the frontend can scope captions/audio
+    source_folder = _get_source_folder(safe_id)
+    if source_folder:
+        data["source_folder"] = source_folder
+
     # Resolve correct audio from scenes.json source_folder to prevent
     # cross-project audio bleed (saved voice track may belong to another project).
     _resolve_project_audio(data, safe_id)

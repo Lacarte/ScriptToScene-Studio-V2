@@ -38,18 +38,39 @@ function initEditorIframe() {
       } catch (e) { console.error('Editor postMessage:', e); }
     }
 
-    // Send captions data if available, or auto-generate from alignment
+    // Determine current project's source_folder for caption scoping
+    let currentSourceFolder = '';
+    try {
+      const scenes = JSON.parse(localStorage.getItem('sts-editor-scenes') || '{}');
+      currentSourceFolder = scenes.source_folder || '';
+    } catch { /* ignore */ }
+    if (!currentSourceFolder) {
+      try {
+        const staged = JSON.parse(sessionStorage.getItem('staged_timeline') || '{}');
+        currentSourceFolder = staged.source_folder || '';
+      } catch { /* ignore */ }
+    }
+
+    // Send captions data if available and matching current project
     const captionsData = localStorage.getItem('sts-editor-captions');
     if (captionsData) {
       try {
-        iframe.contentWindow.postMessage({
-          type: 'load-captions',
-          data: JSON.parse(captionsData),
-        }, '*');
+        const capData = JSON.parse(captionsData);
+        // Skip stale captions from a different project
+        if (currentSourceFolder && capData.source_folder && capData.source_folder !== currentSourceFolder) {
+          console.log('Skipping stale captions (source_folder mismatch):', capData.source_folder, '!=', currentSourceFolder);
+          localStorage.removeItem('sts-editor-captions');
+          _editorAutoGenerateCaptions(iframe, currentSourceFolder);
+        } else {
+          iframe.contentWindow.postMessage({
+            type: 'load-captions',
+            data: capData,
+          }, '*');
+        }
       } catch (e) { console.error('Editor captions postMessage:', e); }
     } else {
       // No captions stored — try to auto-generate from alignment data
-      _editorAutoGenerateCaptions(iframe);
+      _editorAutoGenerateCaptions(iframe, currentSourceFolder);
     }
   };
   iframe.onerror = () => {
@@ -68,31 +89,42 @@ function initEditorIframe() {
  * Auto-generate captions from alignment data and send to the editor iframe.
  * Tries STATE.alignResult first, then falls back to fetching the most recent alignment from history.
  */
-async function _editorAutoGenerateCaptions(iframe) {
+async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '') {
   try {
     let alignment = null;
     let sourceFolder = '';
 
-    // 1) Try current alignment result
+    // 1) Try current alignment result (only if it matches the current project)
     if (STATE.alignResult && STATE.alignResult.alignment && STATE.alignResult.alignment.length) {
-      alignment = STATE.alignResult.alignment;
-      sourceFolder = STATE.alignResult.folder || '';
+      const folder = STATE.alignResult.folder || '';
+      if (!projectSourceFolder || !folder || folder === projectSourceFolder) {
+        alignment = STATE.alignResult.alignment;
+        sourceFolder = folder;
+      }
     }
 
     // 2) Try captionAlignment (set by captions module)
     if (!alignment && STATE.captionAlignment) {
-      alignment = STATE.captionAlignment.word_alignment || STATE.captionAlignment.alignment;
-      sourceFolder = STATE.captionAlignment.folder || '';
+      const folder = STATE.captionAlignment.folder || '';
+      if (!projectSourceFolder || !folder || folder === projectSourceFolder) {
+        alignment = STATE.captionAlignment.word_alignment || STATE.captionAlignment.alignment;
+        sourceFolder = folder;
+      }
     }
 
-    // 3) Fallback: fetch the most recent alignment from history
+    // 3) Fallback: fetch alignment from history matching the current project
     if (!alignment) {
       try {
         const history = await api('/api/timing/history');
         if (history && history.length) {
-          const latest = history[0]; // most recent
-          alignment = latest.word_alignment;
-          sourceFolder = latest.folder || '';
+          // Find alignment matching the current project's source_folder
+          const match = projectSourceFolder
+            ? history.find(h => h.folder === projectSourceFolder)
+            : history[0];
+          if (match) {
+            alignment = match.word_alignment;
+            sourceFolder = match.folder || '';
+          }
         }
       } catch { /* ignore */ }
     }

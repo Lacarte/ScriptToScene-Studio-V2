@@ -1138,6 +1138,7 @@ async function autoAssembleAndSendToEditor() {
     project_id: projectId,
     project_name: projectId,
     style: STATE.assetsSceneData?.style || '',
+    source_folder: STATE.assetsSceneData?.source_folder || '',
     total_duration: stagedScenes.reduce((sum, s) => sum + (s.duration || 0), 0),
     scene_count: stagedScenes.length,
     staged_at: new Date().toISOString(),
