@@ -3051,6 +3051,20 @@ function updateProjectInfo() {
     if (elements.totalTime) {
         elements.totalTime.textContent = formatTimecode(displayTotalDuration);
     }
+
+    // Show export-zip button when a project is loaded
+    const zipBtn = document.getElementById('export-zip-btn');
+    if (zipBtn) zipBtn.style.display = EditorState.project?.id ? '' : 'none';
+}
+
+/**
+ * Export the current project as a ZIP file (download)
+ */
+function exportProjectZip() {
+    const pid = EditorState.project?.id;
+    if (!pid) return;
+    showToast('Preparing project ZIP...', 'info');
+    window.location.href = `/api/editor/export-zip/${encodeURIComponent(pid)}`;
 }
 
 /**

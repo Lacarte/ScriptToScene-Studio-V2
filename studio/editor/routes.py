@@ -1,5 +1,6 @@
 """Editor Module — Timeline Editor Static File Serving + Export API"""
 
+import io
 import json
 import os
 import platform
@@ -10,11 +11,12 @@ import time
 import uuid
 import threading
 import traceback
+import zipfile
 
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.validation import validate_json
 from studio.editor.schemas import EditorSaveRequest, ExportRequest
@@ -231,6 +233,97 @@ def editor_list_projects():
 
     projects.sort(key=lambda p: p.get("saved_at", ""), reverse=True)
     return jsonify(projects)
+
+
+# ---------------------------------------------------------------------------
+# Project ZIP export
+# ---------------------------------------------------------------------------
+
+@editor_bp.route("/api/editor/export-zip/<project_id>", methods=["GET"])
+def export_project_zip(project_id):
+    """Bundle a complete project into a downloadable ZIP file."""
+    from datetime import datetime, timezone
+
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+
+    # Require at least the editor save or scenes.json to exist
+    editor_path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+    scenes_path = os.path.join(SCENES_DIR, safe_id, "scenes.json")
+    if not os.path.isfile(editor_path) and not os.path.isfile(scenes_path):
+        return jsonify({"error": "Project not found"}), 404
+
+    source_folder = _get_source_folder(safe_id)
+    manifest = {
+        "project_id": safe_id,
+        "version": "1.0",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_folder": source_folder or "",
+        "files": [],
+    }
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        prefix = f"{safe_id}/"
+
+        # 1) Editor save JSON
+        if os.path.isfile(editor_path):
+            zf.write(editor_path, f"{prefix}project.json")
+            manifest["files"].append("project.json")
+
+        # 2) Scenes JSON
+        if os.path.isfile(scenes_path):
+            zf.write(scenes_path, f"{prefix}scenes.json")
+            manifest["files"].append("scenes.json")
+
+        # 3) Assets — all media files under output/assets/{project_id}/
+        assets_dir = os.path.join(ASSETS_DIR, safe_id)
+        if os.path.isdir(assets_dir):
+            for root, _dirs, files in os.walk(assets_dir):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    rel = os.path.relpath(fpath, assets_dir).replace("\\", "/")
+                    arc_name = f"{prefix}assets/{rel}"
+                    zf.write(fpath, arc_name)
+                    manifest["files"].append(f"assets/{rel}")
+
+        # 4) Audio — alignment files
+        if source_folder:
+            align_dir = os.path.join(ALIGN_DIR, source_folder)
+            if os.path.isdir(align_dir):
+                try:
+                    for fname in os.listdir(align_dir):
+                        fpath = os.path.join(align_dir, fname)
+                        if os.path.isfile(fpath):
+                            zf.write(fpath, f"{prefix}audio/{fname}")
+                            manifest["files"].append(f"audio/{fname}")
+                except OSError:
+                    pass
+
+            # 5) TTS files
+            tts_dir = os.path.join(TTS_DIR, source_folder)
+            if os.path.isdir(tts_dir):
+                try:
+                    for fname in os.listdir(tts_dir):
+                        fpath = os.path.join(tts_dir, fname)
+                        if os.path.isfile(fpath):
+                            zf.write(fpath, f"{prefix}tts/{fname}")
+                            manifest["files"].append(f"tts/{fname}")
+                except OSError:
+                    pass
+
+        # 6) Manifest
+        zf.writestr(f"{prefix}manifest.json", json.dumps(manifest, indent=2))
+
+    buf.seek(0)
+    logger.info("Project ZIP exported: {} ({} files, {:.1f} MB)",
+                safe_id, len(manifest["files"]), buf.getbuffer().nbytes / 1024 / 1024)
+
+    return send_file(
+        buf,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{safe_id}.zip",
+    )
 
 
 OVERLAYS_DIR = os.path.join(APP_ASSETS_DIR, "overlays")
