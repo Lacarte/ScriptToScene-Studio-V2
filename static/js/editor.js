@@ -39,15 +39,11 @@ function initEditorIframe() {
     }
 
     // Determine current project's source_folder for caption scoping
-    let currentSourceFolder = '';
-    try {
-      const scenes = JSON.parse(localStorage.getItem('sts-editor-scenes') || '{}');
-      currentSourceFolder = scenes.source_folder || '';
-    } catch { /* ignore */ }
+    let currentSourceFolder = localStorage.getItem('sts-editor-source-folder') || '';
     if (!currentSourceFolder) {
       try {
-        const staged = JSON.parse(sessionStorage.getItem('staged_timeline') || '{}');
-        currentSourceFolder = staged.source_folder || '';
+        const scenes = JSON.parse(localStorage.getItem('sts-editor-scenes') || '{}');
+        currentSourceFolder = scenes.source_folder || '';
       } catch { /* ignore */ }
     }
 

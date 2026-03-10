@@ -1360,8 +1360,13 @@ async function loadProjectFromServer(projectId) {
         // Store as staged_timeline so normal init picks it up
         sessionStorage.setItem('staged_timeline', JSON.stringify(staged));
 
+        // Store source_folder so the parent shell can scope caption auto-generation
+        if (saved.source_folder) {
+            localStorage.setItem('sts-editor-source-folder', saved.source_folder);
+        }
+
         // Store captions if present, clear stale ones if not
-        if (saved.captions && saved.captions.entries && saved.captions.entries.length) {
+        if (saved.captions && saved.captions.captions && saved.captions.captions.length) {
             localStorage.setItem('sts-editor-captions', JSON.stringify(saved.captions));
         } else {
             localStorage.removeItem('sts-editor-captions');

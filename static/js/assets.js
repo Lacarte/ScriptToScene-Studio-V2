@@ -1169,6 +1169,10 @@ async function autoAssembleAndSendToEditor() {
     _assetsData: assetsData,
   };
   localStorage.setItem('sts-editor-scenes', JSON.stringify(storeData));
+  // Store source_folder for caption scoping by the parent shell
+  if (STATE.assetsSceneData?.source_folder) {
+    localStorage.setItem('sts-editor-source-folder', STATE.assetsSceneData.source_folder);
+  }
   // Clear stale captions so they auto-regenerate from current alignment
   localStorage.removeItem('sts-editor-captions');
 
