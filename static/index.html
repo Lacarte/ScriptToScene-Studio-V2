@@ -331,9 +331,10 @@
         style="margin:0;width:100%">
         <svg class="nav-icon audio-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round" viewBox="0 0 24 24">
-          <polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor" stroke="none" />
-          <path d="M15.54 8.46a5 5 0 010 7.07" />
-          <path d="M19.07 4.93a10 10 0 010 14.14" />
+          <rect x="3" y="10" width="3" height="4" rx="1.5" fill="currentColor" stroke="none" />
+          <rect x="8" y="7" width="3" height="10" rx="1.5" fill="currentColor" stroke="none" />
+          <rect x="13" y="4" width="3" height="16" rx="1.5" fill="currentColor" stroke="none" />
+          <rect x="18" y="8" width="3" height="8" rx="1.5" fill="currentColor" stroke="none" />
         </svg>
         <span class="nav-label">AUDIO <span class="audio-source-label" style="font-size:0.7em;opacity:0.7;margin-left:4px"></span></span>
       </button>
@@ -487,9 +488,15 @@
           </div>
           <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
             <button id="pipeline-run-btn" class="action-btn hover-accent"
-              style="padding:0 24px;height:40px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:8px" onclick="pipelineStart()">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              Run Pipeline</button>
+              style="padding:0 24px;height:44px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:10px" onclick="pipelineStart()">
+              <span class="pipeline-run-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="6" cy="12" r="1.75" fill="currentColor" stroke="none"></circle>
+                  <path d="M9 12h8"></path>
+                  <path d="M13.5 7.5L18 12l-4.5 4.5"></path>
+                </svg>
+              </span>
+              <span class="pipeline-run-label">Run Pipeline</span></button>
           </div>
         </section>
 

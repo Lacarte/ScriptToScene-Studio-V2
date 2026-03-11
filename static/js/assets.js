@@ -229,11 +229,8 @@ function renderAssetsFromScenes() {
   updateAssetsProgress();
   assetsLoadAudio();
 
-  // Show continue bar if any scenes already have assets ready
-  const readyCount = scenes.filter(s => STATE.assetStatuses[s.index]?.status === 'ready' && STATE.assetStatuses[s.index]?.local_files?.length).length;
-  if (readyCount > 0) {
-    showContinueBar('assets-controls', 'editor', 'Auto-Assemble & Edit →', autoAssembleAndSendToEditor);
-  }
+  // Refresh history to show/update inline assemble buttons
+  loadAssetsHistory();
 }
 
 function _renderAnalysisBar(data) {
@@ -930,7 +927,6 @@ function _startGrabberPolling(projectId) {
         _setGrabberUI(false);
         loadAssetsHistory(); // refresh history
         if (data.status === 'done') {
-          showContinueBar('assets-controls', 'editor', 'Auto-Assemble & Edit →', autoAssembleAndSendToEditor);
           if (typeof playDoneSound === 'function') playDoneSound();
         }
       }
@@ -1063,7 +1059,7 @@ async function loadAssetsHistory() {
               ${p.provider ? `<span class="font-mono" style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(167,139,250,0.1);color:#A78BFA">${esc(p.provider)}</span>` : ''}
             </div>
           </div>
-          <svg width="16" height="16" fill="none" stroke="${isActive ? 'var(--accent)' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>
+          ${readyCount > 0 ? `<button onclick="event.stopPropagation(); assetsAssembleFromHistory('${esc(p.project_id)}')" style="flex-shrink:0;padding:5px 12px;background:var(--accent);color:var(--bg-darkest);border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity 0.15s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Assemble & Edit</button>` : `<svg width="16" height="16" fill="none" stroke="${isActive ? 'var(--accent)' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>`}
         </div>
       </div>`;
     }).join('');
@@ -1138,6 +1134,17 @@ async function assetsLoadFromHistory(projectId) {
 }
 
 // ---- Auto-Assemble & Send to Editor ----
+
+async function assetsAssembleFromHistory(projectId) {
+  try {
+    toast('Loading project...', 'info');
+    await assetsLoadFromHistory(projectId);
+    await autoAssembleAndSendToEditor();
+    switchPage('editor');
+  } catch (e) {
+    toast(e.message || 'Failed to assemble', 'error');
+  }
+}
 
 async function autoAssembleAndSendToEditor() {
   if (!STATE.assetsSceneData) {

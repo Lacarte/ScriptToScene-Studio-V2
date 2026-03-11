@@ -392,6 +392,12 @@ function _showSaveStatus(status, text) {
 
 function _buildSavePayload() {
     normalizeTimelineDurations();
+    const captions = EditorState.captionData
+        ? {
+            ...EditorState.captionData,
+            source_folder: EditorState.project.sourceFolder || EditorState.captionData.source_folder || ''
+        }
+        : null;
 
     return {
         project_id: EditorState.project.id,
@@ -413,7 +419,11 @@ function _buildSavePayload() {
             text_x: s.text_x ?? null, text_y: s.text_y ?? null,
             timestamp: s.timestamp || 0, status: s.status || 'ready',
             isVideo: !!s.isVideo, script: s.script || '',
-            narrative_role: s.narrative_role || s.scene_type || ''
+            narrative_role: s.narrative_role || s.scene_type || '',
+            filler_shift: s.filler_shift || 0,
+            segment_start: s.segment_start ?? null,
+            segment_end: s.segment_end ?? null,
+            segment_duration: s.segment_duration ?? null
         })),
         audio_tracks: EditorState.audioTracks.map(t => ({
             id: t.id, label: t.label, type: t.type,
@@ -425,7 +435,7 @@ function _buildSavePayload() {
             duckingLevel: t.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL,
             fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0
         })),
-        captions: EditorState.captionData || null,
+        captions,
         captionsEnabled: !!EditorState.captionsEnabled,
         overlays: EditorState.overlays.length ? EditorState.overlays : null,
         grain_overlay: normalizeGrainOverlay(EditorState.grainOverlay),
@@ -1275,6 +1285,7 @@ const elements = {
     previewPanel: document.getElementById('preview-panel'),  // Preview panel for fullscreen
     selectFolderBtn: document.getElementById('select-folder'),
     randomizeMediaBtn: document.getElementById('randomize-media'),
+    flipFillerBtn: document.getElementById('flip-filler-btn'),
     mediaStatus: document.getElementById('media-status'),
     zoomIn: document.getElementById('zoom-in'),
     zoomOut: document.getElementById('zoom-out'),
@@ -1450,7 +1461,11 @@ async function loadProjectFromServer(projectId) {
                 narrative_role: s.narrative_role || '',
                 isVideo: s.isVideo || false,
                 image: s.image || '',
-                status: s.status || 'ready'
+                status: s.status || 'ready',
+                filler_shift: s.filler_shift || 0,
+                segment_start: s.segment_start ?? null,
+                segment_end: s.segment_end ?? null,
+                segment_duration: s.segment_duration ?? null
             }))
         };
 
@@ -1977,6 +1992,11 @@ async function loadProjectData(data) {
 
     // Update UI
     updateProjectInfo();
+
+    // Sync flip-filler button active state
+    const hasFlipped = EditorState.scenes.some(s => s.filler_shift && s.filler_shift !== 0);
+    elements.flipFillerBtn?.classList.toggle('active', hasFlipped);
+
     renderTimeline();
     setupTimelineDragDrop();
     renderMediaGrid();
@@ -3829,6 +3849,90 @@ function closeTimelineGaps() {
 }
 
 /**
+ * Timing Adjust — shift scene cuts earlier/later by N seconds.
+ *
+ * Simple: take N seconds from prev scene, give to curr scene.
+ * No segment timing needed — just durations.
+ * Prev scene keeps at least 0.3s so it doesn't vanish.
+ *
+ * Toggle: click to apply, click again to restore.
+ */
+function flipFillers() {
+    const scenes = EditorState.scenes;
+    if (!scenes || scenes.length < 2) {
+        showToast('Need at least 2 scenes', 'info');
+        return;
+    }
+
+    const MIN_PREV_DUR = 0.3; // never shrink prev below this
+
+    // If already applied → undo
+    const isApplied = scenes.some(s => s.filler_shift && s.filler_shift !== 0);
+
+    if (isApplied) {
+        let restored = 0;
+        for (let i = 0; i < scenes.length; i++) {
+            const shift = scenes[i].filler_shift || 0;
+            if (shift === 0) continue;
+            const prev = scenes[i - 1];
+            if (prev) prev.duration = parseFloat((prev.duration - shift).toFixed(3));
+            scenes[i].duration = parseFloat((scenes[i].duration + shift).toFixed(3));
+            scenes[i].filler_shift = 0;
+            restored++;
+        }
+        elements.flipFillerBtn?.classList.remove('active');
+        showToast(`Restored ${restored} scene(s)`, 'info');
+    } else {
+        const shiftSec = parseFloat(document.getElementById('flip-filler-amount')?.value || '0');
+        if (shiftSec === 0) { showToast('Select a shift amount first', 'info'); return; }
+        const randomDir = document.getElementById('flip-filler-random')?.checked || false;
+
+        let earlierCount = 0, laterCount = 0;
+        for (let i = 1; i < scenes.length; i++) {
+            const prev = scenes[i - 1];
+            const curr = scenes[i];
+
+            const goEarlier = randomDir ? Math.random() < 0.5 : true;
+            const wanted = randomDir ? shiftSec * (0.4 + Math.random() * 0.6) : shiftSec;
+
+            if (goEarlier) {
+                // Earlier: prev shrinks, curr grows
+                const maxTake = Math.max(0, prev.duration - MIN_PREV_DUR);
+                const shift = parseFloat(Math.min(wanted, maxTake).toFixed(3));
+                if (shift < 0.02) continue;
+                prev.duration = parseFloat((prev.duration - shift).toFixed(3));
+                curr.duration = parseFloat((curr.duration + shift).toFixed(3));
+                curr.filler_shift = -shift;
+                earlierCount++;
+            } else {
+                // Later: prev grows, curr shrinks
+                const maxTake = Math.max(0, curr.duration - MIN_PREV_DUR);
+                const shift = parseFloat(Math.min(wanted, maxTake).toFixed(3));
+                if (shift < 0.02) continue;
+                prev.duration = parseFloat((prev.duration + shift).toFixed(3));
+                curr.duration = parseFloat((curr.duration - shift).toFixed(3));
+                curr.filler_shift = shift;
+                laterCount++;
+            }
+        }
+
+        elements.flipFillerBtn?.classList.add('active');
+        const total = earlierCount + laterCount;
+        const detail = randomDir
+            ? `${earlierCount} earlier, ${laterCount} later`
+            : `${total} earlier`;
+        showToast(`Adjusted ${total} scene(s) (${detail})`, 'success');
+    }
+
+    renderTimeline();
+    renderTimeRuler();
+    renderCaptionTrack();
+    renderSceneProperties();
+    saveProjectEdits();
+    _debouncedServerSave();
+}
+
+/**
  * Setup caption enable toggle and style controls in the sidebar Caption tab.
  */
 function setupCaptionControls() {
@@ -4062,9 +4166,9 @@ function _loadCaptionsFromStorage() {
             const currentSF = EditorState.project?.sourceFolder;
             const currentPID = EditorState.project?.id;
 
-            // Skip if source_folder doesn't match (most reliable check)
-            if (currentSF && data.source_folder && data.source_folder !== currentSF) {
-                console.log('Skipping stale captions (source_folder mismatch):', data.source_folder, '!=', currentSF);
+            // Fail closed: if the current project has a source_folder, captions must carry the same source_folder.
+            if (currentSF && (!data.source_folder || data.source_folder !== currentSF)) {
+                console.log('Skipping stale captions (missing/mismatch source_folder):', data.source_folder, '!=', currentSF);
                 localStorage.removeItem('sts-editor-captions');
                 return;
             }
@@ -4844,6 +4948,9 @@ function setupEventListeners() {
 
     // Randomize scene media (dice button)
     elements.randomizeMediaBtn?.addEventListener('click', randomizeSceneMedia);
+
+    // Flip filler (shift cuts into silence gaps)
+    elements.flipFillerBtn?.addEventListener('click', flipFillers);
 
     // Sync playhead with manual scroll
     if (elements.timelineTracks) {

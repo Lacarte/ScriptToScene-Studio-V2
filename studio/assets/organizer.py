@@ -33,6 +33,25 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 
+def _unique_filepath(directory, basename, ext):
+    """Return a filepath that doesn't collide with existing files.
+
+    If ``directory/basename+ext`` already exists, appends _1, _2, … until a
+    free name is found.  Returns (filepath, filename).
+    """
+    filename = f"{basename}{ext}"
+    filepath = os.path.join(directory, filename)
+    if not os.path.exists(filepath):
+        return filepath, filename
+    n = 1
+    while True:
+        filename = f"{basename}_{n}{ext}"
+        filepath = os.path.join(directory, filename)
+        if not os.path.exists(filepath):
+            return filepath, filename
+        n += 1
+
+
 def organize_grabber_assets(project_id, scene_num, urls, assets_dir):
     """Download all image/video URLs for a scene into its subfolder.
 
@@ -52,8 +71,7 @@ def organize_grabber_assets(project_id, scene_num, urls, assets_dir):
                 resp.raise_for_status()
 
                 ext = _detect_ext(url, resp.headers.get("Content-Type", ""))
-                filename = f"{i}{ext}"
-                filepath = os.path.join(scene_dir, filename)
+                filepath, filename = _unique_filepath(scene_dir, str(i), ext)
 
                 with open(filepath, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=65536):
@@ -119,8 +137,7 @@ def save_base64_assets(project_id, scene_num, images, assets_dir):
             logger.error("Invalid base64 for scene {}, image {}: {}", scene_num, i, e)
             continue
 
-        filename = f"{i}{ext}"
-        filepath = os.path.join(scene_dir, filename)
+        filepath, filename = _unique_filepath(scene_dir, str(i), ext)
         with open(filepath, "wb") as f:
             f.write(data)
 

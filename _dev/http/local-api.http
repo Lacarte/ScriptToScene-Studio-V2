@@ -1,6 +1,64 @@
 ### ============================================================
 ### ScriptToScene Studio — REST Client Tests
 ### ============================================================
+###
+### SCHEMAS
+### -------
+###
+### POST /api/scenes/generate — SceneGenerateRequest
+### {
+###   "script":        string     (required — full spoken transcript)
+###   "style":         string     (default "cinematic" — style preset id)
+###   "segments":      array      (required, min 1 — see formats below)
+###   "style_prompt":  string?    (custom style instructions appended to system prompt)
+###   "full_segments": array?     (all segments incl. fillers — enables chapter mode)
+###   "webhook_url":   string?    (override default n8n webhook URL)
+###   "project_id":    string?    (override auto-generated project id)
+###   "parent_id":     string?    (link to parent project for re-generation)
+###   "source_folder": string?    (segmenter output folder name)
+###   "aspect_ratio":  string?    (e.g. "9:16", "16:9")
+### }
+###
+### Segment formats (both accepted):
+###   Object: [{ "index": 0, "words": "text" }, ...]
+###   String: ["text1", "text2", ...]   — indexes auto-assigned 0..N
+###
+### Webhook INPUT payload (sent to n8n — timing stripped):
+### {
+###   "script":        string
+###   "style":         string
+###   "system_prompt": string     (SCENE_GENERATOR_PROMPT + style instructions)
+###   "segments":      [{ "index": int, "words": string }, ...]
+### }
+###
+### Webhook OUTPUT (expected from n8n LLM):
+### {
+###   "analysis": {
+###     "core_theme":    string,
+###     "mood":          string,
+###     "environment":   string,
+###     "color_palette": string,
+###     "tone":          string,
+###     "visual_style":  string
+###   },
+###   "scenes": [
+###     {
+###       "index":          int,
+###       "title":          string    (2-6 words),
+###       "narrative_role": "hook"|"buildup"|"peak"|"transition"|"text_accent"|"cta",
+###       "type_of_scene":  "image"|"video"|"text",
+###       "image_prompt":   string    (visual description),
+###       "text_content":   string?   (text scenes only, 3-8 words, uppercase)
+###     }, ...
+###   ]
+### }
+###
+### Final response (after _apply_segmenter_timing):
+###   Each scene gains: timestamp, timeline_start, timeline_end, duration,
+###   segment_start, segment_end, segment_duration, segment_words
+###   Plus: total_duration, project_id, source_folder, style at root level
+###
+### ============================================================
 
 @base = http://localhost:5000
 @webhook = https://n8n-production-6197.up.railway.app/webhook/scene-generator
@@ -13,7 +71,7 @@
 GET {{base}}/api/scenes/webhook-url
 
 ### ----------------------------------------------------------
-### 2. Generate scenes (send to production webhook)
+### 2. Generate scenes — object segments (production webhook)
 ### ----------------------------------------------------------
 
 POST {{base}}/api/scenes/generate
@@ -29,9 +87,9 @@ Content-Type: application/json
     { "index": 3, "words": "she lifted the bow and drew it across the strings." },
     { "index": 4, "words": "The sound was thin and ghostly at first," },
     { "index": 5, "words": "but the wood remembered. By the third note," },
-    { "index": 7, "words": "the kitchen below fell quiet. By the seventh," },
-    { "index": 8, "words": "her grandfather had risen from his chair," },
-    { "index": 9, "words": "tears tracking down weathered cheeks. The violin remembered everything." }
+    { "index": 6, "words": "the kitchen below fell quiet. By the seventh," },
+    { "index": 7, "words": "her grandfather had risen from his chair," },
+    { "index": 8, "words": "tears tracking down weathered cheeks. The violin remembered everything." }
   ],
   "source_folder": "the-violin-had-been-silent-fo-20260224-1_20260224_183800",
   "aspect_ratio": "9:16",
@@ -39,7 +97,26 @@ Content-Type: application/json
 }
 
 ### ----------------------------------------------------------
-### 3. Generate scenes (test webhook — will return empty body)
+### 3. Generate scenes — string segments (tests normalization)
+### ----------------------------------------------------------
+
+POST {{base}}/api/scenes/generate
+Content-Type: application/json
+
+{
+  "script": "The violin had been silent for twenty years, sealed in its velvet-lined case in the attic.",
+  "style": "cinematic",
+  "segments": [
+    "The violin had been silent for twenty years,",
+    "sealed in its velvet-lined case in the attic."
+  ],
+  "source_folder": "test-string-segments",
+  "aspect_ratio": "9:16",
+  "webhook_url": "{{webhook_test}}"
+}
+
+### ----------------------------------------------------------
+### 4. Generate scenes — test webhook (returns empty body)
 ### ----------------------------------------------------------
 
 POST {{base}}/api/scenes/generate
@@ -58,7 +135,7 @@ Content-Type: application/json
 }
 
 ### ----------------------------------------------------------
-### 4. Direct webhook call (bypass Flask, hit n8n directly)
+### 5. Direct webhook call (bypass Flask, hit n8n directly)
 ### ----------------------------------------------------------
 
 POST {{webhook}}
@@ -67,6 +144,7 @@ Content-Type: application/json
 {
   "script": "The violin had been silent for twenty years, sealed in its velvet-lined case in the attic.",
   "style": "cinematic",
+  "system_prompt": "You are a visual scene prompt writer for short-form viral video.\n\n## INPUT\nYou receive JSON with:\n- script: full spoken transcript\n- style: visual style keyword\n- segments: array of speech segments, each with index and words\n\n## SEGMENT CONTRACT\n- Return exactly ONE scene for every input segment.\n- Match each input index exactly.\n- Do NOT merge, split, reorder, omit, or add segments.\n\n## OUTPUT\nReturn ONLY valid JSON. No markdown. No code fences.\n{\n  \"analysis\": { \"core_theme\", \"mood\", \"environment\", \"color_palette\", \"tone\", \"visual_style\" },\n  \"scenes\": [ { \"index\": int, \"title\": string, \"narrative_role\": string, \"type_of_scene\": string, \"image_prompt\": string, \"text_content\": string|null } ]\n}",
   "segments": [
     { "index": 0, "words": "The violin had been silent for twenty years," },
     { "index": 1, "words": "sealed in its velvet-lined case in the attic." }
@@ -74,19 +152,36 @@ Content-Type: application/json
 }
 
 ### ----------------------------------------------------------
-### 5. List scene history
+### 6. Direct webhook — string segments (tests n8n input_validator)
+### ----------------------------------------------------------
+
+POST {{webhook}}
+Content-Type: application/json
+
+{
+  "script": "The violin had been silent for twenty years, sealed in its velvet-lined case in the attic.",
+  "style": "cinematic",
+  "system_prompt": "You are a visual scene prompt writer. Return JSON with analysis and scenes array.",
+  "segments": [
+    "The violin had been silent for twenty years,",
+    "sealed in its velvet-lined case in the attic."
+  ]
+}
+
+### ----------------------------------------------------------
+### 7. List scene history
 ### ----------------------------------------------------------
 
 GET {{base}}/api/scenes/history
 
 ### ----------------------------------------------------------
-### 6. List alignment history
+### 8. List alignment history
 ### ----------------------------------------------------------
 
 GET {{base}}/api/alignment/history
 
 ### ----------------------------------------------------------
-### 7. List segmenter history
+### 9. List segmenter history
 ### ----------------------------------------------------------
 
 GET {{base}}/api/segmenter/history

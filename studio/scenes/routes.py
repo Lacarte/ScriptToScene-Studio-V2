@@ -26,6 +26,181 @@ scenes_bp = Blueprint("scenes", __name__)
 
 
 # ---------------------------------------------------------------------------
+# Segment normalization
+# ---------------------------------------------------------------------------
+
+def _normalize_segments(segments):
+    """Normalize segments from mixed formats to [{index, words, ...}] dicts.
+
+    Accepts:
+      - Plain strings: ["text1", "text2"] -> [{index:0, words:"text1"}, ...]
+      - SegmentItem objects: preserved with model_dump()
+      - Dicts: passed through
+    """
+    result = []
+    for i, seg in enumerate(segments):
+        if isinstance(seg, str):
+            result.append({"index": i, "words": seg})
+        elif hasattr(seg, "model_dump"):
+            result.append(seg.model_dump())
+        elif isinstance(seg, dict):
+            result.append(seg)
+        else:
+            result.append({"index": i, "words": str(seg)})
+    return result
+
+
+def _normalize_webhook_response(result):
+    """Normalize webhook response to expected {scenes: [...]} format.
+
+    Handles both:
+      - Current format: {analysis, scenes: [{index, image_prompt, type_of_scene, ...}]}
+      - Simplified format: {analysis, segments: [{index, prompt, type, ...}]}
+    """
+    if not isinstance(result, dict):
+        return result
+
+    if "segments" in result and "scenes" not in result:
+        scenes = []
+        for seg in result["segments"]:
+            scene = {
+                "index": seg.get("index"),
+                "image_prompt": seg.get("prompt", seg.get("image_prompt", "")),
+                "type_of_scene": seg.get("type", seg.get("type_of_scene", "video")),
+                "title": seg.get("title", ""),
+                "narrative_role": seg.get("narrative_role", "buildup"),
+                "text_content": seg.get("text_content"),
+            }
+            scenes.append(scene)
+        result["scenes"] = scenes
+        del result["segments"]
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Timing helpers
+# ---------------------------------------------------------------------------
+
+def _coerce_float(value):
+    try:
+        return round(float(value), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_timed_segment_refs(segments, full_segments=None):
+    """Return speech segments with stable timing, ordered by time."""
+    merged_by_index = {}
+
+    for seg in full_segments or []:
+        if seg.get("is_filler"):
+            continue
+        try:
+            idx = int(seg.get("index"))
+        except (TypeError, ValueError):
+            continue
+        merged_by_index[idx] = dict(seg)
+
+    ordered = []
+    seen = set()
+    for seg in segments or []:
+        try:
+            idx = int(seg.get("index"))
+        except (TypeError, ValueError):
+            continue
+        base = dict(merged_by_index.get(idx, {}))
+        base.update(seg)
+        start = _coerce_float(base.get("start"))
+        end = _coerce_float(base.get("end"))
+        if start is None or end is None or end < start:
+            continue
+        base["index"] = idx
+        base["start"] = start
+        base["end"] = end
+        base["duration"] = round(end - start, 3)
+        merged_by_index[idx] = base
+        if idx not in seen:
+            ordered.append(base)
+            seen.add(idx)
+
+    if not ordered:
+        for idx, seg in merged_by_index.items():
+            start = _coerce_float(seg.get("start"))
+            end = _coerce_float(seg.get("end"))
+            if start is None or end is None or end < start:
+                continue
+            seg["index"] = idx
+            seg["start"] = start
+            seg["end"] = end
+            seg["duration"] = round(end - start, 3)
+            ordered.append(seg)
+
+    ordered.sort(key=lambda seg: (seg["start"], seg["index"]))
+
+    total_end = 0.0
+    for seg in full_segments or []:
+        end = _coerce_float(seg.get("end"))
+        if end is not None:
+            total_end = max(total_end, end)
+    if total_end <= 0 and ordered:
+        total_end = ordered[-1]["end"]
+
+    return ordered, round(total_end, 3)
+
+
+def _apply_segmenter_timing(result, segments, full_segments=None):
+    """Make segmenter timing the source of truth for saved scene placement."""
+    scenes = result.get("scenes", []) if isinstance(result, dict) else []
+    if not scenes:
+        return
+
+    timed_segments, total_end = _build_timed_segment_refs(segments, full_segments)
+    if not timed_segments:
+        return
+
+    missing, unexpected = validate_scene_indexes(result, timed_segments)
+    if missing or unexpected:
+        raise RuntimeError(
+            f"scene index mismatch (missing={missing}, unexpected={unexpected})"
+        )
+
+    scene_by_index = {}
+    for scene in scenes:
+        try:
+            idx = int(scene.get("index"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        scene_by_index[idx] = scene
+
+    ordered_scenes = []
+    for pos, seg in enumerate(timed_segments):
+        scene = scene_by_index[seg["index"]]
+        timeline_start = 0.0 if pos == 0 else seg["start"]
+        next_start = timed_segments[pos + 1]["start"] if pos + 1 < len(timed_segments) else total_end
+        timeline_end = max(next_start, timeline_start)
+        visual_duration = round(timeline_end - timeline_start, 3)
+        speech_duration = round(seg["end"] - seg["start"], 3)
+
+        original_duration = scene.get("duration")
+        if original_duration is not None:
+            scene["model_duration"] = original_duration
+
+        scene["timestamp"] = timeline_start
+        scene["timeline_start"] = timeline_start
+        scene["timeline_end"] = timeline_end
+        scene["duration"] = visual_duration
+        scene["segment_start"] = seg["start"]
+        scene["segment_end"] = seg["end"]
+        scene["segment_duration"] = speech_duration
+        scene["segment_words"] = seg.get("words", "")
+        ordered_scenes.append(scene)
+
+    result["scenes"] = ordered_scenes
+    result["total_duration"] = round(total_end, 3)
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -63,11 +238,17 @@ def generate_scenes(data: SceneGenerateRequest):
         return jsonify({"error": "Unsafe webhook URL"}), 400
     script = data.script
 
-    segments_raw = [s.model_dump() for s in data.segments]
+    segments_raw = _normalize_segments(data.segments)
+    full_segments_raw = data.full_segments or []
+
+    # Strip timing for webhook — LLM only sees {index, words}
+    segments_for_webhook = [
+        {"index": s["index"], "words": s["words"]} for s in segments_raw
+    ]
 
     try:
         # Check if we should use chapter-based generation
-        full_segments = data.full_segments
+        full_segments = full_segments_raw
         if full_segments and should_use_chapters(full_segments):
             result = _generate_with_chapters(
                 script, style_id, style_prompt, full_segments,
@@ -81,8 +262,10 @@ def generate_scenes(data: SceneGenerateRequest):
                 "script": script,
                 "style": style_id,
                 "system_prompt": system_prompt,
-                "segments": segments_raw,
+                "segments": segments_for_webhook,
             })
+        result = _normalize_webhook_response(result)
+        _apply_segmenter_timing(result, segments_raw, full_segments_raw)
 
         # Save to disk
         project_id_raw = (data.project_id or result.get("pp_randomId")
@@ -342,7 +525,7 @@ def list_scenes():
         json_path = os.path.join(SCENES_DIR, entry, "scenes.json")
         if os.path.isfile(json_path):
             try:
-                with open(json_path) as f:
+                with open(json_path, encoding="utf-8") as f:
                     data = json.load(f)
                 item = {
                     "project_id": data.get("project_id", entry),
@@ -354,7 +537,7 @@ def list_scenes():
                 if data.get("parent_id"):
                     item["parent_id"] = data["parent_id"]
                 items.append(item)
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
                 pass
     items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return jsonify(items)
@@ -368,9 +551,9 @@ def get_scenes(project_id):
     if not os.path.isfile(json_path):
         return jsonify({"error": "Not found"}), 404
     try:
-        with open(json_path) as f:
+        with open(json_path, encoding="utf-8") as f:
             return jsonify(json.load(f))
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         return jsonify({"error": f"Failed to read scene data: {e}"}), 500
 
 
@@ -385,6 +568,3 @@ def get_scene_audio(source_folder):
         if f.endswith((".wav", ".mp3")):
             return jsonify({"url": f"/output/alignments/{source_folder}/{f}"})
     return jsonify({"error": "No audio file found"}), 404
-    allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
-    if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
-        raise RuntimeError("Unsafe webhook URL")

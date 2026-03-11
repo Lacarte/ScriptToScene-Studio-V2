@@ -457,7 +457,10 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
         should_use_chapters,
     )
     from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
-    from studio.scenes.routes import _call_webhook, generate_with_chapters_chunked
+    from studio.scenes.routes import (
+        _call_webhook, generate_with_chapters_chunked,
+        _apply_segmenter_timing, _normalize_webhook_response,
+    )
 
     all_segments = segment_result.get("segments", [])
     segments = [
@@ -504,6 +507,11 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
             "system_prompt": system_prompt, "segments": segments,
         }
         result = _call_webhook(webhook_url, payload)
+
+    # Apply segmenter timing — single source of truth for scene placement
+    result = _normalize_webhook_response(result)
+    speech_segments = [s for s in all_segments if not s.get("is_filler")]
+    _apply_segmenter_timing(result, speech_segments, all_segments)
 
     # Save result
     result["project_id"] = project_id

@@ -834,13 +834,8 @@ function sendToEditor() {
 
 // ---- Scenes History ----
 async function loadScenesHistory() {
-  renderScenesHistoryLoading(1, 3, 'Requesting projects...');
   try {
     const items = await api('/api/scenes/history');
-    renderScenesHistoryLoading(2, 3, 'Processing response...');
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    renderScenesHistoryLoading(3, 3, 'Rendering history...');
-    await new Promise(resolve => requestAnimationFrame(resolve));
     renderScenesHistory(items);
   } catch (e) {
     console.error('Scenes history:', e);

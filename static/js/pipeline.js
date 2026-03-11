@@ -14,6 +14,26 @@ let _plSteps = [
 let _plStepStatus = {};
 let _plLog = [];
 
+const _plRunIcon = `
+  <span class="pipeline-run-icon" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="6" cy="12" r="1.75" fill="currentColor" stroke="none"></circle>
+      <path d="M9 12h8"></path>
+      <path d="M13.5 7.5L18 12l-4.5 4.5"></path>
+    </svg>
+  </span>`;
+
+const _plSpinnerIcon = `
+  <span class="pipeline-run-icon" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite">
+      <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
+    </svg>
+  </span>`;
+
+function _plSetRunButton(btn, label, loading = false) {
+  btn.innerHTML = `${loading ? _plSpinnerIcon : _plRunIcon}<span class="pipeline-run-label">${label}</span>`;
+}
+
 // ---- Start Pipeline ----
 
 async function pipelineStart() {
@@ -22,7 +42,7 @@ async function pipelineStart() {
 
   const btn = $('#pipeline-run-btn');
   btn.disabled = true;
-  btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"/></svg> Starting...';
+  _plSetRunButton(btn, 'Starting...', true);
 
   const autoScenes = $('#pipeline-auto-scenes')?.checked !== false;
   // Use the webhook URL from scenes settings (localStorage) so pipeline hits the same endpoint
@@ -52,7 +72,7 @@ async function pipelineStart() {
     toast(e.message || 'Pipeline failed to start', 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Pipeline';
+    _plSetRunButton(btn, 'Run Pipeline');
   }
 }
 

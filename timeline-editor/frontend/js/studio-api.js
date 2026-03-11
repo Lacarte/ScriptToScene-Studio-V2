@@ -67,7 +67,7 @@ class StudioAPIManager {
             scene_id: i,
             scene_type: scene.scene_type || this._mapType(scene.type || scene.type_of_scene),
             description: scene.description || scene.image_prompt || '',
-            timestamp: scene.timestamp || '0:00',
+            timestamp: scene.timestamp ?? '0:00',
             duration: scene.duration || 3,
             prompt: scene.prompt || scene.image_prompt || '',
             visual_fx: scene.visual_fx || 'static',
@@ -78,6 +78,10 @@ class StudioAPIManager {
             image_url: scene.image_url || '',
             created_at: scene.created_at || studioData.timestamp || new Date().toISOString(),
             error: scene.error || false,
+            segment_start: scene.segment_start ?? null,
+            segment_end: scene.segment_end ?? null,
+            segment_duration: scene.segment_duration ?? null,
+            segment_words: scene.segment_words || '',
         }));
     }
 

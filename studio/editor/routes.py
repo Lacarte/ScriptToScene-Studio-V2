@@ -17,7 +17,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.io_utils import safe_json_write, safe_json_read
@@ -155,20 +155,51 @@ def _resolve_project_audio(data: dict, project_id: str):
 
 
 def _resolve_project_captions(data: dict, project_id: str):
-    """Clear captions if their project_id doesn't match the current project."""
+    """Replace stale captions with the latest matching source_folder captions."""
     captions = data.get("captions")
-    if not captions:
-        return
-    cap_project_id = captions.get("project_id", "")
-    # Captions have their own project_id (cap_XXXXX). Check if source_folder
-    # matches to determine if captions belong to this project.
     source_folder = _get_source_folder(project_id)
     if not source_folder:
-        return
-    cap_source = captions.get("source_folder", "")
-    if cap_source and cap_source != source_folder:
-        logger.info("Clearing stale captions for {}: cap source={} != project source={}", project_id, cap_source, source_folder)
         data["captions"] = None
+        return
+
+    cap_source = captions.get("source_folder", "") if captions else ""
+    if captions and cap_source == source_folder:
+        return
+
+    if captions:
+        logger.info(
+            "Clearing stale captions for {}: cap source={} != project source={}",
+            project_id,
+            cap_source,
+            source_folder,
+        )
+
+    latest_match = None
+    latest_ts = ""
+    if os.path.isdir(CAPTIONS_DIR):
+        for entry in os.listdir(CAPTIONS_DIR):
+            cap_json = os.path.join(CAPTIONS_DIR, entry, "captions.json")
+            if not os.path.isfile(cap_json):
+                continue
+            try:
+                payload = safe_json_read(cap_json)
+            except Exception:
+                continue
+            if payload.get("source_folder") != source_folder:
+                continue
+            ts = payload.get("timestamp", "")
+            if ts >= latest_ts:
+                latest_ts = ts
+                latest_match = payload
+
+    data["captions"] = latest_match
+    if latest_match:
+        logger.info(
+            "Resolved captions for {} from source_folder={} -> {}",
+            project_id,
+            source_folder,
+            latest_match.get("project_id", ""),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +214,14 @@ def editor_save_project(data: EditorSaveRequest):
 
     from datetime import datetime, timezone
     save_data = data.model_dump(exclude_none=True)
+    source_folder = _get_source_folder(safe_id)
+    if source_folder:
+        save_data["source_folder"] = source_folder
+        captions = save_data.get("captions")
+        if isinstance(captions, dict) and not captions.get("source_folder"):
+            captions["source_folder"] = source_folder
+    _resolve_project_audio(save_data, safe_id)
+    _resolve_project_captions(save_data, safe_id)
     save_data["saved_at"] = datetime.now(timezone.utc).isoformat()
 
     path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")

@@ -297,21 +297,27 @@ The analysis below was already computed for the full script. Return it UNCHANGED
 
 ## SCENE RULES
 
-### THEMATIC INTERPRETATION — CRITICAL
+### SEGMENT CONTRACT
+- Return exactly ONE scene for every input segment.
+- Match each input index exactly.
+- Do NOT merge, split, reorder, omit, or add segments.
+
+### THEMATIC INTERPRETATION - CRITICAL
 Every scene must visually serve the core_theme from the analysis, NOT literally translate the script's words into props.
 
 **NEVER illustrate a metaphor literally.** The viewer hears the words while seeing the image. The visual should DEEPEN the meaning, not repeat it.
 
-### Scene object keys
+### Scene object keys (output ONLY these — no extra fields)
 - index: integer (match input index exactly)
 - title: string (2-6 words)
-- narrative_role: "hook" | "buildup" | "peak" | "transition" | "cta"
-- type_of_scene: "image" | "video"
-- image_prompt: scene description (video: include 2-3 motion cues)
-- duration: number (2.0-4.0 seconds)
+- narrative_role: "hook" | "buildup" | "peak" | "transition" | "text_accent" | "cta"
+- type_of_scene: "image" | "video" | "text"
+- image_prompt: scene description (video: include 2-3 motion cues; text: blurred background only)
+- text_content: string or null (text scenes only, 3-8 words, uppercase, hardest-hitting line)
 
 ## TYPE MIX
-- 60-75% video, 20-30% image
+- 60-75% video, 20-30% image, 5-10% text
+- 1-2 text scenes max; most impactful line should be text
 - Default to VIDEO
 
 ## IMAGE_PROMPT RULES
@@ -320,6 +326,8 @@ Every scene must visually serve the core_theme from the analysis, NOT literally 
 Include motion from different categories: body, environment, camera, atmosphere.
 
 **IMAGE**: one frozen photograph. No motion verbs. FORMAT: [shot type], [subject + details], [setting], [lighting], [mood], [style keywords]
+
+**TEXT**: blurred/abstract background from the scene's environment. Do NOT include text in the prompt.
 
 **ALL TYPES**:
 - Shot types: extreme-close-up | close-up | medium | wide | POV | bird's-eye | low-angle | high-angle | over-shoulder | centered-symmetrical

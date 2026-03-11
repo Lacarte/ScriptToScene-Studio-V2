@@ -1545,6 +1545,11 @@ body.asset-dragging .scene-clip:hover {
     background: rgba(255, 255, 255, 0.05);
 }
 
+.tl-btn.active {
+    color: var(--accent, #7c6aef);
+    background: rgba(124, 106, 239, 0.15);
+}
+
 .tl-btn-xs {
     width: 18px;
     height: 18px;

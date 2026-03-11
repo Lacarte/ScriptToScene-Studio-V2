@@ -1,6 +1,6 @@
 """Pydantic schemas for Scenes routes."""
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -13,7 +13,7 @@ class SegmentItem(BaseModel):
 
 
 class SceneGenerateRequest(BaseModel):
-    segments: list[SegmentItem] = Field(min_length=1)
+    segments: list[Union[str, SegmentItem]] = Field(min_length=1)
     script: str = ""
     style: str = "cinematic"
     style_prompt: Optional[str] = None
