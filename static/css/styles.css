@@ -473,6 +473,65 @@ body {
   object-fit: cover;
 }
 
+/* ---- Fancy Asset Checkbox ---- */
+.asset-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.asset-check input { display: none; }
+
+.asset-check .mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(.4,0,.2,1);
+}
+
+.asset-check input:checked + .mark {
+  background: var(--accent, #4ecdc4);
+  border-color: var(--accent, #4ecdc4);
+  box-shadow: 0 0 10px rgba(78,205,196,0.4);
+}
+
+.asset-check .mark svg {
+  width: 13px;
+  height: 13px;
+  stroke: #fff;
+  stroke-width: 3;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+  transition: stroke-dashoffset 0.25s cubic-bezier(.4,0,.2,1);
+}
+
+.asset-check input:checked + .mark svg {
+  stroke-dashoffset: 0;
+}
+
+.asset-check:hover .mark {
+  border-color: rgba(255,255,255,0.5);
+  background: rgba(0,0,0,0.7);
+}
+
+.asset-check input:checked + .mark:hover {
+  background: var(--accent-hover, #45b8b0);
+  border-color: var(--accent-hover, #45b8b0);
+}
+
 .status-badge {
   position: absolute;
   bottom: 8px;

@@ -391,11 +391,13 @@ function _showSaveStatus(status, text) {
 }
 
 function _buildSavePayload() {
+    normalizeTimelineDurations();
+
     return {
         project_id: EditorState.project.id,
         project_name: EditorState.project.name || EditorState.project.id,
         source_folder: EditorState.project.sourceFolder || '',
-        total_duration: getTotalDuration(),
+        total_duration: _roundTimelineSeconds(getScenesDuration()),
         scene_count: EditorState.scenes.length,
         scenes: EditorState.scenes.map(s => ({
             id: s.id, type: s.type, duration: s.duration,
@@ -1114,6 +1116,76 @@ function getTotalDuration() {
     return Math.max(scenesDuration, maxAudioDur, captionsDuration);
 }
 
+function _roundTimelineSeconds(value) {
+    return Math.round(Math.max(0, value) * 1000) / 1000;
+}
+
+function _getTimelineConstraintDuration() {
+    let target = EditorState.project?.totalDuration || 0;
+
+    for (const track of EditorState.audioTracks) {
+        let dur = 0;
+        if (track.trimmedDuration) {
+            dur = track.trimmedDuration;
+        } else if (!track.loop) {
+            dur = track.duration || 0;
+        }
+        if (dur > target) target = dur;
+    }
+
+    if (EditorState.captionsEnabled && EditorState.captionData?.captions?.length > 0) {
+        const lastCaption = EditorState.captionData.captions[EditorState.captionData.captions.length - 1];
+        target = Math.max(target, lastCaption.end || 0);
+    }
+
+    return _roundTimelineSeconds(target);
+}
+
+function _syncSceneTimestamps() {
+    let acc = 0;
+    for (const scene of EditorState.scenes) {
+        scene.timestamp = _roundTimelineSeconds(acc);
+        acc += Number(scene.duration) || 0;
+    }
+}
+
+function normalizeTimelineDurations(targetDuration = null) {
+    if (!EditorState.scenes.length) return false;
+
+    const target = _roundTimelineSeconds(targetDuration ?? _getTimelineConstraintDuration());
+    if (target <= 0) {
+        _syncSceneTimestamps();
+        return false;
+    }
+
+    const total = _roundTimelineSeconds(getScenesDuration());
+    const diff = _roundTimelineSeconds(target - total);
+    if (Math.abs(diff) <= 0.01) {
+        _syncSceneTimestamps();
+        return false;
+    }
+
+    const lastScene = EditorState.scenes[EditorState.scenes.length - 1];
+    const adjustedLast = _roundTimelineSeconds((lastScene.duration || 0) + diff);
+
+    if (adjustedLast >= 0.1) {
+        lastScene.duration = adjustedLast;
+    } else {
+        const ratio = total > 0 ? target / total : 1;
+        EditorState.scenes.forEach(scene => {
+            scene.duration = _roundTimelineSeconds(Math.max(0.1, (scene.duration || 0) * ratio));
+        });
+
+        const resyncedTotal = _roundTimelineSeconds(getScenesDuration());
+        const residual = _roundTimelineSeconds(target - resyncedTotal);
+        const fallbackLast = EditorState.scenes[EditorState.scenes.length - 1];
+        fallbackLast.duration = _roundTimelineSeconds(Math.max(0.1, (fallbackLast.duration || 0) + residual));
+    }
+
+    _syncSceneTimestamps();
+    return true;
+}
+
 /**
  * Convert time (seconds) to pixel position on timeline
  */
@@ -1803,11 +1875,15 @@ async function loadProjectData(data) {
         mediaUrl: scene.image_url || null
     }));
 
+    normalizeTimelineDurations(data.total_duration || 0);
+
     // Store original scenes for reset functionality
     EditorState.originalScenes = JSON.parse(JSON.stringify(EditorState.scenes));
 
     // Load saved edits from localStorage (if any)
     loadProjectEdits();
+
+    normalizeTimelineDurations();
 
     // Load edit history from localStorage
     loadEditHistory();
@@ -2695,25 +2771,10 @@ function loadDefaultAudio(stagedData) {
             console.log('Restored audio trim duration:', voiceTrack.trimmedDuration);
         }
 
-        // Sync scene durations to audio length
-        const audioDur = voiceTrack.trimmedDuration || audio.duration;
-        const scenesDur = getScenesDuration();
-        if (EditorState.scenes.length > 0 && audioDur > scenesDur + 0.05) {
-            const lastScene = EditorState.scenes[EditorState.scenes.length - 1];
-            const gap = parseFloat((audioDur - scenesDur).toFixed(3));
-            lastScene.duration = parseFloat((lastScene.duration + gap).toFixed(3));
-            console.log(`Extended last scene by ${gap}s to match audio duration`);
-        } else if (EditorState.scenes.length > 0 && scenesDur > audioDur + 0.05) {
-            // Scale all scenes proportionally to fit audio
-            const ratio = audioDur / scenesDur;
-            EditorState.scenes.forEach(s => {
-                s.duration = parseFloat((s.duration * ratio).toFixed(3));
-            });
-            console.log(`Scaled scenes to fit audio (ratio ${ratio.toFixed(3)})`);
-            renderTimeline();
-        }
+        normalizeTimelineDurations(voiceTrack.trimmedDuration || audio.duration);
 
         recalculateDuration();
+        renderTimeline();
         renderAllAudioTracks();
         showToast('Audio loaded: ' + formatTimestamp(voiceTrack.trimmedDuration || audio.duration), 'success');
     });
@@ -3690,6 +3751,84 @@ function renderCaptionTrack() {
 }
 
 /**
+ * Close timing gaps in the timeline — trims excess silence from scenes
+ * and shifts caption times to eliminate visual gaps.
+ */
+function closeTimelineGaps() {
+    const scenes = EditorState.scenes;
+    if (!scenes || scenes.length < 2) return;
+
+    const BUFFER = 0.15;   // keep small gap between segments
+    const MIN_GAP = 0.3;   // only close gaps larger than this
+
+    // 1. Collect gap info from scenes (based on original timing)
+    const gaps = [];
+    for (const scene of scenes) {
+        if (scene.segment_start != null && scene.segment_end != null) {
+            const speechDur = scene.segment_end - scene.segment_start;
+            const excess = scene.duration - speechDur;
+            if (excess > MIN_GAP) {
+                gaps.push({
+                    afterTime: scene.segment_end,       // original time where gap starts
+                    trimAmount: excess - BUFFER           // how much to remove
+                });
+            }
+        }
+    }
+
+    if (gaps.length === 0) return;
+    gaps.sort((a, b) => a.afterTime - b.afterTime);
+
+    // Helper: cumulative shift for a given original time
+    function getShift(t) {
+        let s = 0;
+        for (const g of gaps) {
+            if (g.afterTime < t) s += g.trimAmount;
+        }
+        return s;
+    }
+
+    // 2. Trim scene durations & shift segment times
+    for (const scene of scenes) {
+        if (scene.segment_start == null) continue;
+        const speechDur = scene.segment_end - scene.segment_start;
+        const excess = scene.duration - speechDur;
+
+        // Trim this scene's silence
+        if (excess > MIN_GAP) {
+            scene.duration = parseFloat((speechDur + BUFFER).toFixed(3));
+        }
+
+        // Shift segment times for scenes after earlier gaps
+        const shift = getShift(scene.segment_start);
+        if (shift > 0) {
+            scene.segment_start = parseFloat((scene.segment_start - shift).toFixed(3));
+            scene.segment_end = parseFloat((scene.segment_end - shift).toFixed(3));
+        }
+    }
+
+    // 3. Shift caption times
+    const captions = EditorState.captionData?.captions;
+    if (captions) {
+        for (const cap of captions) {
+            const shift = getShift(cap.start);
+            if (shift > 0) {
+                cap.start = parseFloat(Math.max(0, cap.start - shift).toFixed(3));
+                cap.end = parseFloat(Math.max(0, cap.end - shift).toFixed(3));
+            }
+        }
+    }
+
+    // 4. Re-render everything
+    renderTimeline();
+    renderTimeRuler();
+    renderCaptionTrack();
+    saveProjectEdits();
+    _saveCaptionsToStorage();
+    _debouncedServerSave();
+}
+
+/**
  * Setup caption enable toggle and style controls in the sidebar Caption tab.
  */
 function setupCaptionControls() {
@@ -3966,6 +4105,9 @@ function _receiveCaptionData(captionData) {
         EditorState.preview.setCaptions(captionData.captions, captionData.style || {});
     }
 
+    normalizeTimelineDurations();
+    recalculateDuration();
+
     _capSyncStyleUI();
     _capUpdateUI();
     renderCaptionTrack();
@@ -4064,8 +4206,10 @@ function startResize(sceneId, handle, startEvent) {
  * Recalculate total duration from scenes and audio - uses helper functions
  */
 function recalculateDuration() {
+    normalizeTimelineDurations();
+
     // Use helper to get total duration (max of scenes and audio)
-    const totalDuration = getTotalDuration();
+    const totalDuration = _roundTimelineSeconds(getScenesDuration());
     EditorState.project.totalDuration = totalDuration;
 
     // Update preview duration if available

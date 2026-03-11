@@ -336,6 +336,202 @@ SCENE_STYLE_TEMPLATES = [
             "Style: Vivian Maier meets modern street photography — gritty, authentic, alive."
         ),
     },
+    {
+        "id": "dark_psychology",
+        "name": "Dark Psychology",
+        "description": "Manipulation, mind games, shadowy figures, psychological tension",
+        "color": "#6D28D9",
+        "style_prompt": (
+            "Generate psychologically intense image prompts exploring manipulation, influence, and the darker side of human behavior. "
+            "Use claustrophobic framing, distorted reflections, and split-face compositions to show duality. "
+            "Lighting: harsh overhead interrogation lights, faces half in shadow, backlit silhouettes with glowing eyes. "
+            "Include visual metaphors: puppet strings, chess pieces, masks being worn or removed, cracked mirrors. "
+            "Environments: dimly lit rooms, corridors with converging walls, empty chairs facing each other. "
+            "Color palette: deep violet, charcoal black, blood red accents, cold steel grey. "
+            "Composition: extreme close-ups on eyes, over-the-shoulder power dynamics, dutch angles for unease. "
+            "Style: psychological thriller cinematography — Mindhunter, Se7en, Gone Girl."
+        ),
+    },
+    {
+        "id": "religion_spiritual",
+        "name": "Religion / Spiritual",
+        "description": "Sacred imagery, divine light, temples, spiritual transcendence",
+        "color": "#D4AF37",
+        "style_prompt": (
+            "Generate spiritually evocative image prompts with sacred, reverent imagery across world religions. "
+            "Include grand places of worship: cathedrals, mosques, temples, monasteries, ancient stone circles. "
+            "Use divine lighting — god rays piercing stained glass, golden halos, candlelit vigils, dawn over sacred sites. "
+            "Visual motifs: prayer hands, sacred geometry, mandalas, rosary beads, incense smoke, holy water reflections. "
+            "Environments: mountain-top monasteries, desert pilgrimages, underwater baptisms, forest shrines. "
+            "Color palette: celestial gold, pure white, deep indigo, sacred crimson, earthen ochre. "
+            "Composition: symmetrical and reverent, upward gazing angles, light breaking through darkness. "
+            "Style: Renaissance religious painting meets modern spiritual photography — Caravaggio lighting, sacred awe."
+        ),
+    },
+    {
+        "id": "politics_power",
+        "name": "Politics / Power",
+        "description": "Podiums, crowds, propaganda, power dynamics, civic drama",
+        "color": "#DC2626",
+        "style_prompt": (
+            "Generate politically charged image prompts depicting power, governance, and civic tension. "
+            "Include podiums, marble government halls, protest crowds, war rooms, and campaign trails. "
+            "Use dramatic lighting: spotlights on speakers, flash photography, screen-lit debate stages, burning barrel fires at rallies. "
+            "Visual motifs: raised fists, flags, gavels, ballot boxes, barbed wire, propaganda posters, shattered glass ceilings. "
+            "Show power dynamics through composition: towering figures over crowds, isolated leaders in vast empty rooms. "
+            "Color palette: patriotic reds and blues, authoritarian black and gold, revolutionary earth tones. "
+            "Composition: low-angle authority shots, wide crowd panoramas, intimate behind-closed-doors tension. "
+            "Style: political photojournalism meets House of Cards — gravitas, tension, consequence."
+        ),
+    },
+    {
+        "id": "true_crime",
+        "name": "True Crime",
+        "description": "Evidence boards, cold cases, forensic detail, investigative tension",
+        "color": "#991B1B",
+        "style_prompt": (
+            "Generate true crime-style image prompts with investigative and forensic atmosphere. "
+            "Include evidence boards with red string connections, police case files, crime scene tape, forensic labs. "
+            "Use cold, clinical lighting — fluorescent morgue lights, detective desk lamps, car dashboard at night. "
+            "Visual motifs: fingerprints, redacted documents, surveillance footage stills, newspaper clippings, mugshots. "
+            "Environments: interrogation rooms, abandoned crime scenes, courtrooms, rain-soaked parking lots. "
+            "Color palette: sickly green-white fluorescents, desaturated reality, red evidence markers, manila folder tan. "
+            "Composition: overhead evidence layouts, security camera angles, tight focus on clues with bokeh background. "
+            "Style: Making a Murderer meets Zodiac — procedural dread, obsessive detail, unresolved tension."
+        ),
+    },
+    {
+        "id": "conspiracy",
+        "name": "Conspiracy / Occult",
+        "description": "Secret societies, hidden symbols, shadowy agendas, forbidden knowledge",
+        "color": "#4A1D96",
+        "style_prompt": (
+            "Generate conspiracy and occult-themed image prompts with mystery and forbidden knowledge. "
+            "Include secret society meetings, hidden symbols carved in stone, underground bunkers, and coded manuscripts. "
+            "Use low, secretive lighting — candles in dark chambers, monitor glow in surveillance rooms, moonlit rituals. "
+            "Visual motifs: all-seeing eyes, pentagrams, ancient maps, sealed vaults, hooded figures, pyramid structures. "
+            "Environments: underground tunnels, hidden libraries, abandoned temples, windowless rooms with monitors. "
+            "Color palette: deep black, occult purple, illuminated gold, blood red, parchment cream. "
+            "Composition: keyhole perspectives, partially obscured reveals, symmetrical ritual arrangements, extreme wide for isolation. "
+            "Style: Eyes Wide Shut meets Da Vinci Code — seductive secrecy, ancient power, hidden truth."
+        ),
+    },
+    {
+        "id": "stoicism",
+        "name": "Stoicism / Philosophy",
+        "description": "Ancient wisdom, marble busts, contemplation, timeless truths",
+        "color": "#78716C",
+        "style_prompt": (
+            "Generate stoic and philosophical image prompts evoking ancient wisdom and contemplation. "
+            "Include marble busts and statues of philosophers, Roman columns, open journals, and solitary thinkers. "
+            "Use meditative lighting — soft overcast skies, single candle in darkness, dawn breaking over ruins. "
+            "Visual motifs: hourglasses, memento mori skulls, still water reflections, weathered stone inscriptions, laurel wreaths. "
+            "Environments: Greek agoras, cliff-edge meditation spots, minimalist stone rooms, overgrown Roman ruins. "
+            "Color palette: marble white, weathered stone grey, aged bronze, muted olive, warm parchment. "
+            "Composition: solitary figures against vast landscapes, still-life arrangements, centered and balanced framing. "
+            "Style: neoclassical painting meets modern minimalism — Marcus Aurelius energy, timeless gravitas."
+        ),
+    },
+    {
+        "id": "wealth_luxury",
+        "name": "Wealth / Luxury",
+        "description": "Opulence, designer interiors, supercars, gold accents, high life",
+        "color": "#B8860B",
+        "style_prompt": (
+            "Generate luxury and wealth-themed image prompts with aspirational opulence. "
+            "Include penthouses with floor-to-ceiling city views, supercars, private jets, yachts, and designer fashion. "
+            "Use glamorous lighting — golden hour on infinity pools, chandelier sparkle, city skyline at blue hour. "
+            "Visual motifs: gold accents, marble surfaces, champagne flutes, diamond details, brand logos, leather interiors. "
+            "Environments: Monaco harbors, Dubai skylines, Swiss chalets, Maldives overwater villas, Wall Street trading floors. "
+            "Color palette: black and gold, pure white, deep navy, champagne rose, emerald green. "
+            "Composition: wide establishing shots of estates, detail close-ups on luxury items, reflections in polished surfaces. "
+            "Style: luxury brand advertising meets Wolf of Wall Street — aspiration, excess, magnetic allure."
+        ),
+    },
+    {
+        "id": "mythology",
+        "name": "Mythology / Legends",
+        "description": "Gods, heroes, mythical beasts, ancient epics, divine warfare",
+        "color": "#CA8A04",
+        "style_prompt": (
+            "Generate mythology-themed image prompts depicting gods, heroes, and legendary creatures. "
+            "Include Olympian thrones, Norse world trees, Egyptian temples, Hindu celestial battles, and underworld rivers. "
+            "Use divine and epic lighting — lightning bolts, solar eclipses, volcanic glow, ethereal heavenly radiance. "
+            "Visual motifs: tridents, thunderbolts, winged helmets, sacred animals, runes, hieroglyphics, divine weapons. "
+            "Creatures: dragons, phoenixes, minotaurs, hydras, krakens, valkyries, celestial serpents. "
+            "Color palette: divine gold, storm grey, blood red, ocean teal, volcanic orange, celestial white. "
+            "Composition: towering god-scale figures, epic battle panoramas, hero-vs-beast confrontations. "
+            "Style: classical mythology painting meets God of War concept art — divine spectacle, mythic grandeur."
+        ),
+    },
+    {
+        "id": "children_storybook",
+        "name": "Children's Storybook",
+        "description": "Whimsical characters, soft pastels, magical worlds, bedtime warmth",
+        "color": "#F9A8D4",
+        "style_prompt": (
+            "Generate children's storybook image prompts with whimsical, heartwarming illustration style. "
+            "Characters should be cute, round, and expressive — talking animals, friendly creatures, curious children. "
+            "Use warm, soft lighting — cozy bedroom lamps, fairy glow, sunshine through cottage windows. "
+            "Visual motifs: mushroom houses, rainbow bridges, magic wands, friendly stars and moons, flower crowns. "
+            "Environments: enchanted meadows, treehouse villages, candy-colored towns, cloud castles, friendly forests. "
+            "Color palette: soft pastels — baby blue, mint green, peach, lavender, buttercup yellow. "
+            "Composition: centered and clear, slightly naive perspective, plenty of open sky and rolling hills. "
+            "Style: Beatrix Potter meets Studio Ghibli — gentle wonder, innocence, bedtime story magic."
+        ),
+    },
+    {
+        "id": "war_military",
+        "name": "War / Military",
+        "description": "Battlefields, soldiers, strategy rooms, grit and sacrifice",
+        "color": "#4B5320",
+        "style_prompt": (
+            "Generate war and military-themed image prompts with visceral authenticity and emotional weight. "
+            "Include battlefields, trenches, aircraft carriers, strategy war rooms, and soldiers in formation. "
+            "Use harsh, unflinching lighting — explosions illuminating smoke, overcast grey skies, harsh desert sun, night flares. "
+            "Visual motifs: dog tags, battle maps, barbed wire, ammunition, medals, folded flags, letters from home. "
+            "Environments: bombed-out cities, muddy foxholes, vast ocean convoys, jungle patrols, tense border checkpoints. "
+            "Color palette: army olive, steel grey, mud brown, gunmetal, muted khaki, occasional blood red. "
+            "Composition: wide battlefield chaos, intimate soldier portraits, overhead strategic views, silhouettes against fire. "
+            "Style: Saving Private Ryan meets war photojournalism — raw courage, cost of conflict, humanity in crisis."
+        ),
+    },
+    {
+        "id": "stickman_animation",
+        "name": "Stickman Animation",
+        "description": "Stick figures, whiteboard doodles, simple line art, playful sketches",
+        "color": "#E5E7EB",
+        "style_prompt": (
+            "Generate image prompts in stick figure / whiteboard animation style. "
+            "Characters are simple stickmen with circle heads, line bodies, and dot eyes — expressive through pose only. "
+            "Use a clean white or off-white background like a whiteboard, notebook paper, or chalkboard. "
+            "Drawings should look hand-sketched with slightly wobbly lines, as if drawn in real-time. "
+            "Include simple props drawn in the same style: speech bubbles, arrows, thought clouds, exclamation marks. "
+            "Environments are minimal — a few lines for ground, simple shapes for buildings, stick trees. "
+            "Color palette: primarily black lines on white, with occasional single-color highlights (red circle, blue arrow). "
+            "Composition: centered action, comic-strip panel layouts, before/after comparisons. "
+            "Style: XKCD meets whiteboard explainer videos — charming simplicity, humor through minimalism."
+        ),
+    },
+    {
+        "id": "two_choices",
+        "name": "Two Things Can Happen",
+        "description": "Branching choices, split-screen fates, \"what if\" storytelling",
+        "color": "#F97316",
+        "style_prompt": (
+            "Generate image prompts for a branching-choice narrative where every scene presents TWO possible outcomes. "
+            "IMPORTANT: For each scene, create a SPLIT composition showing both paths side by side. "
+            "Use a clear visual divider — a vertical split, a forking road, a cracked mirror, or a door with two sides. "
+            "Left side shows Choice A (often the safe/expected path), right side shows Choice B (the risky/unexpected path). "
+            "Each side should have distinct lighting and color grading: warm/cool, bright/dark, green/red to contrast outcomes. "
+            "Visual motifs: forking paths, crossroads, two doors, split screens, parallel timelines, coin flips mid-air. "
+            "Include text-friendly space for overlay labels like 'Option A' / 'Option B' or 'Stay' / 'Leave'. "
+            "Environments should mirror each other with key differences — same room but one is intact, other destroyed. "
+            "Color palette: contrasting dualities — gold vs blue, red vs green, light vs shadow. "
+            "Composition: symmetrical split-screen, or a character standing at a literal fork/crossroads center-frame. "
+            "Style: interactive story aesthetic, Bandersnatch meets moral dilemma TikToks — suspense of choice, weight of consequence."
+        ),
+    },
 ]
 
 # Quick lookup by ID

@@ -111,6 +111,11 @@ class TimelineRenderer {
         return div.innerHTML;
     }
 
+    _formatExactTime(seconds) {
+        if (seconds == null || Number.isNaN(seconds)) return '?';
+        return `${Number(seconds).toFixed(2)}s`;
+    }
+
     render() {
         const scenes = State.get('scenes');
         const selectedScene = State.get('selectedScene');
@@ -164,12 +169,16 @@ class TimelineRenderer {
             <div class="timeline-track">
         `;
 
+        let cumulative = 0;
         scenes.forEach(scene => {
             const isSelected = selectedScene?.scene_id === scene.scene_id;
             const sceneErrors = getSceneErrors(errors, scene.scene_id);
             const hasError = sceneErrors.some(e => e.type === ErrorType.ERROR);
             const hasWarning = sceneErrors.some(e => e.type === ErrorType.WARNING);
             const hasImage = !!scene.image_url;
+            const startTime = cumulative;
+            const endTime = cumulative + (scene.duration || 0);
+            cumulative = endTime;
 
             const color = SCENE_COLORS[scene.scene_type] || '#666666';
             const vfxIcon = VFX_ICONS[scene.visual_fx] || '';
@@ -189,7 +198,7 @@ class TimelineRenderer {
             // Segment timing display
             let segmentHtml = '';
             if (scene.segment_start != null) {
-                segmentHtml = `<div class="block-segment-timing">${scene.segment_start.toFixed(1)}s–${scene.segment_end.toFixed(1)}s</div>`;
+                segmentHtml = `<div class="block-segment-timing">seg ${this._formatExactTime(scene.segment_start)}-${this._formatExactTime(scene.segment_end)}</div>`;
             }
 
             html += `
@@ -208,8 +217,11 @@ class TimelineRenderer {
                         </div>
                     </div>
                     <div class="block-footer">
-                        <div class="block-duration">${scene.duration}s</div>
+                        <div class="block-duration">${this._formatExactTime(scene.duration)}</div>
                         <div class="block-status status-${scene.status}" title="${scene.status}"></div>
+                    </div>
+                    <div class="block-range" title="Timeline placement">
+                        tl ${this._formatExactTime(startTime)}-${this._formatExactTime(endTime)}
                     </div>
                     ${segmentHtml}
                 </div>
@@ -221,7 +233,7 @@ class TimelineRenderer {
         // Timestamps row - wrapper for positioning
         html += '<div class="timeline-timestamps-wrapper">';
         html += '<div class="timeline-timestamps">';
-        let cumulative = 0;
+        cumulative = 0;
         scenes.forEach(scene => {
             const hasImage = !!scene.image_url;
             html += `

@@ -315,9 +315,6 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
     console.log('[prepareExportData] Captions:', captionData ? (captionData.captions?.length || 0) + ' entries' : 'none');
     console.log('[prepareExportData] BgMusic:', bgMusicConfig ? bgMusicConfig.file : 'none');
 
-    // Calculate total scenes duration
-    const scenesDuration = scenes.reduce((sum, s) => sum + s.duration, 0);
-
     // Determine total video duration (max of scenes, audio, bgMusic, and captions)
     const audioDuration = audioConfig?.trimmedDuration || audioConfig?.duration || 0;
     const bgMusicDuration = bgMusicConfig?.duration || 0;
@@ -328,7 +325,24 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
         captionsDuration = lastCaption.end || 0;
     }
 
-    const totalDuration = Math.max(scenesDuration, audioDuration, bgMusicDuration, captionsDuration);
+    const totalDuration = Math.max(
+        scenes.reduce((sum, s) => sum + s.duration, 0),
+        audioDuration,
+        bgMusicDuration,
+        captionsDuration
+    );
+
+    const normalizedScenes = scenes.map(scene => ({ ...scene }));
+    if (normalizedScenes.length > 0) {
+        const normalizedSceneDuration = normalizedScenes.reduce((sum, s) => sum + s.duration, 0);
+        const diff = Math.round((totalDuration - normalizedSceneDuration) * 1000) / 1000;
+        if (Math.abs(diff) > 0.01) {
+            const lastScene = normalizedScenes[normalizedScenes.length - 1];
+            lastScene.duration = Math.round(Math.max(0.1, ((lastScene.duration || 0) + diff)) * 1000) / 1000;
+        }
+    }
+
+    const scenesDuration = normalizedScenes.reduce((sum, s) => sum + s.duration, 0);
 
     console.log('[prepareExportData] Duration: scenes=', scenesDuration, 'audio=', audioDuration, 'bgMusic=', bgMusicDuration, 'captions=', captionsDuration, 'total=', totalDuration);
 
@@ -378,10 +392,10 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
         },
 
         // Scene-by-scene export data
-        scenes: scenes.map((scene, index) => {
+        scenes: normalizedScenes.map((scene, index) => {
             let startTime = 0;
             for (let i = 0; i < index; i++) {
-                startTime += scenes[i].duration;
+                startTime += normalizedScenes[i].duration;
             }
 
             const mediaType = getMediaType(scene);

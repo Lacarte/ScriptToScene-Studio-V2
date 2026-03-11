@@ -256,20 +256,13 @@
 .media-tab-content {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     min-height: 0;
+    scrollbar-width: none;
 }
 
 .media-tab-content::-webkit-scrollbar {
-    width: 3px;
-}
-
-.media-tab-content::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.media-tab-content::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 2px;
+    display: none;
 }
 
 /* Tab panes */
@@ -1566,7 +1559,7 @@ body.asset-dragging .scene-clip:hover {
     height: 5px;
     cursor: pointer;
     z-index: 5;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .header-marker-track {
@@ -1578,6 +1571,7 @@ body.asset-dragging .scene-clip:hover {
 
 .header-marker-track:hover {
     background: var(--bg-surface-hover);
+    box-shadow: 0 0 3px rgb(56 198 188), 0 0 2px rgba(255, 255, 255, 0.6);
 }
 
 .header-marker-trail {

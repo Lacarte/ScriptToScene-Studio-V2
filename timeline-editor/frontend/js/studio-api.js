@@ -139,10 +139,14 @@ class StudioAPIManager {
                 const fullDur = fullDurationMap.get(segment.index);
                 if (fullDur && fullDur > 0) duration = fullDur;
             }
+            const speechDuration = segment
+                ? parseFloat(((segment.end ?? 0) - (segment.start ?? 0)).toFixed(3))
+                : null;
 
             return {
                 project_id: sceneData.project_id || '',
                 scene_id: i,
+                segment_index: segment?.index ?? sceneIndex,
                 scene_type: scene.scene_type || this._mapType(scene.type || scene.type_of_scene),
                 description: scene.description || scene.image_prompt || '',
                 timestamp: '0:00',
@@ -160,6 +164,7 @@ class StudioAPIManager {
                 asset_files: localFiles,
                 segment_start: segment?.start ?? null,
                 segment_end: segment?.end ?? null,
+                segment_duration: speechDuration,
                 segment_words: segment?.words ?? '',
             };
         });

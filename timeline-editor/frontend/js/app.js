@@ -9,6 +9,13 @@ class App {
         this.timeline = null;
     }
 
+    getReferenceDuration(scenes, segmenterData = null, alignmentData = null, fallback = 0) {
+        const sceneSum = getTotalDuration(scenes || []);
+        const segmenterTotal = segmenterData?.metadata?.total_duration || 0;
+        const alignmentTotal = alignmentData?.duration_seconds || 0;
+        return Math.max(sceneSum, segmenterTotal, alignmentTotal, fallback || 0);
+    }
+
     async init() {
         console.log('App initializing...');
 
@@ -147,7 +154,7 @@ class App {
                 project_id: projectId,
                 script: sceneData.script || '',
                 style: sceneData.style || '',
-                duration: scenes.reduce((sum, s) => sum + (s.duration || 0), 0),
+                duration: this.getReferenceDuration(scenes, segmenterData, null, sceneData.total_duration || 0),
                 created_at: sceneData.timestamp || new Date().toISOString(),
             };
 
@@ -339,7 +346,7 @@ class App {
                 project_id: projectId,
                 script: effectiveSceneData.script || '',
                 style: effectiveSceneData.style || '',
-                duration: timelineScenes.reduce((sum, s) => sum + (s.duration || 0), 0),
+                duration: this.getReferenceDuration(timelineScenes, segmenterData, alignmentData, effectiveSceneData.total_duration || 0),
                 created_at: assetsData.created_at || new Date().toISOString(),
             };
 
@@ -393,7 +400,7 @@ class App {
             project_id: projectId,
             script: studioData.script || '',
             style: studioData.style || '',
-            duration: scenes.reduce((sum, s) => sum + (s.duration || 0), 0),
+            duration: this.getReferenceDuration(scenes, null, null, studioData.total_duration || 0),
             created_at: studioData.timestamp || new Date().toISOString(),
         };
 

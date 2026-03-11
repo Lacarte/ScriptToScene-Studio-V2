@@ -403,8 +403,9 @@ function _buildAssetCard(scene, sceneNum) {
     <div class="asset-preview" style="height:180px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden">
       ${previewContent}
       ${statusBadge}
-      <label style="position:absolute;top:6px;left:6px;z-index:2;cursor:pointer;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;background:rgba(0,0,0,0.55);border:1.5px solid rgba(255,255,255,0.25);transition:all 0.15s" onclick="event.stopPropagation()">
-        <input type="checkbox" ${checked} onchange="assetsToggleSelect(${idx},this.checked)" style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer;margin:0" />
+      <label class="asset-check" onclick="event.stopPropagation()">
+        <input type="checkbox" ${checked} onchange="assetsToggleSelect(${idx},this.checked)" />
+        <span class="mark"><svg viewBox="0 0 16 16"><polyline points="3.5 8.5 6.5 11.5 12.5 5"/></svg></span>
       </label>
     </div>
     <div style="padding:14px">

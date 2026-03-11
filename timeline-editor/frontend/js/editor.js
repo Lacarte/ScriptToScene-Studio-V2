@@ -162,35 +162,61 @@ class SceneEditor {
         return errors.some(e => e.field === field && e.type === ErrorType.ERROR);
     }
 
+    getSceneTiming(scene) {
+        const scenes = State.get('scenes') || [];
+        const index = scenes.findIndex(s => s.scene_id === scene.scene_id);
+        if (index < 0) {
+            return { start: 0, end: scene.duration || 0 };
+        }
+
+        let start = 0;
+        for (let i = 0; i < index; i++) {
+            start += scenes[i].duration || 0;
+        }
+
+        return {
+            start,
+            end: start + (scene.duration || 0),
+        };
+    }
+
     /**
      * Render segmenter info for a specific scene (matched by index).
      */
     renderSegmentInfo(scene) {
         const segData = State.get('segmenterData');
-        if (!segData || !segData.segments) return '';
-
-        // Match by scene index (scene_id is 1-based, segment index is 0-based)
-        const segIndex = (scene.scene_id || 1) - 1;
-        const segment = segData.segments[segIndex];
-        if (!segment) return '';
-
-        const begin = typeof segment.begin === 'number' ? segment.begin.toFixed(2) : '?';
-        const end = typeof segment.end === 'number' ? segment.end.toFixed(2) : '?';
-        const dur = typeof segment.begin === 'number' && typeof segment.end === 'number'
-            ? (segment.end - segment.begin).toFixed(2)
-            : '?';
+        const timing = this.getSceneTiming(scene);
+        const segIndex = scene.segment_index ?? scene.index ?? null;
+        const segment = segData?.segments?.find(s => s.index === segIndex) || null;
+        const timelineStart = timing.start.toFixed(2);
+        const timelineEnd = timing.end.toFixed(2);
+        const timelineDur = Number(scene.duration || 0).toFixed(2);
+        const segStart = scene.segment_start ?? segment?.start ?? segment?.begin ?? null;
+        const segEnd = scene.segment_end ?? segment?.end ?? null;
+        const segWords = scene.segment_words || segment?.words || '';
+        const segDur = scene.segment_duration ?? (
+            typeof segStart === 'number' && typeof segEnd === 'number'
+                ? (segEnd - segStart)
+                : null
+        );
 
         return `
             <div class="segment-info">
                 <div class="segment-info-header">
-                    <span class="segment-info-label">Segment ${segment.index ?? segIndex}</span>
-                    ${segment.is_filler ? '<span style="font-size:0.6rem;color:var(--accent-warning);font-weight:600">FILLER</span>' : ''}
+                    <span class="segment-info-label">Timing Analysis</span>
+                    ${segment?.is_filler ? '<span style="font-size:0.6rem;color:var(--accent-warning);font-weight:600">FILLER</span>' : ''}
                 </div>
-                <div class="segment-info-words">"${this._esc(segment.words || '')}"</div>
                 <div class="segment-info-timing">
-                    <span>${begin}s — ${end}s</span>
-                    <span>dur: ${dur}s</span>
+                    <span>timeline ${timelineStart}s - ${timelineEnd}s</span>
+                    <span>dur: ${timelineDur}s</span>
                 </div>
+                ${typeof segStart === 'number' && typeof segEnd === 'number' ? `
+                    <div class="segment-info-timing">
+                        <span>segment ${segStart.toFixed(2)}s - ${segEnd.toFixed(2)}s</span>
+                        <span>speech: ${(segDur || 0).toFixed(2)}s</span>
+                    </div>
+                ` : ''}
+                ${segWords ? `<div class="segment-info-words">"${this._esc(segWords)}"</div>` : ''}
             </div>
         `;
     }
