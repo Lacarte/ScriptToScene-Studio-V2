@@ -295,7 +295,7 @@ def align_and_segment():
 
         seg_result = run_segmenter(alignment, seg_config, seg_metadata)
 
-        seg_folder = f"{folder_name}_{timestamp}"
+        seg_folder = project_id or f"{folder_name}_{timestamp}"
         out_path = os.path.join(SEGMENTER_DIR, seg_folder, "segmented.json")
         save_output(seg_result, out_path)
         seg_result["output_folder"] = seg_folder

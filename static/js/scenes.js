@@ -834,7 +834,9 @@ function sendToEditor() {
 
 // ---- Scenes History ----
 async function loadScenesHistory() {
+  renderScenesHistoryLoading(1, 2, 'Loading history...');
   try {
+    renderScenesHistoryLoading(2, 2, 'Fetching projects...');
     const items = await api('/api/scenes/history');
     renderScenesHistory(items);
   } catch (e) {

@@ -114,3 +114,15 @@ _dev/automation/automa/
 - **No Node.js, no pip install, no dependencies.** Just Python and a browser.
 
 
+
+
+The skill activates automatically when you talk about pushing Automa workflows — but you can also invoke it explicitly:
+
+
+/automa-pusher
+Then describe what you want, e.g.:
+
+"push the Grok workflow to Chrome"
+"patch Automa for upsert"
+"push all workflows"
+It also triggers automatically when you say things like "push this workflow to Automa" or "deploy the Grok synchronizer" in normal conversation — Claude will read the skill and know the exact commands to run.

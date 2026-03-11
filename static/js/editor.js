@@ -38,16 +38,18 @@ function initEditorIframe() {
       } catch (e) { console.error('Editor postMessage:', e); }
     }
 
-    // Determine current project's source_folder for caption scoping
+    // Determine current project's source_folder and project_id for caption scoping
     let currentSourceFolder = localStorage.getItem('sts-editor-source-folder') || '';
-    if (!currentSourceFolder) {
-      try {
-        const scenes = JSON.parse(localStorage.getItem('sts-editor-scenes') || '{}');
-        currentSourceFolder = scenes.source_folder || '';
-      } catch { /* ignore */ }
-    }
+    let currentProjectId = '';
+    try {
+      const scenes = JSON.parse(localStorage.getItem('sts-editor-scenes') || '{}');
+      if (!currentSourceFolder) currentSourceFolder = scenes.source_folder || '';
+      currentProjectId = scenes.project_id || '';
+    } catch { /* ignore */ }
 
-    // Send captions data if available and matching current project
+    // Send captions data if available and matching current project.
+    // Skip auto-generation when the editor loads from a server project
+    // (the WIP/initial JSON carries its own captions).
     const captionsData = localStorage.getItem('sts-editor-captions');
     if (captionsData) {
       try {
@@ -56,7 +58,10 @@ function initEditorIframe() {
         if (currentSourceFolder && capData.source_folder && capData.source_folder !== currentSourceFolder) {
           console.log('Skipping stale captions (source_folder mismatch):', capData.source_folder, '!=', currentSourceFolder);
           localStorage.removeItem('sts-editor-captions');
-          _editorAutoGenerateCaptions(iframe, currentSourceFolder);
+          // Only auto-generate for internal pipeline entries, not direct/menu loads
+          if (entrySource !== 'menu') {
+            _editorAutoGenerateCaptions(iframe, currentSourceFolder, currentProjectId);
+          }
         } else {
           iframe.contentWindow.postMessage({
             type: 'load-captions',
@@ -64,9 +69,9 @@ function initEditorIframe() {
           }, '*');
         }
       } catch (e) { console.error('Editor captions postMessage:', e); }
-    } else {
-      // No captions stored — try to auto-generate from alignment data
-      _editorAutoGenerateCaptions(iframe, currentSourceFolder);
+    } else if (entrySource !== 'menu') {
+      // No captions stored — try to auto-generate only for pipeline entries
+      _editorAutoGenerateCaptions(iframe, currentSourceFolder, currentProjectId);
     }
   };
   iframe.onerror = () => {
@@ -85,8 +90,29 @@ function initEditorIframe() {
  * Auto-generate captions from alignment data and send to the editor iframe.
  * Tries STATE.alignResult first, then falls back to fetching the most recent alignment from history.
  */
-async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '') {
+async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '', editorProjectId = '') {
   try {
+    // Check if captions already exist on the server for this source folder
+    // to avoid creating duplicate caption folders on every editor load
+    if (projectSourceFolder) {
+      try {
+        const history = await api('/api/captions/history');
+        if (history?.length) {
+          const match = history.find(c => c.source_folder === projectSourceFolder);
+          if (match?.project_id) {
+            // Fetch full caption data from the matched project
+            const fullData = await api(`/api/captions/${encodeURIComponent(match.project_id)}`);
+            if (fullData?.captions?.length) {
+              console.log('Captions already exist for this project, reusing', match.project_id);
+              localStorage.setItem('sts-editor-captions', JSON.stringify(fullData));
+              iframe.contentWindow.postMessage({ type: 'load-captions', data: fullData }, '*');
+              return;
+            }
+          }
+        }
+      } catch { /* ignore, proceed to generate */ }
+    }
+
     let alignment = null;
     let sourceFolder = '';
 
@@ -136,6 +162,7 @@ async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '') {
         words_per_group: 3,
         preset: 'bold_popup',
         source_folder: sourceFolder,
+        ...(editorProjectId ? { project_id: editorProjectId } : {}),
       }),
     });
 

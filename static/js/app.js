@@ -321,7 +321,7 @@ function _renderClearPreview(modules, totalItems) {
       : '<div style="margin-top:4px"><span class="font-mono" style="font-size:10px;color:var(--text-muted)">empty</span></div>';
     return `<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
       <div style="display:flex;justify-content:space-between;gap:10px">
-        <span style="font-size:11px;color:var(--text-secondary)">${esc(m.page)} · ${esc(m.module)}</span>
+        <span style="font-size:11px;color:var(--text-secondary)">${esc(m.page)} ï¿½ ${esc(m.module)}</span>
         <span class="font-mono" style="font-size:11px;color:${count > 0 ? '#ef4444' : 'var(--text-muted)'}">${count}</span>
       </div>
       ${list}
@@ -399,8 +399,15 @@ async function settingsClearConfirm() {
       STATE.assetStatuses = {};
       STATE.captionData = null;
       STATE.captionAlignment = null;
-      // Clear localStorage project data
-      localStorage.removeItem('sts-editor-scenes');
+      // Clear all sts-* project data from localStorage & sessionStorage
+      // (preserve sts-sidebar, sts-normalize, sts-clean â€” UI prefs)
+      const keepKeys = new Set(['sts-sidebar', 'sts-normalize', 'sts-clean']);
+      [...Array(localStorage.length)].map((_, i) => localStorage.key(i))
+        .filter(k => k && (k.startsWith('sts-') || k.startsWith('project_edits_') || k.startsWith('project_history_')) && !keepKeys.has(k))
+        .forEach(k => localStorage.removeItem(k));
+      [...Array(sessionStorage.length)].map((_, i) => sessionStorage.key(i))
+        .filter(k => k && k.startsWith('sts-'))
+        .forEach(k => sessionStorage.removeItem(k));
       // Clear module badges
       ['tts', 'timing', 'segmenter', 'scenes', 'assets', 'pipeline'].forEach(m => setModuleBadge(m, ''));
       // Refresh ALL history lists across every module

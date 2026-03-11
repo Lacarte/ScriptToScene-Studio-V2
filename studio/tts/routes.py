@@ -906,6 +906,8 @@ def list_audio():
         if not os.path.isdir(entry_path) or entry == "TRASH":
             continue
         json_path = os.path.join(entry_path, entry + ".json")
+        if not os.path.isfile(json_path):
+            json_path = os.path.join(entry_path, "tts.json")
         if os.path.isfile(json_path):
             try:
                 with open(json_path, "r") as f:

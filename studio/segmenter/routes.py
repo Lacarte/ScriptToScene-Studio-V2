@@ -43,14 +43,12 @@ def segment_alignment(data: SegmenterRunRequest):
     # Save to disk
     should_save = data.save
     if should_save:
-        project = metadata.get("source_folder") or "untitled"
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder = f"{project}_{ts}"
+        folder = data.project_id or f"{metadata.get('source_folder') or 'untitled'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         out_path = os.path.join(SEGMENTER_DIR, folder, "segmented.json")
         save_output(result, out_path)
         result["output_folder"] = folder
         result["output_path"] = out_path
-        logger.success("Segmented {} | {} segments -> {}", project, result["stats"]["segment_count"], folder)
+        logger.success("Segmented {} | {} segments -> {}", folder, result["stats"]["segment_count"], out_path)
 
     return jsonify(result)
 

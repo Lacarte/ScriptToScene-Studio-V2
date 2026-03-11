@@ -784,6 +784,8 @@ async function saveProjectToServer() {
         if (!res.ok) throw new Error(`Server ${res.status}`);
         _serverSaveRetries = 0;
         _showSaveStatus('saved', 'Saved');
+        // Mark project as WIP after first successful save
+        if (EditorState.project) EditorState.project.loadedFrom = 'wip';
     } catch (e) {
         _serverSaveRetries++;
         if (_serverSaveRetries <= _MAX_SAVE_RETRIES) {
@@ -1618,7 +1620,7 @@ const elements = {
     infoDuration: document.getElementById('info-duration'),
     sceneProperties: document.getElementById('scene-properties'),
     previewJsonBtn: document.getElementById('preview-json'),
-    exportBtn: document.getElementById('export-mp4'),
+    exportShareBtn: document.getElementById('export-share-btn'),
     timeRuler: document.getElementById('time-ruler'),
     timelineResizeHandle: document.getElementById('timeline-resize-handle'),
     timelineHeaderMarker: document.getElementById('timeline-header-marker'),
@@ -1757,6 +1759,7 @@ async function loadProjectFromServer(projectId) {
         const projectData = {
             project_id: saved.project_id,
             project_name: saved.project_name || saved.project_id,
+            _source: saved._source || 'initial',
             style: saved.style || '',
             style_name: styleName,
             style_color: styleColor,
@@ -1814,9 +1817,17 @@ async function loadProjectFromServer(projectId) {
         // Load media assets
         await loadProjectMediaWithProgress();
 
-        // Apply captions directly from saved data
+        // Apply captions: prefer saved data, then check if already loaded
+        // from localStorage (inside loadProjectData), finally try localStorage again
         if (saved.captions?.captions?.length) {
             _receiveCaptionData(saved.captions);
+        } else if (!EditorState.captionData) {
+            _loadCaptionsFromStorage();
+        }
+        // If captions were loaded from localStorage but not in the server JSON,
+        // persist them immediately so they appear in the WIP file
+        if (EditorState.captionData && !saved.captions) {
+            saveProjectToServer();
         }
 
         // Restore extra state directly from saved data
@@ -2186,6 +2197,7 @@ async function loadProjectData(data) {
     EditorState.project = {
         id: data.project_id,
         name: data.project_name,
+        loadedFrom: data._source || 'initial',
         style: data.style || '',
         styleName: data.style_name || '',
         styleColor: data.style_color || '',
@@ -3669,11 +3681,6 @@ function updateProjectInfo() {
         elements.totalTime.textContent = formatTimecode(displayTotalDuration);
     }
 
-    // Show share / export buttons when a project is loaded
-    const shareBtn = document.getElementById('project-share-btn');
-    if (shareBtn) shareBtn.style.display = EditorState.project?.id ? '' : 'none';
-    const exportProjectBtn = document.getElementById('export-project-zip');
-    if (exportProjectBtn) exportProjectBtn.style.display = EditorState.project?.id ? '' : 'none';
 }
 
 // ---------------------------------------------------------------------------
@@ -3688,7 +3695,13 @@ function openShareDialog() {
     const nameEl = document.getElementById('share-project-name');
     const metaEl = document.getElementById('share-project-meta');
     if (nameEl) nameEl.textContent = EditorState.project?.name || EditorState.project?.id || '';
-    if (metaEl) metaEl.textContent = `${EditorState.scenes.length} scenes · ${formatTimestamp(getTotalDuration())}`;
+    const isWip = EditorState.project?.loadedFrom === 'wip';
+    const wipBadge = isWip ? ' · <span style="color:#FFB347;font-weight:600">edited</span>' : '';
+    if (metaEl) metaEl.innerHTML = `${EditorState.scenes.length} scenes · ${formatTimestamp(getTotalDuration())}${wipBadge}`;
+
+    // Show/hide reset button depending on whether WIP exists
+    const resetBtn = document.getElementById('share-reset-initial');
+    if (resetBtn) resetBtn.closest('div').style.display = isWip ? '' : 'none';
 
     // Reset progress indicators
     _resetShareStatus('export');
@@ -3926,50 +3939,17 @@ async function shareOpenFolder() {
     }
 }
 
-async function headerExportProjectZip() {
-    const pid = EditorState.project?.id;
-    if (!pid) return;
-    const btn = document.getElementById('export-project-zip');
-    if (!btn || btn.dataset.busy) return;
-    btn.dataset.busy = '1';
-    const origHTML = btn.innerHTML;
-    btn.style.opacity = '0.6';
-    btn.style.pointerEvents = 'none';
-    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"/></svg> Exporting...`;
-    try {
-        const res = await fetch(`/api/editor/export-zip/${encodeURIComponent(pid)}`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Export failed (${res.status})`);
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `${pid}.zip`;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-        const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
-        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#26DE81" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ${sizeMB} MB`;
-        showToast(`Project ZIP downloaded (${sizeMB} MB)`, 'success');
-        setTimeout(() => { btn.innerHTML = origHTML; }, 3000);
-    } catch (e) {
-        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF6B6B" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Failed`;
-        showToast('ZIP export failed: ' + e.message, 'error');
-        setTimeout(() => { btn.innerHTML = origHTML; }, 3000);
-    } finally {
-        delete btn.dataset.busy;
-        btn.style.opacity = '';
-        btn.style.pointerEvents = '';
-    }
-}
-
 function setupShareDialog() {
-    document.getElementById('project-share-btn')?.addEventListener('click', openShareDialog);
+    document.getElementById('export-share-btn')?.addEventListener('click', openShareDialog);
     document.getElementById('close-share-modal')?.addEventListener('click', closeShareDialog);
+    document.getElementById('share-export-video')?.addEventListener('click', () => {
+        closeShareDialog();
+        exportMp4();
+    });
     document.getElementById('share-export-zip')?.addEventListener('click', shareExportZip);
     document.getElementById('share-import-zip')?.addEventListener('click', shareImportZip);
     document.getElementById('share-open-folder')?.addEventListener('click', shareOpenFolder);
-    document.getElementById('export-project-zip')?.addEventListener('click', headerExportProjectZip);
+    document.getElementById('share-reset-initial')?.addEventListener('click', resetToInitialState);
     document.getElementById('share-import-file')?.addEventListener('change', (e) => {
         _handleImportZipFile(e.target.files?.[0]);
     });
@@ -3981,16 +3961,48 @@ function setupShareDialog() {
     });
 }
 
+async function resetToInitialState() {
+    const pid = EditorState.project?.id;
+    if (!pid) { showToast('No project loaded', 'error'); return; }
+
+    if (!confirm('Reset this project to its initial state?\n\nAll edits (effects, audio, captions, text, etc.) will be discarded.')) return;
+
+    closeShareDialog();
+    showLoadingOverlay('Resetting to initial state...');
+
+    try {
+        const res = await fetch(`/api/editor/reset/${encodeURIComponent(pid)}`, { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Reset failed (${res.status})`);
+        }
+        // Clear localStorage edits for this project
+        try { localStorage.removeItem(getProjectEditsKey(pid)); } catch {}
+
+        // Reload the project from initial state
+        await loadProjectFromServer(pid);
+        showToast('Project reset to initial state', 'success');
+    } catch (e) {
+        hideLoadingOverlay();
+        showToast('Reset failed: ' + e.message, 'error');
+    }
+}
+
 /**
  * Render the timeline with scene clips - uses helper for width calculation
  */
 function renderTimeline() {
     if (!elements.videoTrack) return;
 
-    const clips = EditorState.scenes.map(scene => {
+    const lastSceneIdx = EditorState.scenes.length - 1;
+    const clips = EditorState.scenes.map((scene, idx) => {
         const width = getScenePixelWidth(scene);
         const color = SCENE_COLORS[scene.type] || '#666666';
         const icon = SCENE_ICONS[scene.type] || SCENE_ICONS.default;
+        const leftHandle = idx === 0
+            ? `<div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>` : '';
+        const rightHandle = idx === lastSceneIdx
+            ? `<div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>` : '';
 
         return `
             <div class="scene-clip"
@@ -4010,8 +4022,7 @@ function renderTimeline() {
                     <div class="scene-clip-id">${scene.id}</div>
                     <div class="scene-clip-duration">${scene.duration}s</div>
                 </div>
-                <div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>
-                <div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>
+                ${leftHandle}${rightHandle}
             </div>
         `;
     }).join('');
@@ -4568,7 +4579,7 @@ function _receiveCaptionData(captionData) {
     _capUpdateUI();
     renderCaptionTrack();
     _saveCaptionsToStorage();
-    _debouncedServerSave();
+    saveProjectEdits();
 }
 
 /**
@@ -4893,6 +4904,7 @@ function renderSceneProperties() {
         textDebounceTimer = setTimeout(() => {
             if (oldValue !== scene.text_content) {
                 recordEdit(`Edit text (Scene ${scene.id})`, scene.id, 'text_content', oldValue, scene.text_content);
+                saveProjectEdits();
             }
         }, 1000);
     });
@@ -5327,9 +5339,6 @@ function setupEventListeners() {
     // Preview JSON button
     elements.previewJsonBtn?.addEventListener('click', previewJson);
 
-    // Export MP4
-    elements.exportBtn?.addEventListener('click', exportMp4);
-
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyboard);
 
@@ -5404,6 +5413,7 @@ function setupEventListeners() {
 
             // Update preview and playback if necessary
             updatePreviewFromDisabledTracks();
+            saveProjectEdits();
         });
     });
 
@@ -6997,6 +7007,7 @@ function setupEffectsTab() {
 
         updateEffectsTab();
         renderSceneProperties();
+        saveProjectEdits();
         showToast('Effects auto-assigned', 'success');
     });
 
@@ -7049,6 +7060,7 @@ function setupEffectsTab() {
 
             updateEffectsTab();
             renderSceneProperties();
+            saveProjectEdits();
             showToast(`Effects randomized (${poolFx.length} in pool)`, 'success');
         }
     });
@@ -7377,6 +7389,7 @@ function setupGrainControls() {
         EditorState.grainOverlay = nextCfg;
         syncGrainControlsUI();
         recordEdit('Update grain overlay', 'project', 'grain_overlay', oldCfg, nextCfg);
+        saveProjectEdits();
     };
 
     enabled.addEventListener('change', commitUpdate);

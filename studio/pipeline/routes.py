@@ -299,7 +299,7 @@ def _step_tts(config, project_id):
     """Generate TTS audio and return metadata dict (includes wav_path)."""
     from studio.tts.routes import (
         load_model, _voice_to_lang, _phonemize_with_misaki,
-        generation_inference_lock, generate_filename, _tts_job_dir,
+        generation_inference_lock, _tts_job_dir,
     )
     from studio.tts.normalize import clean_for_tts, tts_breathing_blocks
     from studio.tts.audio import pad_audio, concatenate_chunks, run_loudnorm
@@ -335,10 +335,9 @@ def _step_tts(config, project_id):
         audio = audio_chunks[0]
     audio = pad_audio(audio, sample_rate=24000)
 
-    basename = generate_filename(text)
-    job_dir = _tts_job_dir(basename)
+    job_dir = _tts_job_dir(project_id)
     os.makedirs(job_dir, exist_ok=True)
-    wav_path = os.path.join(job_dir, basename + ".wav")
+    wav_path = os.path.join(job_dir, "voice.wav")
     sf.write(wav_path, audio, 24000)
 
     run_loudnorm(wav_path)
@@ -349,8 +348,8 @@ def _step_tts(config, project_id):
     clean_prompt = re.sub(r'[\[\]]', '', text).strip()
 
     metadata = {
-        "filename": basename + ".wav",
-        "folder": basename,
+        "filename": "voice.wav",
+        "folder": project_id,
         "prompt": clean_prompt,
         "model": "kokoro-v1.0",
         "model_id": "kokoro",
@@ -368,7 +367,7 @@ def _step_tts(config, project_id):
     }
 
     safe_json_write(
-        os.path.join(job_dir, basename + ".json"),
+        os.path.join(job_dir, "tts.json"),
         {k: v for k, v in metadata.items() if k != "wav_path"},
         indent=2,
     )
@@ -439,8 +438,7 @@ def _step_segment(timing_result, config, project_id):
         metadata,
     )
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    folder = f"{timing_result.get('folder', 'pipeline')}_{ts}"
+    folder = project_id or f"{timing_result.get('folder', 'pipeline')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     out_path = os.path.join(SEGMENTER_DIR, folder, "segmented.json")
     save_output(result, out_path)
     result["output_folder"] = folder

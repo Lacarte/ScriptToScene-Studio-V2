@@ -37,6 +37,60 @@ EXPORT_MAX_JOB_AGE = 3600  # evict finished jobs after 1 hour
 logger.info("Export output directory: {}", EXPORT_DIR)
 logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
 
+WIP_FILENAME = "work@in@progress.json"
+INITIAL_FILENAME = "initial.json"
+
+# Legacy flat-file names (for migration)
+_LEGACY_WIP_SUFFIX = "-work@in@progress"
+
+
+def _project_dir(project_id: str) -> str:
+    """Return the per-project directory inside EDITOR_SAVE_DIR."""
+    return os.path.join(EDITOR_SAVE_DIR, project_id)
+
+
+def _wip_path(project_id: str) -> str:
+    """Return the path to the work-in-progress save file for a project."""
+    return os.path.join(_project_dir(project_id), WIP_FILENAME)
+
+
+def _initial_path(project_id: str) -> str:
+    """Return the path to the initial (pristine) project file."""
+    return os.path.join(_project_dir(project_id), INITIAL_FILENAME)
+
+
+def _migrate_legacy_files(project_id: str):
+    """Move legacy flat files into the per-project folder if they exist."""
+    legacy_initial = os.path.join(EDITOR_SAVE_DIR, f"{project_id}.json")
+    legacy_wip = os.path.join(EDITOR_SAVE_DIR, f"{project_id}{_LEGACY_WIP_SUFFIX}.json")
+
+    has_legacy = os.path.isfile(legacy_initial) or os.path.isfile(legacy_wip)
+    if not has_legacy:
+        return
+
+    proj_dir = _project_dir(project_id)
+    os.makedirs(proj_dir, exist_ok=True)
+
+    new_initial = _initial_path(project_id)
+    new_wip = _wip_path(project_id)
+
+    if os.path.isfile(legacy_initial) and not os.path.isfile(new_initial):
+        os.rename(legacy_initial, new_initial)
+        logger.info("Migrated legacy initial: {} -> {}", legacy_initial, new_initial)
+    elif os.path.isfile(legacy_initial):
+        os.remove(legacy_initial)
+
+    if os.path.isfile(legacy_wip) and not os.path.isfile(new_wip):
+        os.rename(legacy_wip, new_wip)
+        logger.info("Migrated legacy WIP: {} -> {}", legacy_wip, new_wip)
+    elif os.path.isfile(legacy_wip):
+        os.remove(legacy_wip)
+
+    # Clean up .bak files too
+    for legacy in (legacy_initial + ".bak", legacy_wip + ".bak"):
+        if os.path.isfile(legacy):
+            os.remove(legacy)
+
 
 class ExportCancelled(Exception):
     """Raised when an export job is cancelled while processing."""
@@ -209,7 +263,13 @@ def _resolve_project_captions(data: dict, project_id: str):
 @editor_bp.route("/api/editor/save", methods=["POST"])
 @validate_json(EditorSaveRequest)
 def editor_save_project(data: EditorSaveRequest):
-    """Save full editor project state to disk."""
+    """Save editor project edits to the work-in-progress file.
+
+    The initial ``{project_id}.json`` is never overwritten by ongoing edits.
+    All changes go to ``{project_id}-work@in@progress.json``.  When the
+    project is loaded next time, the WIP file is preferred over the initial
+    state.
+    """
     safe_id = data.project_id  # already validated: alphanumeric + _ and -
 
     from datetime import datetime, timezone
@@ -224,30 +284,62 @@ def editor_save_project(data: EditorSaveRequest):
     _resolve_project_captions(save_data, safe_id)
     save_data["saved_at"] = datetime.now(timezone.utc).isoformat()
 
-    path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+    # Migrate legacy flat files into per-project folder
+    _migrate_legacy_files(safe_id)
+    os.makedirs(_project_dir(safe_id), exist_ok=True)
+
+    # Always write to the WIP file — initial state stays untouched
+    wip = _wip_path(safe_id)
     try:
-        safe_json_write(path, save_data)
+        safe_json_write(wip, save_data)
     except OSError as e:
-        logger.error("Failed to save editor project {}: {}", safe_id, e)
+        logger.error("Failed to save WIP for {}: {}", safe_id, e)
         return jsonify({"error": f"Failed to save: {e}"}), 500
 
-    logger.info("Editor project saved: {} ({} scenes)", safe_id, save_data.get("scene_count", "?"))
-    return jsonify({"ok": True, "saved_at": save_data["saved_at"]})
+    # Ensure the initial file exists (first-time project creation)
+    initial = _initial_path(safe_id)
+    if not os.path.isfile(initial):
+        try:
+            safe_json_write(initial, save_data)
+            logger.info("Initial state saved for new project: {}", safe_id)
+        except OSError:
+            pass  # WIP is already written, this is non-critical
+
+    logger.info("Editor WIP saved: {} ({} scenes)", safe_id, save_data.get("scene_count", "?"))
+    return jsonify({"ok": True, "saved_at": save_data["saved_at"], "wip": True})
 
 
 @editor_bp.route("/api/editor/load/<project_id>", methods=["GET"])
 def editor_load_project(project_id):
-    """Load a saved editor project."""
+    """Load a saved editor project.
+
+    Prefers the work-in-progress file if it exists, otherwise falls back to
+    the initial (pristine) project file.  The response includes a ``source``
+    field (``"wip"`` or ``"initial"``) so the frontend knows which was loaded.
+    """
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+    _migrate_legacy_files(safe_id)
+
+    # Try WIP first, then initial
+    wip = _wip_path(safe_id)
+    initial = _initial_path(safe_id)
+    source = "initial"
+
+    if os.path.isfile(wip):
+        path = wip
+        source = "wip"
+    elif os.path.isfile(initial):
+        path = initial
+    else:
+        return jsonify({"error": "not found"}), 404
 
     try:
         data = safe_json_read(path)
-    except FileNotFoundError:
-        return jsonify({"error": "not found"}), 404
     except (json.JSONDecodeError, OSError) as e:
         logger.error("Failed to load editor project {}: {}", safe_id, e)
         return jsonify({"error": f"Corrupted project file: {e}"}), 500
+
+    data["_source"] = source
 
     # Inject source_folder so the frontend can scope captions/audio
     source_folder = _get_source_folder(safe_id)
@@ -266,26 +358,77 @@ def editor_load_project(project_id):
 
 @editor_bp.route("/api/editor/projects", methods=["GET"])
 def editor_list_projects():
-    """List all saved editor projects."""
+    """List all saved editor projects from per-project subdirectories."""
     projects = []
-    for fname in os.listdir(EDITOR_SAVE_DIR):
-        if not fname.endswith(".json"):
-            continue
-        fpath = os.path.join(EDITOR_SAVE_DIR, fname)
-        try:
-            data = safe_json_read(fpath)
-            projects.append({
-                "project_id": data.get("project_id", fname.replace(".json", "")),
-                "project_name": data.get("project_name", ""),
-                "saved_at": data.get("saved_at", ""),
-                "scene_count": data.get("scene_count", 0),
-                "total_duration": data.get("total_duration", 0),
-            })
-        except Exception:
-            continue
+    if not os.path.isdir(EDITOR_SAVE_DIR):
+        return jsonify(projects)
+
+    for entry in os.listdir(EDITOR_SAVE_DIR):
+        proj_dir = os.path.join(EDITOR_SAVE_DIR, entry)
+
+        # Per-project subdirectory (new layout)
+        if os.path.isdir(proj_dir):
+            pid = entry
+            wip = os.path.join(proj_dir, WIP_FILENAME)
+            initial = os.path.join(proj_dir, INITIAL_FILENAME)
+            has_wip = os.path.isfile(wip)
+            fpath = wip if has_wip else initial
+            if not os.path.isfile(fpath):
+                continue
+            try:
+                data = safe_json_read(fpath)
+                projects.append({
+                    "project_id": data.get("project_id", pid),
+                    "project_name": data.get("project_name", ""),
+                    "saved_at": data.get("saved_at", ""),
+                    "scene_count": data.get("scene_count", 0),
+                    "total_duration": data.get("total_duration", 0),
+                    "has_wip": has_wip,
+                })
+            except Exception:
+                continue
+
+        # Legacy flat files (auto-migrated on next load/save)
+        elif entry.endswith(".json") and _LEGACY_WIP_SUFFIX not in entry and not entry.endswith(".bak"):
+            pid = entry.replace(".json", "")
+            legacy_wip = os.path.join(EDITOR_SAVE_DIR, f"{pid}{_LEGACY_WIP_SUFFIX}.json")
+            has_wip = os.path.isfile(legacy_wip)
+            fpath = legacy_wip if has_wip else proj_dir  # proj_dir is the .json file here
+            try:
+                data = safe_json_read(fpath)
+                projects.append({
+                    "project_id": data.get("project_id", pid),
+                    "project_name": data.get("project_name", ""),
+                    "saved_at": data.get("saved_at", ""),
+                    "scene_count": data.get("scene_count", 0),
+                    "total_duration": data.get("total_duration", 0),
+                    "has_wip": has_wip,
+                })
+            except Exception:
+                continue
 
     projects.sort(key=lambda p: p.get("saved_at", ""), reverse=True)
     return jsonify(projects)
+
+
+@editor_bp.route("/api/editor/reset/<project_id>", methods=["POST"])
+def editor_reset_to_initial(project_id):
+    """Delete the WIP file and revert the project to its initial state."""
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+    _migrate_legacy_files(safe_id)
+
+    initial = _initial_path(safe_id)
+    if not os.path.isfile(initial):
+        return jsonify({"error": "No initial state found"}), 404
+
+    wip = _wip_path(safe_id)
+    deleted = False
+    if os.path.isfile(wip):
+        os.remove(wip)
+        deleted = True
+        logger.info("WIP file deleted for project {}", safe_id)
+
+    return jsonify({"ok": True, "deleted_wip": deleted})
 
 
 # ---------------------------------------------------------------------------
@@ -298,9 +441,12 @@ def export_project_zip(project_id):
     from datetime import datetime, timezone
 
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+    _migrate_legacy_files(safe_id)
 
-    # Require at least the editor save or scenes.json to exist
-    editor_path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+    # Prefer WIP file, then initial state, then scenes.json
+    wip_file = _wip_path(safe_id)
+    initial_file = _initial_path(safe_id)
+    editor_path = wip_file if os.path.isfile(wip_file) else initial_file
     scenes_path = os.path.join(SCENES_DIR, safe_id, "scenes.json")
     if not os.path.isfile(editor_path) and not os.path.isfile(scenes_path):
         return jsonify({"error": "Project not found"}), 404
@@ -423,13 +569,13 @@ def import_project_zip():
             original_id = safe_id
             renamed_from = None
             scenes_dir_check = os.path.join(SCENES_DIR, safe_id)
-            editor_file_check = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
-            if os.path.exists(scenes_dir_check) or os.path.exists(editor_file_check):
+            editor_dir_check = _project_dir(safe_id)
+            if os.path.exists(scenes_dir_check) or os.path.isdir(editor_dir_check):
                 suffix = 2
                 while True:
                     candidate = f"{original_id}-{suffix}"
                     if not os.path.exists(os.path.join(SCENES_DIR, candidate)) and \
-                       not os.path.exists(os.path.join(EDITOR_SAVE_DIR, f"{candidate}.json")):
+                       not os.path.isdir(_project_dir(candidate)):
                         renamed_from = safe_id
                         safe_id = candidate
                         break
@@ -450,8 +596,9 @@ def import_project_zip():
                 raw = zf.read(name)
 
                 if rel == "project.json":
-                    dest = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
-                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    proj_dir = _project_dir(safe_id)
+                    os.makedirs(proj_dir, exist_ok=True)
+                    dest = _initial_path(safe_id)
                     with open(dest, "wb") as f:
                         f.write(raw)
                     imported.append(rel)
@@ -508,7 +655,7 @@ def import_project_zip():
                             json.dump(sdata, f, ensure_ascii=False)
                     except Exception:
                         pass
-                editor_json_path = os.path.join(EDITOR_SAVE_DIR, f"{safe_id}.json")
+                editor_json_path = _initial_path(safe_id)
                 if os.path.exists(editor_json_path):
                     try:
                         with open(editor_json_path, "r", encoding="utf-8") as f:
