@@ -1500,7 +1500,7 @@
                 }
 
                 // Always write staged_timeline — this is the data bridge to the video editor
-                sessionStorage.setItem('staged_timeline', JSON.stringify(stagedTimeline));
+                sessionStorage.setItem('sts-staged-timeline', JSON.stringify(stagedTimeline));
 
                 // Clear old captions, then set new if available
                 localStorage.removeItem('sts-editor-captions');

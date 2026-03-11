@@ -151,11 +151,11 @@ async function scenesInitWebhookUrl() {
     STATE._scenesDefaultWebhookUrl = '';
   }
   // Restore from localStorage, fall back to server default
-  const saved = localStorage.getItem('sts-scenes-webhook-url');
+  const saved = STS.get('sts-scenes-webhook-url');
   $('#scenes-webhook-url').value = saved !== null ? saved : STATE._scenesDefaultWebhookUrl;
 
   // Restore toggle state
-  const savedToggle = localStorage.getItem('sts-scenes-webhook-enabled');
+  const savedToggle = STS.get('sts-scenes-webhook-enabled');
   if (savedToggle === 'false') {
     $('#scenes-webhook-toggle').checked = false;
     scenesToggleWebhook();
@@ -165,7 +165,7 @@ async function scenesInitWebhookUrl() {
 function scenesToggleWebhook() {
   const on = $('#scenes-webhook-toggle').checked;
   const dot = $('#scenes-webhook-dot');
-  localStorage.setItem('sts-scenes-webhook-enabled', on);
+  STS.set('sts-scenes-webhook-enabled', on);
   if (on) {
     dot.style.transform = 'translateX(16px)';
     dot.style.background = 'var(--accent)';
@@ -183,7 +183,7 @@ function scenesToggleWebhook() {
 
 function scenesResetWebhookUrl() {
   $('#scenes-webhook-url').value = STATE._scenesDefaultWebhookUrl || '';
-  localStorage.removeItem('sts-scenes-webhook-url');
+  STS.set('sts-scenes-webhook-url', null);
   toast('Webhook URL reset to default');
 }
 
@@ -351,7 +351,7 @@ async function scenesSendPreviewToWebhook() {
 
   // Also sync back to the main settings field + localStorage
   $('#scenes-webhook-url').value = webhookUrl;
-  localStorage.setItem('sts-scenes-webhook-url', webhookUrl);
+  STS.set('sts-scenes-webhook-url', webhookUrl);
 
   // Clear previous results while waiting for new ones
   _scnClearResults();

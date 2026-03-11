@@ -106,7 +106,7 @@ export function formatRelativeTime(date) {
 // Local storage helpers
 export const Storage = {
     save(key, data) {
-        if (localStorage.getItem('editor_storage_enabled') === 'false') return false;
+        if (STS.get('sts-editor-storage') === 'false') return false;
         try {
             localStorage.setItem(key, JSON.stringify(data));
             return true;

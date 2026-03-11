@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "defaults": {
+    "sts-sidebar": false,
+    "sts-normalize": true,
+    "sts-clean": true,
+    "sts-sound-enabled": true,
+    "sts-editor-storage": true,
+    "sts-editor-session-storage": true,
+    "sts-editor-zoom": 1,
+    "sts-editor-height": 180,
+    "sts-editor-loop": false,
+    "sts-tts-voice": "af_heart",
+    "sts-tts-lang": "top-picks",
+    "sts-tts-blend": false,
+    "sts-tts-blendA": "af_heart",
+    "sts-tts-blendB": "am_adam",
+    "sts-tts-blendRatio": 50,
+    "sts-tts-blendMethod": "slerp",
+    "sts-tts-genMode": "generate",
+    "sts-tts-speed": "1.0",
+    "sts-tts-voiceOpen": "0",
+    "sts-auto-type": false,
+    "sts-analysis-collapsed": true,
+    "sts-scenes-webhook-enabled": true,
+    "sts-vol-voice": 1,
+    "sts-vol-music": 0.3,
+    "sts-vol-sfx": 0.7
+  },
+  "localStorage": [
+    "sts-sidebar"
+  ]
+}

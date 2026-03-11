@@ -193,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   // Init auto-type checkbox from localStorage
   const autoTypeCb = document.getElementById('assets-auto-type');
-  if (autoTypeCb) autoTypeCb.checked = localStorage.getItem('sts-auto-type') === 'true';
+  if (autoTypeCb) autoTypeCb.checked = STS.get('sts-auto-type') === 'true';
 });
 
 // ---- Main Render ----
@@ -273,7 +273,7 @@ function _renderAnalysisBar(data) {
   }
 
   // Collapse by default, restore from localStorage
-  const collapsed = localStorage.getItem('sts-analysis-collapsed') !== 'false';
+  const collapsed = STS.get('sts-analysis-collapsed') !== 'false';
   chipsEl.style.display = collapsed ? 'none' : 'flex';
   const arrow = $('#assets-analysis-arrow');
   if (arrow) arrow.style.transform = collapsed ? 'rotate(-90deg)' : '';
@@ -285,7 +285,7 @@ function _renderAnalysisBar(data) {
       const hidden = chipsEl.style.display === 'none';
       chipsEl.style.display = hidden ? 'flex' : 'none';
       if (arrow) arrow.style.transform = hidden ? '' : 'rotate(-90deg)';
-      localStorage.setItem('sts-analysis-collapsed', !hidden);
+      STS.set('sts-analysis-collapsed', !hidden);
     });
   }
 }
@@ -1225,7 +1225,7 @@ async function autoAssembleAndSendToEditor() {
     } catch (_) { /* optional */ }
   }
 
-  sessionStorage.setItem('staged_timeline', JSON.stringify(stagedTimeline));
+  sessionStorage.setItem('sts-staged-timeline', JSON.stringify(stagedTimeline));
 
   // Keep bridge payload for compatibility with the older editor flow.
   const storeData = {

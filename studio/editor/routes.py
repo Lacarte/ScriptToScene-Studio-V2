@@ -92,6 +92,51 @@ def _migrate_legacy_files(project_id: str):
             os.remove(legacy)
 
 
+SETTINGS_PATH = os.path.join(EDITOR_SAVE_DIR, "settings.json")
+
+
+@editor_bp.route("/api/settings", methods=["GET"])
+def get_settings():
+    """Return user settings (server JSON with .bak fallback)."""
+    try:
+        data = safe_json_read(SETTINGS_PATH)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    return jsonify(data)
+
+
+@editor_bp.route("/api/settings", methods=["PUT"])
+def put_settings():
+    """Replace all user settings."""
+    data = request.get_json(force=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected JSON object"}), 400
+    safe_json_write(SETTINGS_PATH, data, indent=2)
+    return jsonify({"ok": True})
+
+
+@editor_bp.route("/api/settings", methods=["PATCH"])
+def patch_settings():
+    """Merge partial updates into user settings."""
+    patch = request.get_json(force=True)
+    if not isinstance(patch, dict):
+        return jsonify({"error": "Expected JSON object"}), 400
+    try:
+        data = safe_json_read(SETTINGS_PATH)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    data.update(patch)
+    safe_json_write(SETTINGS_PATH, data, indent=2)
+    return jsonify({"ok": True})
+
+
+@editor_bp.route("/api/settings", methods=["DELETE"])
+def delete_settings():
+    """Reset all user settings to empty."""
+    safe_json_write(SETTINGS_PATH, {}, indent=2)
+    return jsonify({"ok": True})
+
+
 class ExportCancelled(Exception):
     """Raised when an export job is cancelled while processing."""
 

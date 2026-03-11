@@ -6,6 +6,81 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => s ? s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') : '';
 
+// ---- Settings Manager (server JSON with .bak, localStorage only for sts-sidebar) ----
+window.STS = {
+  _cache: {},           // in-memory cache of all settings
+  _defaults: {},        // from app-config.json
+  _localKeys: new Set(),// keys that also mirror to localStorage
+  _saveTimer: null,
+  _dirty: false,
+
+  /** Get a setting value. Sync — reads from memory cache. */
+  get(key) {
+    const v = this._cache[key];
+    if (v !== undefined) return v;
+    // Check localStorage for local-only keys
+    const ls = localStorage.getItem(key);
+    if (ls !== null) return ls === 'true' ? true : ls === 'false' ? false : (isNaN(ls) ? ls : +ls);
+    return this._defaults[key] ?? null;
+  },
+
+  /** Set a setting value. Writes to memory + queues server save. */
+  set(key, value) {
+    this._cache[key] = value;
+    if (this._localKeys.has(key)) localStorage.setItem(key, value);
+    this._queueSave();
+  },
+
+  /** Queue a debounced save to server (300ms). */
+  _queueSave() {
+    this._dirty = true;
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => this._persist(), 300);
+  },
+
+  /** Persist all settings to server via PATCH. */
+  async _persist() {
+    if (!this._dirty) return;
+    this._dirty = false;
+    try {
+      await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this._cache),
+      });
+    } catch (_) { /* silent — next save will retry */ }
+  },
+
+  /** Reset all settings to defaults. */
+  async reset() {
+    this._cache = {};
+    try { await fetch('/api/settings', { method: 'DELETE' }); } catch (_) {}
+  },
+
+  /** Load from server + app-config.json defaults. Returns a promise. */
+  async init() {
+    try {
+      const [cfgRes, srvRes] = await Promise.all([
+        fetch('/app-config.json').then(r => r.json()).catch(() => ({})),
+        fetch('/api/settings').then(r => r.json()).catch(() => ({})),
+      ]);
+      this._defaults = cfgRes.defaults || {};
+      (cfgRes.localStorage || []).forEach(k => this._localKeys.add(k));
+      // Merge: defaults < server settings
+      this._cache = { ...this._defaults, ...srvRes };
+      // Mirror local keys to localStorage
+      for (const k of this._localKeys) {
+        const v = this._cache[k];
+        if (v !== undefined) localStorage.setItem(k, v);
+      }
+    } catch (_) {
+      this._defaults = {};
+      this._cache = {};
+    }
+  }
+};
+window._stsReady = window.STS.init();
+
 // ---- Shared State ----
 window.STATE = {
   alignFile: null,
@@ -180,11 +255,11 @@ function openEditorFromMenu() {
 
 function toggleSidebar() {
   $('#sidebar').classList.toggle('collapsed');
-  localStorage.setItem('sts-sidebar', $('#sidebar').classList.contains('collapsed'));
+  STS.set('sts-sidebar', $('#sidebar').classList.contains('collapsed'));
 }
 
 // Restore sidebar state
-if (localStorage.getItem('sts-sidebar') === 'true') {
+if (STS.get('sts-sidebar') === 'true') {
   $('#sidebar').classList.add('collapsed');
 }
 
@@ -272,40 +347,39 @@ async function downloadProjectZip(projectId) {
   return downloadFileFromApi(`/api/editor/export-zip/${encodeURIComponent(projectId)}`, `${projectId}.zip`);
 }
 
-// ---- Settings ----
-window.STS_SETTINGS = {
-  normalize: localStorage.getItem('sts-normalize') !== 'false',
-  clean: localStorage.getItem('sts-clean') !== 'false',
-};
-
-// Sound notifications (default ON)
-window._stsSoundEnabled = localStorage.getItem('sts_sound_enabled') !== 'false';
+// ---- Settings (backed by STS server settings manager) ----
+window.STS_SETTINGS = { normalize: true, clean: true };
 
 /** Play the completion chime if sound is enabled */
 window.playDoneSound = function () {
-  if (!window._stsSoundEnabled) return;
+  if (!STS.get('sts-sound-enabled')) return;
   try { new Audio('/assets/sounds/effects/done.mp3').play(); } catch (_) {}
 };
 
 function settingsToggle(key, val) {
   STS_SETTINGS[key] = val;
-  localStorage.setItem('sts-' + key, val);
+  STS.set('sts-' + key, val);
 }
 
-// Restore toggles on load
+// Restore toggles on load (after STS.init resolves)
 document.addEventListener('DOMContentLoaded', () => {
-  const normEl = $('#setting-normalize');
-  const cleanEl = $('#setting-clean');
-  if (normEl) normEl.checked = STS_SETTINGS.normalize;
-  if (cleanEl) cleanEl.checked = STS_SETTINGS.clean;
+  window._stsReady.then(() => {
+    STS_SETTINGS.normalize = STS.get('sts-normalize');
+    STS_SETTINGS.clean = STS.get('sts-clean');
 
-  const storageEl = $('#setting-editor-localstorage');
-  const sessionStorageEl = $('#setting-editor-sessionstorage');
-  if (storageEl) storageEl.checked = localStorage.getItem('editor_storage_enabled') !== 'false';
-  if (sessionStorageEl) sessionStorageEl.checked = localStorage.getItem('editor_session_storage_enabled') !== 'false';
+    const normEl = $('#setting-normalize');
+    const cleanEl = $('#setting-clean');
+    if (normEl) normEl.checked = STS_SETTINGS.normalize;
+    if (cleanEl) cleanEl.checked = STS_SETTINGS.clean;
 
-  const soundEl = $('#setting-sound-notifications');
-  if (soundEl) soundEl.checked = window._stsSoundEnabled;
+    const storageEl = $('#setting-editor-localstorage');
+    const sessionStorageEl = $('#setting-editor-sessionstorage');
+    if (storageEl) storageEl.checked = STS.get('sts-editor-storage');
+    if (sessionStorageEl) sessionStorageEl.checked = STS.get('sts-editor-session-storage');
+
+    const soundEl = $('#setting-sound-notifications');
+    if (soundEl) soundEl.checked = STS.get('sts-sound-enabled');
+  });
 });
 
 // ---- Settings: Clear All Projects ----
@@ -399,15 +473,10 @@ async function settingsClearConfirm() {
       STATE.assetStatuses = {};
       STATE.captionData = null;
       STATE.captionAlignment = null;
-      // Clear all sts-* project data from localStorage & sessionStorage
-      // (preserve sts-sidebar, sts-normalize, sts-clean — UI prefs)
-      const keepKeys = new Set(['sts-sidebar', 'sts-normalize', 'sts-clean']);
-      [...Array(localStorage.length)].map((_, i) => localStorage.key(i))
-        .filter(k => k && (k.startsWith('sts-') || k.startsWith('project_edits_') || k.startsWith('project_history_')) && !keepKeys.has(k))
-        .forEach(k => localStorage.removeItem(k));
-      [...Array(sessionStorage.length)].map((_, i) => sessionStorage.key(i))
-        .filter(k => k && k.startsWith('sts-'))
-        .forEach(k => sessionStorage.removeItem(k));
+      // Nuke all browser storage and reset server settings
+      localStorage.clear();
+      sessionStorage.clear();
+      STS.reset();
       // Clear module badges
       ['tts', 'timing', 'segmenter', 'scenes', 'assets', 'pipeline'].forEach(m => setModuleBadge(m, ''));
       // Refresh ALL history lists across every module

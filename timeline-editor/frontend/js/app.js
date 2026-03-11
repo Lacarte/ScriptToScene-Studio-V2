@@ -923,7 +923,7 @@ class App {
             }
 
             // Always write staged_timeline — this is the data bridge to the video editor
-            sessionStorage.setItem('staged_timeline', JSON.stringify(stagedData));
+            sessionStorage.setItem('sts-staged-timeline', JSON.stringify(stagedData));
 
             this.updateStagingOverlay('Opening Video Editor...');
 

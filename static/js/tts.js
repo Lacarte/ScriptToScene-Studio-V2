@@ -6,16 +6,16 @@
 const _ttsState = {
   modelReady: false,
   voices: [],
-  selectedVoice: localStorage.getItem('sts-tts-voice') || 'af_heart',
-  selectedLang: localStorage.getItem('sts-tts-lang') || 'top-picks',
-  blendMode: localStorage.getItem('sts-tts-blend') === 'true',
-  blendVoiceA: localStorage.getItem('sts-tts-blendA') || 'af_heart',
-  blendVoiceB: localStorage.getItem('sts-tts-blendB') || 'am_adam',
-  blendRatio: parseInt(localStorage.getItem('sts-tts-blendRatio') || '50'),
-  blendMethod: localStorage.getItem('sts-tts-blendMethod') || 'slerp',
+  selectedVoice: STS.get('sts-tts-voice') || 'af_heart',
+  selectedLang: STS.get('sts-tts-lang') || 'top-picks',
+  blendMode: STS.get('sts-tts-blend') === 'true',
+  blendVoiceA: STS.get('sts-tts-blendA') || 'af_heart',
+  blendVoiceB: STS.get('sts-tts-blendB') || 'am_adam',
+  blendRatio: parseInt(STS.get('sts-tts-blendRatio') || '50'),
+  blendMethod: STS.get('sts-tts-blendMethod') || 'slerp',
   blendPickerTarget: null,
   blendPickerLang: 'en-us',
-  genMode: localStorage.getItem('sts-tts-genMode') || 'generate',
+  genMode: STS.get('sts-tts-genMode') || 'generate',
   isGenerating: false,
   currentJobId: null,
   chunkEventSource: null,
@@ -290,11 +290,11 @@ let _lastStoryIdx = -1;
 
 // ---- Init ----
 (function ttsInit() {
-  const prompt = localStorage.getItem('sts-tts-prompt');
+  const prompt = STS.get('sts-tts-prompt');
   const el = $('#tts-prompt');
   if (prompt && el) el.value = prompt;
   const speedEl = $('#tts-speed');
-  if (speedEl) speedEl.value = localStorage.getItem('sts-tts-speed') || '1.0';
+  if (speedEl) speedEl.value = STS.get('sts-tts-speed') || '1.0';
   ttsCheckModel();
   ttsLoadVoices();
   ttsLoadHistory();
@@ -302,7 +302,7 @@ let _lastStoryIdx = -1;
   ttsApplyGenMode();
   _ttsUpdateVoiceSummary();
   // Voice section starts collapsed — open if user previously opened it
-  if (localStorage.getItem('sts-tts-voiceOpen') === '1') {
+  if (STS.get('sts-tts-voiceOpen') === '1') {
     const grid = $('#tts-voice-grid');
     const chevron = $('#tts-voice-chevron');
     if (grid) grid.style.display = 'block';
@@ -578,7 +578,7 @@ function ttsToggleVoiceSection() {
   const isOpen = grid.style.display !== 'none';
   grid.style.display = isOpen ? 'none' : 'block';
   if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
-  localStorage.setItem('sts-tts-voiceOpen', isOpen ? '' : '1');
+  STS.set('sts-tts-voiceOpen', isOpen ? '' : '1');
 }
 
 function _ttsUpdateVoiceSummary() {
@@ -600,19 +600,19 @@ function _ttsUpdateVoiceSummary() {
 // ---- Voice Selection ----
 function ttsSelectLang(lang) {
   _ttsState.selectedLang = lang;
-  localStorage.setItem('sts-tts-lang', lang);
+  STS.set('sts-tts-lang', lang);
   ttsRenderVoices();
 }
 
 function ttsSelectVoice(v) {
   _ttsState.selectedVoice = v;
-  localStorage.setItem('sts-tts-voice', v);
+  STS.set('sts-tts-voice', v);
   ttsRenderVoices();
 }
 
 function ttsSetBlendMode(on) {
   _ttsState.blendMode = on;
-  localStorage.setItem('sts-tts-blend', on);
+  STS.set('sts-tts-blend', on);
   ttsRenderVoices();
 }
 
@@ -622,13 +622,13 @@ function ttsToggleBlend() {
 
 function ttsSetBlendRatio(val) {
   _ttsState.blendRatio = parseInt(val);
-  localStorage.setItem('sts-tts-blendRatio', val);
+  STS.set('sts-tts-blendRatio', val);
   ttsRenderVoices();
 }
 
 function ttsSetBlendMethod(m) {
   _ttsState.blendMethod = m;
-  localStorage.setItem('sts-tts-blendMethod', m);
+  STS.set('sts-tts-blendMethod', m);
   ttsRenderVoices();
 }
 
@@ -638,9 +638,9 @@ function ttsApplyBlendPreset(idx) {
   _ttsState.blendVoiceA = p.a;
   _ttsState.blendVoiceB = p.b;
   _ttsState.blendRatio = p.ratio;
-  localStorage.setItem('sts-tts-blendA', p.a);
-  localStorage.setItem('sts-tts-blendB', p.b);
-  localStorage.setItem('sts-tts-blendRatio', p.ratio);
+  STS.set('sts-tts-blendA', p.a);
+  STS.set('sts-tts-blendB', p.b);
+  STS.set('sts-tts-blendRatio', p.ratio);
   ttsRenderVoices();
   toast(`${VOICE_META[p.a]?.name || p.a} + ${VOICE_META[p.b]?.name || p.b}`, 'info');
 }
@@ -658,10 +658,10 @@ function ttsRandomBlend() {
   _ttsState.blendVoiceB = b;
   _ttsState.blendRatio = ratio;
   _ttsState.blendMethod = 'slerp';
-  localStorage.setItem('sts-tts-blendA', a);
-  localStorage.setItem('sts-tts-blendB', b);
-  localStorage.setItem('sts-tts-blendRatio', ratio);
-  localStorage.setItem('sts-tts-blendMethod', 'slerp');
+  STS.set('sts-tts-blendA', a);
+  STS.set('sts-tts-blendB', b);
+  STS.set('sts-tts-blendRatio', ratio);
+  STS.set('sts-tts-blendMethod', 'slerp');
   ttsRenderVoices();
   toast(`${VOICE_META[a].name} + ${VOICE_META[b].name} @ ${ratio}%`, 'info');
 }
@@ -732,10 +732,10 @@ function _ttsRenderPickerGrid() {
 function ttsSelectBlendVoice(v) {
   if (_ttsState.blendPickerTarget === 'a') {
     _ttsState.blendVoiceA = v;
-    localStorage.setItem('sts-tts-blendA', v);
+    STS.set('sts-tts-blendA', v);
   } else {
     _ttsState.blendVoiceB = v;
-    localStorage.setItem('sts-tts-blendB', v);
+    STS.set('sts-tts-blendB', v);
   }
   ttsCloseBlendPicker();
   ttsRenderVoices();
@@ -750,7 +750,7 @@ function ttsUpdateCounts() {
   const tokens = Math.round(words * 1.3);
   const countEl = $('#tts-text-count');
   if (countEl) countEl.textContent = `${words} words ~ ${tokens} tokens`;
-  localStorage.setItem('sts-tts-prompt', el.value);
+  STS.set('sts-tts-prompt', el.value);
 }
 
 async function ttsNormalize() {
@@ -801,7 +801,7 @@ function ttsRandomStory() {
 // ---- Generate Mode Toggle ----
 function ttsSetGenMode(mode) {
   _ttsState.genMode = mode;
-  localStorage.setItem('sts-tts-genMode', mode);
+  STS.set('sts-tts-genMode', mode);
   ttsApplyGenMode();
 }
 

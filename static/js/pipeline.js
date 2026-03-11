@@ -46,7 +46,7 @@ async function pipelineStart() {
 
   const autoScenes = $('#pipeline-auto-scenes')?.checked !== false;
   // Use the webhook URL from scenes settings (localStorage) so pipeline hits the same endpoint
-  const webhookUrl = localStorage.getItem('sts-scenes-webhook-url') || $('#scenes-webhook-url')?.value || '';
+  const webhookUrl = STS.get('sts-scenes-webhook-url') || $('#scenes-webhook-url')?.value || '';
   const config = {
     text,
     voice: $('#pipeline-voice')?.value || 'af_heart',

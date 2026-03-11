@@ -10,6 +10,34 @@ import { ExportAPI, EXPORT_PROFILES, prepareExportData, validateExportData } fro
 // Export API instance
 const exportAPI = new ExportAPI();
 
+// Settings manager (iframe-local mirror of server JSON)
+const STS = {
+    _cache: {}, _defaults: {},
+    get(key) {
+        const v = this._cache[key];
+        if (v !== undefined) return v;
+        const ls = localStorage.getItem(key);
+        if (ls !== null) return ls === 'true' ? true : ls === 'false' ? false : (isNaN(ls) ? ls : +ls);
+        return this._defaults[key] ?? null;
+    },
+    set(key, value) {
+        this._cache[key] = value;
+        clearTimeout(this._saveTimer);
+        this._saveTimer = setTimeout(() => {
+            fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._cache) }).catch(() => {});
+        }, 300);
+    },
+    _saveTimer: null,
+};
+// Init from server + app-config
+Promise.all([
+    fetch('/app-config.json').then(r => r.json()).catch(() => ({})),
+    fetch('/api/settings').then(r => r.json()).catch(() => ({})),
+]).then(([cfg, srv]) => {
+    STS._defaults = cfg.defaults || {};
+    STS._cache = { ...STS._defaults, ...srv };
+});
+
 /**
  * Format seconds to HH:MM:SS:MS timecode (e.g. 00:01:19:04)
  */
@@ -55,11 +83,11 @@ const SCENE_ICONS = {
 
 // LocalStorage keys
 const STORAGE_KEYS = {
-    ZOOM_LEVEL: 'editor_zoom_level',
-    TIMELINE_HEIGHT: 'editor_timeline_height',
-    LOOP_STATE: 'editor_loop_state',
-    PROJECT_EDITS: 'project_edits_',  // + projectId
-    PROJECT_HISTORY: 'project_history_'  // + projectId
+    ZOOM_LEVEL: 'sts-editor-zoom',
+    TIMELINE_HEIGHT: 'sts-editor-height',
+    LOOP_STATE: 'sts-editor-loop',
+    PROJECT_EDITS: 'sts-project-edits-',  // + projectId
+    PROJECT_HISTORY: 'sts-project-history-'  // + projectId
 };
 
 // Maximum history entries per project
@@ -596,8 +624,8 @@ const EditorState = {
     bgMusic: null,          // DEPRECATED — use audioTracks (type: 'music')
     bgMusicElement: null,   // DEPRECATED — use audioTracks[].element
     disabledTracks: new Set(), // Keep track of which tracks are disabled
-    storageEnabled: localStorage.getItem('editor_storage_enabled') !== 'false', // localStorage toggle (default ON)
-    sessionStorageEnabled: localStorage.getItem('editor_session_storage_enabled') !== 'false' // sessionStorage toggle (default ON)
+    storageEnabled: STS.get('sts-editor-storage') !== 'false', // localStorage toggle (default ON)
+    sessionStorageEnabled: STS.get('sts-editor-session-storage') !== 'false' // sessionStorage toggle (default ON)
 };
 
 const DEFAULT_GRAIN_OVERLAY = Object.freeze({
@@ -1998,9 +2026,9 @@ function _applyExtraState(saved) {
 }
 
 function _restoreSavedEditorState() {
-    const raw = sessionStorage.getItem('editor_saved_state');
+    const raw = sessionStorage.getItem('sts-editor-saved-state');
     if (!raw) return;
-    sessionStorage.removeItem('editor_saved_state');
+    sessionStorage.removeItem('sts-editor-saved-state');
 
     let saved;
     try { saved = JSON.parse(raw); } catch (e) { return; }
@@ -2128,7 +2156,7 @@ async function init() {
     sessionStorage.removeItem('sts-editor-entry-source');
 
     // Check for staged data FIRST before showing any loading UI
-    const stagedData = sessionStorage.getItem('staged_timeline');
+    const stagedData = sessionStorage.getItem('sts-staged-timeline');
     if (!stagedData) {
         // Show project import list only when editor was opened directly from the menu.
         showNoDataOverlay(editorEntrySource === 'menu');
@@ -6586,7 +6614,7 @@ function showExportComplete(downloadUrl) {
     }
     showToast('Export completed!', 'success');
     // Sound check — iframe reads parent's localStorage setting
-    if (localStorage.getItem('sts_sound_enabled') !== 'false') {
+    if (STS.get('sts-sound-enabled') !== 'false') {
         try { new Audio('/assets/sounds/effects/done.mp3').play(); } catch (_) {}
     }
 }

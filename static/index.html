@@ -630,7 +630,7 @@
               <label class="text-[10px] font-bold uppercase tracking-[0.15em]"
                 style="color:var(--text-muted)">Speed</label>
               <input id="tts-speed" type="number" min="0.5" max="2.0" step="0.1" value="1.0"
-                onchange="localStorage.setItem('sts-tts-speed',this.value)"
+                onchange="STS.set('sts-tts-speed',this.value)"
                 style="width:60px;background:var(--bg-darkest);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--text);font-family:'JetBrains Mono',monospace;text-align:center">
             </div>
             <div
@@ -1027,7 +1027,7 @@
             <div id="scenes-webhook-url-row" style="display:flex;gap:8px;align-items:center">
               <input type="text" id="scenes-webhook-url" class="input-field font-mono"
                 style="flex:1;padding:8px 12px;font-size:11px" placeholder="Webhook URL..."
-                oninput="localStorage.setItem('sts-scenes-webhook-url',this.value)">
+                oninput="STS.set('sts-scenes-webhook-url',this.value)">
               <button onclick="scenesResetWebhookUrl()" class="action-btn hover-accent"
                 style="padding:6px 10px;font-size:10px;white-space:nowrap">Reset</button>
             </div>
@@ -1297,7 +1297,7 @@
               <label style="display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none">
                 <input type="checkbox" id="assets-auto-type"
                   style="accent-color:var(--accent);cursor:pointer"
-                  onchange="localStorage.setItem('sts-auto-type', this.checked)">
+                  onchange="STS.set('sts-auto-type', this.checked)">
                 <span style="font-size:11px;color:var(--text-muted)">Auto‑type</span>
               </label>
               <span id="assets-progress" class="font-mono text-xs" style="color:var(--text-muted)">0 / 0 complete</span>
@@ -1482,7 +1482,7 @@
             </div>
             <label class="sts-toggle" style="flex-shrink:0;margin-left:12px">
               <input type="checkbox" id="setting-editor-localstorage"
-                onchange="localStorage.setItem('editor_storage_enabled', this.checked)">
+                onchange="STS.set('sts-editor-storage', this.checked)">
               <span class="sts-toggle-slider"></span>
             </label>
           </div>
@@ -1496,7 +1496,7 @@
             </div>
             <label class="sts-toggle" style="flex-shrink:0;margin-left:12px">
               <input type="checkbox" id="setting-editor-sessionstorage"
-                onchange="localStorage.setItem('editor_session_storage_enabled', this.checked)">
+                onchange="STS.set('sts-editor-session-storage', this.checked)">
               <span class="sts-toggle-slider"></span>
             </label>
           </div>
@@ -1515,7 +1515,7 @@
             </div>
             <label class="sts-toggle" style="flex-shrink:0;margin-left:12px">
               <input type="checkbox" id="setting-sound-notifications"
-                onchange="localStorage.setItem('sts_sound_enabled', this.checked); window._stsSoundEnabled = this.checked">
+                onchange="STS.set('sts-sound-enabled', this.checked)">
               <span class="sts-toggle-slider"></span>
             </label>
           </div>

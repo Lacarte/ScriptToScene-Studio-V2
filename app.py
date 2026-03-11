@@ -80,6 +80,11 @@ def index():
     return send_from_directory(STATIC_DIR, "index.html")
 
 
+@app.route("/app-config.json")
+def serve_app_config():
+    return send_from_directory(STATIC_DIR, "app-config.json")
+
+
 @app.route("/css/<path:filename>")
 def serve_css(filename):
     return send_from_directory(os.path.join(STATIC_DIR, "css"), filename)

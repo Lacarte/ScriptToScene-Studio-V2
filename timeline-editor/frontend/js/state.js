@@ -56,7 +56,7 @@ class StateManager {
     _autoSave() {
         const projectId = this.store.currentProject?.project_id;
         if (projectId && this.store.scenes.length) {
-            Storage.save(`timeline_scenes_${projectId}`, this.store.scenes);
+            Storage.save(`sts-timeline-scenes-${projectId}`, this.store.scenes);
         }
     }
 
@@ -182,7 +182,7 @@ class StateManager {
 
         // Remember last project
         if (project) {
-            Storage.save('timeline_last_project', project.project_id);
+            Storage.save('sts-timeline-last-project', project.project_id);
         }
     }
 
@@ -193,7 +193,7 @@ class StateManager {
         let scenesToUse = scenes;
 
         if (!skipLocalStorage && projectId) {
-            const savedScenes = Storage.load(`timeline_scenes_${projectId}`);
+            const savedScenes = Storage.load(`sts-timeline-scenes-${projectId}`);
             if (savedScenes && savedScenes.length) {
                 scenesToUse = savedScenes;
                 console.log(`Loaded ${savedScenes.length} saved scenes from localStorage`);
@@ -210,7 +210,7 @@ class StateManager {
     clearSavedScenes() {
         const projectId = this.store.currentProject?.project_id;
         if (projectId) {
-            Storage.remove(`timeline_scenes_${projectId}`);
+            Storage.remove(`sts-timeline-scenes-${projectId}`);
         }
     }
 
