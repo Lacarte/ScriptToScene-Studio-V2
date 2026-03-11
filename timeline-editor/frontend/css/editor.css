@@ -677,7 +677,7 @@
     padding: 1px 4px;
     border-radius: 3px;
     background: #a78bfa;
-    color: #fff;
+    color: #000000;
     letter-spacing: 0.05em;
     z-index: 2;
 }
@@ -2362,10 +2362,14 @@ body.asset-dragging .scene-clip:hover {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 4px;
+    width: 12px;
     cursor: col-resize;
     opacity: 0;
-    transition: opacity 0.1s ease;
+    transition: opacity 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3;
 }
 
 .scene-clip:hover .resize-handle {
@@ -2374,12 +2378,27 @@ body.asset-dragging .scene-clip:hover {
 
 .scene-clip .resize-handle-left {
     left: 0;
-    background: linear-gradient(to right, var(--accent), transparent);
+    background: linear-gradient(to right, rgba(78, 205, 196, 0.5), transparent);
+    border-radius: 4px 0 0 4px;
 }
 
 .scene-clip .resize-handle-right {
     right: 0;
-    background: linear-gradient(to left, var(--accent), transparent);
+    background: linear-gradient(to left, rgba(78, 205, 196, 0.5), transparent);
+    border-radius: 0 4px 4px 0;
+}
+
+/* Double-arrow icon inside resize handles */
+.resize-arrows {
+    width: 6px;
+    height: 10px;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.9;
+    flex-shrink: 0;
 }
 
 /* ---- Text Track ---- */
@@ -2620,6 +2639,9 @@ body.asset-dragging .scene-clip:hover {
     padding-right: 16px;
     gap: 5px;
     box-sizing: border-box;
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
 .audio-clip svg,
@@ -2633,14 +2655,27 @@ body.asset-dragging .scene-clip:hover {
 .audio-resize-handle-universal {
     position: absolute;
     top: 0;
-    right: 0;
-    width: 5px;
+    width: 12px;
     height: 100%;
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.1);
     cursor: ew-resize;
     opacity: 0;
     transition: opacity 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3;
+}
+
+.audio-resize-handle,
+.audio-resize-handle-universal.audio-resize-right {
+    right: 0;
     border-radius: 0 4px 4px 0;
+}
+
+.audio-resize-handle-universal.audio-resize-left {
+    left: 0;
+    border-radius: 4px 0 0 4px;
 }
 
 .audio-clip:hover .audio-resize-handle,
@@ -2650,7 +2685,7 @@ body.asset-dragging .scene-clip:hover {
 
 .audio-resize-handle:hover,
 .audio-resize-handle-universal:hover {
-    background: var(--accent);
+    background: rgba(78, 205, 196, 0.45);
 }
 
 .audio-clip.audio-clip-error,
@@ -2658,6 +2693,163 @@ body.asset-dragging .scene-clip:hover {
     background: rgba(255, 107, 107, 0.06);
     border: 1px dashed rgba(255, 107, 107, 0.3);
     opacity: 0.6;
+}
+
+/* Wrapper that stacks the tag + waveform clip vertically */
+.audio-clip-wrap {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+/* Filename tag sitting above the waveform */
+.audio-clip-tag {
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 1px 7px;
+    border-radius: 3px 3px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.48rem;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.85);
+    background: rgb(167, 139, 250) !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+}
+
+/* Waveform canvas */
+.audio-waveform-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Selected audio clip */
+.audio-clip-universal.selected {
+    border-color: var(--accent) !important;
+    background: rgba(78, 205, 196, 0.15);
+    box-shadow: 0 0 0 1px var(--accent), 0 0 8px rgba(78, 205, 196, 0.2);
+}
+
+/* Ensure clip content overlays the waveform */
+.audio-clip-universal svg,
+.audio-clip-name,
+.audio-clip-duration,
+.audio-resize-handle-universal {
+    position: relative;
+    z-index: 1;
+}
+
+/* ---- Audio Properties Panel ---- */
+.audio-props-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    margin-bottom: 2px;
+}
+
+.audio-props-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #fff;
+}
+
+.audio-props-title {
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.audio-prop-slider-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.audio-prop-slider {
+    width: 90px;
+    height: 3px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.audio-prop-slider-val {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    min-width: 32px;
+    text-align: right;
+}
+
+.audio-prop-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.audio-prop-unit {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--text-muted);
+}
+
+/* Small toggle switch for audio props */
+.toggle-switch-small {
+    position: relative;
+    display: inline-block;
+    width: 28px;
+    height: 14px;
+    cursor: pointer;
+}
+
+.toggle-switch-small input {
+    display: none;
+}
+
+.toggle-slider-small {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    transition: background 0.2s;
+}
+
+.toggle-slider-small::before {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    left: 1px;
+    top: 1px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.toggle-switch-small input:checked + .toggle-slider-small {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.toggle-switch-small input:checked + .toggle-slider-small::before {
+    transform: translateX(14px);
+    background: #fff;
 }
 
 .audio-clip-name {

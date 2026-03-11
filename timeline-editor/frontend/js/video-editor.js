@@ -227,6 +227,329 @@ function ensureTrackGainNode(track) {
     }
 }
 
+/**
+ * Generate waveform data from an audio track's element.
+ * Fetches the audio file, decodes it, and stores sampled peaks on track._waveformData.
+ */
+async function generateWaveformData(track) {
+    if (!track?.path || track._waveformData || track._waveformLoading) return;
+    track._waveformLoading = true;
+    try {
+        if (!EditorState._audioCtx) {
+            EditorState._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = EditorState._audioCtx;
+        const resp = await fetch(track.path);
+        if (!resp.ok) throw new Error('fetch failed');
+        const arrayBuf = await resp.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuf);
+        const rawData = audioBuffer.getChannelData(0);
+        // Down-sample to ~200 peaks for efficient rendering
+        const samples = 200;
+        const blockSize = Math.floor(rawData.length / samples);
+        const peaks = new Float32Array(samples);
+        for (let i = 0; i < samples; i++) {
+            let sum = 0;
+            const start = i * blockSize;
+            for (let j = start; j < start + blockSize; j++) {
+                sum += Math.abs(rawData[j]);
+            }
+            peaks[i] = sum / blockSize;
+        }
+        // Normalize peaks to 0-1
+        const maxPeak = Math.max(...peaks) || 1;
+        for (let i = 0; i < samples; i++) peaks[i] /= maxPeak;
+        track._waveformData = peaks;
+    } catch (e) {
+        console.warn('Waveform generation failed for', track.file, e);
+    }
+    track._waveformLoading = false;
+}
+
+/**
+ * Draw waveform onto a canvas element using the track's _waveformData.
+ * Applies fade in/out envelope visually to the waveform bars and draws fade curves.
+ */
+function drawWaveformCanvas(canvas, track) {
+    if (!canvas || !track?._waveformData) return;
+    const peaks = track._waveformData;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    const color = track.color || AUDIO_TRACK_COLORS[track.type] || AUDIO_TRACK_COLORS.voice;
+    const trackDur = track.trimmedDuration || track.duration || 1;
+    const fadeIn = track.fadeIn || 0;
+    const fadeOut = track.fadeOut || 0;
+    const fadeInFrac = Math.min(1, fadeIn / trackDur);
+    const fadeOutFrac = Math.min(1, fadeOut / trackDur);
+
+    // Draw waveform bars with fade envelope applied
+    const barColor = color.replace(/[\d.]+\)$/, '0.4)');
+    const barWidth = w / peaks.length;
+    const midY = h / 2;
+    for (let i = 0; i < peaks.length; i++) {
+        const frac = i / peaks.length;
+        let envelope = 1.0;
+        if (fadeInFrac > 0 && frac < fadeInFrac) {
+            envelope = frac / fadeInFrac;
+        }
+        if (fadeOutFrac > 0 && frac > 1 - fadeOutFrac) {
+            envelope = Math.min(envelope, (1 - frac) / fadeOutFrac);
+        }
+        const barH = Math.max(1, peaks[i] * (h * 0.85) * envelope);
+        ctx.fillStyle = barColor;
+        ctx.fillRect(i * barWidth, midY - barH / 2, Math.max(1, barWidth - 0.5), barH);
+    }
+
+    // Draw fade-in curve
+    if (fadeInFrac > 0) {
+        const fadeInPx = fadeInFrac * w;
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        // Quadratic curve from bottom-left to top at fade end
+        ctx.quadraticCurveTo(fadeInPx * 0.5, h, fadeInPx, 0);
+        ctx.lineTo(fadeInPx, h);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.fill();
+        // Curve line
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        ctx.quadraticCurveTo(fadeInPx * 0.5, h, fadeInPx, 0);
+        ctx.strokeStyle = color.replace(/[\d.]+\)$/, '0.8)');
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+
+    // Draw fade-out curve
+    if (fadeOutFrac > 0) {
+        const fadeOutStartPx = (1 - fadeOutFrac) * w;
+        ctx.beginPath();
+        ctx.moveTo(fadeOutStartPx, 0);
+        // Quadratic curve from top at fade start to bottom-right
+        ctx.quadraticCurveTo(fadeOutStartPx + (w - fadeOutStartPx) * 0.5, h, w, h);
+        ctx.lineTo(w, 0);
+        ctx.lineTo(fadeOutStartPx, 0);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.fill();
+        // Curve line
+        ctx.beginPath();
+        ctx.moveTo(fadeOutStartPx, 0);
+        ctx.quadraticCurveTo(fadeOutStartPx + (w - fadeOutStartPx) * 0.5, h, w, h);
+        ctx.strokeStyle = color.replace(/[\d.]+\)$/, '0.8)');
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+}
+
+/**
+ * Select an audio track for the detail panel
+ */
+function selectAudioTrack(trackId) {
+    // Deselect scenes
+    EditorState.selectedScene = null;
+    document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
+
+    // Deselect previous audio clip
+    document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
+
+    const track = getAudioTrackById(trackId);
+    EditorState.selectedAudioTrack = track || null;
+
+    // Highlight selected clip
+    if (track) {
+        const clip = document.querySelector(`.audio-clip-universal[data-track-id="${trackId}"]`);
+        if (clip) clip.classList.add('selected');
+    }
+
+    renderAudioProperties();
+}
+
+/**
+ * Render audio track properties in the detail panel
+ */
+function renderAudioProperties() {
+    if (!elements.sceneProperties) return;
+
+    const track = EditorState.selectedAudioTrack;
+    if (!track) {
+        // Restore default placeholder if no scene selected either
+        if (!EditorState.selectedScene) {
+            elements.sceneProperties.innerHTML = '<div class="detail-placeholder">Select a scene to edit</div>';
+        }
+        return;
+    }
+
+    const volPct = Math.round(track.volume * 100);
+    const trackLabel = track.label || (track.type === 'voice' ? 'Voice' : track.type === 'music' ? 'Music' : 'FX');
+    const color = track.color || AUDIO_TRACK_COLORS[track.type] || AUDIO_TRACK_COLORS.voice;
+
+    elements.sceneProperties.innerHTML = `
+        <div class="audio-props-header">
+            <span class="audio-props-icon" style="background:${color}">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.08"/></svg>
+            </span>
+            <span class="audio-props-title">${trackLabel}</span>
+        </div>
+        ${track.file ? `
+        <div class="property-group">
+            <label>File</label>
+            <span class="property-value" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${track.file}">${track.file}</span>
+        </div>
+        <div class="property-group">
+            <label>Duration</label>
+            <span class="property-value">${formatTimestamp(track.trimmedDuration || track.duration)}</span>
+        </div>
+        ` : ''}
+        <div class="property-group">
+            <label>Volume</label>
+            <div class="audio-prop-slider-wrap">
+                <input type="range" class="audio-prop-slider" id="audio-prop-volume" min="0" max="300" value="${volPct}">
+                <span class="audio-prop-slider-val" id="audio-prop-volume-val">${volPct}%</span>
+            </div>
+        </div>
+        <div class="property-group">
+            <label>Fade in</label>
+            <div class="audio-prop-slider-wrap">
+                <input type="range" class="audio-prop-slider" id="audio-prop-fade-in" min="0" max="100" step="1" value="${Math.round(track.fadeIn * 10)}">
+                <span class="audio-prop-slider-val" id="audio-prop-fade-in-val">${track.fadeIn.toFixed(1)}s</span>
+            </div>
+        </div>
+        <div class="property-group">
+            <label>Fade out</label>
+            <div class="audio-prop-slider-wrap">
+                <input type="range" class="audio-prop-slider" id="audio-prop-fade-out" min="0" max="100" step="1" value="${Math.round(track.fadeOut * 10)}">
+                <span class="audio-prop-slider-val" id="audio-prop-fade-out-val">${track.fadeOut.toFixed(1)}s</span>
+            </div>
+        </div>
+        ${track.type === 'music' ? `
+        <div class="property-group">
+            <label>Loop</label>
+            <label class="toggle-switch-small">
+                <input type="checkbox" id="audio-prop-loop" ${track.loop ? 'checked' : ''}>
+                <span class="toggle-slider-small"></span>
+            </label>
+        </div>
+        <div class="property-group">
+            <label>Voice ducking</label>
+            <label class="toggle-switch-small">
+                <input type="checkbox" id="audio-prop-ducking" ${track.duckingEnabled ? 'checked' : ''}>
+                <span class="toggle-slider-small"></span>
+            </label>
+        </div>
+        ` : ''}
+    `;
+
+    // Wire volume slider
+    const volSlider = document.getElementById('audio-prop-volume');
+    const volLabel = document.getElementById('audio-prop-volume-val');
+    volSlider?.addEventListener('input', () => {
+        const vol = parseInt(volSlider.value) / 100;
+        track.volume = vol;
+        _saveVolume(track.type, vol);
+        volLabel.textContent = `${volSlider.value}%`;
+        const effectiveVol = getEffectiveTrackVolume(track, vol, isVoiceAudible());
+        if (track._gainNode) {
+            track._gainNode.gain.value = effectiveVol;
+        } else if (track.element) {
+            track.element.volume = Math.min(1.0, effectiveVol);
+        }
+    });
+    volSlider?.addEventListener('change', () => saveProjectEdits());
+
+    // Helper to redraw the waveform for the current track
+    const redrawTrackWaveform = () => {
+        const c = document.querySelector(`.audio-waveform-canvas[data-track-id="${track.id}"]`);
+        drawWaveformCanvas(c, track);
+    };
+
+    // Wire fade in slider
+    const fadeInSlider = document.getElementById('audio-prop-fade-in');
+    const fadeInLabel = document.getElementById('audio-prop-fade-in-val');
+    fadeInSlider?.addEventListener('input', () => {
+        const val = parseInt(fadeInSlider.value) / 10;
+        track.fadeIn = val;
+        fadeInLabel.textContent = `${val.toFixed(1)}s`;
+        redrawTrackWaveform();
+    });
+    fadeInSlider?.addEventListener('change', () => {
+        recordEdit(`Change ${trackLabel} fade in`, track.id, 'fadeIn', null, track.fadeIn);
+        saveProjectEdits();
+    });
+
+    // Wire fade out slider
+    const fadeOutSlider = document.getElementById('audio-prop-fade-out');
+    const fadeOutLabel = document.getElementById('audio-prop-fade-out-val');
+    fadeOutSlider?.addEventListener('input', () => {
+        const val = parseInt(fadeOutSlider.value) / 10;
+        track.fadeOut = val;
+        fadeOutLabel.textContent = `${val.toFixed(1)}s`;
+        redrawTrackWaveform();
+    });
+    fadeOutSlider?.addEventListener('change', () => {
+        recordEdit(`Change ${trackLabel} fade out`, track.id, 'fadeOut', null, track.fadeOut);
+        saveProjectEdits();
+    });
+
+    // Wire loop toggle
+    const loopToggle = document.getElementById('audio-prop-loop');
+    loopToggle?.addEventListener('change', () => {
+        track.loop = loopToggle.checked;
+        if (track.element) track.element.loop = track.loop;
+        renderAllAudioTracks();
+        saveProjectEdits();
+    });
+
+    // Wire ducking toggle
+    const duckingToggle = document.getElementById('audio-prop-ducking');
+    duckingToggle?.addEventListener('change', () => {
+        track.duckingEnabled = duckingToggle.checked;
+        saveProjectEdits();
+    });
+}
+
+/**
+ * Apply fade in/out gain envelopes during real-time playback.
+ * Called from onTimeUpdate.
+ */
+function applyAudioFades() {
+    for (const track of EditorState.audioTracks) {
+        if (!track.element || track.muted || !track.file) continue;
+        const fadeIn = track.fadeIn || 0;
+        const fadeOut = track.fadeOut || 0;
+        if (!fadeIn && !fadeOut) continue;
+
+        const currentTime = track.element.currentTime;
+        const trackEnd = track.trimmedDuration || track.duration || 0;
+        if (!trackEnd) continue;
+
+        let fadeMultiplier = 1.0;
+        // Fade in
+        if (fadeIn > 0 && currentTime < fadeIn) {
+            fadeMultiplier = Math.min(fadeMultiplier, currentTime / fadeIn);
+        }
+        // Fade out
+        if (fadeOut > 0 && currentTime > trackEnd - fadeOut) {
+            const remaining = trackEnd - currentTime;
+            fadeMultiplier = Math.min(fadeMultiplier, Math.max(0, remaining / fadeOut));
+        }
+
+        const baseVol = getEffectiveTrackVolume(track, track.volume, isVoiceAudible());
+        if (track._gainNode) {
+            track._gainNode.gain.value = baseVol * fadeMultiplier;
+        } else {
+            track.element.volume = Math.min(1.0, baseVol * fadeMultiplier);
+        }
+    }
+}
+
 // Load saved settings from localStorage
 function loadSavedSettings() {
     const savedZoom = localStorage.getItem(STORAGE_KEYS.ZOOM_LEVEL);
@@ -247,6 +570,7 @@ const EditorState = {
     scenes: [],
     originalScenes: [],  // Original scenes for comparison/reset
     selectedScene: null,
+    selectedAudioTrack: null,  // Currently selected audio track for detail panel
     mediaFolder: null,
     mediaFiles: new Map(),
     playbackPosition: 0,
@@ -1586,7 +1910,7 @@ function _applyExtraState(saved) {
     for (const t of (saved.audio_tracks || [])) {
         if (!t.file || !t.path) continue;
         const track = createAudioTrack({
-            label: t.label || t.type,
+            label: (t.label || t.type).replace(/\s*\d+$/, ''),
             type: t.type,
             file: t.file,
             path: t.path,
@@ -1696,7 +2020,7 @@ function _restoreSavedEditorState() {
     for (const t of nonVoiceTracks) {
         if (!t.file || !t.path) continue;
         const track = createAudioTrack({
-            label: t.label || t.type,
+            label: (t.label || t.type).replace(/\s*\d+$/, ''),
             type: t.type,
             file: t.file,
             path: t.path,
@@ -1913,6 +2237,7 @@ async function loadProjectData(data) {
 
                 // Enforce trimmed duration on non-looping tracks during playback
                 if (EditorState.isPlaying) {
+                    applyAudioFades();
                     for (const track of EditorState.audioTracks) {
                         if (!track.element || track.muted || track.loop || !track.file) continue;
                         const trackEnd = track.trimmedDuration || track.duration;
@@ -3073,12 +3398,16 @@ function renderAllAudioTracks() {
                 ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;opacity:0.5"><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/><path d="M8 17.5V5l12-2v12.5"/></svg>`
                 : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;opacity:0.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
 
+            const selectedClass = EditorState.selectedAudioTrack?.id === track.id ? ' selected' : '';
             clipHTML = `
-                <div class="audio-clip-universal ${errorClass}" data-track-id="${track.id}" style="width:${width}px; border-left: 3px solid ${color};">
-                    ${icon}
-                    <span class="audio-clip-name">${track.file}</span>
-                    <span class="audio-clip-duration">${statusText}</span>
-                    <div class="audio-resize-handle-universal" data-track-id="${track.id}"></div>
+                <div class="audio-clip-wrap" style="width:${width}px;">
+                    <span class="audio-clip-tag" style="background:${color}">${track.file}</span>
+                    <div class="audio-clip-universal ${errorClass}${selectedClass}" data-track-id="${track.id}" style="width:100%; border-left: 3px solid ${color};">
+                        <canvas class="audio-waveform-canvas" data-track-id="${track.id}"></canvas>
+                        <span class="audio-clip-duration">${statusText}</span>
+                        <div class="audio-resize-handle-universal audio-resize-left" data-track-id="${track.id}"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>
+                        <div class="audio-resize-handle-universal audio-resize-right" data-track-id="${track.id}"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>
+                    </div>
                 </div>`;
         } else {
             clipHTML = `<div class="audio-placeholder" style="opacity:0.3; font-size:0.55rem; padding:0 8px; font-style:italic; color:var(--text-muted)">Click + to add ${isVoice ? 'voice audio' : 'audio'}</div>`;
@@ -3129,6 +3458,29 @@ function renderAllAudioTracks() {
             removeAudioTrack(trackId);
         });
     });
+
+    // Wire up clip click to select audio track for detail panel
+    container.querySelectorAll('.audio-clip-universal').forEach(clip => {
+        clip.addEventListener('click', (e) => {
+            if (e.target.classList.contains('audio-resize-handle-universal')) return;
+            const trackId = clip.dataset.trackId;
+            selectAudioTrack(trackId);
+        });
+    });
+
+    // Draw waveforms for tracks that have data, kick off generation for those that don't
+    for (const track of tracks) {
+        if (!track.file) continue;
+        const canvas = container.querySelector(`.audio-waveform-canvas[data-track-id="${track.id}"]`);
+        if (track._waveformData) {
+            drawWaveformCanvas(canvas, track);
+        } else if (!track._waveformLoading) {
+            generateWaveformData(track).then(() => {
+                const c = container.querySelector(`.audio-waveform-canvas[data-track-id="${track.id}"]`);
+                drawWaveformCanvas(c, track);
+            });
+        }
+    }
 }
 
 /**
@@ -3658,8 +4010,8 @@ function renderTimeline() {
                     <div class="scene-clip-id">${scene.id}</div>
                     <div class="scene-clip-duration">${scene.duration}s</div>
                 </div>
-                <div class="resize-handle resize-handle-left"></div>
-                <div class="resize-handle resize-handle-right"></div>
+                <div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>
+                <div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>
             </div>
         `;
     }).join('');
@@ -4336,6 +4688,10 @@ function selectScene(sceneId) {
         el.classList.remove('selected');
     });
 
+    // Deselect any selected audio track
+    EditorState.selectedAudioTrack = null;
+    document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
+
     // Select new
     const clip = elements.videoTrack.querySelector(`[data-id="${sceneId}"]`);
     if (clip) {
@@ -4378,6 +4734,11 @@ function renderSceneProperties() {
 
     const scene = EditorState.selectedScene;
     if (!scene) {
+        // If an audio track is selected, show its properties instead
+        if (EditorState.selectedAudioTrack) {
+            renderAudioProperties();
+            return;
+        }
         elements.sceneProperties.innerHTML = '<div class="detail-placeholder">Select a scene to edit</div>';
         return;
     }
@@ -4806,8 +5167,8 @@ function setupPlayheadDrag() {
 
     // Also allow clicking on timeline to seek
     timelineTracks.addEventListener('mousedown', (e) => {
-        // Only if clicking on track content area, not on clips
-        if (e.target.closest('.scene-clip') || e.target.closest('.track-header')) return;
+        // Only if clicking on track content area, not on clips or audio clips
+        if (e.target.closest('.scene-clip') || e.target.closest('.track-header') || e.target.closest('.audio-clip-universal')) return;
 
         isDragging = true;
         dragStartPosition = EditorState.playbackPosition;
@@ -6402,7 +6763,7 @@ function renderMusicList(files) {
 window.selectBgMusic = function (filename, path, duration) {
     // Create a new music track via the universal audio track system
     const musicTrack = createAudioTrack({
-        label: `Music ${EditorState.audioTracks.filter(t => t.type === 'music').length + 1}`,
+        label: 'Music',
         type: 'music',
         file: filename,
         path: path,
@@ -7092,9 +7453,11 @@ function handleKeyboard(e) {
     // Escape - Deselect
     if (e.code === 'Escape') {
         EditorState.selectedScene = null;
+        EditorState.selectedAudioTrack = null;
         elements.videoTrack.querySelectorAll('.scene-clip.selected').forEach(el => {
             el.classList.remove('selected');
         });
+        document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
         renderSceneProperties();
         updateEffectsTab();
         updateTransitionsTab();
