@@ -21,14 +21,8 @@ const _welcomeQuotes = [
 ];
 
 function _initWelcome() {
-  const seen = localStorage.getItem('sts-welcome-seen');
-  const overlay = $('#welcome-overlay');
-  if (!overlay) return;
-  if (seen) { overlay.remove(); return; }
-  // Pick a random quote
-  const q = $('#welcome-quote');
-  if (q) q.textContent = _welcomeQuotes[Math.floor(Math.random() * _welcomeQuotes.length)];
-  overlay.style.display = 'flex';
+  if (localStorage.getItem('sts-welcome-seen')) return;
+  showWelcome();
 }
 
 function dismissWelcome() {
@@ -37,6 +31,19 @@ function dismissWelcome() {
   localStorage.setItem('sts-welcome-seen', '1');
   overlay.classList.add('dismissing');
   overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
+}
+
+function showWelcome() {
+  let overlay = $('#welcome-overlay');
+  if (overlay) overlay.remove();
+  const tpl = document.getElementById('welcome-template');
+  if (!tpl) return;
+  const clone = tpl.content.cloneNode(true);
+  document.body.prepend(clone);
+  overlay = $('#welcome-overlay');
+  const q = overlay.querySelector('#welcome-quote');
+  if (q) q.textContent = _welcomeQuotes[Math.floor(Math.random() * _welcomeQuotes.length)];
+  overlay.style.display = 'flex';
 }
 
 document.addEventListener('DOMContentLoaded', _initWelcome);
