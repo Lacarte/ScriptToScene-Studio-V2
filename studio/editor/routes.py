@@ -307,7 +307,11 @@ def _resolve_project_captions(data: dict, project_id: str):
     latest_match = None
     latest_ts = ""
     if os.path.isdir(CAPTIONS_DIR):
-        for entry in os.listdir(CAPTIONS_DIR):
+        # Sort entries in reverse so newest (alphabetically highest) is checked first.
+        # Since timestamps are ISO-formatted, the first match with the right
+        # source_folder is very likely the latest — but we still keep the best.
+        entries = sorted(os.listdir(CAPTIONS_DIR), reverse=True)
+        for entry in entries:
             cap_json = os.path.join(CAPTIONS_DIR, entry, "captions.json")
             if not os.path.isfile(cap_json):
                 continue
@@ -321,6 +325,9 @@ def _resolve_project_captions(data: dict, project_id: str):
             if ts >= latest_ts:
                 latest_ts = ts
                 latest_match = payload
+                # First matching entry in reverse-sorted order is almost
+                # certainly the newest; stop scanning the rest.
+                break
 
     data["captions"] = latest_match
     if latest_match:

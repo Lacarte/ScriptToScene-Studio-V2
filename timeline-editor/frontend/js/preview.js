@@ -161,6 +161,7 @@ export class CanvasPreview {
      * Preload all scene media (images and videos)
      */
     async preloadImages() {
+        const TIMEOUT = 10000;
         for (const scene of this.scenes) {
             if (scene.mediaUrl && !this.imageCache.has(scene.id)) {
                 if (scene.isVideo) {
@@ -175,11 +176,17 @@ export class CanvasPreview {
                             video.crossOrigin = 'anonymous';
                         }
                         await new Promise((resolve, reject) => {
+                            const timer = setTimeout(() => {
+                                console.warn(`Preview: Timeout loading video for scene ${scene.id}`);
+                                reject(new Error('timeout'));
+                            }, TIMEOUT);
                             video.onloadeddata = () => {
+                                clearTimeout(timer);
                                 console.log(`Preview: Loaded video for scene ${scene.id} (${video.videoWidth}x${video.videoHeight})`);
                                 resolve();
                             };
                             video.onerror = (e) => {
+                                clearTimeout(timer);
                                 console.warn(`Preview: Failed to load video for scene ${scene.id}:`, scene.mediaUrl, e);
                                 reject(e);
                             };
@@ -198,11 +205,17 @@ export class CanvasPreview {
                     }
                     try {
                         await new Promise((resolve, reject) => {
+                            const timer = setTimeout(() => {
+                                console.warn(`Preview: Timeout loading image for scene ${scene.id}`);
+                                reject(new Error('timeout'));
+                            }, TIMEOUT);
                             img.onload = () => {
+                                clearTimeout(timer);
                                 console.log(`Preview: Loaded image for scene ${scene.id}`);
                                 resolve();
                             };
                             img.onerror = (e) => {
+                                clearTimeout(timer);
                                 console.warn(`Preview: Failed to load image for scene ${scene.id}:`, scene.mediaUrl, e);
                                 reject(e);
                             };

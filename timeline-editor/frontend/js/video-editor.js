@@ -566,6 +566,205 @@ function convertTextSceneToOverlay(sceneId) {
     showToast('Converted text scene to overlay', 'success');
 }
 
+function getTextToolSelectedScene() {
+    if (EditorState.selectedTextOverlaySceneId != null) {
+        return EditorState.scenes.find(scene => scene.id === EditorState.selectedTextOverlaySceneId) || null;
+    }
+    if (EditorState.selectedScene?.id != null) {
+        return EditorState.scenes.find(scene => scene.id === EditorState.selectedScene.id) || null;
+    }
+    return null;
+}
+
+function getTextOverlayTargetScene() {
+    const scene = getTextToolSelectedScene();
+    if (!scene || scene.type === 'text' || scene.type === 'cta') return null;
+    return scene;
+}
+
+function getTextToolInsertIndex() {
+    const selectedScene = getTextToolSelectedScene();
+    if (!selectedScene) return EditorState.scenes.length;
+    const idx = EditorState.scenes.findIndex(scene => scene.id === selectedScene.id);
+    return idx >= 0 ? idx + 1 : EditorState.scenes.length;
+}
+
+function getTextToolPayload() {
+    const textarea = document.getElementById('text-tool-content');
+    const durationInput = document.getElementById('text-tool-duration');
+    const text = (textarea?.value || '').trim();
+    const duration = Math.max(MIN_TEXT_OVERLAY_DURATION, parseFloat(durationInput?.value || '2') || 2);
+    return { textarea, text, duration };
+}
+
+function buildTextSceneFromTool(text, duration) {
+    const scene = {
+        id: getNextSceneId(),
+        type: 'text',
+        duration,
+        text_content: text,
+        script: text,
+        text_color: 'white',
+        text_size: 48,
+        font_family: 'Inter',
+        font_style: 'bold',
+        text_align: 'center',
+        vertical_align: 'center',
+        text_background_enabled: true,
+        text_background_color: '#000000',
+        text_timeline_offset: 0,
+        text_overlay_duration: duration,
+        visual_fx: 'static',
+        image_prompt: '',
+        mediaUrl: null,
+        image_url: null,
+        image: '',
+        mediaLoaded: false,
+        isVideo: false,
+        videoThumb: null,
+        status: 'ready',
+        timestamp: 0,
+        narrative_role: '',
+        filler_shift: 0,
+        segment_start: null,
+        segment_end: null,
+        segment_duration: null,
+        transition: { type: 'none', duration: 0 }
+    };
+    normalizeSceneTextOverlay(scene);
+    return scene;
+}
+
+function renderTextToolState() {
+    const targetEl = document.getElementById('text-tool-target');
+    const addSceneBtn = document.getElementById('text-add-scene');
+    const addOverlayBtn = document.getElementById('text-add-overlay');
+    if (!targetEl || !addSceneBtn || !addOverlayBtn) return;
+
+    const { text } = getTextToolPayload();
+    const selectedScene = getTextToolSelectedScene();
+    const overlayTarget = getTextOverlayTargetScene();
+    const hasOverlay = overlayTarget ? hasSceneTextOverlay(overlayTarget) : false;
+
+    let message = 'Create a standalone text scene or select an image/video scene to place text directly on it.';
+    if (!EditorState.project) {
+        message = 'Load a project first to add text to the timeline.';
+    } else if (overlayTarget) {
+        message = hasOverlay
+            ? `<strong>Selected:</strong> Scene ${overlayTarget.id} already has a text overlay. Convert or edit it from the timeline.`
+            : `<strong>Selected for overlay:</strong> Scene ${overlayTarget.id} (${overlayTarget.type}). New text will start at the beginning of this scene.`;
+    } else if (selectedScene) {
+        message = `<strong>Selected:</strong> Scene ${selectedScene.id} is a text scene. Add another text scene, or select an image/video scene to add an overlay.`;
+    }
+
+    targetEl.innerHTML = message;
+    addSceneBtn.disabled = !EditorState.project || !text;
+    addOverlayBtn.disabled = !EditorState.project || !text || !overlayTarget || hasOverlay;
+}
+
+function addTextSceneFromTool() {
+    if (!EditorState.project) {
+        showToast('Load a project first', 'warning');
+        return;
+    }
+
+    const { textarea, text, duration } = getTextToolPayload();
+    if (!text) {
+        showToast('Enter text first', 'warning');
+        return;
+    }
+
+    const newScene = buildTextSceneFromTool(text, duration);
+    const insertIndex = getTextToolInsertIndex();
+    EditorState.scenes.splice(insertIndex, 0, newScene);
+    recordEdit(`Add text scene (Scene ${newScene.id})`, newScene.id, 'scene_add', null, cloneScene(newScene));
+    syncTimelineAfterSceneStructureChange(newScene.id, false);
+
+    if (textarea) textarea.value = '';
+    renderTextToolState();
+    showToast('Text scene added to timeline', 'success');
+}
+
+function addTextOverlayFromTool() {
+    if (!EditorState.project) {
+        showToast('Load a project first', 'warning');
+        return;
+    }
+
+    const { textarea, text, duration } = getTextToolPayload();
+    if (!text) {
+        showToast('Enter text first', 'warning');
+        return;
+    }
+
+    const scene = getTextOverlayTargetScene();
+    if (!scene) {
+        showToast('Select an image or video scene first', 'warning');
+        return;
+    }
+    if (hasSceneTextOverlay(scene)) {
+        showToast('Selected scene already has a text overlay', 'warning');
+        return;
+    }
+
+    const oldValue = {
+        text_content: scene.text_content,
+        text_timeline_offset: scene.text_timeline_offset,
+        text_overlay_duration: scene.text_overlay_duration,
+        text_background_enabled: scene.text_background_enabled,
+        text_background_color: scene.text_background_color
+    };
+
+    scene.text_content = text;
+    scene.text_timeline_offset = 0;
+    scene.text_overlay_duration = Math.min(duration, Math.max(MIN_TEXT_OVERLAY_DURATION, scene.duration || duration));
+    scene.text_color = scene.text_color || 'white';
+    scene.text_size = scene.text_size || 48;
+    scene.font_family = scene.font_family || 'Inter';
+    scene.font_style = scene.font_style || 'bold';
+    scene.text_align = scene.text_align || 'center';
+    scene.vertical_align = scene.vertical_align || 'center';
+    if (typeof scene.text_background_enabled !== 'boolean') scene.text_background_enabled = false;
+    scene.text_background_color = scene.text_background_color || '#000000';
+    normalizeSceneTextOverlay(scene);
+
+    recordEdit(`Add text overlay (Scene ${scene.id})`, scene.id, 'text_overlay', oldValue, {
+        text_content: scene.text_content,
+        text_timeline_offset: scene.text_timeline_offset,
+        text_overlay_duration: scene.text_overlay_duration,
+        text_background_enabled: scene.text_background_enabled,
+        text_background_color: scene.text_background_color
+    });
+
+    renderTimeline();
+    if (EditorState.preview) {
+        EditorState.preview.setScenes(EditorState.scenes);
+        EditorState.preview.seek(EditorState.playbackPosition);
+    }
+    selectTextOverlay(scene.id);
+    saveProjectEdits();
+
+    if (textarea) textarea.value = '';
+    renderTextToolState();
+    showToast('Text overlay added to selected scene', 'success');
+}
+
+function setupTextTool() {
+    const textarea = document.getElementById('text-tool-content');
+    const addSceneBtn = document.getElementById('text-add-scene');
+    const addOverlayBtn = document.getElementById('text-add-overlay');
+    const durationInput = document.getElementById('text-tool-duration');
+    if (!textarea || !addSceneBtn || !addOverlayBtn || !durationInput) return;
+    if (textarea.dataset.bound === '1') return;
+
+    textarea.dataset.bound = '1';
+    textarea.addEventListener('input', renderTextToolState);
+    durationInput.addEventListener('input', renderTextToolState);
+    addSceneBtn.addEventListener('click', addTextSceneFromTool);
+    addOverlayBtn.addEventListener('click', addTextOverlayFromTool);
+    renderTextToolState();
+}
+
 function isVoiceAudible() {
     const voiceTrack = getVoiceTrack();
     if (!voiceTrack?.loaded || !voiceTrack.element || voiceTrack.muted) return false;
@@ -766,6 +965,7 @@ function selectAudioTrack(trackId) {
     }
 
     renderAudioProperties();
+    renderTextToolState();
 }
 
 /**
@@ -2149,9 +2349,12 @@ async function loadFontRegistry() {
         style.textContent = rules.join('\n');
         document.head.appendChild(style);
 
-        // Wait for fonts to be ready for canvas rendering
+        // Wait for fonts to be ready for canvas rendering (cap at 5s)
         if (rules.length > 0) {
-            await document.fonts.ready;
+            await Promise.race([
+                document.fonts.ready,
+                new Promise(r => setTimeout(r, 5000))
+            ]);
             console.log(`Custom @font-face rules injected: ${rules.length}`);
         }
     } catch (err) {
@@ -2213,7 +2416,7 @@ function buildFontOptions(selectEl, selectedFamily) {
 async function loadProjectFromServer(projectId) {
     showLoadingOverlay('Loading saved project...');
     try {
-        const res = await fetch(`/api/editor/load/${encodeURIComponent(projectId)}`);
+        const res = await fetch(`/api/editor/load/${encodeURIComponent(projectId)}`, { signal: AbortSignal.timeout(15000) });
         if (!res.ok) throw new Error('Project not found');
         const saved = await res.json();
 
@@ -2721,6 +2924,7 @@ async function loadProjectData(data) {
         mediaUrl: scene.image_url || null
     }));
     EditorState.scenes.forEach(normalizeSceneTextOverlay);
+    renderTextToolState();
 
     normalizeTimelineDurations(data.total_duration || 0);
 
@@ -2875,60 +3079,55 @@ async function loadProjectMediaWithProgress() {
 
     updateLoadingOverlay(`Loading assets (0/${totalScenes})...`);
 
+    // ---- Phase 1: verify existing mediaUrls in parallel ----
+    const scenesToProbe = [];
+    const verifyPromises = [];
     for (let i = 0; i < EditorState.scenes.length; i++) {
         const scene = EditorState.scenes[i];
-        const sceneNumber = i;
-
         if (scene.type === 'text') continue;
-
-        // If image_url was set from staged data, verify it loads
         if (scene.mediaUrl) {
-            updateLoadingOverlay(`Loading scene ${sceneNumber} (${loadedCount}/${totalScenes})...`);
-            const isVideo = isVideoFile(scene.mediaUrl);
-            const exists = isVideo
-                ? await checkMediaExists(scene.mediaUrl)
-                : await checkImageExists(scene.mediaUrl);
-            if (exists) {
-                scene.isVideo = isVideo;
-                if (isVideo) {
-                    const meta = await getVideoMeta(scene.mediaUrl);
-                    if (meta) {
-                        scene.videoDuration = meta.duration;
-                        scene.videoThumb = meta.thumbDataUrl;
-                        console.log(`Scene ${sceneNumber}: video src=${meta.duration.toFixed(1)}s, scene trimmed to ${scene.duration}s`);
-                    }
-                }
-                loadedCount++;
-                console.log(`Scene ${sceneNumber}: loaded from mediaUrl (${isVideo ? 'video' : 'image'}): ${scene.mediaUrl}`);
-                updateSceneClipThumb(scene.id, scene.mediaUrl, isVideo, scene.videoThumb);
-                await sleep(30);
-                continue;
-            }
-            // mediaUrl didn't load, clear and fall through to probing
-            console.warn(`Scene ${sceneNumber}: mediaUrl failed (${scene.mediaUrl}), trying fallback`);
-            scene.mediaUrl = null;
-            scene.mediaLoaded = false;
+            verifyPromises.push(
+                checkMediaExists(scene.mediaUrl).then(ok => ({ scene, idx: i, ok }))
+            );
+        } else {
+            scenesToProbe.push({ scene, idx: i });
         }
+    }
 
-        // Fallback: try asset_files from buildTimelineFromAssets, then probe paths
+    if (verifyPromises.length) {
+        updateLoadingOverlay(`Verifying ${verifyPromises.length} known media paths...`);
+        const results = await Promise.all(verifyPromises);
+        for (const { scene, idx, ok } of results) {
+            if (ok) {
+                scene.isVideo = isVideoFile(scene.mediaUrl);
+                loadedCount++;
+                updateSceneClipThumb(scene.id, scene.mediaUrl, scene.isVideo, scene.videoThumb);
+            } else {
+                console.warn(`Scene ${idx}: mediaUrl failed (${scene.mediaUrl}), will probe`);
+                scene.mediaUrl = null;
+                scene.mediaLoaded = false;
+                scenesToProbe.push({ scene, idx });
+            }
+        }
+    }
+
+    // ---- Phase 2: probe unknown scenes — batch HEAD requests per scene ----
+    const basePath = `working-assets/${projectId}/`;
+    const allExtensions = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS];
+
+    for (const { scene, idx: sceneNumber } of scenesToProbe) {
         updateLoadingOverlay(`Loading scene ${sceneNumber} (${loadedCount}/${totalScenes})...`);
-        const basePath = `working-assets/${projectId}/`;
-        const assetsBasePath = `/output/assets/${projectId}/${sceneNumber}/`;
-        const allExtensions = [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS];
 
+        const assetsBasePath = `/output/assets/${projectId}/${sceneNumber}/`;
         const pathsToTry = [];
-        // Try asset_files stored on scene (from buildTimelineFromAssets)
         if (scene.asset_files && scene.asset_files.length) {
             for (const af of scene.asset_files) {
-                const fn = af.split('/').pop();
-                pathsToTry.push({ path: af, filename: fn });
+                pathsToTry.push({ path: af, filename: af.split('/').pop() });
             }
         }
-        // Try /output/assets/{project}/{sceneNum}/ paths
         for (const ext of allExtensions) {
             pathsToTry.push({ path: `${assetsBasePath}0.${ext}`, filename: `0.${ext}` });
         }
-        // Try working-assets/ paths
         for (const ext of allExtensions) {
             pathsToTry.push({ path: `${basePath}${sceneNumber}.${ext}`, filename: `${sceneNumber}.${ext}` });
         }
@@ -2940,42 +3139,41 @@ async function loadProjectMediaWithProgress() {
             }
         }
 
-        let found = false;
-        for (const { path: mediaPath, filename } of pathsToTry) {
-            try {
-                const isVideo = isVideoFile(mediaPath);
-                const exists = isVideo
-                    ? await checkMediaExists(mediaPath)
-                    : await checkImageExists(mediaPath);
-                if (exists) {
-                    scene.mediaUrl = mediaPath;
-                    scene.mediaLoaded = true;
-                    scene.isVideo = isVideo;
-                    scene.image = filename;
-                    if (isVideo) {
-                        const meta = await getVideoMeta(mediaPath);
-                        if (meta) {
-                            scene.videoDuration = meta.duration;
-                            scene.videoThumb = meta.thumbDataUrl;
-                            console.log(`Scene ${sceneNumber}: video src=${meta.duration.toFixed(1)}s, scene trimmed to ${scene.duration}s`);
-                        }
-                    }
-                    loadedCount++;
-                    found = true;
-                    console.log(`Scene ${sceneNumber}: fallback loaded ${isVideo ? 'video' : 'image'} ${mediaPath}`);
-                    updateSceneClipThumb(scene.id, mediaPath, isVideo, scene.videoThumb);
-                    break;
-                }
-            } catch (error) {
-                continue;
-            }
-        }
+        // Fire all HEAD requests for this scene in parallel
+        const probeResults = await Promise.all(
+            pathsToTry.map(({ path: p, filename }) =>
+                checkMediaExists(p).then(ok => ({ path: p, filename, ok }))
+            )
+        );
 
-        if (!found) {
+        const hit = probeResults.find(r => r.ok);
+        if (hit) {
+            scene.mediaUrl = hit.path;
+            scene.mediaLoaded = true;
+            scene.isVideo = isVideoFile(hit.path);
+            scene.image = hit.filename;
+            loadedCount++;
+            console.log(`Scene ${sceneNumber}: found ${scene.isVideo ? 'video' : 'image'} ${hit.path}`);
+            updateSceneClipThumb(scene.id, hit.path, scene.isVideo, scene.videoThumb);
+        } else {
             console.warn(`Scene ${sceneNumber} (id: ${scene.id}): No media found`);
         }
+    }
 
-        await sleep(50);
+    // ---- Phase 3: fetch video metadata in parallel for all video scenes ----
+    const videoScenes = EditorState.scenes.filter(s => s.isVideo && s.mediaUrl && !s.videoDuration);
+    if (videoScenes.length) {
+        updateLoadingOverlay(`Loading ${videoScenes.length} video metadata...`);
+        const metaResults = await Promise.all(
+            videoScenes.map(s => getVideoMeta(s.mediaUrl).then(meta => ({ scene: s, meta })))
+        );
+        for (const { scene, meta } of metaResults) {
+            if (meta) {
+                scene.videoDuration = meta.duration;
+                scene.videoThumb = meta.thumbDataUrl;
+                updateSceneClipThumb(scene.id, scene.mediaUrl, true, meta.thumbDataUrl);
+            }
+        }
     }
 
     const scenesWithMedia = EditorState.scenes.filter(s => s.mediaUrl);
@@ -3536,7 +3734,7 @@ function setupTimelineDragDrop() {
  * Check if an image exists at the given path
  */
 function checkImageExists(imagePath) {
-    return fetch(imagePath, { method: 'HEAD' })
+    return fetch(imagePath, { method: 'HEAD', signal: AbortSignal.timeout(4000) })
         .then(res => res.ok)
         .catch(() => false);
 }
@@ -3548,7 +3746,7 @@ const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
  * Check if a media file (image or video) exists via HEAD request
  */
 function checkMediaExists(mediaPath) {
-    return fetch(mediaPath, { method: 'HEAD' })
+    return fetch(mediaPath, { method: 'HEAD', signal: AbortSignal.timeout(4000) })
         .then(res => res.ok)
         .catch(() => false);
 }
@@ -3567,6 +3765,11 @@ function isVideoFile(path) {
  */
 function getVideoMeta(videoUrl) {
     return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+            video.src = '';
+            resolve(null);
+        }, 8000);
+        const done = (result) => { clearTimeout(timeout); resolve(result); };
         const video = document.createElement('video');
         video.muted = true;
         video.preload = 'metadata';
@@ -3583,10 +3786,10 @@ function getVideoMeta(videoUrl) {
                     c.getContext('2d').drawImage(video, 0, 0);
                     thumbDataUrl = c.toDataURL('image/jpeg', 0.7);
                 } catch (_) { /* cross-origin, ignore */ }
-                resolve({ duration, thumbDataUrl });
+                done({ duration, thumbDataUrl });
             };
         };
-        video.onerror = () => resolve(null);
+        video.onerror = () => done(null);
         video.src = videoUrl;
     });
 }
@@ -4922,6 +5125,7 @@ function selectCaption(idx) {
     updatePlayhead();
 
     renderSceneProperties();
+    renderTextToolState();
 }
 
 /**
@@ -5837,6 +6041,7 @@ function selectScene(sceneId) {
     document.querySelectorAll('.media-grid-item').forEach(item => {
         item.classList.toggle('selected', parseInt(item.dataset.sceneId) === sceneId);
     });
+    renderTextToolState();
 }
 
 function selectTextOverlay(sceneId) {
@@ -5865,6 +6070,7 @@ function selectTextOverlay(sceneId) {
     updateTimeScrubber();
     updatePlayhead();
     renderSceneProperties();
+    renderTextToolState();
 }
 
 /**
@@ -6567,6 +6773,7 @@ function setupEventListeners() {
 
     // Play/Pause
     elements.playBtn?.addEventListener('click', togglePlayback);
+    setupTextTool();
 
     // Skip to Start / End
     document.getElementById('skip-start-btn')?.addEventListener('click', skipToStart);

@@ -599,41 +599,56 @@
                     <div class="tab-pane-body text-tool-pane">
                         <div class="text-tool-card">
                             <div class="text-tool-header">
-                                <div>
-                                    <p class="text-tool-kicker">Text</p>
-                                    <h3>Add Text To Timeline</h3>
+                                <div class="text-tool-header-left">
+                                    <span class="text-tool-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>
+                                        </svg>
+                                    </span>
+                                    <div>
+                                        <p class="text-tool-kicker">Text Tool</p>
+                                        <h3>Add to Timeline</h3>
+                                    </div>
                                 </div>
-                                <span class="text-tool-badge">Live</span>
+                                <span class="text-tool-badge">
+                                    <span class="text-tool-badge-dot"></span>
+                                    Live
+                                </span>
                             </div>
 
                             <label class="text-tool-field">
                                 <span>Content</span>
-                                <textarea id="text-tool-content" class="text-tool-textarea" rows="5"
+                                <textarea id="text-tool-content" class="text-tool-textarea" rows="4"
                                     placeholder="Type a title, hook, lower-third, or CTA..."></textarea>
                             </label>
 
-                            <div class="text-tool-grid">
-                                <label class="text-tool-field">
-                                    <span>Duration</span>
-                                    <input id="text-tool-duration" class="text-tool-input" type="number"
-                                        min="0.5" step="0.5" value="2.0">
-                                </label>
-                            </div>
+                            <label class="text-tool-field">
+                                <span>Duration (seconds)</span>
+                                <input id="text-tool-duration" class="text-tool-input" type="number"
+                                    min="0.5" step="0.5" value="2.0">
+                            </label>
 
                             <div id="text-tool-target" class="text-tool-target"></div>
 
                             <div class="text-tool-actions">
-                                <button id="text-add-scene" class="fx-auto-btn">
+                                <button id="text-add-scene" class="text-tool-btn text-tool-btn-primary">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="3" y="3" width="18" height="18" rx="3"/>
+                                        <path d="M12 8v8M8 12h8"/>
+                                    </svg>
                                     Add Text Scene
                                 </button>
-                                <button id="text-add-overlay" class="fx-auto-btn">
-                                    Add Overlay To Selected Scene
+                                <button id="text-add-overlay" class="text-tool-btn text-tool-btn-secondary">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="3" y="7" width="14" height="10" rx="2" opacity="0.5"/>
+                                        <rect x="7" y="3" width="14" height="10" rx="2"/>
+                                    </svg>
+                                    Overlay on Selected Scene
                                 </button>
                             </div>
 
                             <p class="text-tool-hint">
-                                Text scenes are inserted after the current selection. Overlay mode uses the
-                                selected image or video scene.
+                                Text scenes insert after selection. Overlay mode places text on the selected image or video scene.
                             </p>
                         </div>
                     </div>
@@ -642,9 +657,8 @@
                     <div class="tab-pane-body" style="padding:12px;display:flex;flex-direction:column;gap:12px">
 
                         <!-- Enable toggle -->
-                        <div
-                            style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-darker);border-radius:6px;border:1px solid var(--border-subtle)">
-                            <span style="font-size:11px;font-weight:600;color:var(--text)">Enable Captions</span>
+                        <div class="cap-panel-toggle">
+                            <span>Enable Captions</span>
                             <label class="caption-toggle">
                                 <input type="checkbox" id="caption-enabled-toggle">
                                 <span class="caption-toggle-slider"></span>
@@ -652,171 +666,140 @@
                         </div>
 
                         <!-- Status (no data) -->
-                        <div id="caption-no-data"
-                            style="text-align:center;padding:16px 8px;color:var(--text-muted);font-size:11px">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="1.5" style="margin:0 auto 8px;display:block;opacity:0.4">
+                        <div id="caption-no-data" class="cap-empty-state">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                 <rect x="2" y="4" width="20" height="16" rx="2" />
-                                <path d="M6 14h4" />
-                                <path d="M14 14h4" />
-                                <path d="M6 18h12" />
+                                <path d="M6 14h4" /><path d="M14 14h4" /><path d="M6 18h12" />
                             </svg>
                             <p>No captions loaded.</p>
-                            <p style="margin-top:4px;font-size:10px;opacity:0.6">Send captions from the Studio Captions
-                                page, or they will load automatically from alignment data.</p>
+                            <p class="cap-empty-hint">Send captions from the Studio Captions page, or they will load automatically from alignment data.</p>
                         </div>
 
                         <!-- Caption info (shown when data loaded) -->
                         <div id="caption-info" style="display:none">
-                            <div
-                                style="padding:6px 10px;background:var(--bg-darker);border-radius:6px;border:1px solid var(--border-subtle)">
-                                <div style="display:flex;align-items:center;justify-content:space-between">
-                                    <span
-                                        style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted)">Loaded</span>
-                                    <span id="caption-info-count"
-                                        style="font-size:10px;font-family:var(--font-mono);color:var(--accent)">0
-                                        captions</span>
-                                </div>
+                            <div class="cap-info-bar">
+                                <span class="cap-info-label">Loaded</span>
+                                <span id="caption-info-count" class="cap-info-value">0 captions</span>
                             </div>
                         </div>
 
                         <!-- Style controls (shown when data loaded) -->
                         <div id="caption-style-controls" style="display:none;flex-direction:column;gap:10px">
-                            <div
-                                style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted)">
-                                Style</div>
 
-                            <div>
-                                <label
-                                    style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Preset</label>
-                                <select id="cap-ed-preset" class="cap-select">
-                                    <option value="bold_popup">Bold Pop-up</option>
-                                    <option value="popup_highlight">Pop-up Highlight</option>
-                                    <option value="popup_highlight_box">Pop-up Highlight 2</option>
-                                    <option value="subtitle_bar">Subtitle Bar</option>
-                                    <option value="karaoke">Karaoke</option>
-                                    <option value="minimal">Minimal</option>
-                                    <option value="single_line">Single Line</option>
-                                    <option value="single_line_highlight">Single Line 2</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label
-                                    style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Font</label>
-                                <select id="cap-ed-font" class="cap-select"></select>
-                            </div>
-
-                            <div style="display:flex;gap:8px">
-                                <div style="flex:1">
-                                    <label
-                                        style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Size</label>
-                                    <input id="cap-ed-size" type="number" value="64" min="24" max="120" step="2"
-                                        class="cap-input">
+                            <!-- Preset & Font -->
+                            <div class="cap-section">
+                                <div class="cap-section-label">Preset</div>
+                                <div class="cap-field">
+                                    <select id="cap-ed-preset" class="cap-select">
+                                        <option value="bold_popup">Bold Pop-up</option>
+                                        <option value="popup_highlight">Pop-up Highlight</option>
+                                        <option value="popup_highlight_box">Pop-up Highlight 2</option>
+                                        <option value="subtitle_bar">Subtitle Bar</option>
+                                        <option value="karaoke">Karaoke</option>
+                                        <option value="minimal">Minimal</option>
+                                        <option value="single_line">Single Line</option>
+                                        <option value="single_line_highlight">Single Line 2</option>
+                                    </select>
                                 </div>
-                                <div style="flex:1">
-                                    <label
-                                        style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Color</label>
-                                    <input id="cap-ed-color" type="color" value="#FFFFFF" class="cap-color-input">
+                                <div class="cap-field">
+                                    <label>Font</label>
+                                    <select id="cap-ed-font" class="cap-select"></select>
                                 </div>
                             </div>
 
-                            <div style="display:flex;gap:8px">
-                                <div style="flex:1">
-                                    <label
-                                        style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Stroke</label>
-                                    <input id="cap-ed-stroke" type="color" value="#000000" class="cap-color-input">
-                                </div>
-                                <div style="flex:1">
-                                    <label
-                                        style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Stroke
-                                        Width</label>
-                                    <input id="cap-ed-stroke-width" type="number" value="4" min="0" max="20" step="1"
-                                        class="cap-input" style="width:100%">
-                                </div>
-                            </div>
+                            <div class="cap-section-divider"></div>
 
-                            <div>
-                                <label
-                                    style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Position
-                                    Y: <span id="cap-ed-pos-val">75%</span></label>
-                                <input id="cap-ed-position" type="range" min="10" max="95" value="75" class="cap-range">
-                            </div>
-
-                            <div>
-                                <label
-                                    style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Letter
-                                    Spacing: <span id="cap-ed-ls-val">0px</span></label>
-                                <input id="cap-ed-letter-spacing" type="range" min="-5" max="20" value="0" step="1"
-                                    class="cap-range">
-                            </div>
-
-                            <div style="border-top:1px solid var(--border-subtle);padding-top:10px;margin-top:2px">
-                                <div
-                                    style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:8px">
-                                    Shadow</div>
-
-                                <div style="display:flex;gap:8px;margin-bottom:8px">
-                                    <div style="flex:1">
-                                        <label
-                                            style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Color</label>
-                                        <input id="cap-ed-shadow-color" type="color" value="#000000"
-                                            class="cap-color-input">
+                            <!-- Typography -->
+                            <div class="cap-section">
+                                <div class="cap-section-label">Typography</div>
+                                <div class="cap-row">
+                                    <div class="cap-field">
+                                        <label>Size</label>
+                                        <input id="cap-ed-size" type="number" value="64" min="24" max="120" step="2" class="cap-input">
                                     </div>
-                                    <div style="flex:1">
-                                        <label
-                                            style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Blur</label>
-                                        <input id="cap-ed-shadow-blur" type="number" value="0" min="0" max="40"
-                                            step="1" class="cap-input">
+                                    <div class="cap-field">
+                                        <label>Color</label>
+                                        <input id="cap-ed-color" type="color" value="#FFFFFF" class="cap-color-input">
                                     </div>
                                 </div>
-                                <div style="display:flex;gap:8px">
-                                    <div style="flex:1">
-                                        <label
-                                            style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Offset
-                                            X</label>
-                                        <input id="cap-ed-shadow-x" type="number" value="0" min="-20" max="20"
-                                            step="1" class="cap-input">
+                                <div class="cap-row">
+                                    <div class="cap-field">
+                                        <label>Stroke</label>
+                                        <input id="cap-ed-stroke" type="color" value="#000000" class="cap-color-input">
                                     </div>
-                                    <div style="flex:1">
-                                        <label
-                                            style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Offset
-                                            Y</label>
-                                        <input id="cap-ed-shadow-y" type="number" value="0" min="-20" max="20"
-                                            step="1" class="cap-input">
+                                    <div class="cap-field">
+                                        <label>Stroke Width</label>
+                                        <input id="cap-ed-stroke-width" type="number" value="4" min="0" max="20" step="1" class="cap-input">
                                     </div>
                                 </div>
                             </div>
 
-                            <div id="cap-highlight-section"
-                                style="border-top:1px solid var(--border-subtle);padding-top:10px;margin-top:2px;display:none">
-                                <div
-                                    style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:8px">
-                                    Highlight</div>
-                                <div style="display:flex;gap:8px;align-items:flex-end">
-                                    <div style="flex:1">
-                                        <label
-                                            style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px">Active
-                                            Word Color</label>
-                                        <input id="cap-ed-highlight-color" type="color" value="#4ECDC4"
-                                            class="cap-color-input">
+                            <div class="cap-section-divider"></div>
+
+                            <!-- Position -->
+                            <div class="cap-section">
+                                <div class="cap-section-label">Position</div>
+                                <div class="cap-slider-row">
+                                    <label>Position Y <span id="cap-ed-pos-val">75%</span></label>
+                                    <input id="cap-ed-position" type="range" min="10" max="95" value="75" class="cap-range">
+                                </div>
+                                <div class="cap-slider-row">
+                                    <label>Letter Spacing <span id="cap-ed-ls-val">0px</span></label>
+                                    <input id="cap-ed-letter-spacing" type="range" min="-5" max="20" value="0" step="1" class="cap-range">
+                                </div>
+                            </div>
+
+                            <div class="cap-section-divider"></div>
+
+                            <!-- Shadow -->
+                            <div class="cap-section">
+                                <div class="cap-section-label">Shadow</div>
+                                <div class="cap-row">
+                                    <div class="cap-field">
+                                        <label>Color</label>
+                                        <input id="cap-ed-shadow-color" type="color" value="#000000" class="cap-color-input">
+                                    </div>
+                                    <div class="cap-field">
+                                        <label>Blur</label>
+                                        <input id="cap-ed-shadow-blur" type="number" value="0" min="0" max="40" step="1" class="cap-input">
+                                    </div>
+                                </div>
+                                <div class="cap-row">
+                                    <div class="cap-field">
+                                        <label>Offset X</label>
+                                        <input id="cap-ed-shadow-x" type="number" value="0" min="-20" max="20" step="1" class="cap-input">
+                                    </div>
+                                    <div class="cap-field">
+                                        <label>Offset Y</label>
+                                        <input id="cap-ed-shadow-y" type="number" value="0" min="-20" max="20" step="1" class="cap-input">
                                     </div>
                                 </div>
                             </div>
 
-                            <div style="border-top:1px solid var(--border-subtle);padding-top:10px;margin-top:2px">
-                                <div
-                                    style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:6px">
-                                    Options</div>
-                                <label
-                                    style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 0;font-size:11px;color:var(--text)">
-                                    <input type="checkbox" id="cap-clean-text-toggle" checked
-                                        style="accent-color:var(--accent);width:14px;height:14px;cursor:pointer">
+                            <!-- Highlight -->
+                            <div id="cap-highlight-section" style="display:none">
+                                <div class="cap-section-divider"></div>
+                                <div class="cap-section">
+                                    <div class="cap-section-label">Highlight</div>
+                                    <div class="cap-field">
+                                        <label>Active Word Color</label>
+                                        <input id="cap-ed-highlight-color" type="color" value="#4ECDC4" class="cap-color-input">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="cap-section-divider"></div>
+
+                            <!-- Options -->
+                            <div class="cap-section">
+                                <div class="cap-section-label">Options</div>
+                                <label class="cap-option-row">
+                                    <input type="checkbox" id="cap-clean-text-toggle" checked>
                                     Clean special characters
                                 </label>
                             </div>
-                        </div>
 
+                        </div>
                     </div>
                 </div>
                 <div class="tab-pane" data-pane="adjustment">
