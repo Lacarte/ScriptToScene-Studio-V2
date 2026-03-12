@@ -2951,6 +2951,15 @@ function getBootProjectData() {
         }
     }
 
+    const bootRaw = localStorage.getItem('sts-editor-boot-project');
+    if (bootRaw) {
+        try {
+            return buildBootProjectData(JSON.parse(bootRaw));
+        } catch (error) {
+            console.error('Failed to parse editor boot data:', error);
+        }
+    }
+
     const bridgeRaw = localStorage.getItem('sts-editor-scenes');
     if (!bridgeRaw) return null;
 
@@ -2967,6 +2976,11 @@ function setEditorBootState(state) {
     if (!body) return;
     body.classList.toggle('editor-shell-booting', state === 'booting');
     body.classList.toggle('editor-shell-loading', state === 'loading');
+    if (window.parent && window.parent !== window && state !== 'booting') {
+        try {
+            window.parent.postMessage({ type: 'editor-shell-ready', state }, '*');
+        } catch (_) { /* ignore */ }
+    }
 }
 
 function persistBootProjectData(raw, options = {}) {
@@ -2978,6 +2992,7 @@ function persistBootProjectData(raw, options = {}) {
     } catch (_) { /* ignore */ }
 
     try {
+        localStorage.setItem('sts-editor-boot-project', JSON.stringify(bootData));
         localStorage.setItem('sts-editor-scenes', JSON.stringify(bootData));
         if (bootData.source_folder) {
             localStorage.setItem('sts-editor-source-folder', bootData.source_folder);

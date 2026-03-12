@@ -2,14 +2,36 @@
    ScriptToScene Studio — Editor Module (Timeline Editor iframe)
    ================================================================ */
 
+function getStoredEditorBootProject() {
+  const candidates = [
+    sessionStorage.getItem('sts-staged-timeline'),
+    localStorage.getItem('sts-editor-boot-project'),
+    localStorage.getItem('sts-editor-scenes'),
+  ];
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    try {
+      const data = JSON.parse(raw);
+      if (data && Array.isArray(data.scenes) && data.scenes.length) {
+        return data;
+      }
+    } catch (_) { /* ignore malformed bridge data */ }
+  }
+
+  return null;
+}
+
 function initEditorIframe() {
   const iframe = $('#editor-iframe');
   const targetSrc = '/timeline-editor/editor.html';
+  const entrySource = sessionStorage.getItem('sts-editor-entry-source') || 'internal';
   if (STATE.editorLoaded && iframe.src.includes(targetSrc)) return;
   STATE.editorLoaded = false;
   iframe.style.display = 'none';
   const loadingEl = $('#editor-loading');
   let loadFinalized = false;
+  let bridgeSynced = false;
   // Restore spinner in case it was replaced with empty-state message
   loadingEl.innerHTML = `
     <div style="text-align:center">
@@ -19,42 +41,40 @@ function initEditorIframe() {
     </div>`;
   loadingEl.style.display = 'flex';
 
-  if (window._editorReadyPoll) {
-    clearInterval(window._editorReadyPoll);
-    window._editorReadyPoll = null;
+  if (window._editorShellReadyHandler) {
+    window.removeEventListener('message', window._editorShellReadyHandler);
+    window._editorShellReadyHandler = null;
   }
 
   const finalizeEditorLoad = () => {
     if (loadFinalized) return;
     loadFinalized = true;
     if (window._editorLoadTimeout) { clearTimeout(window._editorLoadTimeout); window._editorLoadTimeout = null; }
-    if (window._editorReadyPoll) { clearInterval(window._editorReadyPoll); window._editorReadyPoll = null; }
     STATE.editorLoaded = true;
     $('#editor-loading').style.display = 'none';
     iframe.style.display = 'block';
+  };
 
-    const entrySource = sessionStorage.getItem('sts-editor-entry-source') || 'internal';
+  const syncEditorBridgeData = () => {
+    if (bridgeSynced || !iframe.contentWindow) return;
+    bridgeSynced = true;
+
+    const bootProject = getStoredEditorBootProject();
 
     // Send scenes data only for internal flows (Auto-Assemble / Send to Editor).
     // When opened directly from menu, let the editor decide via no-data/import UI.
-    const scenesData = localStorage.getItem('sts-editor-scenes');
-    if (scenesData && entrySource !== 'menu') {
+    if (bootProject && entrySource !== 'menu') {
       try {
         iframe.contentWindow.postMessage({
           type: 'load-scenes',
-          data: JSON.parse(scenesData),
+          data: bootProject,
         }, '*');
       } catch (e) { console.error('Editor postMessage:', e); }
     }
 
     // Determine current project's source_folder and project_id for caption scoping
-    let currentSourceFolder = localStorage.getItem('sts-editor-source-folder') || '';
-    let currentProjectId = '';
-    try {
-      const scenes = JSON.parse(localStorage.getItem('sts-editor-scenes') || '{}');
-      if (!currentSourceFolder) currentSourceFolder = scenes.source_folder || '';
-      currentProjectId = scenes.project_id || '';
-    } catch { /* ignore */ }
+    const currentSourceFolder = localStorage.getItem('sts-editor-source-folder') || bootProject?.source_folder || '';
+    const currentProjectId = bootProject?.project_id || localStorage.getItem('sts-editor-last-project-id') || '';
 
     // Send captions data if available and matching current project.
     // Skip auto-generation when the editor loads from a server project
@@ -88,7 +108,10 @@ function initEditorIframe() {
   if (window._editorLoadTimeout) clearTimeout(window._editorLoadTimeout);
   window._editorLoadTimeout = setTimeout(() => {
     if (loadFinalized || STATE.editorLoaded) return;
-    if (window._editorReadyPoll) { clearInterval(window._editorReadyPoll); window._editorReadyPoll = null; }
+    if (window._editorShellReadyHandler) {
+      window.removeEventListener('message', window._editorShellReadyHandler);
+      window._editorShellReadyHandler = null;
+    }
     loadingEl.innerHTML = `
       <div style="text-align:center">
         <svg width="40" height="40" fill="none" stroke="var(--coral)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.7">
@@ -100,12 +123,33 @@ function initEditorIframe() {
       </div>`;
   }, 12000);
 
-  iframe.onload = finalizeEditorLoad;
+  window._editorShellReadyHandler = (event) => {
+    if (!event.data || event.data.type !== 'editor-shell-ready') return;
+    if (event.source !== iframe.contentWindow) return;
+
+    const state = event.data.state || 'ready';
+    if (state === 'loading' || state === 'ready') {
+      finalizeEditorLoad();
+    }
+    if (state === 'ready') {
+      syncEditorBridgeData();
+      window.removeEventListener('message', window._editorShellReadyHandler);
+      window._editorShellReadyHandler = null;
+    }
+  };
+  window.addEventListener('message', window._editorShellReadyHandler);
+
+  iframe.onload = () => {
+    // Keep the shell loader visible until the editor reports its own boot state.
+  };
   iframe.onerror = () => {
     if (loadFinalized) return;
     loadFinalized = true;
     if (window._editorLoadTimeout) { clearTimeout(window._editorLoadTimeout); window._editorLoadTimeout = null; }
-    if (window._editorReadyPoll) { clearInterval(window._editorReadyPoll); window._editorReadyPoll = null; }
+    if (window._editorShellReadyHandler) {
+      window.removeEventListener('message', window._editorShellReadyHandler);
+      window._editorShellReadyHandler = null;
+    }
     $('#editor-loading').innerHTML = `
       <div style="text-align:center">
         <svg width="40" height="40" fill="none" stroke="var(--coral)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.7">
@@ -118,20 +162,6 @@ function initEditorIframe() {
 
   // Attach handlers before assigning src so cached iframe loads cannot beat the callback.
   iframe.src = targetSrc + '?t=' + Date.now();
-
-  // Some refresh paths do not dispatch iframe.onload reliably. Same-origin polling
-  // lets the shell detect when the editor document is already ready.
-  window._editorReadyPoll = setInterval(() => {
-    if (loadFinalized) return;
-    try {
-      const pathname = iframe.contentWindow?.location?.pathname || '';
-      const isEditorPath = pathname === targetSrc || pathname.endsWith(targetSrc);
-      const hasEditorDoc = !!iframe.contentDocument?.documentElement;
-      if (isEditorPath && hasEditorDoc) {
-        finalizeEditorLoad();
-      }
-    } catch (_) { /* same-origin access may not be ready yet */ }
-  }, 250);
 }
 
 /**

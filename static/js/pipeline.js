@@ -190,7 +190,13 @@ function _plUpdateStep(event) {
     if (event.summary?.scenes) {
       STATE.scenesResult = event.summary.scenes;
       setModuleBadge('pipeline', event.summary.scenes.project_id);
+      localStorage.setItem('sts-editor-boot-project', JSON.stringify(event.summary.scenes));
       localStorage.setItem('sts-editor-scenes', JSON.stringify(event.summary.scenes));
+      if (event.summary.scenes.source_folder) {
+        localStorage.setItem('sts-editor-source-folder', event.summary.scenes.source_folder);
+      } else {
+        localStorage.removeItem('sts-editor-source-folder');
+      }
       // Refresh scenes history so the new project shows with style
       if (typeof loadScenesHistory === 'function') loadScenesHistory();
     }

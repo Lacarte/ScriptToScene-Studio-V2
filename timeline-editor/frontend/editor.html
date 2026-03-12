@@ -1860,6 +1860,7 @@
 
                 // Always write staged_timeline — this is the data bridge to the video editor
                 sessionStorage.setItem('sts-staged-timeline', JSON.stringify(stagedTimeline));
+                localStorage.setItem('sts-editor-boot-project', JSON.stringify(stagedTimeline));
                 localStorage.setItem('sts-editor-scenes', JSON.stringify(stagedTimeline));
                 if (stagedTimeline.source_folder) {
                     localStorage.setItem('sts-editor-source-folder', stagedTimeline.source_folder);

@@ -352,6 +352,24 @@ function stsAudioToggle() {
 }
 
 // ---- Navigation ----
+function hasStoredEditorProject() {
+  const bridgeKeys = ['sts-staged-timeline', 'sts-editor-boot-project', 'sts-editor-scenes'];
+  for (const key of bridgeKeys) {
+    const raw = key === 'sts-staged-timeline'
+      ? sessionStorage.getItem(key)
+      : localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const data = JSON.parse(raw);
+      if (data && Array.isArray(data.scenes) && data.scenes.length) {
+        return true;
+      }
+    } catch (_) { /* ignore malformed bridge data */ }
+  }
+
+  return !!localStorage.getItem('sts-editor-last-saved-project-id');
+}
+
 function switchPage(page, editorSource = 'internal') {
   $$('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
@@ -369,7 +387,7 @@ function switchPage(page, editorSource = 'internal') {
       sessionStorage.setItem('sts-editor-entry-source', editorSource || 'internal');
     } catch (_) {}
     $('#main-content').style.overflowY = 'hidden';
-    if (!localStorage.getItem('sts-editor-scenes')) {
+    if (!hasStoredEditorProject()) {
       // Hide the loading spinner and show empty state
       const loadingEl = $('#editor-loading');
       if (loadingEl) {
@@ -408,7 +426,7 @@ function restoreInitialPage() {
   } catch (_) {}
   if (!document.getElementById('page-' + page)) page = 'pipeline';
 
-  const editorSource = page === 'editor' && !localStorage.getItem('sts-editor-scenes')
+  const editorSource = page === 'editor' && !hasStoredEditorProject()
     ? 'menu'
     : 'internal';
 

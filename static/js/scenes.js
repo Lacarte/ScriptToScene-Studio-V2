@@ -825,7 +825,14 @@ async function sendToAssets() {
 
 function sendToEditor() {
   if (!STATE.scenesResult) { toast('No scenes to send', 'error'); return; }
+  try { sessionStorage.setItem('sts-staged-timeline', JSON.stringify(STATE.scenesResult)); } catch (_) {}
+  localStorage.setItem('sts-editor-boot-project', JSON.stringify(STATE.scenesResult));
   localStorage.setItem('sts-editor-scenes', JSON.stringify(STATE.scenesResult));
+  if (STATE.scenesResult.source_folder) {
+    localStorage.setItem('sts-editor-source-folder', STATE.scenesResult.source_folder);
+  } else {
+    localStorage.removeItem('sts-editor-source-folder');
+  }
   // Clear stale captions so they auto-regenerate from current alignment
   localStorage.removeItem('sts-editor-captions');
   switchPage('editor');

@@ -1221,6 +1221,7 @@ async function autoAssembleAndSendToEditor() {
   }
 
   sessionStorage.setItem('sts-staged-timeline', JSON.stringify(stagedTimeline));
+  localStorage.setItem('sts-editor-boot-project', JSON.stringify(stagedTimeline));
 
   // Keep bridge payload for compatibility with the older editor flow.
   const storeData = {
