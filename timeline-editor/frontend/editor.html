@@ -1857,6 +1857,12 @@
 
                 // Always write staged_timeline — this is the data bridge to the video editor
                 sessionStorage.setItem('sts-staged-timeline', JSON.stringify(stagedTimeline));
+                localStorage.setItem('sts-editor-scenes', JSON.stringify(stagedTimeline));
+                if (stagedTimeline.source_folder) {
+                    localStorage.setItem('sts-editor-source-folder', stagedTimeline.source_folder);
+                } else {
+                    localStorage.removeItem('sts-editor-source-folder');
+                }
 
                 // Clear old captions, then set new if available
                 localStorage.removeItem('sts-editor-captions');

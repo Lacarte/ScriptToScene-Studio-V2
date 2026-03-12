@@ -412,9 +412,11 @@ function getSceneClipThumbMarkup(scene, icon) {
         `;
     }
 
-    const videoBadge = scene.isVideo && thumbSrc
-        ? '<span class="media-video-badge">VIDEO</span>'
-        : '';
+    const typeBadge = scene.isVideo && thumbSrc
+        ? '<span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>'
+        : thumbSrc
+            ? '<span class="media-image-badge" data-tooltip="Image"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>'
+            : '';
     const mediaMarkup = thumbSrc
         ? `<img src="${thumbSrc}" alt="Scene ${scene.id}">`
         : icon;
@@ -422,7 +424,7 @@ function getSceneClipThumbMarkup(scene, icon) {
     return `
         <div class="scene-clip-thumb">
             ${mediaMarkup}
-            ${videoBadge}
+            ${typeBadge}
         </div>
     `;
 }
@@ -775,7 +777,7 @@ function isVoiceAudible() {
 
 function getEffectiveTrackVolume(track, requestedVol, voiceAudible = isVoiceAudible()) {
     const vol = Number(requestedVol ?? track?.volume ?? 1.0);
-    if (!track || track.muted) return 0;
+    if (!track || isTrackPlaybackSuppressed(track)) return 0;
     if (track.type === 'music' && track.duckingEnabled && voiceAudible) {
         const duck = Math.max(
             MIN_MUSIC_DUCKING_LEVEL,
@@ -784,6 +786,20 @@ function getEffectiveTrackVolume(track, requestedVol, voiceAudible = isVoiceAudi
         return Math.min(duck, vol);
     }
     return vol;
+}
+
+function isTrackPlaybackSuppressed(track) {
+    if (!track) return true;
+    const disabledTracks = EditorState.disabledTracks || new Set();
+    const trackKey = `audio-${track.id}`;
+    const legacyMusicDisabled = track.type === 'music' && disabledTracks.has('bgmusic');
+    return !!(
+        EditorState.isMuted
+        || track.muted
+        || disabledTracks.has(trackKey)
+        || disabledTracks.has('audio')
+        || legacyMusicDisabled
+    );
 }
 
 function ensureTrackGainNode(track) {
@@ -800,8 +816,10 @@ function ensureTrackGainNode(track) {
         source.connect(gain);
         gain.connect(ctx.destination);
         track._gainNode = gain;
+        audio.muted = false;
         audio.volume = 1.0;
     } catch (e) {
+        audio.muted = false;
         audio.volume = Math.min(1.0, getEffectiveTrackVolume(track, track.volume, isVoiceAudible()));
     }
 }
@@ -827,6 +845,7 @@ function applyTrackVolumeLive(track, requestedVol = track?.volume, options = {})
 
     const applyVolume = () => {
         const effectiveVol = getEffectiveTrackVolume(track, track.volume, isVoiceAudible());
+        track.element.muted = false;
         if (track._gainNode && EditorState._audioCtx) {
             try {
                 const now = EditorState._audioCtx.currentTime;
@@ -1450,7 +1469,12 @@ async function saveProjectToServer() {
         _serverSaveRetries = 0;
         _showSaveStatus('saved', 'Saved');
         // Mark project as WIP after first successful save
-        if (EditorState.project) EditorState.project.loadedFrom = 'wip';
+        if (EditorState.project) {
+            EditorState.project.loadedFrom = 'wip';
+            try {
+                localStorage.setItem('sts-editor-last-saved-project-id', EditorState.project.id);
+            } catch (_) { /* ignore */ }
+        }
     } catch (e) {
         _serverSaveRetries++;
         if (_serverSaveRetries <= _MAX_SAVE_RETRIES) {
@@ -2855,6 +2879,110 @@ function _restoreSavedEditorState() {
     renderTimeline();
 }
 
+function buildBootProjectData(raw) {
+    if (!raw?.scenes?.length) return null;
+
+    let runningTimestamp = 0;
+    const scenes = raw.scenes.map((scene, index) => {
+        const duration = Number(scene.duration) || 3;
+        const timestamp = scene.timestamp ?? scene.timeline_start ?? runningTimestamp;
+        runningTimestamp = Number(timestamp) + duration;
+
+        return {
+            scene_id: scene.scene_id ?? scene.id ?? scene.index ?? index,
+            type: scene.type || scene.type_of_scene || 'image',
+            image_prompt: scene.image_prompt || '',
+            text_content: scene.text_content ?? null,
+            duration,
+            timestamp,
+            image_url: scene.image_url || scene.mediaUrl || scene.image || '',
+            visual_fx: scene.visual_fx || 'none',
+            text_color: scene.text_color,
+            text_size: scene.text_size,
+            font_family: scene.font_family,
+            font_style: scene.font_style,
+            text_align: scene.text_align,
+            vertical_align: scene.vertical_align,
+            text_x: scene.text_x,
+            text_y: scene.text_y,
+            text_timeline_offset: scene.text_timeline_offset ?? 0,
+            text_overlay_duration: scene.text_overlay_duration ?? null,
+            text_background_enabled: !!scene.text_background_enabled,
+            text_background_color: scene.text_background_color || '#000000',
+            script: scene.script || scene.segment_words || '',
+            narrative_role: scene.narrative_role || '',
+            isVideo: scene.isVideo ?? ((scene.type || scene.type_of_scene) === 'video'),
+            image: scene.image || '',
+            status: scene.status || ((scene.image_url || scene.mediaUrl || scene.image) ? 'ready' : 'pending'),
+            filler_shift: scene.filler_shift || 0,
+            segment_start: scene.segment_start ?? null,
+            segment_end: scene.segment_end ?? null,
+            segment_duration: scene.segment_duration ?? null
+        };
+    });
+
+    return {
+        project_id: raw.project_id || raw.projectId || 'default',
+        project_name: raw.project_name || raw.project_id || raw.projectId || 'Untitled',
+        style: raw.style || '',
+        style_name: raw.style_name || '',
+        style_color: raw.style_color || '',
+        source_folder: raw.source_folder || '',
+        total_duration: raw.total_duration || scenes.reduce((sum, scene) => sum + (scene.duration || 0), 0),
+        scene_count: raw.scene_count || scenes.length,
+        staged_at: raw.staged_at || raw.saved_at || new Date().toISOString(),
+        scenes,
+        ...(raw.audio ? { audio: raw.audio } : {})
+    };
+}
+
+function getBootProjectData() {
+    const stagedRaw = sessionStorage.getItem('sts-staged-timeline');
+    if (stagedRaw) {
+        try {
+            return buildBootProjectData(JSON.parse(stagedRaw));
+        } catch (error) {
+            console.error('Failed to parse staged data:', error);
+        }
+    }
+
+    const bridgeRaw = localStorage.getItem('sts-editor-scenes');
+    if (!bridgeRaw) return null;
+
+    try {
+        return buildBootProjectData(JSON.parse(bridgeRaw));
+    } catch (error) {
+        console.error('Failed to parse editor bridge data:', error);
+        return null;
+    }
+}
+
+function persistBootProjectData(raw, options = {}) {
+    const bootData = buildBootProjectData(raw);
+    if (!bootData) return null;
+
+    try {
+        sessionStorage.setItem('sts-staged-timeline', JSON.stringify(bootData));
+    } catch (_) { /* ignore */ }
+
+    try {
+        localStorage.setItem('sts-editor-scenes', JSON.stringify(bootData));
+        if (bootData.source_folder) {
+            localStorage.setItem('sts-editor-source-folder', bootData.source_folder);
+        } else {
+            localStorage.removeItem('sts-editor-source-folder');
+        }
+        if (bootData.project_id) {
+            localStorage.setItem('sts-editor-last-project-id', bootData.project_id);
+            if (options.markSavedProject) {
+                localStorage.setItem('sts-editor-last-saved-project-id', bootData.project_id);
+            }
+        }
+    } catch (_) { /* ignore */ }
+
+    return bootData;
+}
+
 /**
  * Initialize the editor with sequential loading
  */
@@ -2871,22 +2999,22 @@ async function init() {
     // One-shot signal from Studio shell.
     sessionStorage.removeItem('sts-editor-entry-source');
 
-    // Check for staged data FIRST before showing any loading UI
-    const stagedData = sessionStorage.getItem('sts-staged-timeline');
-    if (!stagedData) {
+    // Prefer the staged timeline bridge, but survive refreshes with the localStorage bridge.
+    const data = getBootProjectData();
+    if (!data) {
+        const lastSavedProjectId = editorEntrySource !== 'menu'
+            ? localStorage.getItem('sts-editor-last-saved-project-id')
+            : '';
+        if (lastSavedProjectId) {
+            await loadProjectFromServer(lastSavedProjectId);
+            return;
+        }
         // Show project import list only when editor was opened directly from the menu.
-        showNoDataOverlay(editorEntrySource === 'menu');
+        showNoDataOverlay(true);
         return;
     }
 
-    let data;
-    try {
-        data = JSON.parse(stagedData);
-    } catch (error) {
-        console.error('Failed to parse staged data:', error);
-        showNoDataOverlay(editorEntrySource === 'menu');
-        return;
-    }
+    persistBootProjectData(data);
 
     // Data exists - hide no-data overlay immediately (in case browser cached old HTML)
     hideNoDataOverlay();
@@ -2969,6 +3097,14 @@ async function loadProjectData(data) {
         mediaLoaded: !!scene.image_url,
         mediaUrl: scene.image_url || null
     }));
+    persistBootProjectData({
+        ...data,
+        project_name: EditorState.project.name,
+        style_name: EditorState.project.styleName,
+        style_color: EditorState.project.styleColor
+    }, {
+        markSavedProject: EditorState.project.loadedFrom === 'wip' || EditorState.project.loadedFrom === 'initial'
+    });
     EditorState.scenes.forEach(normalizeSceneTextOverlay);
     renderTextToolState();
 
@@ -3442,17 +3578,16 @@ function updateSceneClipThumb(sceneId, mediaPath, isVideo = false, videoThumbUrl
     const thumb = clip.querySelector('.scene-clip-thumb');
     if (!thumb) return;
 
+    const videoBadgeHtml = '<span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>';
+    const imageBadgeHtml = '<span class="media-image-badge" data-tooltip="Image"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>';
+
     if (isVideo && videoThumbUrl) {
-        // Use pre-generated thumbnail data URL
-        thumb.innerHTML = `<img src="${videoThumbUrl}" alt="Scene ${sceneId}">
-            <span class="media-video-badge">VIDEO</span>`;
+        thumb.innerHTML = `<img src="${videoThumbUrl}" alt="Scene ${sceneId}">${videoBadgeHtml}`;
     } else if (isVideo) {
-        // Fallback: generate thumbnail from video
         thumb.classList.add('loading');
         getVideoMeta(mediaPath).then(meta => {
             if (meta?.thumbDataUrl) {
-                thumb.innerHTML = `<img src="${meta.thumbDataUrl}" alt="Scene ${sceneId}">
-                    <span class="media-video-badge">VIDEO</span>`;
+                thumb.innerHTML = `<img src="${meta.thumbDataUrl}" alt="Scene ${sceneId}">${videoBadgeHtml}`;
             }
             thumb.classList.remove('loading');
         });
@@ -3460,7 +3595,7 @@ function updateSceneClipThumb(sceneId, mediaPath, isVideo = false, videoThumbUrl
         thumb.classList.add('loading');
         const img = new Image();
         img.onload = () => {
-            thumb.innerHTML = `<img src="${mediaPath}" alt="Scene ${sceneId}">`;
+            thumb.innerHTML = `<img src="${mediaPath}" alt="Scene ${sceneId}">${imageBadgeHtml}`;
             thumb.classList.remove('loading');
         };
         img.onerror = () => thumb.classList.remove('loading');
@@ -3500,13 +3635,13 @@ function renderMediaGrid() {
                 ${hasMedia
                 ? (scene.isVideo && scene.videoThumb
                     ? `<img src="${scene.videoThumb}" alt="Scene ${scene.id}" style="width:100%;height:100%;object-fit:cover">
-                       <span class="media-video-badge">VIDEO</span>`
+                       <span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>`
                     : scene.isVideo
                         ? `<div class="media-grid-placeholder">${icon}</div>
-                           <span class="media-video-badge">VIDEO</span>`
+                           <span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>`
                         : `<img src="${scene.mediaUrl}" alt="Scene ${scene.id}">`)
                 : `<div class="media-grid-placeholder">${icon}</div>`}
-                ${hasMedia ? '<span class="media-grid-badge">Added</span>' : ''}
+                ${hasMedia ? '<span class="media-grid-badge" data-tooltip="Added"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></span>' : ''}
                 <span class="media-grid-duration">${dur}s</span>
                 <span class="media-grid-label">${label}</span>
             </div>`;
@@ -3631,7 +3766,7 @@ function renderProjectAssets(pane, data) {
                           title="${sceneLabel} — ${file.filename}">
                 ${/\.(mp4|webm|mov|avi|mkv)$/i.test(file.url) ? `<video src="${file.url}#t=0.1" muted preload="auto" style="width:100%;height:100%;object-fit:cover"
                     onmouseenter="this.play();this.nextElementSibling.style.opacity='0'"
-                    onmouseleave="this.pause();this.currentTime=0.1;this.nextElementSibling.style.opacity='1'"></video><span class="vid-play-icon" style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity 0.2s;z-index:1"><svg width="8" height="8" fill="white" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span>` : `<img src="${file.url}" alt="${file.filename}" loading="lazy">`}
+                    onmouseleave="this.pause();this.currentTime=0.1;this.nextElementSibling.style.opacity='1'"></video><span class="vid-play-icon" style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity 0.2s;z-index:1"><svg width="8" height="8" fill="white" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span><span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>` : `<img src="${file.url}" alt="${file.filename}" loading="lazy"><span class="media-image-badge" data-tooltip="Image"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>`}
                 ${isActive ? '<span class="asset-thumb-active">In use</span>' : ''}
             </div>`;
         });
@@ -4559,7 +4694,7 @@ function toggleVolumePopup(trackId, anchorBtn) {
     // Wire mute toggle
     popup.querySelector('.volume-mute-toggle').addEventListener('click', () => {
         track.muted = !track.muted;
-        if (track.element) track.element.muted = track.muted;
+        applyTrackVolumeLive(track, track.volume, { resumeContext: true });
         popup.remove();
         renderAllAudioTracks();
         saveProjectEdits();
@@ -7149,12 +7284,7 @@ function updatePreviewFromDisabledTracks() {
     // 2. Audio tracks — mute/unmute based on global mute or per-track disable
     for (const track of EditorState.audioTracks) {
         if (!track.element) continue;
-        const trackKey = `audio-${track.id}`;
-        const globalMuted = EditorState.isMuted;
-        const trackDisabled = EditorState.disabledTracks.has(trackKey)
-            || EditorState.disabledTracks.has('audio')   // legacy: mute all audio
-            || EditorState.disabledTracks.has('bgmusic'); // legacy: mute music
-        track.element.muted = globalMuted || trackDisabled || track.muted;
+        applyTrackVolumeLive(track, track.volume);
     }
 
     // 4. Caption track disabled - Hide/Show captions in preview
@@ -7469,9 +7599,9 @@ function toggleLoop() {
 function toggleMute() {
     EditorState.isMuted = !EditorState.isMuted;
 
-    // Apply mute to all audio track elements
+    // Keep mute state in the same live output path as the volume sliders.
     for (const track of EditorState.audioTracks) {
-        if (track.element) track.element.muted = EditorState.isMuted || track.muted;
+        applyTrackVolumeLive(track, track.volume);
     }
 
     // Update button icon

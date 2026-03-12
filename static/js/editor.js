@@ -9,6 +9,7 @@ function initEditorIframe() {
   STATE.editorLoaded = false;
   iframe.style.display = 'none';
   const loadingEl = $('#editor-loading');
+  let loadFinalized = false;
   // Restore spinner in case it was replaced with empty-state message
   loadingEl.innerHTML = `
     <div style="text-align:center">
@@ -18,25 +19,16 @@ function initEditorIframe() {
     </div>`;
   loadingEl.style.display = 'flex';
 
-  // Timeout: show retry UI if iframe doesn't load within 12s
-  if (window._editorLoadTimeout) clearTimeout(window._editorLoadTimeout);
-  window._editorLoadTimeout = setTimeout(() => {
-    if (STATE.editorLoaded) return;
-    loadingEl.innerHTML = `
-      <div style="text-align:center">
-        <svg width="40" height="40" fill="none" stroke="var(--coral)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.7">
-          <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
-        </svg>
-        <p style="color:var(--coral);margin-bottom:4px">Timeline Editor didn't respond</p>
-        <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">The editor server may not be running or is slow to respond.</p>
-        <button onclick="initEditorIframe()" style="padding:6px 18px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;font-size:12px;transition:border-color .2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.12)'">Retry</button>
-      </div>`;
-  }, 12000);
+  if (window._editorReadyPoll) {
+    clearInterval(window._editorReadyPoll);
+    window._editorReadyPoll = null;
+  }
 
-  // Cache-bust to force reload+onload when src is already set
-  iframe.src = targetSrc + '?t=' + Date.now();
-  iframe.onload = () => {
+  const finalizeEditorLoad = () => {
+    if (loadFinalized) return;
+    loadFinalized = true;
     if (window._editorLoadTimeout) { clearTimeout(window._editorLoadTimeout); window._editorLoadTimeout = null; }
+    if (window._editorReadyPoll) { clearInterval(window._editorReadyPoll); window._editorReadyPoll = null; }
     STATE.editorLoaded = true;
     $('#editor-loading').style.display = 'none';
     iframe.style.display = 'block';
@@ -91,8 +83,29 @@ function initEditorIframe() {
       _editorAutoGenerateCaptions(iframe, currentSourceFolder, currentProjectId);
     }
   };
+
+  // Timeout: show retry UI if iframe doesn't load within 12s
+  if (window._editorLoadTimeout) clearTimeout(window._editorLoadTimeout);
+  window._editorLoadTimeout = setTimeout(() => {
+    if (loadFinalized || STATE.editorLoaded) return;
+    if (window._editorReadyPoll) { clearInterval(window._editorReadyPoll); window._editorReadyPoll = null; }
+    loadingEl.innerHTML = `
+      <div style="text-align:center">
+        <svg width="40" height="40" fill="none" stroke="var(--coral)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.7">
+          <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+        </svg>
+        <p style="color:var(--coral);margin-bottom:4px">Timeline Editor didn't respond</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:14px">The editor server may not be running or is slow to respond.</p>
+        <button onclick="initEditorIframe()" style="padding:6px 18px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;font-size:12px;transition:border-color .2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.12)'">Retry</button>
+      </div>`;
+  }, 12000);
+
+  iframe.onload = finalizeEditorLoad;
   iframe.onerror = () => {
+    if (loadFinalized) return;
+    loadFinalized = true;
     if (window._editorLoadTimeout) { clearTimeout(window._editorLoadTimeout); window._editorLoadTimeout = null; }
+    if (window._editorReadyPoll) { clearInterval(window._editorReadyPoll); window._editorReadyPoll = null; }
     $('#editor-loading').innerHTML = `
       <div style="text-align:center">
         <svg width="40" height="40" fill="none" stroke="var(--coral)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.7">
@@ -102,6 +115,23 @@ function initEditorIframe() {
         <p style="font-size:11px;margin-top:4px;color:var(--text-muted)">Ensure the editor files are served at /timeline-editor/</p>
       </div>`;
   };
+
+  // Attach handlers before assigning src so cached iframe loads cannot beat the callback.
+  iframe.src = targetSrc + '?t=' + Date.now();
+
+  // Some refresh paths do not dispatch iframe.onload reliably. Same-origin polling
+  // lets the shell detect when the editor document is already ready.
+  window._editorReadyPoll = setInterval(() => {
+    if (loadFinalized) return;
+    try {
+      const pathname = iframe.contentWindow?.location?.pathname || '';
+      const isEditorPath = pathname === targetSrc || pathname.endsWith(targetSrc);
+      const hasEditorDoc = !!iframe.contentDocument?.documentElement;
+      if (isEditorPath && hasEditorDoc) {
+        finalizeEditorLoad();
+      }
+    } catch (_) { /* same-origin access may not be ready yet */ }
+  }, 250);
 }
 
 /**

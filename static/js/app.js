@@ -401,6 +401,20 @@ function openEditorFromMenu() {
   switchPage('editor', 'menu');
 }
 
+function restoreInitialPage() {
+  let page = 'pipeline';
+  try {
+    page = sessionStorage.getItem('sts-current-page') || page;
+  } catch (_) {}
+  if (!document.getElementById('page-' + page)) page = 'pipeline';
+
+  const editorSource = page === 'editor' && !localStorage.getItem('sts-editor-scenes')
+    ? 'menu'
+    : 'internal';
+
+  switchPage(page, editorSource);
+}
+
 function toggleSidebar() {
   $('#sidebar').classList.toggle('collapsed');
   STS.set('sts-sidebar', $('#sidebar').classList.contains('collapsed'));
@@ -511,6 +525,8 @@ function settingsToggle(key, val) {
 
 // Restore toggles on load (after STS.init resolves)
 document.addEventListener('DOMContentLoaded', () => {
+  restoreInitialPage();
+
   window._stsReady.then(() => {
     STS_SETTINGS.normalize = STS.get('sts-normalize');
     STS_SETTINGS.clean = STS.get('sts-clean');
