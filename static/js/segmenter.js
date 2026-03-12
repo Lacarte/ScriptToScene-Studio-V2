@@ -519,7 +519,17 @@ function renderSegHistory(items) {
             <span style="font-size:13px;color:${isActive ? 'var(--accent)' : 'var(--text)'};font-weight:${isActive ? '600' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.project_id || item.source_folder || item.folder)}</span>
             ${isActive ? '<span class="font-mono" style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(78,205,196,0.15);color:var(--accent);letter-spacing:0.05em;flex-shrink:0">ACTIVE</span>' : ''}
           </div>
-          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:0">${item.segment_count} segments · ${item.filler_count} fillers · avg ${item.avg_duration.toFixed(2)}s · ${item.total_duration.toFixed(1)}s total · ${timeAgo(item.segmented_at)}</p>
+          <div class="font-mono" style="font-size:10px;color:var(--text-muted);margin:0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="color:#4ECDC4">${item.segment_count} segments</span>
+            <span style="opacity:0.3">/</span>
+            <span style="color:#FFB347">${item.filler_count} fillers</span>
+            <span style="opacity:0.3">/</span>
+            <span style="color:var(--text-secondary)">avg ${item.avg_duration.toFixed(2)}s</span>
+            <span style="opacity:0.3">/</span>
+            <span style="color:var(--text-secondary)">${item.total_duration.toFixed(1)}s total</span>
+            <span style="opacity:0.3">/</span>
+            <span>${timeAgo(item.segmented_at)}</span>
+          </div>
         </div>
         <svg width="14" height="14" fill="none" stroke="${isActive ? 'var(--accent)' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>
       </div>

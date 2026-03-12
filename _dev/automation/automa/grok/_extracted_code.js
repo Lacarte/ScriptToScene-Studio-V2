@@ -1201,13 +1201,27 @@ async function startTyping() {
   // Collect ALL existing video URLs on the page before we start typing
   // Strip query params for reliable comparison (Grok appends ?cache=N)
   var seenVideoUrls = new Set();
-  function addSeen(url) { if (url) seenVideoUrls.add(url.replace(/\?.*$/, '')); }
+  function addSeen(url) {
+    if (!url) return;
+    var clean = url.replace(/\?.*$/, '');
+    seenVideoUrls.add(clean);
+    // Reserve the eventual video URL for any generated asset UUID,
+    // regardless of the original filename (preview_image, image_0, etc.)
+    var um = clean.match(/\/users\/([a-f0-9-]+)\/generated\/([a-f0-9-]+)\//);
+    if (um) {
+      seenVideoUrls.add('https://assets.grok.com/users/' + um[1] + '/generated/' + um[2] + '/generated_video.mp4');
+    }
+  }
   document.querySelectorAll('video[src*="assets.grok.com"]').forEach(function(v) {
     addSeen(v.src || v.getAttribute('src') || '');
   });
+  // Also pre-seed from existing thumbnail/generated images already on the page
+  document.querySelectorAll('img[src*="assets.grok.com"][src*="/generated/"]').forEach(function(img) {
+    addSeen(img.src || img.getAttribute('src') || '');
+  });
   var sdv = document.getElementById('sd-video');
   if (sdv && sdv.src) addSeen(sdv.src);
-  console.log('Pre-existing videos to ignore:', seenVideoUrls.size);
+  console.log('Pre-existing assets to ignore:', seenVideoUrls.size);
 
   for (let i = 0; i < tq.length; i++) {
     if (!S.typing.active) break;

@@ -379,7 +379,7 @@
 
     <!-- Navigation -->
     <div class="flex-1 py-3 flex flex-col gap-0.5">
-      <button class="nav-item active" onclick="switchPage('pipeline')" data-page="pipeline" title="Pipeline Dashboard">
+      <button class="nav-item" onclick="switchPage('pipeline')" data-page="pipeline" title="Pipeline Dashboard">
         <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           viewBox="0 0 24 24">
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
@@ -407,13 +407,13 @@
         <span class="nav-label">ALIGNMENT</span>
       </button>
       <button class="nav-item" onclick="switchPage('segmenter')" data-page="segmenter" title="Scene Segmenter">
-        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        <svg class="nav-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
           viewBox="0 0 24 24">
-          <path d="M4 6h16" />
-          <path d="M4 12h10" />
-          <path d="M4 18h6" />
-          <path d="M18 10v8" />
-          <path d="M15 13l3-3 3 3" />
+          <circle cx="6" cy="6" r="3" />
+          <circle cx="6" cy="18" r="3" />
+          <line x1="20" y1="4" x2="8.12" y2="15.88" />
+          <line x1="14.47" y1="14.48" x2="20" y2="20" />
+          <line x1="8.12" y1="8.12" x2="12" y2="12" />
         </svg>
         <span class="nav-label">SEGMENTER</span>
       </button>
@@ -516,12 +516,12 @@
       ALIGNMENT
     </button>
     <button onclick="switchPage('segmenter')" data-page="segmenter">
-      <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
-        <path d="M4 6h16" />
-        <path d="M4 12h10" />
-        <path d="M4 18h6" />
-        <path d="M18 10v8" />
-        <path d="M15 13l3-3 3 3" />
+      <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <circle cx="6" cy="6" r="3" />
+        <circle cx="6" cy="18" r="3" />
+        <line x1="20" y1="4" x2="8.12" y2="15.88" />
+        <line x1="14.47" y1="14.48" x2="20" y2="20" />
+        <line x1="8.12" y1="8.12" x2="12" y2="12" />
       </svg>
       SEGMENTER
     </button>
@@ -563,7 +563,7 @@
     <!-- ========================================================== -->
     <!-- PAGE: PIPELINE (Auto Pipeline)                             -->
     <!-- ========================================================== -->
-    <div id="page-pipeline" class="page active">
+    <div id="page-pipeline" class="page">
       <div class="mx-auto px-6 py-8" style="max-width:780px">
 
         <!-- Header -->
@@ -653,13 +653,15 @@
         </section>
 
         <!-- History -->
-        <section class="card p-5">
-          <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-3"
-            style="color:var(--text-muted)">History</label>
-          <div id="pipeline-jobs" style="max-height:300px;overflow-y:auto">
+        <div style="margin-top:28px">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-display text-lg font-bold" style="color:var(--text)">History</h3>
+            <span id="pipeline-history-count" class="font-mono text-xs" style="color:var(--text-muted)"></span>
+          </div>
+          <div id="pipeline-jobs" style="max-height:400px;overflow-y:auto">
             <p style="text-align:center;color:var(--text-muted);font-size:11px;padding:24px 0">Loading...</p>
           </div>
-        </section>
+        </div>
 
       </div>
     </div>
@@ -836,7 +838,7 @@
                 style="padding:3px 10px;font-size:10px">Delete All</button>
             </div>
           </div>
-          <div id="tts-history-list"></div>
+          <div id="tts-history-list" style="max-height:400px;overflow-y:auto"></div>
         </div>
 
       </div>
@@ -955,7 +957,7 @@
             <h3 class="font-display text-lg font-bold" style="color:var(--text)">History</h3>
             <span id="history-count" class="font-mono text-xs" style="color:var(--text-muted)">0 files</span>
           </div>
-          <div id="history-list"></div>
+          <div id="history-list" style="max-height:400px;overflow-y:auto"></div>
         </div>
 
       </div>
@@ -1066,7 +1068,7 @@
             <h3 class="font-display text-lg font-bold" style="color:var(--text)">History</h3>
             <span id="seg-history-count" class="font-mono text-xs" style="color:var(--text-muted)">0 results</span>
           </div>
-          <div id="seg-history-list"></div>
+          <div id="seg-history-list" style="max-height:400px;overflow-y:auto"></div>
         </div>
 
       </div>
@@ -1255,7 +1257,7 @@
             <h3 class="font-display text-lg font-bold" style="color:var(--text)">History</h3>
             <span id="scenes-history-count" class="font-mono text-xs" style="color:var(--text-muted)">0 projects</span>
           </div>
-          <div id="scenes-history-list"></div>
+          <div id="scenes-history-list" style="max-height:400px;overflow-y:auto"></div>
         </div>
 
       </div>
@@ -1553,8 +1555,35 @@
             <span class="font-mono text-xs" style="color:var(--text-muted)">Source: output/exports</span>
             <span id="export-library-count" class="font-mono text-xs" style="color:var(--text-muted)">0 videos</span>
           </div>
+          <!-- Filter / Sort toolbar -->
+          <div id="explib-toolbar" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <select id="explib-sort" onchange="_expLibApplyFilters()" style="background:var(--bg-darkest);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer">
+              <option value="date-desc">Newest first</option>
+              <option value="date-asc">Oldest first</option>
+              <option value="duration-desc">Longest first</option>
+              <option value="duration-asc">Shortest first</option>
+              <option value="size-desc">Largest first</option>
+              <option value="size-asc">Smallest first</option>
+            </select>
+            <select id="explib-filter-style" onchange="_expLibApplyFilters()" style="background:var(--bg-darkest);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer">
+              <option value="">All styles</option>
+            </select>
+            <select id="explib-filter-ratio" onchange="_expLibApplyFilters()" style="background:var(--bg-darkest);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer">
+              <option value="">All ratios</option>
+            </select>
+            <select id="explib-filter-duration" onchange="_expLibApplyFilters()" style="background:var(--bg-darkest);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer">
+              <option value="">All durations</option>
+              <option value="0-15">Under 15s</option>
+              <option value="15-30">15s – 30s</option>
+              <option value="30-60">30s – 1m</option>
+              <option value="60-180">1m – 3m</option>
+              <option value="180-">Over 3m</option>
+            </select>
+            <span id="explib-filter-count" class="font-mono" style="font-size:10px;color:var(--text-muted);margin-left:auto"></span>
+          </div>
         </section>
 
+        <div id="explib-stats" style="display:none"></div>
         <div id="export-library-list"></div>
       </div>
     </div>
@@ -1740,6 +1769,18 @@
 
   </div>
 
+  <!-- Restore saved page instantly (before paint) to prevent flicker -->
+  <script>
+    (function() {
+      var p = 'pipeline';
+      try { p = sessionStorage.getItem('sts-current-page') || p; } catch(_) {}
+      var el = document.getElementById('page-' + p);
+      if (!el) { p = 'pipeline'; el = document.getElementById('page-pipeline'); }
+      if (el) el.classList.add('active');
+      var nav = document.querySelector('.nav-item[data-page="' + p + '"]');
+      if (nav) nav.classList.add('active');
+    })();
+  </script>
   <!-- ===== JavaScript Modules ===== -->
   <script src="js/app.js"></script>
   <script src="js/tts.js"></script>

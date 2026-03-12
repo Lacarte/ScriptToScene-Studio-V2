@@ -377,16 +377,24 @@ async function loadCaptionsHistory() {
       list.innerHTML = '<p style="text-align:center;padding:24px;font-size:12px;color:var(--text-muted)">No caption projects yet</p>';
       return;
     }
-    list.innerHTML = items.map(h => `
-      <div class="hist-item" style="cursor:pointer" onclick="loadCaptionProject('${esc(h.project_id)}')">
+    const capActiveId = STATE.captionData?.project_id || '';
+    list.innerHTML = items.map(h => {
+      const isActive = h.project_id === capActiveId;
+      return `
+      <div class="hist-item${isActive ? ' active' : ''}" data-project="${esc(h.project_id)}" style="cursor:pointer" onclick="loadCaptionProject('${esc(h.project_id)}')">
         <div style="display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px">
           <div style="flex:1;min-width:0">
             <p style="font-size:13px;color:var(--text);margin:0">${esc(h.project_id)}</p>
-            <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${h.caption_count} captions · ${h.preset || ''} · ${timeAgo(h.timestamp)}</p>
+            <div class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span style="color:#4ECDC4">${h.caption_count} captions</span>
+              ${h.preset ? `<span style="opacity:0.3">/</span><span style="color:var(--text-secondary)">${esc(h.preset)}</span>` : ''}
+              <span style="opacity:0.3">/</span>
+              <span>${timeAgo(h.timestamp)}</span>
+            </div>
           </div>
         </div>
       </div>
-    `).join('');
+    `}).join('');
   } catch (e) { /* ignore */ }
 }
 
@@ -396,6 +404,10 @@ async function loadCaptionProject(projectId) {
     STATE.captionData = data;
     renderCaptionList();
     renderCaptionStylePanel(data.style);
+    // Update active glow on captions history
+    document.querySelectorAll('#captions-history-list .hist-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.project === projectId);
+    });
     toast('Captions loaded');
   } catch (e) { toast(e.message, 'error'); }
 }

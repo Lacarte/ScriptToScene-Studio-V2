@@ -9,6 +9,17 @@ AUTOMA_PATH = "_dev/automation/automa/grok/Grok Assets Synchronizer.automa.json"
 with open(AUTOMA_PATH, encoding="utf-8") as f:
     data = json.load(f)
 
+OLD_ADD_SEEN = "  function addSeen(url) { if (url) seenVideoUrls.add(url.replace(/\\?.*$/, '')); }"
+NEW_ADD_SEEN = """  function addSeen(url) {
+    if (!url) return;
+    var clean = url.replace(/\\?.*$/, '');
+    seenVideoUrls.add(clean);
+    // If we only observed a preview frame, also reserve its eventual video URL.
+    if (clean.includes('/preview_image.')) {
+      seenVideoUrls.add(clean.replace(/\\/preview_image\\.(jpg|jpeg|png|webp)$/i, '/generated_video.mp4'));
+    }
+  }"""
+
 nodes = data["drawflow"]["nodes"]
 for node in nodes:
     if node.get("id") != "sync_js":
@@ -187,6 +198,12 @@ function collectAllVideoUrls() {
         print("[OK] Updated retry caller")
     else:
         print("[WARN] Could not find retry caller pattern")
+
+    if OLD_ADD_SEEN in code:
+        code = code.replace(OLD_ADD_SEEN, NEW_ADD_SEEN)
+        print("[OK] Updated addSeen to reserve derived video URLs")
+    else:
+        print("[SKIP] addSeen already updated or pattern not found")
 
     # ── 5. Update rescan to collect all thumbnail URLs per scene ──
     old_rescan = (

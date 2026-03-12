@@ -3146,11 +3146,12 @@ function _loadNoDataProjects() {
                             ${savedBadge}
                             <span style="width:6px;height:6px;border-radius:50%;background:${sc};flex-shrink:0"></span>
                         </div>
-                        <div style="display:flex;gap:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666)">
-                            <span>${scenes} scene${scenes !== 1 ? 's' : ''}</span>
-                            ${ready > 0 ? '<span style="color:#4ECDC4">' + ready + ' ready</span>' : ''}
-                            ${files > 0 ? '<span>' + files + ' files</span>' : ''}
-                            ${savedTime || '<span style="opacity:0.7">' + time + '</span>'}
+                        <div style="display:flex;gap:6px;align-items:center;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666);flex-wrap:wrap">
+                            <span style="color:#4ECDC4">${scenes} scene${scenes !== 1 ? 's' : ''}</span>
+                            ${ready > 0 ? '<span style="opacity:0.3">/</span><span style="color:#26DE81">' + ready + ' ready</span>' : ''}
+                            ${files > 0 ? '<span style="opacity:0.3">/</span><span style="color:var(--text-secondary,#999)">' + files + ' files</span>' : ''}
+                            <span style="opacity:0.3">/</span>
+                            ${savedTime || '<span>' + time + '</span>'}
                         </div>
                     </div>
                     <svg width="14" height="14" fill="none" stroke="${isSaved ? 'var(--accent,#4ECDC4)' : 'var(--text-muted,#666)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
@@ -4378,8 +4379,8 @@ function openShareDialog() {
     const metaEl = document.getElementById('share-project-meta');
     if (nameEl) nameEl.textContent = EditorState.project?.name || EditorState.project?.id || '';
     const isWip = EditorState.project?.loadedFrom === 'wip';
-    const wipBadge = isWip ? ' · <span style="color:#FFB347;font-weight:600">edited</span>' : '';
-    if (metaEl) metaEl.innerHTML = `${EditorState.scenes.length} scenes · ${formatTimestamp(getTotalDuration())}${wipBadge}`;
+    const wipBadge = isWip ? ' <span style="opacity:0.3">/</span> <span style="color:#FFB347;font-weight:600">edited</span>' : '';
+    if (metaEl) metaEl.innerHTML = `<span style="color:#4ECDC4">${EditorState.scenes.length} scenes</span> <span style="opacity:0.3">/</span> ${formatTimestamp(getTotalDuration())}${wipBadge}`;
 
     // Reset progress indicators
     _resetShareStatus('export');

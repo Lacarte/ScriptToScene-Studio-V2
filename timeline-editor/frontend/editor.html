@@ -1089,7 +1089,7 @@
                         <div style="font-size:15px;font-weight:700;color:var(--text);letter-spacing:-0.02em">Export, Import & Share</div>
                         <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
                             <span id="share-project-name" style="font-size:12px;font-weight:600;color:var(--accent);font-family:'JetBrains Mono',monospace"></span>
-                            <span style="color:var(--border)">|</span>
+                            <span style="opacity:0.3">/</span>
                             <span id="share-project-meta" style="font-size:11px;color:var(--text-muted)"></span>
                         </div>
                     </div>
@@ -1386,11 +1386,12 @@
                                         <span style="font-size:12px;font-weight:600;color:var(--text,#e0e0e0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(p.project_id)}</span>
                                         <span style="width:6px;height:6px;border-radius:50%;background:${sc};flex-shrink:0"></span>
                                     </div>
-                                    <div style="display:flex;gap:8px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666)">
-                                        <span>${scenes} scene${scenes !== 1 ? 's' : ''}</span>
-                                        ${ready > 0 ? '<span style="color:#4ECDC4">' + ready + ' ready</span>' : ''}
-                                        ${files > 0 ? '<span>' + files + ' files</span>' : ''}
-                                        <span style="opacity:0.7">${time}</span>
+                                    <div style="display:flex;gap:6px;align-items:center;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-muted,#666);flex-wrap:wrap">
+                                        <span style="color:#4ECDC4">${scenes} scene${scenes !== 1 ? 's' : ''}</span>
+                                        ${ready > 0 ? '<span style="opacity:0.3">/</span><span style="color:#26DE81">' + ready + ' ready</span>' : ''}
+                                        ${files > 0 ? '<span style="opacity:0.3">/</span><span style="color:var(--text-secondary,#999)">' + files + ' files</span>' : ''}
+                                        <span style="opacity:0.3">/</span>
+                                        <span>${time}</span>
                                     </div>
                                 </div>
                                 <svg width="14" height="14" fill="none" stroke="var(--text-muted,#666)" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>

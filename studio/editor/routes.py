@@ -158,6 +158,36 @@ def _resolve_export_relpath(rel_path: str) -> str:
     return abs_path
 
 
+import shutil as _shutil
+_ffprobe_bin = _shutil.which("ffprobe")
+
+
+def _ffprobe_video(abs_path: str) -> dict:
+    """Return {duration, width, height} via ffprobe, or empty dict on failure."""
+    if not _ffprobe_bin:
+        return {}
+    try:
+        r = subprocess.run(
+            [_ffprobe_bin, "-v", "quiet", "-print_format", "json",
+             "-show_format", "-show_streams", abs_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            return {}
+        data = json.loads(r.stdout)
+        dur = float((data.get("format") or {}).get("duration", 0))
+        # Find video stream for dimensions
+        w, h = 0, 0
+        for s in data.get("streams", []):
+            if s.get("codec_type") == "video":
+                w = int(s.get("width", 0))
+                h = int(s.get("height", 0))
+                break
+        return {"duration": round(dur, 2), "width": w, "height": h}
+    except Exception:
+        return {}
+
+
 def _cleanup_old_export_jobs():
     """Evict completed/failed jobs older than EXPORT_MAX_JOB_AGE."""
     now = time.time()
@@ -1025,6 +1055,37 @@ def _process_video(job_id, export_data, output_path):
         logger.success("[{}] Export completed — {} ({:.1f} MB)",
                        short_id, output_path, file_size / (1024 * 1024))
 
+        # Derive aspect ratio from resolution
+        _res = (export_data.get("output") or {}).get("resolution") or {}
+        _w, _h = _res.get("width", 0), _res.get("height", 0)
+        _ratio = f"{_w}:{_h}" if _w and _h else ""
+
+        # Try to read style from the scenes project
+        _style = ""
+        try:
+            _scenes_json = os.path.join(SCENES_DIR, project_id, "scenes.json")
+            if os.path.isfile(_scenes_json):
+                _sdata = safe_json_read(_scenes_json)
+                _style = _sdata.get("style", "")
+        except Exception:
+            pass
+
+        # Probe exported video for duration and dimensions
+        _probe = _ffprobe_video(output_path)
+
+        safe_json_write(os.path.splitext(output_path)[0] + ".json", {
+            "job_id": job_id,
+            "project_id": job.get("project_id", ""),
+            "output_filename": job.get("output_filename", ""),
+            "completed_at": time.time(),
+            "scene_count": scene_count,
+            "style": _style,
+            "ratio": _ratio,
+            "duration": _probe.get("duration", 0),
+            "width": _probe.get("width", 0),
+            "height": _probe.get("height", 0),
+        }, indent=2)
+
         safe_json_write(_metadata_path(), {
             "job_id": job_id,
             "project_id": job.get("project_id", ""),
@@ -1176,12 +1237,53 @@ def export_library_list():
             folder_project_id = _safe_project_id(os.path.basename(root))
             meta_path = os.path.splitext(abs_video)[0] + ".json"
             project_id = ""
+            meta_style = ""
+            meta_ratio = ""
+            meta_scene_count = 0
+            meta_duration = 0
+            meta_width = 0
+            meta_height = 0
+            meta_dirty = False  # whether sidecar needs update
             if os.path.isfile(meta_path):
                 try:
                     meta = safe_json_read(meta_path)
                     project_id = _safe_project_id(meta.get("project_id", ""))
+                    meta_style = meta.get("style", "")
+                    meta_ratio = meta.get("ratio", "")
+                    meta_scene_count = meta.get("scene_count", 0)
+                    meta_duration = meta.get("duration", 0)
+                    meta_width = meta.get("width", 0)
+                    meta_height = meta.get("height", 0)
                 except Exception:
                     project_id = ""
+
+            # Probe video if duration/dimensions are missing
+            if not meta_duration or not meta_width:
+                probe = _ffprobe_video(abs_video)
+                if probe:
+                    if not meta_duration and probe.get("duration"):
+                        meta_duration = probe["duration"]
+                        meta_dirty = True
+                    if not meta_width and probe.get("width"):
+                        meta_width = probe["width"]
+                        meta_height = probe.get("height", 0)
+                        meta_dirty = True
+
+            # Build video_ratio from actual dimensions
+            video_ratio = ""
+            if meta_width and meta_height:
+                video_ratio = f"{meta_width}:{meta_height}"
+
+            # Cache probe results into sidecar
+            if meta_dirty and meta_path:
+                try:
+                    existing = safe_json_read(meta_path) if os.path.isfile(meta_path) else {}
+                    existing["duration"] = meta_duration
+                    existing["width"] = meta_width
+                    existing["height"] = meta_height
+                    safe_json_write(meta_path, existing, indent=2)
+                except Exception:
+                    pass
             if not project_id:
                 match = re.match(r"^(?P<project>.+)_[0-9a-fA-F]{8}$", base)
                 if match:
@@ -1200,8 +1302,21 @@ def export_library_list():
             video_q = quote(rel_video, safe="/")
             zip_q = quote(zip_rel, safe="/") if zip_exists else ""
 
+            # If no metadata found, try reading from scenes project
+            pid = project_id or base
+            if not meta_style:
+                try:
+                    _sp = os.path.join(SCENES_DIR, pid, "scenes.json")
+                    if os.path.isfile(_sp):
+                        _sd = safe_json_read(_sp)
+                        meta_style = _sd.get("style", "")
+                        if not meta_scene_count:
+                            meta_scene_count = len(_sd.get("scenes", []))
+                except Exception:
+                    pass
+
             items.append({
-                "project_id": project_id or base,
+                "project_id": pid,
                 "video_name": fname,
                 "video_relpath": rel_video,
                 "folder_relpath": rel_folder if rel_folder != "." else "",
@@ -1211,6 +1326,11 @@ def export_library_list():
                 "video_download_url": f"/api/export/library/download/{video_q}",
                 "zip_download_url": (f"/api/export/library/download/{zip_q}" if zip_exists else (f"/api/editor/export-zip/{project_id}" if project_id else "")),
                 "zip_source": ("file" if zip_exists else "generated"),
+                "style": meta_style,
+                "ratio": meta_ratio,
+                "video_ratio": video_ratio,
+                "duration": meta_duration,
+                "scene_count": meta_scene_count,
             })
 
     items.sort(key=lambda it: it.get("modified_at", ""), reverse=True)

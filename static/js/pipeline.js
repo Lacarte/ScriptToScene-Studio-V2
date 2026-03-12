@@ -250,6 +250,10 @@ async function pipelineLoadHistory() {
     }
     // Store jobs for click handler
     window._pipelineJobs = jobs;
+    const countEl = document.getElementById('pipeline-history-count');
+    if (countEl) countEl.textContent = jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
+    const plBadge = document.getElementById('badge-pipeline');
+    const plActiveId = plBadge?.classList.contains('visible') ? plBadge.textContent : '';
     list.innerHTML = jobs.map((j, i) => {
       const color = j.status === 'done' ? '#26DE81' : j.status === 'error' ? '#FF6B6B' : 'var(--accent)';
       const scenes = j.scene_count ? `${j.scene_count} scenes` : '';
@@ -257,15 +261,24 @@ async function pipelineLoadHistory() {
       const styleName = typeof _scnStyleLabel === 'function' ? _scnStyleLabel(j.style) : '';
       const styleColor = typeof _scnStyleColor === 'function' ? _scnStyleColor(j.style) : 'var(--text-muted)';
       const styleHtml = styleName ? ` · <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${esc(styleName)}</span></span>` : '';
+      const isActive = j.project_id === plActiveId;
+      const excerpt = (j.text || '').slice(0, 60) + ((j.text || '').length > 60 ? '...' : '');
       return `
-      <div onclick="pipelineLoadFromHistory(${i})" style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background=''">
-        <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
-        <div style="min-width:0;flex:1">
-          <div class="font-mono" style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(j.label || j.project_id)}</div>
-          <div style="font-size:10px;color:var(--text-muted);margin-top:1px">${esc(j.project_id)}${scenes ? ' · ' + scenes : ''}${styleHtml}</div>
+      <div class="hist-item${isActive ? ' active' : ''}" data-project="${esc(j.project_id)}" style="cursor:pointer" onclick="pipelineLoadFromHistory(${i})">
+        <div style="display:flex;align-items:start;gap:10px;padding:10px 12px 10px 14px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></span>
+          <div style="flex:1;min-width:0">
+            <p class="text-xs" style="color:var(--text);line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(excerpt || j.label || j.project_id)}</p>
+            <div class="flex items-center gap-2 mt-1" style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">
+              <span>${esc(j.project_id)}</span>
+              ${scenes ? `<span style="opacity:0.3">/</span><span style="color:#4ECDC4">${scenes}</span>` : ''}
+              <span style="opacity:0.3">/</span>
+              <span style="color:var(--text-muted)">${date}</span>
+              ${styleHtml}
+            </div>
+          </div>
+          <button onclick="event.stopPropagation();switchPage('scenes');loadScenesProject('${esc(j.project_id)}')" title="Open in Scene Generator" style="background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;flex-shrink:0" onmouseenter="this.style.color='var(--accent)'" onmouseleave="this.style.color='var(--text-muted)'"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M4 11V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/><path d="M4 11h16"/></svg></button>
         </div>
-        <span class="font-mono" style="font-size:10px;color:var(--text-muted);flex-shrink:0;text-align:right">${date}</span>
-        <button onclick="event.stopPropagation();switchPage('scenes');loadScenesProject('${esc(j.project_id)}')" title="Open in Scene Generator" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:10px;transition:all 0.15s;display:flex;align-items:center;gap:4px" onmouseenter="this.style.color='var(--accent)';this.style.borderColor='var(--accent)'" onmouseleave="this.style.color='var(--text-muted)';this.style.borderColor='var(--border)'"><svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M4 11V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/><path d="M4 11h16"/></svg>Scenes</button>
       </div>`;
     }).join('');
   } catch (e) { console.error('Pipeline history:', e); }
@@ -284,6 +297,10 @@ function pipelineLoadFromHistory(index) {
     const match = [...sel.options].find(o => j.style.toLowerCase().includes(o.value));
     if (match) sel.value = match.value;
   }
+  // Update active glow on pipeline history
+  document.querySelectorAll('#pipeline-jobs .hist-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.project === j.project_id);
+  });
   // Scroll to top so user sees the populated form
   $('#pipeline-text').scrollIntoView({ behavior: 'smooth', block: 'center' });
   $('#pipeline-text').focus();
@@ -326,13 +343,18 @@ function _plResetProgress() {
   const evt = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'number') ? 'input' : 'change';
   el.addEventListener(evt, _plResetProgress);
 });
+// Persist last chosen style across sessions
+document.getElementById('pipeline-style')?.addEventListener('change', e => {
+  localStorage.setItem('sts-pipeline-style', e.target.value);
+});
 
 // Populate pipeline style dropdown from templates API, then load history
 (async function _plInit() {
   try {
     const templates = await api('/api/scenes/templates');
     const sel = $('#pipeline-style');
-    const current = sel.value;
+    const saved = localStorage.getItem('sts-pipeline-style');
+    const current = saved || sel.value;
     sel.innerHTML = templates.map(t =>
       `<option value="${t.id}"${t.id === current ? ' selected' : ''}>${t.name}</option>`
     ).join('');

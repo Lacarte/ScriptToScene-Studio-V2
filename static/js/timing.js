@@ -351,7 +351,14 @@ function renderAlignHistory() {
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px">
         <div style="flex:1;min-width:0">
           <p style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0">${esc(truncated)}</p>
-          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${h.project_id ? h.project_id + ' · ' : ''}${h.word_count} words · ${h.duration_seconds}s · ${timeAgo(h.timestamp)}</p>
+          <div class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            ${h.project_id ? `<span>${esc(h.project_id)}</span><span style="opacity:0.3">/</span>` : ''}
+            <span style="color:#4ECDC4">${h.word_count} words</span>
+            <span style="opacity:0.3">/</span>
+            <span style="color:var(--text-secondary)">${h.duration_seconds}s</span>
+            <span style="opacity:0.3">/</span>
+            <span>${timeAgo(h.timestamp)}</span>
+          </div>
         </div>
         <span class="font-mono" style="font-size:9px;color:var(--text-muted);flex-shrink:0;background:var(--bg-darkest);padding:2px 6px;border-radius:4px">${esc(h.source_file || '')}</span>
         <button onclick="event.stopPropagation();deleteAlignHistItem(${i})" title="Delete" class="hover-delete-icon" style="width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);background:transparent;border:none;cursor:pointer;flex-shrink:0;opacity:0.5;transition:all 0.2s">

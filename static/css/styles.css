@@ -449,6 +449,11 @@ body {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
+.hist-item.active {
+  border-color: #ff9f43;
+  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
+}
+
 /* ---- Scene History Loading ---- */
 .history-loading-card {
   background: var(--bg-surface);

@@ -358,6 +358,7 @@ function switchPage(page, editorSource = 'internal') {
   $$('.nav-item[data-page]').forEach(n => {
     n.classList.toggle('active', n.dataset.page === page);
   });
+  try { sessionStorage.setItem('sts-current-page', page); } catch (_) {}
   $$('#mobile-nav button[data-page]').forEach(b => {
     const isActive = b.dataset.page === page;
     b.style.color = isActive ? 'var(--accent)' : 'var(--text-muted)';
@@ -643,6 +644,7 @@ async function settingsClearConfirm() {
       if (assetsEmpty) assetsEmpty.style.display = '';
       const exportsMsg = data.exports_deleted ? ` (${data.exports_deleted} export item${data.exports_deleted !== 1 ? 's' : ''} deleted)` : '';
       toast(`Cleared ${data.count} project item${data.count !== 1 ? 's' : ''}${exportsMsg}`, 'success');
+      try { sessionStorage.setItem('sts-current-page', 'pipeline'); } catch (_) {}
       setTimeout(() => location.reload(), 600);
     } else {
       toast(data.error || 'Failed to clear projects', 'error');

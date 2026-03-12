@@ -264,10 +264,11 @@ class App {
                         ${previewHtml}
                         <div class="picker-item-info">
                             <div class="picker-item-name">${this._escHtml(truncated)}${styleHtml}</div>
-                            <div class="picker-item-meta">
-                                ${item.scene_count || 0} scenes ·
-                                ${item.disk_files || 0} files
-                                ${timeStr ? ' · ' + timeStr : ''}
+                            <div class="picker-item-meta" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                                <span style="color:#4ECDC4">${item.scene_count || 0} scenes</span>
+                                <span style="opacity:0.3">/</span>
+                                <span>${item.disk_files || 0} files</span>
+                                ${timeStr ? '<span style="opacity:0.3">/</span><span>' + timeStr + '</span>' : ''}
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;gap:5px">
@@ -535,10 +536,10 @@ class App {
                                 ${isActive ? '<span class="recent-project-badge">ACTIVE</span>' : ''}
                             </div>
                             <div class="recent-project-meta">
-                                <span class="recent-project-chip">${item.scene_count || 0} scenes</span>
-                                ${readyCount > 0 ? `<span class="recent-project-chip recent-project-chip-accent">${readyCount} ready</span>` : ''}
-                                ${item.disk_files > 0 ? `<span class="recent-project-chip">${item.disk_files} files</span>` : ''}
-                                ${timeStr ? `<span class="recent-project-chip" style="opacity:0.6">${timeStr}</span>` : ''}
+                                <span class="recent-project-chip" style="color:#4ECDC4">${item.scene_count || 0} scenes</span>
+                                ${readyCount > 0 ? `<span style="opacity:0.3">/</span><span class="recent-project-chip recent-project-chip-accent">${readyCount} ready</span>` : ''}
+                                ${item.disk_files > 0 ? `<span style="opacity:0.3">/</span><span class="recent-project-chip">${item.disk_files} files</span>` : ''}
+                                ${timeStr ? `<span style="opacity:0.3">/</span><span class="recent-project-chip" style="opacity:0.6">${timeStr}</span>` : ''}
                             </div>
                         </div>
                         <div class="recent-project-status">

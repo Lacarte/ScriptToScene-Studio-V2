@@ -77,26 +77,23 @@ async function assetsPickSceneHistory() {
 
   $('#assets-scene-picker-list').innerHTML = items.map(item => {
     const isActive = currentPid && item.project_id === currentPid;
-    const activeStyle = isActive
-      ? 'background:rgba(78,205,196,0.06);border-left:3px solid var(--accent)'
-      : 'border-left:3px solid transparent';
     const styleName = typeof _scnStyleLabel === 'function' ? _scnStyleLabel(item.style) : '';
     const styleColor = typeof _scnStyleColor === 'function' ? _scnStyleColor(item.style) : 'var(--text-muted)';
     const parentLabel = item.parent_id ? `<span style="color:var(--text-muted);font-size:10px">from ${esc(item.parent_id)}</span>` : '';
 
     return `
-    <div class="hist-item" style="cursor:pointer;transition:background 0.15s;${activeStyle}" onclick="assetsSelectSceneProject('${esc(item.project_id)}')" onmouseover="this.style.background='var(--bg-darkest)'" onmouseout="this.style.background='${isActive ? 'rgba(78,205,196,0.06)' : ''}'">
+    <div class="hist-item${isActive ? ' active' : ''}" style="cursor:pointer;transition:background 0.15s" onclick="assetsSelectSceneProject('${esc(item.project_id)}')" onmouseover="this.style.background='var(--bg-darkest)'" onmouseout="this.style.background=''"
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px">
-            <p style="font-size:13px;color:${isActive ? 'var(--accent)' : 'var(--text)'};margin:0;font-weight:${isActive ? '600' : '400'}">${esc(item.project_id)}</p>
-            ${isActive ? '<span class="font-mono" style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(78,205,196,0.15);color:var(--accent);letter-spacing:0.05em;flex-shrink:0">ACTIVE</span>' : ''}
+            <p style="font-size:13px;color:${isActive ? '#ff9f43' : 'var(--text)'};margin:0;font-weight:${isActive ? '600' : '400'}">${esc(item.project_id)}</p>
+            ${isActive ? '<span class="font-mono" style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(255,159,67,0.15);color:#ff9f43;letter-spacing:0.05em;flex-shrink:0">ACTIVE</span>' : ''}
             ${parentLabel}
           </div>
           <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}${styleName ? ` · <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${esc(styleName)}</span></span>` : ''}</p>
         </div>
         ${item.source_folder ? `<span class="font-mono" style="font-size:9px;color:var(--text-muted);flex-shrink:0;background:var(--bg-darkest);padding:2px 6px;border-radius:4px">${esc(item.source_folder.length > 30 ? item.source_folder.slice(0, 30) + '...' : item.source_folder)}</span>` : ''}
-        <svg width="14" height="14" fill="none" stroke="${isActive ? 'var(--accent)' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>
+        <svg width="14" height="14" fill="none" stroke="${isActive ? '#ff9f43' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>
       </div>
     </div>`;
   }).join('');
@@ -1031,35 +1028,32 @@ async function loadAssetsHistory() {
       const diskFiles = p.disk_files || 0;
       const time = p.created_at ? timeAgo(p.created_at) : timeAgo(p.timestamp);
 
-      const activeStyle = isActive
-        ? 'background:rgba(78,205,196,0.06);border-left:3px solid var(--accent)'
-        : 'border-left:3px solid transparent';
-
       return `
-      <div class="hist-item" data-project-id="${esc(p.project_id)}" style="cursor:pointer;transition:background 0.15s;${activeStyle}" onclick="assetsLoadFromHistory('${esc(p.project_id)}')" onmouseover="this.style.background='var(--bg-darkest)'" onmouseout="this.style.background='${isActive ? 'rgba(78,205,196,0.06)' : ''}'">
+      <div class="hist-item${isActive ? ' active' : ''}" data-project-id="${esc(p.project_id)}" style="cursor:pointer;transition:background 0.15s" onclick="assetsLoadFromHistory('${esc(p.project_id)}')" onmouseover="this.style.background='var(--bg-darkest)'" onmouseout="this.style.background=''">
         <div style="display:flex;align-items:center;gap:12px;padding:10px 14px">
           ${p.preview
-            ? `<div style="width:48px;height:48px;border-radius:6px;overflow:hidden;flex-shrink:0;border:1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}"><img src="${esc(p.preview)}" style="width:100%;height:100%;object-fit:cover" /></div>`
-            : `<div style="width:48px;height:48px;border-radius:6px;flex-shrink:0;background:var(--bg-darkest);display:flex;align-items:center;justify-content:center;border:1px solid ${isActive ? 'var(--accent)' : 'transparent'}">
-                <svg width="20" height="20" fill="none" stroke="${isActive ? 'var(--accent)' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:${isActive ? '0.8' : '0.4'}"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            ? `<div style="width:48px;height:48px;border-radius:6px;overflow:hidden;flex-shrink:0;border:1px solid ${isActive ? '#ff9f43' : 'var(--border)'}"><img src="${esc(p.preview)}" style="width:100%;height:100%;object-fit:cover" /></div>`
+            : `<div style="width:48px;height:48px;border-radius:6px;flex-shrink:0;background:var(--bg-darkest);display:flex;align-items:center;justify-content:center;border:1px solid ${isActive ? '#ff9f43' : 'transparent'}">
+                <svg width="20" height="20" fill="none" stroke="${isActive ? '#ff9f43' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:${isActive ? '0.8' : '0.4'}"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
               </div>`
           }
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
-              <span style="font-size:12px;font-weight:600;color:${isActive ? 'var(--accent)' : 'var(--text)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project_id)}</span>
-              ${isActive ? '<span class="font-mono" style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(78,205,196,0.15);color:var(--accent);letter-spacing:0.05em;flex-shrink:0">ACTIVE</span>' : ''}
+              <span style="font-size:12px;font-weight:600;color:${isActive ? '#ff9f43' : 'var(--text)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project_id)}</span>
+              ${isActive ? '<span class="font-mono" style="font-size:8px;padding:1px 6px;border-radius:3px;background:rgba(255,159,67,0.15);color:#ff9f43;letter-spacing:0.05em;flex-shrink:0">ACTIVE</span>' : ''}
               <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${statusColor};flex-shrink:0"></span>
               <span class="font-mono" style="font-size:9px;color:${statusColor};text-transform:uppercase;letter-spacing:0.05em">${esc(statusLabel)}</span>
             </div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <span class="font-mono" style="font-size:10px;color:var(--text-muted)">${sceneCount} scene${sceneCount !== 1 ? 's' : ''}</span>
-              ${readyCount > 0 ? `<span class="font-mono" style="font-size:10px;color:#4ECDC4">${readyCount} ready</span>` : ''}
-              ${diskFiles > 0 ? `<span class="font-mono" style="font-size:10px;color:var(--text-secondary)">${diskFiles} files</span>` : ''}
-              <span class="font-mono" style="font-size:9px;color:var(--text-muted);opacity:0.7">${time}</span>
-              ${p.provider ? `<span class="font-mono" style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(167,139,250,0.1);color:#A78BFA">${esc(p.provider)}</span>` : ''}
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;font-size:10px">
+              <span style="color:#4ECDC4">${sceneCount} scene${sceneCount !== 1 ? 's' : ''}</span>
+              ${readyCount > 0 ? `<span style="opacity:0.3">/</span><span style="color:#26DE81">${readyCount} ready</span>` : ''}
+              ${diskFiles > 0 ? `<span style="opacity:0.3">/</span><span style="color:var(--text-secondary)">${diskFiles} files</span>` : ''}
+              <span style="opacity:0.3">/</span>
+              <span style="color:var(--text-muted)">${time}</span>
+              ${p.provider ? `<span style="opacity:0.3">/</span><span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(167,139,250,0.1);color:#A78BFA">${esc(p.provider)}</span>` : ''}
             </div>
           </div>
-          ${readyCount > 0 ? `<button onclick="event.stopPropagation(); assetsAssembleFromHistory('${esc(p.project_id)}')" style="flex-shrink:0;padding:5px 12px;background:var(--accent);color:var(--bg-darkest);border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity 0.15s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Assemble & Edit</button>` : `<svg width="16" height="16" fill="none" stroke="${isActive ? 'var(--accent)' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>`}
+          ${readyCount > 0 ? `<button onclick="event.stopPropagation(); assetsAssembleFromHistory('${esc(p.project_id)}')" style="flex-shrink:0;padding:5px 12px;background:var(--accent);color:var(--bg-darkest);border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity 0.15s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Assemble & Edit</button>` : `<svg width="16" height="16" fill="none" stroke="${isActive ? '#ff9f43' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>`}
         </div>
       </div>`;
     }).join('');

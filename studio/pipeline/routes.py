@@ -165,7 +165,7 @@ def list_jobs():
                 }
                 # Look up original text, voice, speed from TTS metadata
                 if source:
-                    tts_meta = os.path.join(TTS_DIR, source, source + ".json")
+                    tts_meta = os.path.join(TTS_DIR, source, "tts.json")
                     if os.path.isfile(tts_meta):
                         try:
                             with open(tts_meta, "r", encoding="utf-8") as mf:

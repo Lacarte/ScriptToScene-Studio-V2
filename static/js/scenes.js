@@ -911,19 +911,26 @@ function renderScenesHistory(items) {
     return;
   }
   $('#scenes-history-count').textContent = items.length + ' project' + (items.length !== 1 ? 's' : '');
+  const activeId = STATE.scenesResult?.project_id || '';
   list.innerHTML = items.map(item => {
+    const isActive = item.project_id === activeId;
     const styleName = _scnStyleLabel(item.style);
     const styleColor = _scnStyleColor(item.style);
     const parentLabel = item.parent_id ? `<span style="color:var(--text-muted);font-size:10px;font-weight:400">from ${esc(item.parent_id)}</span>` : '';
     return `
-    <div class="hist-item" style="cursor:pointer" onclick="loadScenesProject('${esc(item.project_id)}')">
+    <div class="hist-item${isActive ? ' active' : ''}" data-project="${esc(item.project_id)}" style="cursor:pointer" onclick="loadScenesProject('${esc(item.project_id)}')">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px">
             <p style="font-size:13px;color:var(--text);margin:0">${esc(item.project_id)}</p>
             ${parentLabel}
           </div>
-          <p class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0">${item.scene_count} scenes · ${timeAgo(item.timestamp)}${styleName ? ` · <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${esc(styleName)}</span></span>` : ''}</p>
+          <div class="font-mono" style="font-size:10px;color:var(--text-muted);margin:2px 0 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="color:#4ECDC4">${item.scene_count} scenes</span>
+            <span style="opacity:0.3">/</span>
+            <span>${timeAgo(item.timestamp)}</span>
+            ${styleName ? `<span style="opacity:0.3">/</span><span style="display:inline-flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:${styleColor};display:inline-block"></span><span style="color:${styleColor};font-weight:600">${esc(styleName)}</span></span>` : ''}
+          </div>
         </div>
         <button class="btn-ghost" title="Go to Assets" onclick="event.stopPropagation(); goToAssetsFromHistory('${esc(item.project_id)}')" style="padding:6px 8px;font-size:11px;color:var(--text-muted);border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:4px;flex-shrink:0">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
@@ -955,6 +962,10 @@ async function loadScenesProject(projectId) {
     if (data.style) scenesSelectStyle(data.style);
 
     renderSceneResults(data);
+    // Update active glow on history list
+    document.querySelectorAll('#scenes-history-list .hist-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.project === projectId);
+    });
     toast('Scenes loaded');
   } catch (e) { toast(e.message, 'error'); }
 }
