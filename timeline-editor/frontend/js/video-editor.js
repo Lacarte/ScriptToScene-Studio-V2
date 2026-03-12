@@ -2658,7 +2658,11 @@ function _applyExtraState(saved) {
     if (saved.captionsEnabled !== undefined) {
         EditorState.captionsEnabled = saved.captionsEnabled;
         const toggle = document.getElementById('caption-enabled-toggle');
-        if (toggle) toggle.checked = saved.captionsEnabled;
+        if (toggle) {
+            toggle.checked = saved.captionsEnabled;
+            const lbl = toggle.parentElement?.querySelector('.cap-card-toggle-label');
+            if (lbl) lbl.textContent = saved.captionsEnabled ? 'On' : 'Off';
+        }
         if (elements.captionTrackRow) {
             elements.captionTrackRow.style.display = saved.captionsEnabled ? '' : 'none';
         }
@@ -2777,7 +2781,11 @@ function _restoreSavedEditorState() {
     if (saved.captionsEnabled !== undefined) {
         EditorState.captionsEnabled = saved.captionsEnabled;
         const toggle = document.getElementById('caption-enabled-toggle');
-        if (toggle) toggle.checked = saved.captionsEnabled;
+        if (toggle) {
+            toggle.checked = saved.captionsEnabled;
+            const lbl = toggle.parentElement?.querySelector('.cap-card-toggle-label');
+            if (lbl) lbl.textContent = saved.captionsEnabled ? 'On' : 'Off';
+        }
         if (elements.captionTrackRow) {
             elements.captionTrackRow.style.display = saved.captionsEnabled ? '' : 'none';
         }
@@ -3431,7 +3439,8 @@ function updateSceneClipThumb(sceneId, mediaPath, isVideo = false, videoThumbUrl
  * Render the media panel grid with scene thumbnails (CapCut-style)
  */
 function renderMediaGrid() {
-    const pane = document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
+    const pane = document.querySelector('.tab-pane[data-pane="media"] .med-card') ||
+                 document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
     if (!pane || !EditorState.scenes.length) return;
 
     const emptyEl = pane.querySelector('.media-empty');
@@ -3497,7 +3506,8 @@ async function loadProjectAssets() {
     const projectId = EditorState.project?.id;
     if (!projectId) return;
 
-    const pane = document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
+    const pane = document.querySelector('.tab-pane[data-pane="media"] .med-card') ||
+                 document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
     if (!pane) return;
 
     // Reuse cache if same project
@@ -3692,7 +3702,8 @@ function setupTimelineDragDrop() {
     });
 
     // Also support drop on the media grid items
-    const mediaPane = document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
+    const mediaPane = document.querySelector('.tab-pane[data-pane="media"] .med-card') ||
+                      document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
     if (mediaPane) {
         mediaPane.addEventListener('dragover', (e) => {
             if (!e.dataTransfer.types.includes('application/x-asset-url')) return;
@@ -5419,8 +5430,14 @@ function setupCaptionControls() {
     const toggle = document.getElementById('caption-enabled-toggle');
     if (!toggle) return;
 
+    // Sync toggle label text
+    const capToggleLabel = toggle.parentElement?.querySelector('.cap-card-toggle-label');
+    const updateCapToggleLabel = () => { if (capToggleLabel) capToggleLabel.textContent = toggle.checked ? 'On' : 'Off'; };
+    updateCapToggleLabel();
+
     toggle.addEventListener('change', () => {
         EditorState.captionsEnabled = toggle.checked;
+        updateCapToggleLabel();
         const row = elements.captionTrackRow;
         if (row) row.style.display = toggle.checked ? '' : 'none';
         if (!toggle.checked) {
@@ -5686,7 +5703,11 @@ function _receiveCaptionData(captionData) {
     // Auto-enable captions when data arrives
     EditorState.captionsEnabled = true;
     const toggle = document.getElementById('caption-enabled-toggle');
-    if (toggle) toggle.checked = true;
+    if (toggle) {
+        toggle.checked = true;
+        const lbl = toggle.parentElement?.querySelector('.cap-card-toggle-label');
+        if (lbl) lbl.textContent = 'On';
+    }
     if (elements.captionTrackRow) elements.captionTrackRow.style.display = '';
 
     // Update preview
@@ -8587,7 +8608,7 @@ function setupEffectsTab() {
             fxPoolMode = true;
             fxCardGrid.classList.add('pool-mode');
             fxRandomBtn.classList.add('pool-active');
-            fxRandomBtn.querySelector('.fx-btn-label').textContent = 'Apply randomize';
+            fxRandomBtn.querySelector('.fx-btn-label').textContent = 'Apply';
             // Select all non-static effects by default
             fxCardGrid.querySelectorAll('.fx-card[data-fx]').forEach(c => {
                 if (c.dataset.fx !== 'static') c.classList.add('in-pool');
@@ -8622,7 +8643,7 @@ function setupEffectsTab() {
             fxPoolMode = false;
             fxCardGrid.classList.remove('pool-mode');
             fxRandomBtn.classList.remove('pool-active');
-            fxRandomBtn.querySelector('.fx-btn-label').textContent = 'Randomize all scenes';
+            fxRandomBtn.querySelector('.fx-btn-label').textContent = 'Randomize';
             fxCardGrid.querySelectorAll('.fx-card').forEach(c => c.classList.remove('in-pool'));
 
             updateEffectsTab();
@@ -8737,7 +8758,7 @@ function setupTransitionsTab() {
             trPoolMode = true;
             trCardGrid.classList.add('pool-mode');
             trRandomBtn.classList.add('pool-active');
-            trRandomBtn.querySelector('.fx-btn-label').textContent = 'Apply randomize';
+            trRandomBtn.querySelector('.fx-btn-label').textContent = 'Apply';
             // Select all non-none transitions by default
             trCardGrid.querySelectorAll('.fx-card[data-tr]').forEach(c => {
                 if (c.dataset.tr !== 'none') c.classList.add('in-pool');
@@ -8774,7 +8795,7 @@ function setupTransitionsTab() {
             trPoolMode = false;
             trCardGrid.classList.remove('pool-mode');
             trRandomBtn.classList.remove('pool-active');
-            trRandomBtn.querySelector('.fx-btn-label').textContent = 'Randomize all scenes';
+            trRandomBtn.querySelector('.fx-btn-label').textContent = 'Randomize';
             trCardGrid.querySelectorAll('.fx-card').forEach(c => c.classList.remove('in-pool'));
 
             updateTransitionsTab();
@@ -8790,14 +8811,14 @@ function updateTransitionsTab() {
 
     const scene = EditorState.selectedScene;
 
-    noScene.style.display = scene ? 'none' : 'flex';
-    grid.style.display = scene ? 'flex' : 'none';
+    // Always show the grid so randomize/auto-assign are accessible
+    noScene.style.display = 'none';
+    grid.style.display = 'flex';
 
-    if (!scene) return;
-
-    const tr = scene.transition || { type: 'none', duration: 0 };
+    // Highlight active transition only when a scene is selected
+    const tr = scene ? (scene.transition || { type: 'none', duration: 0 }) : null;
     grid.querySelectorAll('.fx-card[data-tr]').forEach(card => {
-        card.classList.toggle('active', card.dataset.tr === tr.type);
+        card.classList.toggle('active', tr !== null && card.dataset.tr === tr.type);
     });
 
     // Show/hide duration slider
@@ -8805,7 +8826,7 @@ function updateTransitionsTab() {
     const durationSlider = document.getElementById('tr-duration-slider');
     const durationValue = document.getElementById('tr-duration-value');
 
-    const hasDuration = tr.type !== 'none' && tr.type !== 'cut';
+    const hasDuration = tr && tr.type !== 'none' && tr.type !== 'cut';
     if (durationRow) durationRow.style.display = hasDuration ? 'flex' : 'none';
     if (hasDuration && durationSlider) {
         durationSlider.value = tr.duration || 0.3;
@@ -8967,6 +8988,9 @@ async function setupOverlaysTab() {
                 <span class="ov-eye-btn" data-bg="0" title="Preview on different backgrounds">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </span>
+                <span class="ov-expand-btn" title="Preview larger">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                </span>
             </div>
             <span class="overlay-card-label">${esc(ov.name)}</span>
         </button>`;
@@ -8982,6 +9006,18 @@ async function setupOverlaysTab() {
             btn.dataset.bg = idx;
             const preview = btn.closest('.overlay-card-preview');
             if (preview) preview.style.background = _ovBgColors[idx] || '';
+        });
+    });
+
+    // Expand button — show overlay in a lightbox
+    cardGrid.querySelectorAll('.ov-expand-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const card = btn.closest('.overlay-card');
+            const url = card?.dataset.overlay;
+            if (!url) return;
+            const name = card?.getAttribute('title') || '';
+            showOverlayLightbox(url, name);
         });
     });
 
@@ -9038,7 +9074,7 @@ function updateOverlaysTab() {
 
     // Update stack count label
     const countEl = document.getElementById('ov-stack-count');
-    if (countEl) countEl.textContent = stack.length ? `(${stack.length} active)` : '';
+    if (countEl) countEl.textContent = stack.length ? `${stack.length} active` : '0 active';
 
     grid.querySelectorAll('.overlay-card[data-overlay]').forEach(card => {
         const url = card.dataset.overlay;
@@ -9058,6 +9094,52 @@ function updateOverlaysTab() {
     });
 
     syncGrainControlsUI();
+}
+
+function showOverlayLightbox(url, name) {
+    let lb = document.getElementById('ov-lightbox');
+    if (!lb) {
+        lb = document.createElement('div');
+        lb.id = 'ov-lightbox';
+        lb.className = 'ov-lightbox';
+        lb.innerHTML = `
+            <div class="ov-lightbox-backdrop"></div>
+            <div class="ov-lightbox-content">
+                <img class="ov-lightbox-img" src="" alt="">
+                <div class="ov-lightbox-footer">
+                    <span class="ov-lightbox-name"></span>
+                    <div class="ov-lightbox-bg-btns">
+                        <button class="ov-lightbox-bg-btn active" data-bg="" title="Dark">
+                            <span style="background:#0d0d14"></span>
+                        </button>
+                        <button class="ov-lightbox-bg-btn" data-bg="#ffffff" title="White">
+                            <span style="background:#ffffff"></span>
+                        </button>
+                        <button class="ov-lightbox-bg-btn" data-bg="#808080" title="Grey">
+                            <span style="background:#808080"></span>
+                        </button>
+                    </div>
+                </div>
+                <button class="ov-lightbox-close" title="Close">&times;</button>
+            </div>`;
+        document.body.appendChild(lb);
+        lb.querySelector('.ov-lightbox-backdrop').addEventListener('click', () => lb.classList.remove('active'));
+        lb.querySelector('.ov-lightbox-close').addEventListener('click', () => lb.classList.remove('active'));
+        lb.querySelectorAll('.ov-lightbox-bg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                lb.querySelectorAll('.ov-lightbox-bg-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                lb.querySelector('.ov-lightbox-img').style.background = btn.dataset.bg || '';
+            });
+        });
+    }
+    const img = lb.querySelector('.ov-lightbox-img');
+    img.src = url;
+    img.alt = name;
+    img.style.background = '';
+    lb.querySelector('.ov-lightbox-name').textContent = name;
+    lb.querySelectorAll('.ov-lightbox-bg-btn').forEach(b => b.classList.toggle('active', !b.dataset.bg));
+    lb.classList.add('active');
 }
 
 function setupGrainControls() {

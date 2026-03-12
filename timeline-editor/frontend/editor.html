@@ -179,419 +179,521 @@
             </nav>
             <div class="media-tab-content">
                 <div class="tab-pane active" data-pane="media">
-                    <div class="tab-pane-body">
-                        <div class="media-empty">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="1.5">
-                                <rect x="2" y="2" width="20" height="20" rx="2" />
-                                <circle cx="8.5" cy="8.5" r="1.5" />
-                                <path d="M21 15l-5-5L5 21" />
-                            </svg>
-                            <p>Project media will appear here</p>
+                    <div class="tab-pane-body med-pane">
+                        <div class="med-card">
+
+                            <!-- Header -->
+                            <div class="med-card-header">
+                                <div class="med-card-header-left">
+                                    <span class="med-card-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="2" y="2" width="20" height="20" rx="2"/>
+                                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                                            <path d="M21 15l-5-5L5 21"/>
+                                        </svg>
+                                    </span>
+                                    <div>
+                                        <p class="med-card-kicker">Media</p>
+                                        <h3>Scene Assets</h3>
+                                    </div>
+                                </div>
+                                <span class="med-card-badge">
+                                    <span class="med-card-badge-dot"></span>
+                                    Library
+                                </span>
+                            </div>
+
+                            <!-- Empty state -->
+                            <div class="media-empty">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <rect x="2" y="2" width="20" height="20" rx="2"/>
+                                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                                    <path d="M21 15l-5-5L5 21"/>
+                                </svg>
+                                <p>Project media will appear here</p>
+                                <p class="med-card-empty-hint">Import a project to populate scene thumbnails and asset browser.</p>
+                            </div>
+
                         </div>
                     </div>
                 </div>
                 <div class="tab-pane" data-pane="effects">
-                    <div class="tab-pane-body"
-                        style="padding:8px;display:flex;flex-direction:column;gap:8px;overflow-y:auto">
-                        <!-- No scene selected state -->
-                        <div id="fx-no-scene" class="fx-empty-state" style="display:none">
-                            <span>Select a scene to apply effects</span>
-                        </div>
-                        <!-- Effects grid -->
-                        <div id="fx-grid" class="fx-grid">
-                            <div class="fx-section-label">Motion Effects</div>
-                            <div class="fx-card-grid" id="fx-card-grid">
-                                <button class="fx-card" data-fx="static" title="No motion">
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                                            <circle cx="12" cy="12" r="3" />
+                    <div class="tab-pane-body efx-pane">
+                        <div class="efx-card">
+
+                            <!-- Header -->
+                            <div class="efx-card-header">
+                                <div class="efx-card-header-left">
+                                    <span class="efx-card-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>
+                                            <circle cx="12" cy="12" r="4"/>
                                         </svg>
+                                    </span>
+                                    <div>
+                                        <p class="efx-card-kicker">Effects</p>
+                                        <h3>Motion Presets</h3>
                                     </div>
-                                    <span class="fx-card-label">Static</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="zoom_in" title="Slowly zoom into the scene">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <circle cx="11" cy="11" r="8" />
-                                            <path d="M21 21l-4.35-4.35" />
-                                            <path d="M11 8v6M8 11h6" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Zoom In</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="zoom_out" title="Slowly zoom out from the scene">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <circle cx="11" cy="11" r="8" />
-                                            <path d="M21 21l-4.35-4.35" />
-                                            <path d="M8 11h6" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Zoom Out</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="pan_left" title="Pan camera from right to left">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M19 12H5" />
-                                            <path d="M12 5l-7 7 7 7" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Pan Left</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="pan_right" title="Pan camera from left to right">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M5 12h14" />
-                                            <path d="M12 5l7 7-7 7" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Pan Right</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="fade" title="Fade in from transparent">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <circle cx="12" cy="12" r="9" stroke-dasharray="3 3" />
-                                            <circle cx="12" cy="12" r="4" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Fade</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="shake" title="Camera shake for impact">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M2 12l3-3 3 6 3-6 3 6 3-6 3 3" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Shake</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="pan_up" title="Pan camera from bottom to top">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M12 19V5" />
-                                            <path d="M5 12l7-7 7 7" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Pan Up</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="pan_down" title="Pan camera from top to bottom">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M12 5v14" />
-                                            <path d="M19 12l-7 7-7-7" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Pan Down</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="pan_diagonal_tl" title="Diagonal pan toward top-left">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M17 17L7 7" />
-                                            <path d="M7 17V7h10" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Diag TL</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="pan_diagonal_br" title="Diagonal pan toward bottom-right">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M7 7l10 10" />
-                                            <path d="M17 7v10H7" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Diag BR</span>
-                                </button>
-                                <button class="fx-card in-pool" data-fx="ken_burns" title="Zoom in + slow pan combined">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                                            <circle cx="9" cy="9" r="3" />
-                                            <path d="M15 15l3 3" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Ken Burns</span>
-                                </button>
+                                </div>
+                                <span class="efx-card-badge">
+                                    <span class="efx-card-badge-dot"></span>
+                                    Ready
+                                </span>
                             </div>
-                            <div style="display:flex;gap:6px">
-                                <button class="fx-auto-btn" id="fx-auto-assign" style="flex:1"
-                                    title="Auto-assign effects based on scene roles">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2">
-                                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                                    </svg>
-                                    Auto-assign all scenes
-                                </button>
-                                <button class="fx-auto-btn" id="fx-random-assign" style="flex:1"
-                                    title="Randomly assign effects to all scenes">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2">
-                                        <rect x="2" y="2" width="20" height="20" rx="2" />
-                                        <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-                                        <circle cx="16" cy="8" r="1.5" fill="currentColor" />
-                                        <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-                                        <circle cx="8" cy="16" r="1.5" fill="currentColor" />
-                                        <circle cx="16" cy="16" r="1.5" fill="currentColor" />
-                                    </svg>
-                                    <span class="fx-btn-label">Randomize all scenes</span>
-                                </button>
+
+                            <!-- No scene selected state -->
+                            <div id="fx-no-scene" class="efx-card-empty" style="display:none">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>
+                                    <circle cx="12" cy="12" r="4"/>
+                                </svg>
+                                <p>Select a scene to apply effects</p>
+                                <p class="efx-card-empty-hint">Click any scene on the timeline to choose a motion effect for it.</p>
                             </div>
+
+                            <!-- Effects grid -->
+                            <div id="fx-grid" class="fx-grid">
+                                <div class="efx-section-label">Motion Effects</div>
+                                <div class="fx-card-grid efx-card-grid" id="fx-card-grid">
+                                    <button class="fx-card" data-fx="static" title="No motion">
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                                <circle cx="12" cy="12" r="3"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Static</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="zoom_in" title="Slowly zoom into the scene">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <circle cx="11" cy="11" r="8"/>
+                                                <path d="M21 21l-4.35-4.35"/>
+                                                <path d="M11 8v6M8 11h6"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Zoom In</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="zoom_out" title="Slowly zoom out from the scene">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <circle cx="11" cy="11" r="8"/>
+                                                <path d="M21 21l-4.35-4.35"/>
+                                                <path d="M8 11h6"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Zoom Out</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="pan_left" title="Pan camera from right to left">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Pan Left</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="pan_right" title="Pan camera from left to right">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Pan Right</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="fade" title="Fade in from transparent">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/>
+                                                <circle cx="12" cy="12" r="4"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Fade</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="shake" title="Camera shake for impact">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M2 12l3-3 3 6 3-6 3 6 3-6 3 3"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Shake</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="pan_up" title="Pan camera from bottom to top">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Pan Up</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="pan_down" title="Pan camera from top to bottom">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Pan Down</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="pan_diagonal_tl" title="Diagonal pan toward top-left">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M17 17L7 7"/><path d="M7 17V7h10"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Diag TL</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="pan_diagonal_br" title="Diagonal pan toward bottom-right">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M7 7l10 10"/><path d="M17 7v10H7"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Diag BR</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-fx="ken_burns" title="Zoom in + slow pan combined">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                                <circle cx="9" cy="9" r="3"/><path d="M15 15l3 3"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Ken Burns</span>
+                                    </button>
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="efx-card-actions">
+                                    <button class="efx-card-btn efx-card-btn-primary" id="fx-auto-assign"
+                                        title="Auto-assign effects based on scene roles">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                                        </svg>
+                                        Auto-assign
+                                    </button>
+                                    <button class="efx-card-btn efx-card-btn-secondary" id="fx-random-assign"
+                                        title="Randomly assign effects to all scenes">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="2" y="2" width="20" height="20" rx="2"/>
+                                            <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+                                            <circle cx="16" cy="8" r="1.5" fill="currentColor"/>
+                                            <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                                            <circle cx="8" cy="16" r="1.5" fill="currentColor"/>
+                                            <circle cx="16" cy="16" r="1.5" fill="currentColor"/>
+                                        </svg>
+                                        <span class="fx-btn-label">Randomize</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <p class="efx-card-hint">
+                                Motion effects animate the camera during each scene. Use auto-assign for role-based presets.
+                            </p>
+
                         </div>
                     </div>
                 </div>
                 <div class="tab-pane" data-pane="transitions">
-                    <div class="tab-pane-body"
-                        style="padding:8px;display:flex;flex-direction:column;gap:8px;overflow-y:auto">
-                        <!-- No scene selected state -->
-                        <div id="tr-no-scene" class="fx-empty-state">
-                            <span>Select a scene to set transitions</span>
-                        </div>
-                        <!-- Transitions grid -->
-                        <div id="tr-grid" class="fx-grid" style="display:none">
-                            <div class="fx-section-label">Transition to next scene</div>
-                            <div class="fx-card-grid" id="tr-card-grid">
-                                <button class="fx-card" data-tr="none" title="No transition">
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <path d="M18 6L6 18M6 6l12 12" />
+                    <div class="tab-pane-body tr-pane">
+                        <div class="tr-card">
+
+                            <!-- Header -->
+                            <div class="tr-card-header">
+                                <div class="tr-card-header-left">
+                                    <span class="tr-card-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="2" y="6" width="9" height="12" rx="1" opacity="0.5"/>
+                                            <rect x="13" y="6" width="9" height="12" rx="1" opacity="0.5"/>
+                                            <rect x="8" y="6" width="8" height="12" rx="1" fill="none" stroke-dasharray="2 2"/>
                                         </svg>
+                                    </span>
+                                    <div>
+                                        <p class="tr-card-kicker">Transitions</p>
+                                        <h3>Scene Flow</h3>
                                     </div>
-                                    <span class="fx-card-label">None</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="cut" title="Hard cut — instant switch">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="5" width="7" height="14" rx="1" />
-                                            <rect x="14" y="5" width="7" height="14" rx="1" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Cut</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="crossfade" title="Smooth crossfade blend">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="2" y="6" width="9" height="12" rx="1" opacity="0.5" />
-                                            <rect x="13" y="6" width="9" height="12" rx="1" opacity="0.5" />
-                                            <rect x="8" y="6" width="8" height="12" rx="1" fill="none"
-                                                stroke-dasharray="2 2" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Crossfade</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="fade_black" title="Fade to black then reveal">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="5" width="18" height="14" rx="2" />
-                                            <rect x="8" y="9" width="8" height="6" rx="1" fill="currentColor"
-                                                opacity="0.4" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Fade Black</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="fade_white" title="Fade to white then reveal">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="5" width="18" height="14" rx="2" />
-                                            <rect x="8" y="9" width="8" height="6" rx="1" stroke="none"
-                                                fill="currentColor" opacity="0.15" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Fade White</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="slide_left" title="Slide next scene in from right">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="6" width="8" height="12" rx="1" opacity="0.4" />
-                                            <rect x="13" y="6" width="8" height="12" rx="1" />
-                                            <path d="M15 12H9m0 0l2-2m-2 2l2 2" stroke-width="1.5" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Slide Left</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="slide_right" title="Slide next scene in from left">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="6" width="8" height="12" rx="1" />
-                                            <rect x="13" y="6" width="8" height="12" rx="1" opacity="0.4" />
-                                            <path d="M9 12h6m0 0l-2-2m2 2l-2 2" stroke-width="1.5" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Slide Right</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="slide_up" title="Slide next scene in from bottom">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="5" y="3" width="14" height="8" rx="1" opacity="0.4" />
-                                            <rect x="5" y="13" width="14" height="8" rx="1" />
-                                            <path d="M12 15V9m0 0l-2 2m2-2l2 2" stroke-width="1.5" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Slide Up</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="slide_down" title="Slide next scene in from top">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="5" y="3" width="14" height="8" rx="1" />
-                                            <rect x="5" y="13" width="14" height="8" rx="1" opacity="0.4" />
-                                            <path d="M12 9v6m0 0l-2-2m2 2l2-2" stroke-width="1.5" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Slide Down</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="wipe_left" title="Wipe reveal from right to left">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="5" width="18" height="14" rx="2" />
-                                            <line x1="13" y1="5" x2="13" y2="19" stroke-width="2" opacity="0.7" />
-                                            <rect x="13" y="5" width="8" height="14" rx="0" fill="currentColor" opacity="0.15" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Wipe Left</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="wipe_right" title="Wipe reveal from left to right">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="5" width="18" height="14" rx="2" />
-                                            <line x1="11" y1="5" x2="11" y2="19" stroke-width="2" opacity="0.7" />
-                                            <rect x="3" y="5" width="8" height="14" rx="0" fill="currentColor" opacity="0.15" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Wipe Right</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="zoom_in" title="Zoom into next scene">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="6" y="8" width="12" height="8" rx="1" />
-                                            <rect x="3" y="5" width="18" height="14" rx="2" opacity="0.35" />
-                                            <path d="M12 9v6m-3-3h6" stroke-width="1.5" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Zoom In</span>
-                                </button>
-                                <button class="fx-card in-pool" data-tr="zoom_out" title="Zoom out from current scene">
-                                    <span class="fx-pool-dot"></span>
-                                    <div class="fx-card-icon">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="1.5">
-                                            <rect x="3" y="5" width="18" height="14" rx="2" />
-                                            <rect x="6" y="8" width="12" height="8" rx="1" opacity="0.35" />
-                                            <path d="M9 12h6" stroke-width="1.5" />
-                                        </svg>
-                                    </div>
-                                    <span class="fx-card-label">Zoom Out</span>
-                                </button>
+                                </div>
+                                <span class="tr-card-badge">
+                                    <span class="tr-card-badge-dot"></span>
+                                    Ready
+                                </span>
                             </div>
-                            <!-- Duration control -->
-                            <div id="tr-duration-row" class="fx-duration-row" style="display:none">
-                                <label>Duration</label>
-                                <input type="range" id="tr-duration-slider" min="0.1" max="1.0" step="0.1" value="0.3">
-                                <span id="tr-duration-value">0.3s</span>
+
+                            <!-- No scene selected state -->
+                            <div id="tr-no-scene" class="tr-card-empty">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <rect x="2" y="6" width="9" height="12" rx="1" opacity="0.5"/>
+                                    <rect x="13" y="6" width="9" height="12" rx="1" opacity="0.5"/>
+                                    <rect x="8" y="6" width="8" height="12" rx="1" fill="none" stroke-dasharray="2 2"/>
+                                </svg>
+                                <p>Select a scene to set transitions</p>
+                                <p class="tr-card-empty-hint">Click any scene on the timeline to choose how it flows into the next one.</p>
                             </div>
-                            <div style="display:flex;gap:6px">
-                                <button class="fx-auto-btn" id="tr-auto-assign" style="flex:1"
+
+                            <!-- Transitions grid -->
+                            <div id="tr-grid" class="fx-grid">
+                                <div class="tr-section-label">Choose Transition</div>
+                                <div class="fx-card-grid tr-card-grid" id="tr-card-grid">
+                                    <button class="fx-card" data-tr="none" title="No transition">
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <path d="M18 6L6 18M6 6l12 12"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">None</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="cut" title="Hard cut — instant switch">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="5" width="7" height="14" rx="1"/>
+                                                <rect x="14" y="5" width="7" height="14" rx="1"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Cut</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="crossfade" title="Smooth crossfade blend">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="2" y="6" width="9" height="12" rx="1" opacity="0.5"/>
+                                                <rect x="13" y="6" width="9" height="12" rx="1" opacity="0.5"/>
+                                                <rect x="8" y="6" width="8" height="12" rx="1" fill="none" stroke-dasharray="2 2"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Crossfade</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="fade_black" title="Fade to black then reveal">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="5" width="18" height="14" rx="2"/>
+                                                <rect x="8" y="9" width="8" height="6" rx="1" fill="currentColor" opacity="0.4"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Fade Black</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="fade_white" title="Fade to white then reveal">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="5" width="18" height="14" rx="2"/>
+                                                <rect x="8" y="9" width="8" height="6" rx="1" stroke="none" fill="currentColor" opacity="0.15"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Fade White</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="slide_left" title="Slide next scene in from right">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="6" width="8" height="12" rx="1" opacity="0.4"/>
+                                                <rect x="13" y="6" width="8" height="12" rx="1"/>
+                                                <path d="M15 12H9m0 0l2-2m-2 2l2 2" stroke-width="1.5"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Slide Left</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="slide_right" title="Slide next scene in from left">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="6" width="8" height="12" rx="1"/>
+                                                <rect x="13" y="6" width="8" height="12" rx="1" opacity="0.4"/>
+                                                <path d="M9 12h6m0 0l-2-2m2 2l-2 2" stroke-width="1.5"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Slide Right</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="slide_up" title="Slide next scene in from bottom">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="5" y="3" width="14" height="8" rx="1" opacity="0.4"/>
+                                                <rect x="5" y="13" width="14" height="8" rx="1"/>
+                                                <path d="M12 15V9m0 0l-2 2m2-2l2 2" stroke-width="1.5"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Slide Up</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="slide_down" title="Slide next scene in from top">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="5" y="3" width="14" height="8" rx="1"/>
+                                                <rect x="5" y="13" width="14" height="8" rx="1" opacity="0.4"/>
+                                                <path d="M12 9v6m0 0l-2-2m2 2l2-2" stroke-width="1.5"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Slide Down</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="wipe_left" title="Wipe reveal from right to left">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="5" width="18" height="14" rx="2"/>
+                                                <line x1="13" y1="5" x2="13" y2="19" stroke-width="2" opacity="0.7"/>
+                                                <rect x="13" y="5" width="8" height="14" rx="0" fill="currentColor" opacity="0.15"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Wipe Left</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="wipe_right" title="Wipe reveal from left to right">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="5" width="18" height="14" rx="2"/>
+                                                <line x1="11" y1="5" x2="11" y2="19" stroke-width="2" opacity="0.7"/>
+                                                <rect x="3" y="5" width="8" height="14" rx="0" fill="currentColor" opacity="0.15"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Wipe Right</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="zoom_in" title="Zoom into next scene">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="6" y="8" width="12" height="8" rx="1"/>
+                                                <rect x="3" y="5" width="18" height="14" rx="2" opacity="0.35"/>
+                                                <path d="M12 9v6m-3-3h6" stroke-width="1.5"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Zoom In</span>
+                                    </button>
+                                    <button class="fx-card in-pool" data-tr="zoom_out" title="Zoom out from current scene">
+                                        <span class="fx-pool-dot"></span>
+                                        <div class="fx-card-icon">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                <rect x="3" y="5" width="18" height="14" rx="2"/>
+                                                <rect x="6" y="8" width="12" height="8" rx="1" opacity="0.35"/>
+                                                <path d="M9 12h6" stroke-width="1.5"/>
+                                            </svg>
+                                        </div>
+                                        <span class="fx-card-label">Zoom Out</span>
+                                    </button>
+                                </div>
+                                <!-- Duration control -->
+                                <div id="tr-duration-row" class="tr-duration-row" style="display:none">
+                                    <label>Duration</label>
+                                    <input type="range" id="tr-duration-slider" min="0.1" max="1.0" step="0.1" value="0.3">
+                                    <span id="tr-duration-value">0.3s</span>
+                                </div>
+                            </div>
+
+                            <!-- Actions (always visible) -->
+                            <div class="tr-card-actions">
+                                <button class="tr-card-btn tr-card-btn-primary" id="tr-auto-assign"
                                     title="Auto-assign transitions based on scene roles">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2">
-                                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
                                     </svg>
-                                    Auto-assign all scenes
+                                    Auto-assign
                                 </button>
-                                <button class="fx-auto-btn" id="tr-random-assign" style="flex:1"
+                                <button class="tr-card-btn tr-card-btn-secondary" id="tr-random-assign"
                                     title="Randomly assign transitions to all scenes">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2">
-                                        <rect x="2" y="2" width="20" height="20" rx="2" />
-                                        <circle cx="8" cy="8" r="1.5" fill="currentColor" />
-                                        <circle cx="16" cy="8" r="1.5" fill="currentColor" />
-                                        <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-                                        <circle cx="8" cy="16" r="1.5" fill="currentColor" />
-                                        <circle cx="16" cy="16" r="1.5" fill="currentColor" />
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="2" y="2" width="20" height="20" rx="2"/>
+                                        <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+                                        <circle cx="16" cy="8" r="1.5" fill="currentColor"/>
+                                        <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                                        <circle cx="8" cy="16" r="1.5" fill="currentColor"/>
+                                        <circle cx="16" cy="16" r="1.5" fill="currentColor"/>
                                     </svg>
-                                    <span class="fx-btn-label">Randomize all scenes</span>
+                                    <span class="fx-btn-label">Randomize</span>
                                 </button>
                             </div>
+
+                            <p class="tr-card-hint">
+                                Select a transition for the current scene. Use auto-assign or randomize to apply to all scenes at once.
+                            </p>
+
                         </div>
                     </div>
                 </div>
                 <div class="tab-pane" data-pane="overlays">
-                    <div class="tab-pane-body" style="padding:8px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overflow-x:hidden">
-                        <div id="ov-no-scene" class="fx-empty-state" style="display:none">
-                            <span>No overlays available</span>
-                        </div>
-                        <div id="ov-grid">
-                            <div class="fx-section-label">Timeline Overlays <span id="ov-stack-count" style="opacity:0.5;font-weight:400"></span></div>
-                            <div id="ov-card-grid" class="overlay-card-grid"></div>
-                            <div class="grain-panel" id="grain-panel">
-                                <div class="fx-section-label" style="margin-top:10px">White Dot Grain</div>
-                                <label class="grain-row">
-                                    <input type="checkbox" id="grain-enabled">
-                                    <span>Enable animated grain</span>
-                                </label>
-                                <div class="grain-grid">
-                                    <label class="grain-field">Opacity
-                                        <input id="grain-opacity" type="range" min="0.00" max="0.50" step="0.01" value="0.16">
-                                        <span id="grain-opacity-val">0.16</span>
+                    <div class="tab-pane-body ov-pane">
+                        <div class="ov-card">
+
+                            <!-- Header -->
+                            <div class="ov-card-header">
+                                <div class="ov-card-header-left">
+                                    <span class="ov-card-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="3" y="7" width="14" height="10" rx="2" opacity="0.5"></rect>
+                                            <rect x="7" y="3" width="14" height="10" rx="2"></rect>
+                                        </svg>
+                                    </span>
+                                    <div>
+                                        <p class="ov-card-kicker">Overlays</p>
+                                        <h3>Layer Stack</h3>
+                                    </div>
+                                </div>
+                                <span class="ov-card-badge">
+                                    <span class="ov-card-badge-dot"></span>
+                                    <span id="ov-stack-count">0 active</span>
+                                </span>
+                            </div>
+
+                            <!-- Empty state -->
+                            <div id="ov-no-scene" class="ov-card-empty" style="display:none">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <rect x="3" y="7" width="14" height="10" rx="2" opacity="0.5"></rect>
+                                    <rect x="7" y="3" width="14" height="10" rx="2"></rect>
+                                </svg>
+                                <p>No overlays available</p>
+                                <p class="ov-card-empty-hint">Overlay textures will appear here once loaded from the server.</p>
+                            </div>
+
+                            <!-- Overlay grid -->
+                            <div id="ov-grid">
+                                <div class="ov-section-label">Choose Overlay</div>
+                                <div id="ov-card-grid" class="overlay-card-grid"></div>
+
+                                <!-- Grain panel -->
+                                <div class="ov-section-divider"></div>
+                                <div id="grain-panel" class="ov-grain-panel">
+                                    <div class="ov-section-label">White Dot Grain</div>
+                                    <label class="ov-grain-toggle">
+                                        <input type="checkbox" id="grain-enabled">
+                                        <span>Enable animated grain</span>
                                     </label>
-                                    <label class="grain-field">Fade In (s)
-                                        <input id="grain-fade-in" type="range" min="0.00" max="1.00" step="0.01" value="0.12">
-                                        <span id="grain-fade-in-val">0.12</span>
-                                    </label>
-                                    <label class="grain-field">Hold (s)
-                                        <input id="grain-hold" type="range" min="0.00" max="2.00" step="0.01" value="0.65">
-                                        <span id="grain-hold-val">0.65</span>
-                                    </label>
-                                    <label class="grain-field">Fade Out (s)
-                                        <input id="grain-fade-out" type="range" min="0.00" max="3.00" step="0.01" value="1.20">
-                                        <span id="grain-fade-out-val">1.20</span>
-                                    </label>
+                                    <div class="ov-grain-grid">
+                                        <label class="ov-grain-field">
+                                            <span class="ov-grain-field-label">Opacity</span>
+                                            <input id="grain-opacity" type="range" min="0.00" max="0.50" step="0.01" value="0.16">
+                                            <span class="ov-grain-field-val" id="grain-opacity-val">0.16</span>
+                                        </label>
+                                        <label class="ov-grain-field">
+                                            <span class="ov-grain-field-label">Fade In (s)</span>
+                                            <input id="grain-fade-in" type="range" min="0.00" max="1.00" step="0.01" value="0.12">
+                                            <span class="ov-grain-field-val" id="grain-fade-in-val">0.12</span>
+                                        </label>
+                                        <label class="ov-grain-field">
+                                            <span class="ov-grain-field-label">Hold (s)</span>
+                                            <input id="grain-hold" type="range" min="0.00" max="2.00" step="0.01" value="0.65">
+                                            <span class="ov-grain-field-val" id="grain-hold-val">0.65</span>
+                                        </label>
+                                        <label class="ov-grain-field">
+                                            <span class="ov-grain-field-label">Fade Out (s)</span>
+                                            <input id="grain-fade-out" type="range" min="0.00" max="3.00" step="0.01" value="1.20">
+                                            <span class="ov-grain-field-val" id="grain-fade-out-val">1.20</span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
+
+                            <p class="ov-card-hint">
+                                Click an overlay to add it to the stack. Click again to edit blend mode and opacity. Multiple overlays stack in z-order.
+                            </p>
+
                         </div>
                     </div>
                 </div>
@@ -654,150 +756,170 @@
                     </div>
                 </div>
                 <div class="tab-pane" data-pane="caption">
-                    <div class="tab-pane-body" style="padding:12px;display:flex;flex-direction:column;gap:12px">
+                    <div class="tab-pane-body cap-pane">
+                        <div class="cap-card">
 
-                        <!-- Enable toggle -->
-                        <div class="cap-panel-toggle">
-                            <span>Enable Captions</span>
-                            <label class="caption-toggle">
-                                <input type="checkbox" id="caption-enabled-toggle">
-                                <span class="caption-toggle-slider"></span>
-                            </label>
-                        </div>
-
-                        <!-- Status (no data) -->
-                        <div id="caption-no-data" class="cap-empty-state">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <rect x="2" y="4" width="20" height="16" rx="2" />
-                                <path d="M6 14h4" /><path d="M14 14h4" /><path d="M6 18h12" />
-                            </svg>
-                            <p>No captions loaded.</p>
-                            <p class="cap-empty-hint">Send captions from the Studio Captions page, or they will load automatically from alignment data.</p>
-                        </div>
-
-                        <!-- Caption info (shown when data loaded) -->
-                        <div id="caption-info" style="display:none">
-                            <div class="cap-info-bar">
-                                <span class="cap-info-label">Loaded</span>
-                                <span id="caption-info-count" class="cap-info-value">0 captions</span>
-                            </div>
-                        </div>
-
-                        <!-- Style controls (shown when data loaded) -->
-                        <div id="caption-style-controls" style="display:none;flex-direction:column;gap:10px">
-
-                            <!-- Preset & Font -->
-                            <div class="cap-section">
-                                <div class="cap-section-label">Preset</div>
-                                <div class="cap-field">
-                                    <select id="cap-ed-preset" class="cap-select">
-                                        <option value="bold_popup">Bold Pop-up</option>
-                                        <option value="popup_highlight">Pop-up Highlight</option>
-                                        <option value="popup_highlight_box">Pop-up Highlight 2</option>
-                                        <option value="subtitle_bar">Subtitle Bar</option>
-                                        <option value="karaoke">Karaoke</option>
-                                        <option value="minimal">Minimal</option>
-                                        <option value="single_line">Single Line</option>
-                                        <option value="single_line_highlight">Single Line 2</option>
-                                    </select>
-                                </div>
-                                <div class="cap-field">
-                                    <label>Font</label>
-                                    <select id="cap-ed-font" class="cap-select"></select>
-                                </div>
-                            </div>
-
-                            <div class="cap-section-divider"></div>
-
-                            <!-- Typography -->
-                            <div class="cap-section">
-                                <div class="cap-section-label">Typography</div>
-                                <div class="cap-row">
-                                    <div class="cap-field">
-                                        <label>Size</label>
-                                        <input id="cap-ed-size" type="number" value="64" min="24" max="120" step="2" class="cap-input">
-                                    </div>
-                                    <div class="cap-field">
-                                        <label>Color</label>
-                                        <input id="cap-ed-color" type="color" value="#FFFFFF" class="cap-color-input">
+                            <!-- Header -->
+                            <div class="cap-card-header">
+                                <div class="cap-card-header-left">
+                                    <span class="cap-card-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="2" y="4" width="20" height="16" rx="2" />
+                                            <path d="M6 14h4" /><path d="M14 14h4" /><path d="M6 18h12" />
+                                        </svg>
+                                    </span>
+                                    <div>
+                                        <p class="cap-card-kicker">Captions</p>
+                                        <h3>Style Editor</h3>
                                     </div>
                                 </div>
-                                <div class="cap-row">
-                                    <div class="cap-field">
-                                        <label>Stroke</label>
-                                        <input id="cap-ed-stroke" type="color" value="#000000" class="cap-color-input">
-                                    </div>
-                                    <div class="cap-field">
-                                        <label>Stroke Width</label>
-                                        <input id="cap-ed-stroke-width" type="number" value="4" min="0" max="20" step="1" class="cap-input">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="cap-section-divider"></div>
-
-                            <!-- Position -->
-                            <div class="cap-section">
-                                <div class="cap-section-label">Position</div>
-                                <div class="cap-slider-row">
-                                    <label>Position Y <span id="cap-ed-pos-val">75%</span></label>
-                                    <input id="cap-ed-position" type="range" min="10" max="95" value="75" class="cap-range">
-                                </div>
-                                <div class="cap-slider-row">
-                                    <label>Letter Spacing <span id="cap-ed-ls-val">0px</span></label>
-                                    <input id="cap-ed-letter-spacing" type="range" min="-5" max="20" value="0" step="1" class="cap-range">
-                                </div>
-                            </div>
-
-                            <div class="cap-section-divider"></div>
-
-                            <!-- Shadow -->
-                            <div class="cap-section">
-                                <div class="cap-section-label">Shadow</div>
-                                <div class="cap-row">
-                                    <div class="cap-field">
-                                        <label>Color</label>
-                                        <input id="cap-ed-shadow-color" type="color" value="#000000" class="cap-color-input">
-                                    </div>
-                                    <div class="cap-field">
-                                        <label>Blur</label>
-                                        <input id="cap-ed-shadow-blur" type="number" value="0" min="0" max="40" step="1" class="cap-input">
-                                    </div>
-                                </div>
-                                <div class="cap-row">
-                                    <div class="cap-field">
-                                        <label>Offset X</label>
-                                        <input id="cap-ed-shadow-x" type="number" value="0" min="-20" max="20" step="1" class="cap-input">
-                                    </div>
-                                    <div class="cap-field">
-                                        <label>Offset Y</label>
-                                        <input id="cap-ed-shadow-y" type="number" value="0" min="-20" max="20" step="1" class="cap-input">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Highlight -->
-                            <div id="cap-highlight-section" style="display:none">
-                                <div class="cap-section-divider"></div>
-                                <div class="cap-section">
-                                    <div class="cap-section-label">Highlight</div>
-                                    <div class="cap-field">
-                                        <label>Active Word Color</label>
-                                        <input id="cap-ed-highlight-color" type="color" value="#4ECDC4" class="cap-color-input">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="cap-section-divider"></div>
-
-                            <!-- Options -->
-                            <div class="cap-section">
-                                <div class="cap-section-label">Options</div>
-                                <label class="cap-option-row">
-                                    <input type="checkbox" id="cap-clean-text-toggle" checked>
-                                    Clean special characters
+                                <label class="cap-card-toggle-badge" title="Enable / disable captions">
+                                    <input type="checkbox" id="caption-enabled-toggle">
+                                    <span class="cap-card-toggle-slider"></span>
+                                    <span class="cap-card-toggle-label" data-on="On" data-off="Off">Off</span>
                                 </label>
                             </div>
+
+                            <!-- Empty state (no data) -->
+                            <div id="caption-no-data" class="cap-card-empty">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <rect x="2" y="4" width="20" height="16" rx="2" />
+                                    <path d="M6 14h4" /><path d="M14 14h4" /><path d="M6 18h12" />
+                                </svg>
+                                <p>No captions loaded.</p>
+                                <p class="cap-card-empty-hint">Send captions from the Studio Captions page, or they will load automatically from alignment data.</p>
+                            </div>
+
+                            <!-- Caption info (shown when data loaded) -->
+                            <div id="caption-info" style="display:none">
+                                <div class="cap-card-info">
+                                    <span class="cap-card-info-label">Loaded</span>
+                                    <span id="caption-info-count" class="cap-card-info-value">0 captions</span>
+                                </div>
+                            </div>
+
+                            <!-- Style controls (shown when data loaded) -->
+                            <div id="caption-style-controls" style="display:none;flex-direction:column;gap:12px">
+
+                                <!-- Preset & Font -->
+                                <div class="cap-section">
+                                    <div class="cap-section-label">Preset</div>
+                                    <label class="cap-card-field">
+                                        <span>Style</span>
+                                        <select id="cap-ed-preset" class="cap-select">
+                                            <option value="bold_popup">Bold Pop-up</option>
+                                            <option value="popup_highlight">Pop-up Highlight</option>
+                                            <option value="popup_highlight_box">Pop-up Highlight 2</option>
+                                            <option value="subtitle_bar">Subtitle Bar</option>
+                                            <option value="karaoke">Karaoke</option>
+                                            <option value="minimal">Minimal</option>
+                                            <option value="single_line">Single Line</option>
+                                            <option value="single_line_highlight">Single Line 2</option>
+                                        </select>
+                                    </label>
+                                    <label class="cap-card-field">
+                                        <span>Font</span>
+                                        <select id="cap-ed-font" class="cap-select"></select>
+                                    </label>
+                                </div>
+
+                                <div class="cap-section-divider"></div>
+
+                                <!-- Typography -->
+                                <div class="cap-section">
+                                    <div class="cap-section-label">Typography</div>
+                                    <div class="cap-row">
+                                        <label class="cap-card-field">
+                                            <span>Size</span>
+                                            <input id="cap-ed-size" type="number" value="64" min="24" max="120" step="2" class="cap-input">
+                                        </label>
+                                        <label class="cap-card-field">
+                                            <span>Color</span>
+                                            <input id="cap-ed-color" type="color" value="#FFFFFF" class="cap-color-input">
+                                        </label>
+                                    </div>
+                                    <div class="cap-row">
+                                        <label class="cap-card-field">
+                                            <span>Stroke</span>
+                                            <input id="cap-ed-stroke" type="color" value="#000000" class="cap-color-input">
+                                        </label>
+                                        <label class="cap-card-field">
+                                            <span>Stroke Width</span>
+                                            <input id="cap-ed-stroke-width" type="number" value="4" min="0" max="20" step="1" class="cap-input">
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="cap-section-divider"></div>
+
+                                <!-- Position -->
+                                <div class="cap-section">
+                                    <div class="cap-section-label">Position</div>
+                                    <div class="cap-slider-row">
+                                        <label>Position Y <span id="cap-ed-pos-val">75%</span></label>
+                                        <input id="cap-ed-position" type="range" min="10" max="95" value="75" class="cap-range cap-range--amber">
+                                    </div>
+                                    <div class="cap-slider-row">
+                                        <label>Letter Spacing <span id="cap-ed-ls-val">0px</span></label>
+                                        <input id="cap-ed-letter-spacing" type="range" min="-5" max="20" value="0" step="1" class="cap-range cap-range--amber">
+                                    </div>
+                                </div>
+
+                                <div class="cap-section-divider"></div>
+
+                                <!-- Shadow -->
+                                <div class="cap-section">
+                                    <div class="cap-section-label">Shadow</div>
+                                    <div class="cap-row">
+                                        <label class="cap-card-field">
+                                            <span>Color</span>
+                                            <input id="cap-ed-shadow-color" type="color" value="#000000" class="cap-color-input">
+                                        </label>
+                                        <label class="cap-card-field">
+                                            <span>Blur</span>
+                                            <input id="cap-ed-shadow-blur" type="number" value="0" min="0" max="40" step="1" class="cap-input">
+                                        </label>
+                                    </div>
+                                    <div class="cap-row">
+                                        <label class="cap-card-field">
+                                            <span>Offset X</span>
+                                            <input id="cap-ed-shadow-x" type="number" value="0" min="-20" max="20" step="1" class="cap-input">
+                                        </label>
+                                        <label class="cap-card-field">
+                                            <span>Offset Y</span>
+                                            <input id="cap-ed-shadow-y" type="number" value="0" min="-20" max="20" step="1" class="cap-input">
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- Highlight -->
+                                <div id="cap-highlight-section" style="display:none">
+                                    <div class="cap-section-divider"></div>
+                                    <div class="cap-section">
+                                        <div class="cap-section-label">Highlight</div>
+                                        <label class="cap-card-field">
+                                            <span>Active Word Color</span>
+                                            <input id="cap-ed-highlight-color" type="color" value="#4ECDC4" class="cap-color-input">
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="cap-section-divider"></div>
+
+                                <!-- Options -->
+                                <div class="cap-section">
+                                    <div class="cap-section-label">Options</div>
+                                    <label class="cap-option-row">
+                                        <input type="checkbox" id="cap-clean-text-toggle" checked>
+                                        Clean special characters
+                                    </label>
+                                </div>
+
+                            </div>
+
+                            <p class="cap-card-hint">
+                                Captions sync from the Studio Captions page. Styles apply to all caption segments on the timeline.
+                            </p>
 
                         </div>
                     </div>
