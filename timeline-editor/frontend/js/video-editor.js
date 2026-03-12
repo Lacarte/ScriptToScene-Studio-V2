@@ -1564,6 +1564,14 @@ function loadProjectEdits() {
 /**
  * Record an edit action to history
  */
+function _updateResetButtonVisibility() {
+    const resetBtn = document.getElementById('share-reset-initial');
+    if (!resetBtn) return;
+    const hasEdits = EditorState.editHistory && EditorState.editHistory.length > 0;
+    const isWip = EditorState.project?.loadedFrom === 'wip';
+    resetBtn.style.display = (hasEdits || isWip) ? '' : 'none';
+}
+
 function recordEdit(action, sceneId, field, oldValue, newValue) {
     if (!EditorState.project?.id) return;
 
@@ -1597,6 +1605,7 @@ function recordEdit(action, sceneId, field, oldValue, newValue) {
 
     // Update undo button state
     updateUndoButton();
+    _updateResetButtonVisibility();
 
     // Re-validate scenes and update error indicators
     validateScenes();
@@ -1995,6 +2004,7 @@ function deleteHistoryAt(index) {
 
     saveEditHistory();
     updateUndoButton();
+    _updateResetButtonVisibility();
     showToast('History entry removed', 'info');
 }
 
@@ -2009,6 +2019,7 @@ function clearProjectEdits() {
     EditorState.editHistory = [];
     EditorState.historyIndex = -1;
     updateUndoButton();
+    _updateResetButtonVisibility();
     showToast('Cleared saved edits', 'info');
 }
 
@@ -3275,12 +3286,8 @@ async function loadProjectData(data) {
     // Update UI
     updateProjectInfo();
 
-    // Show/hide reset button depending on whether WIP exists
-    const resetBtn = document.getElementById('share-reset-initial');
-    if (resetBtn) {
-        const isWip = EditorState.project?.loadedFrom === 'wip';
-        resetBtn.style.display = isWip ? '' : 'none';
-    }
+    // Show/hide reset button depending on whether there are edits or WIP
+    _updateResetButtonVisibility();
 
     // Sync flip-filler button active state
     const hasFlipped = EditorState.scenes.some(s => s.filler_shift && s.filler_shift !== 0);
