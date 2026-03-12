@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="css/editor.css?v=2">
 </head>
 
-<body>
+<body class="editor-shell-booting">
     <header class="app-header">
         <div class="header-left">
             <a href="#" onclick="event.preventDefault();editorShowAssetPicker()" class="back-link"
@@ -1788,6 +1788,7 @@
                             segment_duration: s.segment_duration ?? null,
                             segment_words: s.segment_words || '',
                             image_url: firstImage,
+                            asset_files: filesOnDisk.map(file => file.url).filter(Boolean),
                             status: firstImage ? 'ready' : 'pending',
                         };
                     });
@@ -1805,6 +1806,7 @@
                                 text_content: null,
                                 duration: 3,
                                 image_url: firstImage,
+                                asset_files: filesOnDisk.map(file => file.url).filter(Boolean),
                                 status: firstImage ? 'ready' : 'pending',
                             };
                         });
@@ -1833,6 +1835,7 @@
                         segment_duration: s.segment_duration ?? null,
                         segment_words: s.segment_words || '',
                         image_url: s.image_url,
+                        asset_files: Array.isArray(s.asset_files) ? s.asset_files : [],
                         visual_fx: 'none',
                     })),
                 };

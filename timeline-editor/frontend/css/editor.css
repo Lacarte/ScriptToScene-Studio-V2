@@ -9,6 +9,19 @@
     display: none !important;
 }
 
+body.editor-shell-booting {
+    background: #040404;
+    overflow: hidden;
+}
+
+body.editor-shell-booting .app-header,
+body.editor-shell-booting .editor-layout,
+body.editor-shell-booting #no-data-overlay {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
 /* Layout — CapCut-inspired grid: media | gutter | player | gutter | details */
 .editor-layout {
     display: grid;

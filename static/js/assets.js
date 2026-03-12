@@ -1185,6 +1185,7 @@ async function autoAssembleAndSendToEditor() {
       duration,
       timestamp: t,
       image_url: firstImage,
+      asset_files: filesOnDisk.map(file => file.url).filter(Boolean),
       visual_fx: scene.visual_fx || 'none',
       narrative_role: scene.narrative_role || scene.role || '',
       status: firstImage ? 'done' : 'pending',

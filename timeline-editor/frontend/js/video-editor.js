@@ -2896,6 +2896,11 @@ function buildBootProjectData(raw) {
             duration,
             timestamp,
             image_url: scene.image_url || scene.mediaUrl || scene.image || '',
+            asset_files: Array.isArray(scene.asset_files)
+                ? scene.asset_files.filter(Boolean)
+                : (Array.isArray(scene.files_on_disk)
+                    ? scene.files_on_disk.map(file => file?.url).filter(Boolean)
+                    : ((scene.image_url || scene.mediaUrl) ? [scene.image_url || scene.mediaUrl] : [])),
             visual_fx: scene.visual_fx || 'none',
             text_color: scene.text_color,
             text_size: scene.text_size,
@@ -2955,6 +2960,13 @@ function getBootProjectData() {
         console.error('Failed to parse editor bridge data:', error);
         return null;
     }
+}
+
+function setEditorBootState(state) {
+    const body = document.body;
+    if (!body) return;
+    body.classList.toggle('editor-shell-booting', state === 'booting');
+    body.classList.toggle('editor-shell-loading', state === 'loading');
 }
 
 function persistBootProjectData(raw, options = {}) {
@@ -3329,6 +3341,9 @@ async function loadProjectMediaWithProgress() {
             scene.mediaLoaded = true;
             scene.isVideo = isVideoFile(hit.path);
             scene.image = hit.filename;
+            if (!Array.isArray(scene.asset_files) || scene.asset_files.length === 0) {
+                scene.asset_files = [hit.path];
+            }
             loadedCount++;
             console.log(`Scene ${sceneNumber}: found ${scene.isVideo ? 'video' : 'image'} ${hit.path}`);
             updateSceneClipThumb(scene.id, hit.path, scene.isVideo, scene.videoThumb);
@@ -3355,6 +3370,25 @@ async function loadProjectMediaWithProgress() {
 
     const scenesWithMedia = EditorState.scenes.filter(s => s.mediaUrl);
     console.log(`Auto-load complete: ${scenesWithMedia.length} scenes have mediaUrl`);
+    persistBootProjectData({
+        project_id: EditorState.project?.id,
+        project_name: EditorState.project?.name,
+        style: EditorState.project?.style,
+        style_name: EditorState.project?.styleName,
+        style_color: EditorState.project?.styleColor,
+        source_folder: EditorState.project?.sourceFolder,
+        total_duration: getTotalDuration(),
+        scene_count: EditorState.scenes.length,
+        staged_at: EditorState.project?.stagedAt,
+        scenes: EditorState.scenes.map(scene => ({
+            ...scene,
+            image_url: scene.mediaUrl || scene.image_url || '',
+            asset_files: Array.isArray(scene.asset_files) ? scene.asset_files : []
+        })),
+        ...(EditorState.savedAudioSettings ? { audio: EditorState.savedAudioSettings } : {})
+    }, {
+        markSavedProject: EditorState.project?.loadedFrom === 'wip' || EditorState.project?.loadedFrom === 'initial'
+    });
 
     if (EditorState.preview) {
         updateLoadingOverlay(`Preloading ${scenesWithMedia.length} media elements...`);
@@ -3421,6 +3455,7 @@ function showLoadingOverlay(message = 'Loading...') {
         `;
         document.body.appendChild(overlay);
     }
+    setEditorBootState('loading');
     return overlay;
 }
 
@@ -3442,9 +3477,11 @@ function hideLoadingOverlay() {
             overlay.classList.add('fade-out');
             setTimeout(() => {
                 overlay.remove();
+                setEditorBootState('ready');
                 resolve();
             }, 300);
         } else {
+            setEditorBootState('ready');
             resolve();
         }
     });
@@ -3454,6 +3491,7 @@ function hideLoadingOverlay() {
  * Show the no data overlay — auto-loads asset list
  */
 function showNoDataOverlay(showProjects = true) {
+    setEditorBootState('ready');
     elements.noDataOverlay?.classList.remove('hidden');
     if (showProjects) {
         _loadNoDataProjects();
