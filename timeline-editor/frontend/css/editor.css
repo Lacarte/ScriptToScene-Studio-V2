@@ -2557,6 +2557,37 @@ body.asset-dragging .scene-clip:hover {
     min-width: 0;
 }
 
+.caption-clip.selected {
+    background: rgba(255, 193, 7, 0.25);
+    border-color: rgba(255, 193, 7, 0.7);
+    box-shadow: 0 0 0 1px rgba(255, 193, 7, 0.5);
+}
+
+.caption-props-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0 6px;
+}
+
+.caption-props-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    background: rgba(255, 193, 7, 0.15);
+    color: rgba(255, 193, 7, 0.9);
+    flex-shrink: 0;
+}
+
+.caption-props-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
 .caption-track-empty {
     font-size: 0.6rem;
     color: var(--text-muted);

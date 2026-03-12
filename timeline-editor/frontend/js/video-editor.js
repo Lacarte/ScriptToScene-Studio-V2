@@ -747,8 +747,10 @@ function selectAudioTrack(trackId) {
     // Deselect scenes
     EditorState.selectedScene = null;
     EditorState.selectedTextOverlaySceneId = null;
+    EditorState.selectedCaptionIdx = null;
     document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
 
     // Deselect previous audio clip
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
@@ -985,6 +987,7 @@ const EditorState = {
     savedAudioSettings: null,  // Saved audio settings from localStorage
     captionData: null,      // Caption data { captions: [], style: {} }
     captionsEnabled: false, // Whether caption track is visible
+    selectedCaptionIdx: null, // Currently selected caption index for detail panel
     overlays: [],           // Stacked overlay URLs applied to entire timeline (bottom → top)
     grainOverlay: null,     // Optional animated white-dot grain config (export-time only)
     selectedExportProfile: 'yt_shorts',  // Export profile ID
@@ -4848,6 +4851,120 @@ function renderCaptionTrack() {
     }).join('');
 
     elements.captionTrack.innerHTML = `<div style="position:relative;width:${totalWidth}px;height:100%">${clips}</div>`;
+
+    // Bind click delegation once
+    if (!elements.captionTrack._capClickBound) {
+        elements.captionTrack._capClickBound = true;
+        elements.captionTrack.addEventListener('click', (e) => {
+            const clip = e.target.closest('.caption-clip');
+            if (!clip) return;
+            const idx = parseInt(clip.dataset.capIdx, 10);
+            if (!isNaN(idx)) selectCaption(idx);
+        });
+    }
+}
+
+/**
+ * Select a caption clip and show its details in the properties panel
+ */
+function selectCaption(idx) {
+    const captionData = EditorState.captionData;
+    if (!captionData || !captionData.captions || idx < 0 || idx >= captionData.captions.length) return;
+
+    // Deselect scenes and audio
+    EditorState.selectedScene = null;
+    EditorState.selectedTextOverlaySceneId = null;
+    EditorState.selectedAudioTrack = null;
+    document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
+
+    // Deselect previous caption clip
+    document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
+
+    EditorState.selectedCaptionIdx = idx;
+
+    // Highlight selected
+    const clip = elements.captionTrack.querySelector(`.caption-clip[data-cap-idx="${idx}"]`);
+    if (clip) clip.classList.add('selected');
+
+    // Seek playback to caption start
+    const cap = captionData.captions[idx];
+    EditorState.playbackPosition = cap.start;
+    if (EditorState.preview) EditorState.preview.seek(cap.start);
+    seekAudio(cap.start);
+    updateTimeScrubber();
+    updatePlayhead();
+
+    renderCaptionProperties();
+}
+
+/**
+ * Render caption properties in the detail panel
+ */
+function renderCaptionProperties() {
+    if (!elements.sceneProperties) return;
+
+    const idx = EditorState.selectedCaptionIdx;
+    const captionData = EditorState.captionData;
+    if (idx == null || !captionData || !captionData.captions || idx >= captionData.captions.length) {
+        return;
+    }
+
+    const cap = captionData.captions[idx];
+    const duration = (cap.end - cap.start).toFixed(2);
+    const totalCaptions = captionData.captions.length;
+
+    const fmtTime = (s) => {
+        const m = Math.floor(s / 60);
+        const sec = (s % 60).toFixed(2).padStart(5, '0');
+        return `${m}:${sec}`;
+    };
+
+    elements.sceneProperties.innerHTML = `
+        <div class="caption-props-header">
+            <span class="caption-props-icon">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="6" y1="16" x2="14" y2="16"/></svg>
+            </span>
+            <span class="caption-props-title">Caption ${idx + 1} / ${totalCaptions}</span>
+        </div>
+        <div class="property-group">
+            <label>Start</label>
+            <span class="property-value">${fmtTime(cap.start)}</span>
+        </div>
+        <div class="property-group">
+            <label>End</label>
+            <span class="property-value">${fmtTime(cap.end)}</span>
+        </div>
+        <div class="property-group">
+            <label>Duration</label>
+            <span class="property-value">${duration}s</span>
+        </div>
+        <div class="property-group property-stack">
+            <label>Text</label>
+            <textarea class="property-textarea" id="caption-text-edit"
+                      rows="4" spellcheck="false">${cap.text.replace(/</g, '&lt;')}</textarea>
+        </div>
+    `;
+
+    // Bind text editing
+    const textarea = document.getElementById('caption-text-edit');
+    if (textarea) {
+        textarea.addEventListener('input', () => {
+            const newText = textarea.value;
+            captionData.captions[idx].text = newText;
+            _saveCaptionsToStorage();
+
+            // Update the clip label on the timeline
+            const clipEl = elements.captionTrack.querySelector(`.caption-clip[data-cap-idx="${idx}"]`);
+            if (clipEl) {
+                const label = newText.length > 20 ? newText.substring(0, 20) + '...' : newText;
+                const labelEl = clipEl.querySelector('.caption-clip-label');
+                if (labelEl) labelEl.textContent = label;
+                clipEl.title = newText;
+            }
+        });
+    }
 }
 
 /**
@@ -5594,7 +5711,9 @@ function selectScene(sceneId) {
     // Deselect any selected audio track
     EditorState.selectedAudioTrack = null;
     EditorState.selectedTextOverlaySceneId = null;
+    EditorState.selectedCaptionIdx = null;
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
 
     // Select new
     const clip = elements.videoTrack.querySelector(`[data-id="${sceneId}"]`);
@@ -5643,10 +5762,12 @@ function selectTextOverlay(sceneId) {
     EditorState.selectedScene = scene;
     EditorState.selectedTextOverlaySceneId = sceneId;
     EditorState.selectedAudioTrack = null;
+    EditorState.selectedCaptionIdx = null;
 
     document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
 
     const clip = elements.textTrack?.querySelector(`.text-clip[data-id="${sceneId}"]`);
     if (clip) clip.classList.add('selected');
@@ -5671,6 +5792,11 @@ function renderSceneProperties() {
         // If an audio track is selected, show its properties instead
         if (EditorState.selectedAudioTrack) {
             renderAudioProperties();
+            return;
+        }
+        // If a caption is selected, show its properties instead
+        if (EditorState.selectedCaptionIdx != null) {
+            renderCaptionProperties();
             return;
         }
         elements.sceneProperties.innerHTML = '<div class="detail-placeholder">Select a scene to edit</div>';

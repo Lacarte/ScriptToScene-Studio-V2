@@ -12,3 +12,8 @@
 - Add contract tests for frontend payloads versus backend schema expectations.
 - Add end-to-end smoke tests for the main pipeline, ZIP import/export, and export-library flows.
 - Replace the current ad hoc `_dev/tools/test_*.py` scripts with repeatable automated checks where possible.
+
+
+FIX SPECIAL CHARACTER AND FOREIGN THE NAME PRONUNCIACION IN THE TTS
+
+ Thewisestickman - Channel Tiktok Youtube Instagram  Facebook

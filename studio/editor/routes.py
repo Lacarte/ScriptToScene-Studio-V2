@@ -1072,6 +1072,7 @@ def _process_video(job_id, export_data, output_path):
 
         # Probe exported video for duration and dimensions
         _probe = _ffprobe_video(output_path)
+        scene_count = len(export_data.get("scenes", []))
 
         safe_json_write(os.path.splitext(output_path)[0] + ".json", {
             "job_id": job_id,
