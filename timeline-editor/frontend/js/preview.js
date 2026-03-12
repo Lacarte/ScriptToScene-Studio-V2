@@ -364,11 +364,11 @@ export class CanvasPreview {
         const img = this.imageCache.get(scene.id);
 
         // For text scenes, render background + text overlay (unless text track disabled)
-        if (scene.type === 'text') {
+        if (scene.type === 'text' || scene.type === 'cta') {
             if (this.disabledTracks.has('text')) {
                 this.renderPlaceholder(scene);
             } else {
-                this.renderTextScene(scene, progress);
+                this.renderTextScene(scene, current.localTime, progress);
             }
             this.renderOverlay();
             this.renderCaptionOverlay(this.currentTime);
@@ -386,6 +386,8 @@ export class CanvasPreview {
         } else {
             this.renderPlaceholder(scene);
         }
+
+        this.renderSceneTextOverlay(scene, current.localTime, progress);
 
         // Transition blending: crossfade into next scene
         if (scene.transition && scene.transition.type === 'crossfade' && scene.transition.duration > 0) {
@@ -411,6 +413,41 @@ export class CanvasPreview {
 
         // Caption overlay on top
         this.renderCaptionOverlay(this.currentTime);
+    }
+
+    renderSceneTextOverlay(scene, localTime, progress) {
+        const text = (scene.text_content || '').trim();
+        if (!text || ['text', 'cta'].includes(scene.type)) {
+            this.currentTextScene = null;
+            return;
+        }
+
+        const start = Math.max(0, Number(scene.text_timeline_offset) || 0);
+        const duration = Math.max(0, Number(scene.text_overlay_duration) || (scene.duration - start));
+        if (duration <= 0 || localTime < start || localTime > start + duration) {
+            this.currentTextScene = null;
+            return;
+        }
+
+        const overlayProgress = duration > 0 ? Math.max(0, Math.min(1, (localTime - start) / duration)) : progress;
+
+        if (scene.text_background_enabled) {
+            this.ctx.fillStyle = scene.text_background_color || '#000000';
+            this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        this.renderTextOverlay(text, overlayProgress, {
+            color: scene.text_color || 'white',
+            size: scene.text_size || 48,
+            style: scene.font_style || 'bold',
+            fontFamily: scene.font_family || 'Inter',
+            textAlign: scene.text_align || 'center',
+            verticalAlign: scene.vertical_align || 'center',
+            textX: scene.text_x,
+            textY: scene.text_y
+        });
+
+        this.currentTextScene = scene;
     }
 
     /**
@@ -441,27 +478,42 @@ export class CanvasPreview {
     }
 
     /**
-     * Render a text scene with optional background image
-     * Uses wbg.png for white text, bbg.png for black text
+     * Render a text scene using its actual media background when available,
+     * or a solid background when explicitly enabled.
      */
-    renderTextScene(scene, progress) {
-        // Determine text color preference (default: white text on dark background)
+    renderTextScene(scene, localTime, progress) {
         const textColor = scene.text_color || 'white';
-        const bgImage = textColor === 'white' ? this.textBackgrounds.white : this.textBackgrounds.black;
+        const media = this.imageCache.get(scene.id);
+        const fallbackBgImage = textColor === 'white' ? this.textBackgrounds.white : this.textBackgrounds.black;
 
-        // Render background at full opacity (no fade on background)
-        if (bgImage) {
-            this.renderBackgroundImage(bgImage);
+        if (scene.text_background_enabled) {
+            this.ctx.fillStyle = scene.text_background_color || '#000000';
+            this.ctx.fillRect(0, 0, this.width, this.height);
+        } else if (media) {
+            if (media._isVideo) {
+                this._syncVideo(media, localTime);
+                this.renderImage(media, scene.visual_fx || 'static', progress);
+            } else {
+                this.renderImage(media, scene.visual_fx || 'static', progress);
+            }
+        } else if (fallbackBgImage) {
+            this.renderBackgroundImage(fallbackBgImage);
         } else {
-            // Fallback to solid background
             this.ctx.fillStyle = textColor === 'white' ? '#000000' : '#ffffff';
             this.ctx.fillRect(0, 0, this.width, this.height);
         }
 
         // Render text on top with fade effect
         const textContent = scene.text_content || scene.script;
-        if (textContent) {
-            this.renderTextOverlay(textContent, progress, {
+        const start = Math.max(0, Number(scene.text_timeline_offset) || 0);
+        const duration = Math.max(0, Number(scene.text_overlay_duration) || (scene.duration - start));
+        const showText = !!textContent && duration > 0 && localTime >= start && localTime <= start + duration;
+
+        if (showText) {
+            const overlayProgress = duration > 0
+                ? Math.max(0, Math.min(1, (localTime - start) / duration))
+                : progress;
+            this.renderTextOverlay(textContent, overlayProgress, {
                 color: textColor,
                 size: scene.text_size || 48,
                 style: scene.font_style || 'bold',
@@ -474,7 +526,7 @@ export class CanvasPreview {
         }
 
         // Store current scene for drag reference
-        this.currentTextScene = scene;
+        this.currentTextScene = showText ? scene : null;
     }
 
     /**

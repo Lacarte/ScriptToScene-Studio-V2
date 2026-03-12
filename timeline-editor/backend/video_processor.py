@@ -217,6 +217,42 @@ class VideoProcessor:
         """Create a video clip for a text scene"""
         text_config = scene.get('text', {})
         duration = scene.get('duration', 3)
+        background_cfg = text_config.get('background', {}) or {}
+        use_solid_background = bool(background_cfg.get('enabled'))
+        media = scene.get('media', {})
+        media_path = media.get('path')
+
+        if media_path and not use_solid_background:
+            full_media_path = self._get_media_path(media_path)
+            effect = scene.get('effect', {})
+            base_output_path = os.path.join(temp_dir, f"text_base_{index:03d}.mp4")
+            output_path = os.path.join(temp_dir, f"scene_{index:03d}.mp4")
+
+            is_video_source = full_media_path.lower().endswith(('.mp4', '.webm', '.mov', '.avi', '.mkv'))
+            if is_video_source:
+                self._create_scene_from_video(full_media_path, base_output_path, duration, effect)
+            elif USE_FFMPEG_PYTHON:
+                self._create_scene_ffmpeg(full_media_path, base_output_path, duration, effect)
+            else:
+                self._create_scene_subprocess(full_media_path, base_output_path, duration, effect)
+
+            self._apply_scene_text_overlay(base_output_path, output_path, {
+                'start_time': 0,
+                'duration': duration,
+                'content': text_config.get('content', ''),
+                'color_hex': text_config.get('color_hex', '#ffffff'),
+                'font_family': text_config.get('font_family', 'Inter'),
+                'font_size': text_config.get('font_size', 48),
+                'font_style': text_config.get('font_style', 'bold'),
+                'position': text_config.get('position', {}) or {},
+                'text_align': text_config.get('text_align', 'center'),
+                'vertical_align': text_config.get('vertical_align', 'center'),
+                'background': {
+                    'enabled': False,
+                    'color': background_cfg.get('color', '#000000')
+                }
+            }, temp_dir, index)
+            return output_path
 
         text_image_path = os.path.join(temp_dir, f"text_{index:03d}.png")
         self._render_text_image(text_config, text_image_path)
@@ -291,6 +327,7 @@ class VideoProcessor:
         content = text_config.get('content', '')
         color_hex = text_config.get('color_hex', '#ffffff')
         background = text_config.get('background', {})
+        transparent_bg = bool(background.get('transparent'))
 
         font_family = text_config.get('font_family', 'Inter')
         font_size = text_config.get('font_size', 48)
@@ -312,7 +349,7 @@ class VideoProcessor:
         if bg_image_path:
             try:
                 full_path = self._get_media_path(bg_image_path)
-                bg_image = Image.open(full_path).convert('RGB')
+                bg_image = Image.open(full_path).convert('RGBA')
                 bg_image = bg_image.resize((self.width, self.height), Image.Resampling.LANCZOS)
                 logger.debug("Text background image: {}", bg_image_path)
             except Exception as e:
@@ -323,8 +360,12 @@ class VideoProcessor:
             img = bg_image
         else:
             fallback_color = background.get('fallback_color', '#000000')
-            img = Image.new('RGB', (self.width, self.height), fallback_color)
-            logger.debug("Text solid background: {}", fallback_color)
+            if transparent_bg:
+                img = Image.new('RGBA', (self.width, self.height), (0, 0, 0, 0))
+                logger.debug("Text transparent background")
+            else:
+                img = Image.new('RGB', (self.width, self.height), fallback_color)
+                logger.debug("Text solid background: {}", fallback_color)
 
         draw = ImageDraw.Draw(img)
         font = self._load_font(font_family, font_size, font_style)
@@ -366,6 +407,58 @@ class VideoProcessor:
 
         img.save(output_path, 'PNG')
         logger.debug("Text image saved: {}", output_path)
+
+    def _apply_scene_text_overlay(self, input_path, output_path, overlay_config, temp_dir, index):
+        """Burn a timed text overlay onto a rendered image/video scene clip."""
+        duration = max(0.0, float(overlay_config.get('duration', 0) or 0))
+        if duration <= 0:
+            shutil.copy2(input_path, output_path)
+            return
+
+        bg_cfg = overlay_config.get('background', {}) or {}
+        overlay_text_cfg = {
+            'content': overlay_config.get('content', ''),
+            'color_hex': overlay_config.get('color_hex', '#ffffff'),
+            'font_family': overlay_config.get('font_family', 'Inter'),
+            'font_size': overlay_config.get('font_size', 48),
+            'font_style': overlay_config.get('font_style', 'bold'),
+            'position': overlay_config.get('position', {}) or {},
+            'text_align': overlay_config.get('text_align', 'center'),
+            'vertical_align': overlay_config.get('vertical_align', 'center'),
+            'background': {
+                'transparent': not bg_cfg.get('enabled'),
+                'fallback_color': bg_cfg.get('color', '#000000')
+            }
+        }
+
+        overlay_image_path = os.path.join(temp_dir, f"scene_{index:03d}_text_overlay.png")
+        self._render_text_image(overlay_text_cfg, overlay_image_path)
+
+        start_time = max(0.0, float(overlay_config.get('start_time', 0) or 0))
+        end_time = start_time + duration
+        filter_complex = (
+            f"[1:v]format=rgba[ov];"
+            f"[0:v][ov]overlay=0:0:enable='between(t,{start_time:.3f},{end_time:.3f})'[v]"
+        )
+        cmd = [
+            FFMPEG_BIN, '-y',
+            '-i', input_path,
+            '-loop', '1', '-i', overlay_image_path,
+            '-filter_complex', filter_complex,
+            '-map', '[v]',
+            '-map', '0:a?',
+            '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
+            '-pix_fmt', self.pixel_format,
+            '-c:a', 'copy',
+            '-shortest',
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            logger.error("Scene text overlay failed: {}", result.stderr[-700:] if result.stderr else '')
+            shutil.copy2(input_path, output_path)
+        else:
+            logger.info("Scene text overlay applied: {}", os.path.basename(output_path))
 
     def _wrap_text(self, text, font, max_width, draw):
         """Wrap text to fit within max_width"""
@@ -443,6 +536,12 @@ class VideoProcessor:
             logger.debug("Scene {}: output {} ({:.1f} KB)", scene_id, output_path, size / 1024)
         else:
             logger.error("Scene {}: output file was NOT created: {}", scene_id, output_path)
+
+        text_overlay = scene.get('text_overlay') or {}
+        if text_overlay.get('content') and float(text_overlay.get('duration', 0) or 0) > 0:
+            overlaid_output_path = os.path.join(temp_dir, f"scene_{index:03d}_overlay.mp4")
+            self._apply_scene_text_overlay(output_path, overlaid_output_path, text_overlay, temp_dir, index)
+            return overlaid_output_path
 
         return output_path
 

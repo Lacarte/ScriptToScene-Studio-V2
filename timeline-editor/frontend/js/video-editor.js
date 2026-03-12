@@ -169,6 +169,7 @@ const AUDIO_TRACK_COLORS = {
 };
 const DEFAULT_MUSIC_DUCKING_LEVEL = 0.2;
 const MIN_MUSIC_DUCKING_LEVEL = 0.12;
+const MIN_TEXT_OVERLAY_DURATION = 0.5;
 
 function _getSavedVolume(type) {
     try { const v = parseFloat(localStorage.getItem(`sts-vol-${type}`)); return isNaN(v) ? null : v; } catch { return null; }
@@ -299,6 +300,270 @@ function getTrackPlaybackTime(track, timelineTime) {
         return (startOffset + clipTime) % duration;
     }
     return Math.min(startOffset + clipTime, getTrackSourceEnd(track));
+}
+
+function getSceneTextOffset(scene) {
+    return Math.max(0, Number(scene?.text_timeline_offset) || 0);
+}
+
+function getSceneTextDuration(scene) {
+    if (!scene) return 0;
+    const maxDuration = Math.max(0, Number(scene.duration) || 0);
+    const offset = getSceneTextOffset(scene);
+    const requested = Number(scene.text_overlay_duration);
+    const remaining = Math.max(0, maxDuration - offset);
+    if (requested > 0) return Math.min(requested, remaining || requested);
+    return remaining;
+}
+
+function getSceneTextValue(scene) {
+    if (!scene) return '';
+    if (scene.type === 'text' || scene.type === 'cta') {
+        return String(scene.text_content || scene.script || '').trim();
+    }
+    return String(scene.text_content || '').trim();
+}
+
+function hasSceneTextOverlay(scene) {
+    return !!getSceneTextValue(scene);
+}
+
+function getSceneTextTimelineStart(sceneIndex) {
+    const scene = EditorState.scenes[sceneIndex];
+    return getSceneStartTime(sceneIndex) + getSceneTextOffset(scene);
+}
+
+function normalizeSceneTextOverlay(scene) {
+    if (!scene) return;
+    const duration = Math.max(0, Number(scene.duration) || 0);
+    const maxOffset = Math.max(0, duration - MIN_TEXT_OVERLAY_DURATION);
+    scene.text_timeline_offset = Math.min(maxOffset, Math.max(0, Number(scene.text_timeline_offset) || 0));
+    const maxOverlayDuration = Math.max(MIN_TEXT_OVERLAY_DURATION, duration - scene.text_timeline_offset);
+    scene.text_overlay_duration = Math.min(
+        maxOverlayDuration,
+        Math.max(MIN_TEXT_OVERLAY_DURATION, Number(scene.text_overlay_duration) || maxOverlayDuration)
+    );
+    if (typeof scene.text_background_enabled !== 'boolean') {
+        scene.text_background_enabled = scene.type === 'text' || scene.type === 'cta';
+    }
+    if (!scene.text_background_color) scene.text_background_color = '#000000';
+}
+
+function getNextSceneId() {
+    const maxId = EditorState.scenes.reduce((max, scene) => {
+        const id = Number(scene?.id);
+        return Number.isFinite(id) ? Math.max(max, id) : max;
+    }, 0);
+    return maxId + 1;
+}
+
+function cloneScene(scene) {
+    return JSON.parse(JSON.stringify(scene));
+}
+
+function clearSceneTextOverlay(scene) {
+    if (!scene) return;
+    scene.text_content = null;
+    scene.text_timeline_offset = 0;
+    scene.text_overlay_duration = null;
+    scene.text_background_enabled = false;
+    scene.text_background_color = '#000000';
+}
+
+function hasSceneBackgroundMedia(scene) {
+    return !!(scene && (scene.mediaUrl || scene.videoThumb || scene.image));
+}
+
+function getSceneThumbSource(scene) {
+    if (!scene) return null;
+    if (scene.isVideo) {
+        return scene.videoThumb || scene.mediaUrl || scene.image_url || null;
+    }
+    if (scene.mediaUrl) return scene.mediaUrl;
+    if (scene.image_url) return scene.image_url;
+    if (scene.image && EditorState.project?.id) {
+        return `working-assets/${EditorState.project.id}/${scene.image}`;
+    }
+    return null;
+}
+
+function getSceneClipThumbMarkup(scene, icon) {
+    const isTextScene = scene.type === 'text' || scene.type === 'cta';
+    const textBadge = isTextScene ? '<span class="scene-thumb-text-badge">TXT</span>' : '';
+    const thumbSrc = getSceneThumbSource(scene);
+
+    // Text scenes: solid black unless scene background mode AND image exists
+    if (isTextScene) {
+        if (!scene.text_background_enabled && thumbSrc) {
+            // Scene background mode with valid image
+            return `
+                <div class="scene-clip-thumb scene-thumb-has-text">
+                    <img src="${thumbSrc}" alt="Scene ${scene.id}">
+                    ${textBadge}
+                </div>
+            `;
+        }
+        // Solid color mode (default) or no image available — always solid
+        const solidBgColor = scene.text_background_color || '#000000';
+        return `
+            <div class="scene-clip-thumb scene-thumb-solid" style="--thumb-solid-color: ${solidBgColor}">
+                ${textBadge}
+            </div>
+        `;
+    }
+
+    const videoBadge = scene.isVideo && thumbSrc
+        ? '<span class="media-video-badge">VIDEO</span>'
+        : '';
+    const mediaMarkup = thumbSrc
+        ? `<img src="${thumbSrc}" alt="Scene ${scene.id}">`
+        : icon;
+
+    return `
+        <div class="scene-clip-thumb">
+            ${mediaMarkup}
+            ${videoBadge}
+        </div>
+    `;
+}
+
+function syncTimelineAfterSceneStructureChange(selectSceneId = null, selectAsOverlay = false) {
+    EditorState.project.sceneCount = EditorState.scenes.length;
+    normalizeTimelineDurations();
+    recalculateDuration();
+    renderTimeline();
+    if (EditorState.preview) {
+        EditorState.preview.setScenes(EditorState.scenes);
+        EditorState.preview.seek(EditorState.playbackPosition);
+    }
+    if (selectSceneId !== null) {
+        if (selectAsOverlay) {
+            selectTextOverlay(selectSceneId);
+        } else {
+            selectScene(selectSceneId);
+        }
+    } else {
+        renderSceneProperties();
+    }
+    saveProjectEdits();
+}
+
+function convertTextOverlayToScene(sceneId) {
+    const sceneIndex = EditorState.scenes.findIndex(s => s.id === sceneId);
+    const scene = EditorState.scenes[sceneIndex];
+    if (!scene) return;
+
+    normalizeSceneTextOverlay(scene);
+    const textContent = getSceneTextValue(scene);
+    if (!textContent) {
+        showToast('This scene has no text overlay to convert', 'info');
+        return;
+    }
+
+    const startOffset = getSceneTextOffset(scene);
+    const overlayDuration = getSceneTextDuration(scene);
+    const beforeDuration = Math.max(0, Math.round(startOffset * 1000) / 1000);
+    const afterDuration = Math.max(0, Math.round((scene.duration - startOffset - overlayDuration) * 1000) / 1000);
+    const originalScene = cloneScene(scene);
+    const replacement = [];
+    const originalTransition = cloneScene(scene.transition || { type: 'none', duration: 0 });
+
+    if (beforeDuration >= 0.1) {
+        const beforeScene = cloneScene(originalScene);
+        beforeScene.duration = beforeDuration;
+        beforeScene.transition = { type: 'none', duration: 0 };
+        clearSceneTextOverlay(beforeScene);
+        replacement.push(beforeScene);
+    }
+
+    const textScene = {
+        id: getNextSceneId(),
+        type: 'text',
+        duration: overlayDuration,
+        text_content: textContent,
+        script: textContent,
+        text_color: originalScene.text_color,
+        text_size: originalScene.text_size,
+        font_family: originalScene.font_family,
+        font_style: originalScene.font_style,
+        text_align: originalScene.text_align,
+        vertical_align: originalScene.vertical_align,
+        text_x: originalScene.text_x,
+        text_y: originalScene.text_y,
+        text_background_enabled: true,
+        text_background_color: originalScene.text_background_color || '#000000',
+        text_timeline_offset: 0,
+        text_overlay_duration: overlayDuration,
+        visual_fx: originalScene.visual_fx || 'static',
+        image_prompt: originalScene.image_prompt || '',
+        mediaUrl: originalScene.mediaUrl || null,
+        image_url: originalScene.mediaUrl || originalScene.image_url || null,
+        image: originalScene.image || '',
+        mediaLoaded: !!originalScene.mediaLoaded,
+        isVideo: !!originalScene.isVideo,
+        videoThumb: originalScene.videoThumb || null,
+        status: originalScene.status || 'ready',
+        timestamp: originalScene.timestamp || 0,
+        narrative_role: originalScene.narrative_role || '',
+        filler_shift: 0,
+        segment_start: null,
+        segment_end: null,
+        segment_duration: null,
+        transition: afterDuration >= 0.1 ? { type: 'none', duration: 0 } : originalTransition
+    };
+    replacement.push(textScene);
+
+    if (afterDuration >= 0.1) {
+        const afterScene = cloneScene(originalScene);
+        afterScene.id = getNextSceneId() + 1;
+        afterScene.duration = afterDuration;
+        afterScene.transition = originalTransition;
+        clearSceneTextOverlay(afterScene);
+        replacement.push(afterScene);
+    }
+
+    EditorState.scenes.splice(sceneIndex, 1, ...replacement);
+    syncTimelineAfterSceneStructureChange(textScene.id, false);
+    showToast('Converted text overlay to scene', 'success');
+}
+
+function convertTextSceneToOverlay(sceneId) {
+    const sceneIndex = EditorState.scenes.findIndex(s => s.id === sceneId);
+    const scene = EditorState.scenes[sceneIndex];
+    const hostScene = sceneIndex > 0 ? EditorState.scenes[sceneIndex - 1] : null;
+    if (!scene || !hostScene) {
+        showToast('A text scene needs a visual scene before it', 'warning');
+        return;
+    }
+    if (hostScene.type === 'text' || hostScene.type === 'cta') {
+        showToast('The previous scene must be an image or video scene', 'warning');
+        return;
+    }
+    if (getSceneTextValue(hostScene)) {
+        showToast('The previous scene already has a text overlay', 'warning');
+        return;
+    }
+
+    const textContent = getSceneTextValue(scene);
+    hostScene.text_content = textContent;
+    hostScene.text_color = scene.text_color;
+    hostScene.text_size = scene.text_size;
+    hostScene.font_family = scene.font_family;
+    hostScene.font_style = scene.font_style;
+    hostScene.text_align = scene.text_align;
+    hostScene.vertical_align = scene.vertical_align;
+    hostScene.text_x = scene.text_x;
+    hostScene.text_y = scene.text_y;
+    hostScene.text_background_enabled = !!scene.text_background_enabled;
+    hostScene.text_background_color = scene.text_background_color || '#000000';
+    hostScene.text_timeline_offset = hostScene.duration;
+    hostScene.text_overlay_duration = scene.duration;
+    hostScene.duration = Math.round((hostScene.duration + scene.duration) * 1000) / 1000;
+    normalizeSceneTextOverlay(hostScene);
+
+    EditorState.scenes.splice(sceneIndex, 1);
+    syncTimelineAfterSceneStructureChange(hostScene.id, true);
+    showToast('Converted text scene to overlay', 'success');
 }
 
 function isVoiceAudible() {
@@ -481,7 +746,9 @@ function drawWaveformCanvas(canvas, track) {
 function selectAudioTrack(trackId) {
     // Deselect scenes
     EditorState.selectedScene = null;
+    EditorState.selectedTextOverlaySceneId = null;
     document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
 
     // Deselect previous audio clip
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
@@ -697,6 +964,7 @@ const EditorState = {
     scenes: [],
     originalScenes: [],  // Original scenes for comparison/reset
     selectedScene: null,
+    selectedTextOverlaySceneId: null,
     selectedAudioTrack: null,  // Currently selected audio track for detail panel
     mediaFolder: null,
     mediaFiles: new Map(),
@@ -788,7 +1056,11 @@ function saveProjectEdits() {
         text_align: scene.text_align,
         vertical_align: scene.vertical_align,
         text_x: scene.text_x,
-        text_y: scene.text_y
+        text_y: scene.text_y,
+        text_timeline_offset: scene.text_timeline_offset ?? 0,
+        text_overlay_duration: scene.text_overlay_duration ?? null,
+        text_background_enabled: !!scene.text_background_enabled,
+        text_background_color: scene.text_background_color || '#000000'
     }));
 
     // Include audio settings if audio is loaded
@@ -870,6 +1142,10 @@ function _buildSavePayload() {
             font_family: s.font_family, font_style: s.font_style,
             text_align: s.text_align, vertical_align: s.vertical_align,
             text_x: s.text_x ?? null, text_y: s.text_y ?? null,
+            text_timeline_offset: s.text_timeline_offset ?? 0,
+            text_overlay_duration: s.text_overlay_duration ?? null,
+            text_background_enabled: !!s.text_background_enabled,
+            text_background_color: s.text_background_color || '#000000',
             timestamp: s.timestamp || 0, status: s.status || 'ready',
             isVideo: !!s.isVideo, script: s.script || '',
             narrative_role: s.narrative_role || s.scene_type || '',
@@ -961,6 +1237,11 @@ function loadProjectEdits() {
                 if (edit.vertical_align !== undefined) scene.vertical_align = edit.vertical_align;
                 if (edit.text_x !== undefined) scene.text_x = edit.text_x;
                 if (edit.text_y !== undefined) scene.text_y = edit.text_y;
+                if (edit.text_timeline_offset !== undefined) scene.text_timeline_offset = edit.text_timeline_offset;
+                if (edit.text_overlay_duration !== undefined) scene.text_overlay_duration = edit.text_overlay_duration;
+                if (edit.text_background_enabled !== undefined) scene.text_background_enabled = edit.text_background_enabled;
+                if (edit.text_background_color !== undefined) scene.text_background_color = edit.text_background_color;
+                normalizeSceneTextOverlay(scene);
                 appliedCount++;
             }
         }
@@ -1288,6 +1569,15 @@ function setupHistoryDropdown() {
                 clearProjectEdits();
                 renderHistoryList();
             }
+        });
+    }
+
+    // Reset to initial state button
+    const resetBtn = document.getElementById('share-reset-initial');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            resetToInitialState();
         });
     }
 }
@@ -1946,6 +2236,10 @@ async function loadProjectFromServer(projectId) {
                 vertical_align: s.vertical_align,
                 text_x: s.text_x,
                 text_y: s.text_y,
+                text_timeline_offset: s.text_timeline_offset ?? 0,
+                text_overlay_duration: s.text_overlay_duration ?? null,
+                text_background_enabled: !!s.text_background_enabled,
+                text_background_color: s.text_background_color || '#000000',
                 script: s.script || '',
                 narrative_role: s.narrative_role || '',
                 isVideo: s.isVideo || false,
@@ -2038,6 +2332,7 @@ function _resetEditorForNewProject() {
     EditorState.scenes = [];
     EditorState.originalScenes = [];
     EditorState.selectedScene = null;
+    EditorState.selectedTextOverlaySceneId = null;
     EditorState.playbackPosition = 0;
     EditorState.editHistory = [];
     EditorState.historyIndex = -1;
@@ -2077,8 +2372,13 @@ function _applyExtraState(saved) {
             if (ss.vertical_align !== undefined) scene.vertical_align = ss.vertical_align;
             if (ss.text_x !== undefined) scene.text_x = ss.text_x;
             if (ss.text_y !== undefined) scene.text_y = ss.text_y;
+            if (ss.text_timeline_offset !== undefined) scene.text_timeline_offset = ss.text_timeline_offset;
+            if (ss.text_overlay_duration !== undefined) scene.text_overlay_duration = ss.text_overlay_duration;
+            if (ss.text_background_enabled !== undefined) scene.text_background_enabled = ss.text_background_enabled;
+            if (ss.text_background_color !== undefined) scene.text_background_color = ss.text_background_color;
             if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
             if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
+            normalizeSceneTextOverlay(scene);
         }
     }
 
@@ -2188,8 +2488,13 @@ function _restoreSavedEditorState() {
             if (ss.vertical_align !== undefined) scene.vertical_align = ss.vertical_align;
             if (ss.text_x !== undefined) scene.text_x = ss.text_x;
             if (ss.text_y !== undefined) scene.text_y = ss.text_y;
+            if (ss.text_timeline_offset !== undefined) scene.text_timeline_offset = ss.text_timeline_offset;
+            if (ss.text_overlay_duration !== undefined) scene.text_overlay_duration = ss.text_overlay_duration;
+            if (ss.text_background_enabled !== undefined) scene.text_background_enabled = ss.text_background_enabled;
+            if (ss.text_background_color !== undefined) scene.text_background_color = ss.text_background_color;
             if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
             if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
+            normalizeSceneTextOverlay(scene);
         }
     }
 
@@ -2394,6 +2699,7 @@ async function loadProjectData(data) {
         mediaLoaded: !!scene.image_url,
         mediaUrl: scene.image_url || null
     }));
+    EditorState.scenes.forEach(normalizeSceneTextOverlay);
 
     normalizeTimelineDurations(data.total_duration || 0);
 
@@ -2508,6 +2814,13 @@ async function loadProjectData(data) {
 
     // Update UI
     updateProjectInfo();
+
+    // Show/hide reset button depending on whether WIP exists
+    const resetBtn = document.getElementById('share-reset-initial');
+    if (resetBtn) {
+        const isWip = EditorState.project?.loadedFrom === 'wip';
+        resetBtn.style.display = isWip ? '' : 'none';
+    }
 
     // Sync flip-filler button active state
     const hasFlipped = EditorState.scenes.some(s => s.filler_shift && s.filler_shift !== 0);
@@ -4065,10 +4378,6 @@ function openShareDialog() {
     const wipBadge = isWip ? ' · <span style="color:#FFB347;font-weight:600">edited</span>' : '';
     if (metaEl) metaEl.innerHTML = `${EditorState.scenes.length} scenes · ${formatTimestamp(getTotalDuration())}${wipBadge}`;
 
-    // Show/hide reset button depending on whether WIP exists
-    const resetBtn = document.getElementById('share-reset-initial');
-    if (resetBtn) resetBtn.style.display = isWip ? '' : 'none';
-
     // Reset progress indicators
     _resetShareStatus('export');
     _resetShareStatus('import');
@@ -4315,7 +4624,7 @@ function setupShareDialog() {
     document.getElementById('share-export-zip')?.addEventListener('click', shareExportZip);
     document.getElementById('share-import-zip')?.addEventListener('click', shareImportZip);
     document.getElementById('share-open-folder')?.addEventListener('click', shareOpenFolder);
-    document.getElementById('share-reset-initial')?.addEventListener('click', resetToInitialState);
+    // Reset button moved to history dropdown — listener set up in setupHistoryDropdown()
     document.getElementById('share-import-file')?.addEventListener('change', (e) => {
         _handleImportZipFile(e.target.files?.[0]);
     });
@@ -4327,31 +4636,58 @@ function setupShareDialog() {
     });
 }
 
-async function resetToInitialState() {
+function resetToInitialState() {
     const pid = EditorState.project?.id;
     if (!pid) { showToast('No project loaded', 'error'); return; }
 
-    if (!confirm('Reset this project to its initial state?\n\nAll edits (effects, audio, captions, text, etc.) will be discarded.')) return;
+    // Close history dropdown and show confirm dialog
+    document.getElementById('history-dropdown')?.classList.remove('show');
+    const modal = document.getElementById('reset-confirm-modal');
+    if (!modal) return;
+    modal.classList.add('active');
 
-    closeShareDialog();
-    showLoadingOverlay('Resetting to initial state...');
+    const confirmBtn = document.getElementById('reset-confirm-btn');
+    const cancelBtn = document.getElementById('reset-cancel-btn');
 
-    try {
-        const res = await fetch(`/api/editor/reset/${encodeURIComponent(pid)}`, { method: 'POST' });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Reset failed (${res.status})`);
+    const cleanup = () => {
+        modal.classList.remove('active');
+        confirmBtn.replaceWith(confirmBtn.cloneNode(true));
+        cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+    };
+
+    cancelBtn.addEventListener('click', cleanup, { once: true });
+    modal.addEventListener('click', (e) => { if (e.target === modal) cleanup(); }, { once: true });
+
+    confirmBtn.addEventListener('click', async () => {
+        cleanup();
+        showLoadingOverlay('Resetting to initial state...');
+
+        try {
+            // Stop playback and release audio before resetting
+            if (EditorState.isPlaying) togglePlayback();
+            for (const track of EditorState.audioTracks) {
+                if (track.element) { track.element.pause(); track.element.src = ''; }
+            }
+            EditorState.audioTracks = [];
+            EditorState.selectedAudioTrack = null;
+
+            const res = await fetch(`/api/editor/reset/${encodeURIComponent(pid)}`, { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `Reset failed (${res.status})`);
+            }
+
+            // Clear all localStorage edits and history for this project
+            clearProjectEdits();
+
+            // Reload the project from initial state
+            await loadProjectFromServer(pid);
+            showToast('Project reset to initial state', 'success');
+        } catch (e) {
+            hideLoadingOverlay();
+            showToast('Reset failed: ' + e.message, 'error');
         }
-        // Clear localStorage edits for this project
-        try { localStorage.removeItem(getProjectEditsKey(pid)); } catch {}
-
-        // Reload the project from initial state
-        await loadProjectFromServer(pid);
-        showToast('Project reset to initial state', 'success');
-    } catch (e) {
-        hideLoadingOverlay();
-        showToast('Reset failed: ' + e.message, 'error');
-    }
+    }, { once: true });
 }
 
 /**
@@ -4364,23 +4700,18 @@ function renderTimeline() {
         const width = getScenePixelWidth(scene);
         const color = SCENE_COLORS[scene.type] || '#666666';
         const icon = SCENE_ICONS[scene.type] || SCENE_ICONS.default;
+        const selectedClass = EditorState.selectedScene?.id === scene.id &&
+            EditorState.selectedTextOverlaySceneId !== scene.id ? ' selected' : '';
         const leftHandle = `<div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>`;
         const rightHandle = `<div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>`;
 
         return `
-            <div class="scene-clip"
+            <div class="scene-clip${selectedClass}"
                  data-id="${scene.id}"
                  data-type="${scene.type}"
                  style="width: ${width}px; --scene-color: ${color};"
                  title="${scene.type} - ${scene.duration}s">
-                <div class="scene-clip-thumb">
-                    ${scene.isVideo && scene.videoThumb
-                ? `<img src="${scene.videoThumb}" alt="Scene ${scene.id}"><span class="media-video-badge">VIDEO</span>`
-                : scene.mediaUrl
-                    ? `<img src="${scene.mediaUrl}" alt="Scene ${scene.id}">`
-                    : icon
-            }
-                </div>
+                ${getSceneClipThumbMarkup(scene, icon)}
                 <div class="scene-clip-info">
                     <div class="scene-clip-id">${scene.id}</div>
                     <div class="scene-clip-duration">${scene.duration}s</div>
@@ -4421,43 +4752,60 @@ function renderTextTrack() {
     if (!elements.textTrack) return;
 
     // Build text clips for scenes that have text_content
-    let offset = 0;
+    const totalWidth = timeToPixels(getScenesDuration());
     const textClips = [];
 
-    for (const scene of EditorState.scenes) {
-        const width = getScenePixelWidth(scene);
-        const text = scene.text_content;
+    EditorState.scenes.forEach((scene, sceneIndex) => {
+        const text = getSceneTextValue(scene);
+        if (!hasSceneTextOverlay(scene)) return;
+        normalizeSceneTextOverlay(scene);
 
-        if (text) {
-            const truncText = text.length > 30 ? text.substring(0, 30) + '...' : text;
-            textClips.push(`
-                <div class="text-clip"
-                     data-id="${scene.id}"
-                     style="position:absolute;left:${offset}px;width:${width}px;"
-                     title="${text.replace(/"/g, '&quot;')}">
-                    <div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.6">
-                        <path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M8 20h8"/>
-                    </svg>
-                    <span class="text-clip-label">${truncText.replace(/</g, '&lt;')}</span>
-                    <span class="text-clip-duration">${scene.duration}s</span>
-                    <div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>
-                </div>
-            `);
-        }
-        offset += width;
-    }
+        const left = timeToPixels(getSceneTextTimelineStart(sceneIndex));
+        const width = timeToPixels(getSceneTextDuration(scene));
+        const isTextScene = scene.type === 'text' || scene.type === 'cta';
+        const isSelected = EditorState.selectedTextOverlaySceneId === scene.id ||
+            (isTextScene && EditorState.selectedScene?.id === scene.id);
+        const selectedClass = isSelected ? ' selected' : '';
+
+        const truncText = text.length > 30 ? text.substring(0, 30) + '...' : text;
+        textClips.push(`
+            <div class="text-clip${selectedClass}"
+                 data-id="${scene.id}"
+                 style="position:absolute;left:${left}px;width:${width}px;"
+                 title="${text.replace(/"/g, '&quot;')}">
+                <div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.6">
+                    <path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M8 20h8"/>
+                </svg>
+                <span class="text-clip-label">${truncText.replace(/</g, '&lt;')}</span>
+                <span class="text-clip-duration">${getSceneTextDuration(scene)}s</span>
+                <div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>
+            </div>
+        `);
+    });
 
     if (textClips.length > 0) {
-        elements.textTrack.innerHTML = `<div style="position:relative;width:${offset}px;height:100%">${textClips.join('')}</div>`;
+        elements.textTrack.innerHTML = `<div style="position:relative;width:${totalWidth}px;height:100%">${textClips.join('')}</div>`;
 
         // Click to select scene
         elements.textTrack.querySelectorAll('.text-clip').forEach(clip => {
             clip.addEventListener('click', (e) => {
                 if (e.target.closest('.resize-handle')) return;
-                selectScene(parseInt(clip.dataset.id));
+                if (clip.dataset.suppressClick === '1') {
+                    delete clip.dataset.suppressClick;
+                    return;
+                }
+                const sceneId = parseInt(clip.dataset.id);
+                const scene = EditorState.scenes.find(s => s.id === sceneId);
+                if (!scene) return;
+                if (scene.type === 'text' || scene.type === 'cta') {
+                    selectScene(sceneId);
+                } else {
+                    selectTextOverlay(sceneId);
+                }
             });
         });
+        setupTextOverlayHandlers();
     } else {
         elements.textTrack.innerHTML = `<div class="text-track-empty">No text overlays</div>`;
     }
@@ -4974,13 +5322,11 @@ function setupResizeHandlers() {
     };
 
     elements.videoTrack.querySelectorAll('.scene-clip').forEach(attachResizeHandlers);
-    elements.textTrack?.querySelectorAll('.text-clip').forEach(attachResizeHandlers);
 }
 
 function updateSceneAndTextClipLayout() {
-    let textOffsetPx = 0;
-
-    for (const scene of EditorState.scenes) {
+    for (let sceneIndex = 0; sceneIndex < EditorState.scenes.length; sceneIndex++) {
+        const scene = EditorState.scenes[sceneIndex];
         const widthPx = getScenePixelWidth(scene);
         const sceneClip = elements.videoTrack?.querySelector(`.scene-clip[data-id="${scene.id}"]`);
         if (sceneClip) {
@@ -4992,19 +5338,141 @@ function updateSceneAndTextClipLayout() {
 
         const textClip = elements.textTrack?.querySelector(`.text-clip[data-id="${scene.id}"]`);
         if (textClip) {
-            textClip.style.left = `${textOffsetPx}px`;
-            textClip.style.width = `${widthPx}px`;
+            textClip.style.left = `${timeToPixels(getSceneTextTimelineStart(sceneIndex))}px`;
+            textClip.style.width = `${timeToPixels(getSceneTextDuration(scene))}px`;
             const durationEl = textClip.querySelector('.text-clip-duration');
-            if (durationEl) durationEl.textContent = `${scene.duration}s`;
+            if (durationEl) durationEl.textContent = `${getSceneTextDuration(scene)}s`;
         }
-
-        textOffsetPx += widthPx;
     }
 
     const textTrackInner = elements.textTrack?.firstElementChild;
     if (textTrackInner && textTrackInner.style.position === 'relative') {
-        textTrackInner.style.width = `${textOffsetPx}px`;
+        textTrackInner.style.width = `${timeToPixels(getScenesDuration())}px`;
     }
+}
+
+function setupTextOverlayHandlers() {
+    elements.textTrack?.querySelectorAll('.text-clip').forEach(clip => {
+        const leftHandle = clip.querySelector('.resize-handle-left');
+        const rightHandle = clip.querySelector('.resize-handle-right');
+        const sceneId = parseInt(clip.dataset.id);
+
+        if (leftHandle && leftHandle.dataset.textResizeBound !== '1') {
+            leftHandle.dataset.textResizeBound = '1';
+            leftHandle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                startTextOverlayResize(sceneId, 'left', e);
+            });
+        }
+
+        if (rightHandle && rightHandle.dataset.textResizeBound !== '1') {
+            rightHandle.dataset.textResizeBound = '1';
+            rightHandle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                startTextOverlayResize(sceneId, 'right', e);
+            });
+        }
+
+        if (clip.dataset.textDragBound !== '1') {
+            clip.dataset.textDragBound = '1';
+            clip.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                if (e.target.closest('.resize-handle')) return;
+                startTextOverlayDrag(sceneId, e);
+            });
+        }
+    });
+}
+
+function startTextOverlayDrag(sceneId, startEvent) {
+    const sceneIndex = EditorState.scenes.findIndex(s => s.id === sceneId);
+    const scene = EditorState.scenes[sceneIndex];
+    const clip = elements.textTrack?.querySelector(`.text-clip[data-id="${sceneId}"]`);
+    if (!scene || !clip) return;
+
+    normalizeSceneTextOverlay(scene);
+    startEvent.preventDefault();
+
+    const startX = startEvent.clientX;
+    const startOffset = getSceneTextOffset(scene);
+    const textDuration = getSceneTextDuration(scene);
+    const maxOffset = Math.max(0, scene.duration - textDuration);
+    let moved = false;
+
+    clip.classList.add('text-clip-dragging');
+
+    const onMouseMove = (e) => {
+        const deltaDuration = pixelsToTime(e.clientX - startX);
+        let newOffset = Math.max(0, Math.min(maxOffset, startOffset + deltaDuration));
+        newOffset = Math.round(newOffset * 2) / 2;
+        moved = moved || Math.abs(e.clientX - startX) > 2;
+
+        scene.text_timeline_offset = newOffset;
+        updateSceneAndTextClipLayout();
+    };
+
+    const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        clip.classList.remove('text-clip-dragging');
+
+        if (moved) {
+            clip.dataset.suppressClick = '1';
+            if (scene.text_timeline_offset !== startOffset) {
+                recordEdit(`Move text overlay (Scene ${sceneId})`, sceneId, 'text_timeline_offset', startOffset, scene.text_timeline_offset);
+            }
+            if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+        }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+}
+
+function startTextOverlayResize(sceneId, handle, startEvent) {
+    const scene = EditorState.scenes.find(s => s.id === sceneId);
+    const clip = elements.textTrack?.querySelector(`.text-clip[data-id="${sceneId}"]`);
+    if (!scene || !clip) return;
+
+    normalizeSceneTextOverlay(scene);
+    startEvent.preventDefault();
+
+    const startX = startEvent.clientX;
+    const startOffset = getSceneTextOffset(scene);
+    const startDuration = getSceneTextDuration(scene);
+
+    const onMouseMove = (e) => {
+        const deltaDuration = Math.round(pixelsToTime(e.clientX - startX) * 2) / 2;
+        if (handle === 'left') {
+            const fixedEnd = startOffset + startDuration;
+            const nextOffset = Math.max(0, Math.min(fixedEnd - MIN_TEXT_OVERLAY_DURATION, startOffset + deltaDuration));
+            scene.text_timeline_offset = Math.round(nextOffset * 2) / 2;
+            scene.text_overlay_duration = Math.round((fixedEnd - nextOffset) * 2) / 2;
+        } else {
+            const maxDuration = Math.max(MIN_TEXT_OVERLAY_DURATION, scene.duration - startOffset);
+            scene.text_overlay_duration = Math.max(MIN_TEXT_OVERLAY_DURATION, Math.min(maxDuration, startDuration + deltaDuration));
+            scene.text_overlay_duration = Math.round(scene.text_overlay_duration * 2) / 2;
+        }
+        normalizeSceneTextOverlay(scene);
+        updateSceneAndTextClipLayout();
+    };
+
+    const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+
+        if (scene.text_timeline_offset !== startOffset) {
+            recordEdit(`Move text start (Scene ${sceneId})`, sceneId, 'text_timeline_offset', startOffset, scene.text_timeline_offset);
+        }
+        if (getSceneTextDuration(scene) !== startDuration) {
+            recordEdit(`Resize text duration (Scene ${sceneId})`, sceneId, 'text_overlay_duration', startDuration, getSceneTextDuration(scene));
+        }
+        if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+        renderSceneProperties();
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
 }
 
 /**
@@ -5117,15 +5585,22 @@ function selectScene(sceneId) {
     elements.videoTrack.querySelectorAll('.scene-clip.selected').forEach(el => {
         el.classList.remove('selected');
     });
+    document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
 
     // Deselect any selected audio track
     EditorState.selectedAudioTrack = null;
+    EditorState.selectedTextOverlaySceneId = null;
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
 
     // Select new
     const clip = elements.videoTrack.querySelector(`[data-id="${sceneId}"]`);
     if (clip) {
         clip.classList.add('selected');
+    }
+    const textClip = elements.textTrack?.querySelector(`.text-clip[data-id="${sceneId}"]`);
+    const sceneForClip = EditorState.scenes.find(s => s.id === sceneId);
+    if (textClip && sceneForClip && (sceneForClip.type === 'text' || sceneForClip.type === 'cta')) {
+        textClip.classList.add('selected');
     }
 
     EditorState.selectedScene = EditorState.scenes.find(s => s.id === sceneId);
@@ -5156,6 +5631,31 @@ function selectScene(sceneId) {
     });
 }
 
+function selectTextOverlay(sceneId) {
+    const sceneIndex = EditorState.scenes.findIndex(s => s.id === sceneId);
+    const scene = EditorState.scenes[sceneIndex];
+    if (!scene) return;
+
+    EditorState.selectedScene = scene;
+    EditorState.selectedTextOverlaySceneId = sceneId;
+    EditorState.selectedAudioTrack = null;
+
+    document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
+
+    const clip = elements.textTrack?.querySelector(`.text-clip[data-id="${sceneId}"]`);
+    if (clip) clip.classList.add('selected');
+
+    const startTime = getSceneTextTimelineStart(sceneIndex);
+    EditorState.playbackPosition = startTime;
+    if (EditorState.preview) EditorState.preview.seek(startTime);
+    seekAudio(startTime);
+    updateTimeScrubber();
+    updatePlayhead();
+    renderSceneProperties();
+}
+
 /**
  * Render scene properties panel
  */
@@ -5174,6 +5674,15 @@ function renderSceneProperties() {
     }
 
     const isTextScene = scene.type === 'text' || scene.type === 'cta';
+    const isTextOverlaySelected = EditorState.selectedTextOverlaySceneId === scene.id && !isTextScene;
+    if (isTextOverlaySelected) normalizeSceneTextOverlay(scene);
+    const sceneIndex = EditorState.scenes.findIndex(s => s.id === scene.id);
+    const previousScene = sceneIndex > 0 ? EditorState.scenes[sceneIndex - 1] : null;
+    const hasStoredSceneBackground = hasSceneBackgroundMedia(scene);
+    const canConvertTextSceneToOverlay = isTextScene &&
+        !!previousScene &&
+        !['text', 'cta'].includes(previousScene.type) &&
+        !getSceneTextValue(previousScene);
 
     elements.sceneProperties.innerHTML = `
         <div class="property-group">
@@ -5182,14 +5691,26 @@ function renderSceneProperties() {
         </div>
         <div class="property-group">
             <label>Type</label>
-            <span class="property-value">${scene.type}</span>
+            <span class="property-value">${isTextOverlaySelected ? 'text overlay' : scene.type}</span>
         </div>
+        ${!isTextOverlaySelected ? `
         <div class="property-group">
             <label>Duration</label>
             <input type="number" class="property-input" id="prop-duration"
                    value="${scene.duration}" min="0.5" step="0.5">
         </div>
-        ${isTextScene ? `
+        ` : `
+        <div class="property-group">
+            <label>Overlay Duration</label>
+            <input type="number" class="property-input" id="prop-text-overlay-duration"
+                   value="${getSceneTextDuration(scene)}" min="0.5" max="${scene.duration}" step="0.5">
+        </div>
+        <div class="property-group">
+            <label>Overlay Start In Scene</label>
+            <span class="property-value">${getSceneTextOffset(scene).toFixed(1)}s</span>
+        </div>
+        `}
+        ${(isTextScene || isTextOverlaySelected) ? `
             <div class="property-group">
                 <label>Text Content</label>
                 <textarea class="property-textarea" id="prop-text-content"
@@ -5242,6 +5763,34 @@ function renderSceneProperties() {
                 </select>
             </div>
             <div class="property-group">
+                <label>Background</label>
+                ${isTextScene ? `
+                    <div class="property-mode-buttons">
+                        <button class="property-mode-btn${!scene.text_background_enabled ? ' active' : ''}"
+                                id="prop-text-bg-scene"
+                                ${hasStoredSceneBackground ? '' : 'disabled'}>
+                            Use Scene Background
+                        </button>
+                        <button class="property-mode-btn${scene.text_background_enabled ? ' active' : ''}"
+                                id="prop-text-bg-solid">
+                            Use Solid Color
+                        </button>
+                    </div>
+                    <span class="property-hint">${hasStoredSceneBackground ? 'Switch between the original scene background and a solid color.' : 'This text scene has no stored scene background, so only solid color is available.'}</span>
+                ` : `
+                    <label style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <span>Solid Background</span>
+                        <input type="checkbox" id="prop-text-bg-enabled" ${scene.text_background_enabled ? 'checked' : ''}>
+                    </label>
+                `}
+            </div>
+            <div class="property-group">
+                <label>Background Color</label>
+                <input type="color" class="property-input" id="prop-text-bg-color"
+                       value="${scene.text_background_color || '#000000'}"
+                       ${scene.text_background_enabled ? '' : 'disabled'}>
+            </div>
+            <div class="property-group">
                 <label>Position</label>
                 <div class="property-position-info">
                     ${scene.text_x !== undefined && scene.text_x !== null ?
@@ -5279,6 +5828,19 @@ function renderSceneProperties() {
                 <span class="property-value">${scene.image}</span>
             </div>
         ` : ''}
+        ${isTextOverlaySelected ? `
+            <div class="property-group">
+                <button class="btn btn-small" id="convert-text-overlay-to-scene">Turn Text Into Scene</button>
+            </div>
+        ` : ''}
+        ${isTextScene ? `
+            <div class="property-group">
+                <button class="btn btn-small" id="convert-text-scene-to-overlay" ${canConvertTextSceneToOverlay ? '' : 'disabled'}>
+                    Turn Text Into Overlay
+                </button>
+                <span class="property-hint">${canConvertTextSceneToOverlay ? 'Move this text into the previous visual scene as an overlay.' : 'Needs a previous image or video scene without another text overlay.'}</span>
+            </div>
+        ` : ''}
     `;
 
     // Add event listeners for property changes
@@ -5292,14 +5854,33 @@ function renderSceneProperties() {
     const fontStyleSelect = document.getElementById('prop-font-style');
     const textAlignSelect = document.getElementById('prop-text-align');
     const verticalAlignSelect = document.getElementById('prop-vertical-align');
+    const textOverlayDurationInput = document.getElementById('prop-text-overlay-duration');
+    const textBgEnabledInput = document.getElementById('prop-text-bg-enabled');
+    const textBgColorInput = document.getElementById('prop-text-bg-color');
+    const textBgSceneBtn = document.getElementById('prop-text-bg-scene');
+    const textBgSolidBtn = document.getElementById('prop-text-bg-solid');
+    const convertTextOverlayBtn = document.getElementById('convert-text-overlay-to-scene');
+    const convertTextSceneBtn = document.getElementById('convert-text-scene-to-overlay');
 
     durationInput?.addEventListener('change', (e) => {
         const oldValue = scene.duration;
         const newValue = parseFloat(e.target.value) || 0.5;
         scene.duration = newValue;
+        normalizeSceneTextOverlay(scene);
         recordEdit(`Change duration (Scene ${scene.id})`, scene.id, 'duration', oldValue, newValue);
         recalculateDuration();
         renderTimeline();
+    });
+
+    textOverlayDurationInput?.addEventListener('change', (e) => {
+        const oldValue = getSceneTextDuration(scene);
+        scene.text_overlay_duration = parseFloat(e.target.value) || oldValue || scene.duration;
+        normalizeSceneTextOverlay(scene);
+        const newValue = getSceneTextDuration(scene);
+        recordEdit(`Change text duration (Scene ${scene.id})`, scene.id, 'text_overlay_duration', oldValue, newValue);
+        renderTextTrack();
+        if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+        renderSceneProperties();
     });
 
     effectSelect?.addEventListener('change', (e) => {
@@ -5314,6 +5895,8 @@ function renderSceneProperties() {
     textContentInput?.addEventListener('input', (e) => {
         const oldValue = scene.text_content;
         scene.text_content = e.target.value;
+        normalizeSceneTextOverlay(scene);
+        renderTextTrack();
         // Refresh preview to show updated text
         if (EditorState.preview) {
             EditorState.preview.seek(EditorState.playbackPosition);
@@ -5392,6 +5975,52 @@ function renderSceneProperties() {
         if (EditorState.preview) {
             EditorState.preview.seek(EditorState.playbackPosition);
         }
+    });
+
+    textBgEnabledInput?.addEventListener('change', (e) => {
+        const oldValue = !!scene.text_background_enabled;
+        scene.text_background_enabled = e.target.checked;
+        recordEdit(`Toggle text background (Scene ${scene.id})`, scene.id, 'text_background_enabled', oldValue, scene.text_background_enabled);
+        if (textBgColorInput) textBgColorInput.disabled = !scene.text_background_enabled;
+        renderTimeline();
+        if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+    });
+
+    textBgColorInput?.addEventListener('change', (e) => {
+        const oldValue = scene.text_background_color || '#000000';
+        scene.text_background_color = e.target.value || '#000000';
+        recordEdit(`Change text background color (Scene ${scene.id})`, scene.id, 'text_background_color', oldValue, scene.text_background_color);
+        renderTimeline();
+        if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+    });
+
+    textBgSceneBtn?.addEventListener('click', () => {
+        if (!hasStoredSceneBackground) return;
+        const oldValue = !!scene.text_background_enabled;
+        if (!oldValue) return;
+        scene.text_background_enabled = false;
+        recordEdit(`Use scene background (Scene ${scene.id})`, scene.id, 'text_background_enabled', oldValue, false);
+        renderTimeline();
+        renderSceneProperties();
+        if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+    });
+
+    textBgSolidBtn?.addEventListener('click', () => {
+        const oldValue = !!scene.text_background_enabled;
+        if (oldValue) return;
+        scene.text_background_enabled = true;
+        recordEdit(`Use solid background (Scene ${scene.id})`, scene.id, 'text_background_enabled', oldValue, true);
+        renderTimeline();
+        renderSceneProperties();
+        if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+    });
+
+    convertTextOverlayBtn?.addEventListener('click', () => {
+        convertTextOverlayToScene(scene.id);
+    });
+
+    convertTextSceneBtn?.addEventListener('click', () => {
+        convertTextSceneToOverlay(scene.id);
     });
 
     // Reset text position - clear custom position to use alignment
@@ -7277,8 +7906,15 @@ function hasUnsavedChanges() {
             current.text_color !== original.text_color ||
             current.text_size !== original.text_size ||
             current.font_family !== original.font_family ||
+            current.font_style !== original.font_style ||
+            current.text_align !== original.text_align ||
+            current.vertical_align !== original.vertical_align ||
             current.text_x !== original.text_x ||
-            current.text_y !== original.text_y) {
+            current.text_y !== original.text_y ||
+            current.text_timeline_offset !== original.text_timeline_offset ||
+            current.text_overlay_duration !== original.text_overlay_duration ||
+            !!current.text_background_enabled !== !!original.text_background_enabled ||
+            (current.text_background_color || '#000000') !== (original.text_background_color || '#000000')) {
             return true;
         }
     }

@@ -2346,6 +2346,19 @@ body.asset-dragging .scene-clip:hover {
     position: relative;
 }
 
+.scene-clip-thumb.scene-thumb-solid {
+    background: var(--thumb-solid-color, #000000);
+}
+
+.scene-clip-thumb.scene-thumb-has-text::after,
+.scene-clip-thumb.scene-thumb-solid::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.38), transparent 55%);
+    pointer-events: none;
+}
+
 .scene-clip-thumb img {
     width: 100%;
     height: 100%;
@@ -2355,6 +2368,22 @@ body.asset-dragging .scene-clip:hover {
 .scene-clip-thumb svg {
     color: var(--text-muted);
     opacity: 0.3;
+}
+
+.scene-thumb-text-badge {
+    position: absolute;
+    left: 4px;
+    bottom: 4px;
+    z-index: 1;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(8, 12, 20, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.88);
+    font-family: var(--font-mono);
+    font-size: 0.42rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
 }
 
 .scene-clip-info {
@@ -2440,7 +2469,7 @@ body.asset-dragging .scene-clip:hover {
     background: rgba(170, 68, 255, 0.1);
     border: 1px solid rgba(170, 68, 255, 0.25);
     border-radius: 4px;
-    cursor: pointer;
+    cursor: grab;
     overflow: hidden;
     box-sizing: border-box;
     transition: border-color 0.15s, background 0.15s;
@@ -2448,6 +2477,15 @@ body.asset-dragging .scene-clip:hover {
 
 .text-clip .resize-handle {
     z-index: 3;
+}
+
+.text-clip.selected {
+    border-color: rgba(170, 68, 255, 0.8);
+    box-shadow: 0 0 0 1px rgba(170, 68, 255, 0.55), 0 0 10px rgba(170, 68, 255, 0.2);
+}
+
+.text-clip.text-clip-dragging {
+    cursor: grabbing;
 }
 
 .text-clip:hover {
@@ -3360,6 +3398,41 @@ body.asset-dragging .scene-clip:hover {
 .property-group.property-stack {
     flex-direction: column;
     align-items: stretch;
+}
+
+.property-mode-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.property-mode-btn {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.property-mode-btn:hover:not(:disabled) {
+    border-color: rgba(78, 205, 196, 0.45);
+    color: var(--text);
+}
+
+.property-mode-btn.active {
+    border-color: rgba(78, 205, 196, 0.75);
+    background: rgba(78, 205, 196, 0.12);
+    color: var(--accent);
+}
+
+.property-mode-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 .property-group.property-stack label {

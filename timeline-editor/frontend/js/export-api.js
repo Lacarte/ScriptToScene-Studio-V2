@@ -402,6 +402,19 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
 
             const mediaType = getMediaType(scene);
             const isTextScene = mediaType === 'text';
+            const mediaFile = scene.image || `${index}.${scene.isVideo ? 'mp4' : 'jpg'}`;
+            const mediaPath = scene.mediaUrl
+                ? (scene.mediaUrl.startsWith('/output/') ? '..' + scene.mediaUrl : scene.mediaUrl)
+                : `working-assets/${project.id}/${mediaFile}`;
+            const textOverlayStart = Math.max(0, Number(scene.text_timeline_offset) || 0);
+            const textOverlayRemaining = Math.max(0, (scene.duration || 0) - textOverlayStart);
+            const textOverlayDuration = Math.max(
+                0,
+                Math.min(Number(scene.text_overlay_duration) || textOverlayRemaining, textOverlayRemaining)
+            );
+            const hasTextOverlay = !isTextScene &&
+                textOverlayDuration > 0 &&
+                String(scene.text_content || '').trim().length > 0;
 
             const sceneData = {
                 id: scene.id,
@@ -414,8 +427,8 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
 
                 media: {
                     type: mediaType,
-                    file: isTextScene ? null : (scene.image || `${index}.${scene.isVideo ? 'mp4' : 'jpg'}`),
-                    path: isTextScene ? null : (scene.mediaUrl && scene.mediaUrl.startsWith('/output/') ? '..' + scene.mediaUrl : `working-assets/${project.id}/${scene.image || `${index}.${scene.isVideo ? 'mp4' : 'jpg'}`}`)
+                    file: scene.image ? mediaFile : null,
+                    path: scene.mediaUrl || scene.image ? mediaPath : null
                 },
 
                 text: isTextScene ? {
@@ -432,12 +445,39 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     text_align: scene.text_align || 'center',
                     vertical_align: scene.vertical_align || 'center',
                     background: {
-                        image: null,
-                        image_path: null,
-                        fallback_color: (scene.text_color || 'white') === 'white' ? '#000000' : '#ffffff'
+                        enabled: !!scene.text_background_enabled,
+                        color: scene.text_background_color ||
+                            ((scene.text_color || 'white') === 'white' ? '#000000' : '#ffffff'),
+                        image: !scene.text_background_enabled && scene.image ? scene.image : null,
+                        image_path: !scene.text_background_enabled && (scene.mediaUrl || scene.image) ? mediaPath : null,
+                        fallback_color: scene.text_background_color ||
+                            ((scene.text_color || 'white') === 'white' ? '#000000' : '#ffffff')
                     },
                     fade_in: 0.25,
                     fade_out: 0.25
+                } : null,
+
+                text_overlay: hasTextOverlay ? {
+                    start_time: textOverlayStart,
+                    duration: textOverlayDuration,
+                    end_time: textOverlayStart + textOverlayDuration,
+                    content: scene.text_content || '',
+                    font_family: scene.font_family || 'Inter',
+                    font_size: scene.text_size || 48,
+                    font_style: scene.font_style || 'bold',
+                    color: scene.text_color || 'white',
+                    color_hex: (scene.text_color || 'white') === 'white' ? '#ffffff' : '#000000',
+                    position: {
+                        x: scene.text_x ?? null,
+                        y: scene.text_y ?? null
+                    },
+                    text_align: scene.text_align || 'center',
+                    vertical_align: scene.vertical_align || 'center',
+                    background: {
+                        enabled: !!scene.text_background_enabled,
+                        color: scene.text_background_color ||
+                            ((scene.text_color || 'white') === 'white' ? '#000000' : '#ffffff')
+                    }
                 } : null,
 
                 effect: getEffectConfig(scene.visual_fx || 'static'),
