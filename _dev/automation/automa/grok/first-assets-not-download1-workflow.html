@@ -1,0 +1,597 @@
+<div id="sts-sync">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+  #sts-sync * { box-sizing: border-box; margin: 0; padding: 0; }
+  #sts-sync {
+    --bg: rgba(10,14,19,0.97);
+    --bg-raised: rgba(22,29,42,0.98);
+    --bg-hover: rgba(255,255,255,0.04);
+    --border: #1e2a3a;
+    --border-active: #2a3a4e;
+    --text: #e8edf3;
+    --text-dim: #8899aa;
+    --text-muted: #6b7f93;
+    --accent: #4ECDC4;
+    --accent-hover: #5edfd6;
+    --accent-glow: rgba(78,205,196,0.20);
+    --accent-bg: rgba(78,205,196,0.08);
+    --green: #4ECDC4;
+    --green-bg: rgba(78,205,196,0.10);
+    --amber: #FFB347;
+    --amber-bg: rgba(255,179,71,0.10);
+    --red: #FF6B6B;
+    --red-bg: rgba(255,107,107,0.10);
+    --info: #56CCF2;
+    --mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    --sans: 'DM Sans', system-ui, sans-serif;
+    --display: 'Space Grotesk', system-ui, sans-serif;
+    --radius: 12px;
+    --radius-sm: 8px;
+    position: fixed; bottom: 16px; right: 16px; z-index: 999999;
+    font-family: var(--sans);
+    font-size: 13px; color: var(--text); line-height: 1.5;
+  }
+
+  /* â”€â”€â”€ Collapsed Pill â”€â”€â”€ */
+  .sts-pill {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    background: var(--bg);
+    border: 1.5px solid rgba(255,255,255,0.10);
+    border-radius: 100px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    user-select: none;
+    backdrop-filter: blur(20px) saturate(1.5);
+  }
+  .sts-pill:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 20px var(--accent-glow);
+    transform: translateY(-2px);
+  }
+  .sts-pill-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--red); flex-shrink: 0;
+    transition: all 0.4s; box-shadow: 0 0 0 2px rgba(248,113,113,0.15);
+  }
+  .sts-pill-dot.on {
+    background: var(--green);
+    box-shadow: 0 0 8px rgba(52,211,153,0.5), 0 0 0 2px rgba(52,211,153,0.15);
+    animation: sts-breathe 3s ease-in-out infinite;
+  }
+  @keyframes sts-breathe {
+    0%, 100% { box-shadow: 0 0 8px rgba(52,211,153,0.3), 0 0 0 2px rgba(52,211,153,0.1); }
+    50% { box-shadow: 0 0 14px rgba(52,211,153,0.6), 0 0 0 3px rgba(52,211,153,0.2); }
+  }
+  .sts-pill-label { font-size: 12px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.03em; font-family: var(--display); }
+  .sts-pill-proj {
+    font-size: 11px; font-family: var(--mono); font-weight: 500; color: var(--accent);
+    opacity: 0.9; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sts-pill-counts { display: flex; gap: 10px; font-family: var(--mono); font-size: 11px; font-weight: 500; }
+  .sts-pill-counts span { opacity: 0.8; }
+  .sts-c-pend { color: var(--text-dim); }
+  .sts-c-proc { color: var(--amber); }
+  .sts-c-rdy { color: var(--green); }
+  .sts-c-sent { color: var(--accent); }
+
+  /* â”€â”€â”€ Expanded Panel â”€â”€â”€ */
+  .sts-panel {
+    width: 520px;
+    background: var(--bg);
+    backdrop-filter: blur(24px) saturate(1.4);
+    border: 1.5px solid rgba(255,255,255,0.10);
+    border-radius: var(--radius);
+    box-shadow:
+      0 24px 80px rgba(0,0,0,0.55),
+      0 0 0 1px rgba(255,255,255,0.03) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset;
+    overflow: hidden;
+    animation: sts-up 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    padding-left:1rem !important;
+  }
+  @keyframes sts-up {
+    from { opacity: 0; transform: translateY(16px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* â”€â”€â”€ Header â”€â”€â”€ */
+  .sts-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px;
+    background: linear-gradient(180deg, rgba(78,205,196,0.06) 0%, transparent 100%);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .sts-head::after {
+    content: ''; position: absolute; bottom: 0; left: 16px; right: 16px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+  }
+  .sts-head-left { display: flex; align-items: center; gap: 10px; }
+  .sts-head-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--red); transition: all 0.4s;
+  }
+  .sts-head-dot.on { background: var(--green); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
+  .sts-head h3 {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    letter-spacing: -0.02em; font-family: var(--display);
+  }
+  .sts-head-proj {
+    font-size: 11px; font-family: var(--mono); font-weight: 500; color: var(--accent);
+    background: var(--accent-bg); padding: 4px 12px; border-radius: var(--radius-sm);
+    max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    border: 1px solid rgba(78,205,196,0.12);
+  }
+  .sts-head-port {
+    font-size: 11px; font-family: var(--mono); font-weight: 500; color: var(--text-muted);
+    padding: 4px 8px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+  }
+  .sts-head-autotype {
+    font-size: 10px; font-family: var(--mono); font-weight: 600;
+    padding: 4px 10px; border-radius: var(--radius-sm);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    transition: all 0.2s; user-select: none;
+  }
+  .sts-head-autotype.on {
+    color: var(--accent); background: var(--accent-bg);
+    border: 1px solid rgba(78,205,196,0.15);
+  }
+  .sts-head-autotype.off {
+    color: var(--text-muted); background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+  }
+  .sts-head-autotype:hover { opacity: 0.8; }
+
+  .sts-head-btns { display: flex; gap: 4px; }
+  .sts-hb {
+    width: 32px; height: 32px; border-radius: var(--radius-sm);
+    border: 1px solid transparent; background: transparent;
+    color: var(--text-muted); cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .sts-hb:hover { background: var(--bg-hover); color: var(--text-dim); border-color: var(--border); }
+  .sts-hb.active { background: var(--accent-bg); color: var(--accent); border-color: rgba(78,205,196,0.15); }
+
+  /* â”€â”€â”€ Settings â”€â”€â”€ */
+  .sts-settings {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.25);
+    display: none;
+  }
+  .sts-settings.open { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .sts-settings label {
+    font-size: 11px; color: var(--text-muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-family: var(--display);
+  }
+  .sts-url-input {
+    flex: 1; min-width: 120px; padding: 6px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03); color: var(--text);
+    font-family: var(--mono); font-size: 10px; font-weight: 400;
+    outline: none; transition: all 0.2s;
+  }
+  .sts-url-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .sts-scroll-input {
+    width: 42px; padding: 6px 8px; border-radius: var(--radius-sm); text-align: center;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03); color: var(--text);
+    font-family: var(--mono); font-size: 10px; font-weight: 400;
+    outline: none; transition: all 0.2s;
+  }
+  .sts-scroll-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .sts-url-save {
+    padding: 8px 16px; border-radius: var(--radius-sm); border: none;
+    background: linear-gradient(135deg, var(--accent), #3eb8b0);
+    color: #0a0e13;
+    font-size: 11px; font-weight: 700; cursor: pointer;
+    font-family: var(--display); letter-spacing: 0.04em;
+    text-transform: uppercase;
+    transition: all 0.25s;
+  }
+  .sts-url-save:hover { background: linear-gradient(135deg, var(--accent-hover), var(--accent)); transform: translateY(-1px); box-shadow: 0 4px 16px var(--accent-glow); }
+
+  /* â”€â”€â”€ Timer â”€â”€â”€ */
+  .sts-timer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--text-muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    font-family: var(--display);
+  }
+  .sts-timer-val { font-family: var(--mono); color: var(--text-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  /* --- Connection Status --- */
+  .sts-conn-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--red-bg);
+    font-size: 11px; font-weight: 600; color: var(--red);
+    font-family: var(--display);
+    animation: sts-pulse 2s ease-in-out infinite;
+  }
+  .sts-conn-bar.ok {
+    background: var(--green-bg); color: var(--green);
+    animation: none;
+  }
+
+  /* â”€â”€â”€ Stats â”€â”€â”€ */
+  .sts-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+    padding: 0; margin: 0;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .sts-stat {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 14px 8px 12px;
+    background: var(--bg);
+    transition: background 0.2s;
+  }
+  .sts-stat:hover { background: var(--bg-raised); }
+  .sts-stat-n {
+    font-family: var(--mono); font-size: 22px; font-weight: 600;
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  .sts-stat-l {
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--text-muted); margin-top: 6px;
+    font-family: var(--display);
+  }
+
+  /* â”€â”€â”€ Tabs â”€â”€â”€ */
+  .sts-tabs {
+    display: flex; gap: 4px; padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.1);
+  }
+  .sts-tab {
+    flex: 1; padding: 10px 0; text-align: center;
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-muted);
+    cursor: pointer; border: none;
+    background: transparent; border-radius: var(--radius-sm);
+    transition: all 0.2s;
+    font-family: var(--display);
+  }
+  .sts-tab:hover { color: var(--text-dim); background: var(--bg-hover); }
+  .sts-tab.active {
+    color: var(--accent); background: var(--accent-bg);
+    box-shadow: 0 0 0 1px rgba(78,205,196,0.12) inset;
+  }
+
+  /* â”€â”€â”€ Progress Bar â”€â”€â”€ */
+  .sts-typing-prog {
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    display: none;
+  }
+  .sts-typing-prog.show { display: block; }
+  .sts-prog-text {
+    font-size: 11px; color: var(--text-dim); margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-weight: 500;
+  }
+  .sts-prog-text .sts-cd { color: var(--amber); font-family: var(--mono); font-weight: 600; }
+  .sts-prog-text .sts-cd.cool { color: #60a5fa; }
+  .sts-prog-bar {
+    height: 4px; border-radius: 4px; background: rgba(255,255,255,0.04);
+    overflow: hidden; position: relative;
+  }
+  .sts-prog-fill {
+    height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent), #3eb8b0, var(--accent));
+    background-size: 200% 100%;
+    animation: sts-shimmer 2s linear infinite;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  @keyframes sts-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* â”€â”€â”€ Scene / Typing Lists â”€â”€â”€ */
+  .sts-list {
+    max-height: 520px; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.06) transparent;
+  }
+  .sts-list::-webkit-scrollbar { width: 3px; }
+  .sts-list::-webkit-scrollbar-track { background: transparent; }
+  .sts-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+  .sts-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+  .sts-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+  .sts-row:hover { background: var(--bg-hover); }
+  .sts-row:last-child { border-bottom: none; }
+  .sts-row.highlight {
+    background: var(--accent-bg);
+    border-left: 2px solid var(--accent);
+    padding-left: 18px;
+  }
+  .sts-row-num {
+    width: 32px; height: 32px; border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    background: var(--accent-bg); color: var(--accent); flex-shrink: 0;
+    border: 1px solid rgba(78,205,196,0.1);
+  }
+  .sts-row-info { flex: 1; min-width: 0; }
+  .sts-row-prompt {
+    font-size: 13px; color: var(--text-dim); font-weight: 400;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sts-row-meta {
+    font-size: 10px; color: var(--text-muted); margin-top: 4px;
+    font-family: var(--mono); font-weight: 400;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .sts-row-status { flex-shrink: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+
+  .sts-d-q { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+  .sts-d-typing {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--amber);
+    box-shadow: 0 0 8px rgba(251,191,36,0.4);
+    animation: sts-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes sts-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 8px rgba(251,191,36,0.4); }
+    50% { opacity: 0.5; transform: scale(0.6); box-shadow: 0 0 4px rgba(251,191,36,0.2); }
+  }
+  .sts-d-typed { color: var(--green); font-size: 15px; }
+  .sts-d-ready { color: var(--green); font-size: 15px; }
+  .sts-d-sent { color: var(--accent); font-size: 15px; }
+  .sts-d-err { color: var(--red); font-size: 14px; }
+  .sts-d-proc {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--amber);
+    animation: sts-pulse 1.6s ease-in-out infinite;
+  }
+  .sts-d-pending { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+  .sts-d-dl { color: var(--accent); font-size: 15px; }
+
+  .sts-empty {
+    padding: 32px 20px; text-align: center; color: var(--text-muted);
+    font-size: 13px; font-weight: 500;
+  }
+  .sts-empty-icon { font-size: 24px; margin-bottom: 8px; opacity: 0.25; display: block; }
+
+  /* â”€â”€â”€ Sync Cards â”€â”€â”€ */
+  .sts-card {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+  .sts-card:hover { background: var(--bg-hover); }
+  .sts-card:last-child { border-bottom: none; }
+  .sts-card-head {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 8px;
+  }
+  .sts-card-num {
+    width: 28px; height: 28px; border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    background: var(--accent-bg); color: var(--accent); flex-shrink: 0;
+    border: 1px solid rgba(78,205,196,0.1);
+  }
+  .sts-card-prompt {
+    flex: 1; font-size: 12px; color: var(--text-muted); min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-weight: 400;
+  }
+  .sts-card-badge {
+    font-size: 10px; font-family: var(--mono); padding: 4px 10px;
+    border-radius: 100px; flex-shrink: 0; font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .sts-badge-pending { background: rgba(72,72,84,0.2); color: var(--text-muted); border: 1px solid rgba(72,72,84,0.2); }
+  .sts-badge-processing { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(251,191,36,0.12); }
+  .sts-badge-ready { background: var(--green-bg); color: var(--green); border: 1px solid rgba(52,211,153,0.12); }
+  .sts-badge-uploading { background: var(--accent-bg); color: var(--accent); border: 1px solid rgba(78,205,196,0.12); }
+  .sts-badge-sent { background: var(--accent-bg); color: var(--accent); border: 1px solid rgba(78,205,196,0.12); }
+  .sts-badge-downloaded { background: var(--green-bg); color: var(--green); border: 1px solid rgba(52,211,153,0.12); }
+  .sts-badge-error { background: var(--red-bg); color: var(--red); border: 1px solid rgba(248,113,113,0.12); }
+
+  .sts-thumbs {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px;
+    border-radius: var(--radius-sm); overflow: hidden;
+  }
+  .sts-thumbs.cols2 { grid-template-columns: repeat(2, 1fr); }
+  .sts-thumb {
+    aspect-ratio: 1; background: rgba(255,255,255,0.02);
+    border-radius: 4px; overflow: hidden; position: relative;
+  }
+  .sts-thumb img {
+    width: 100%; height: 100%; object-fit: cover;
+    display: block; transition: all 0.3s;
+  }
+  .sts-thumb img.loading { opacity: 0.3; filter: saturate(0); }
+  .sts-thumb:hover img { transform: scale(1.05); }
+  .sts-thumb-placeholder {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); font-size: 14px;
+  }
+  .sts-card-noimg {
+    padding: 12px 0 6px;
+    font-size: 10px; color: var(--text-muted); text-align: center; font-weight: 500;
+  }
+
+  /* â”€â”€â”€ Scroll Status â”€â”€â”€ */
+  .sts-scroll-status {
+    display: none; padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(96,165,250,0.06);
+    font-size: 11px; font-weight: 600; color: #60a5fa;
+    align-items: center; gap: 10px;
+  }
+  .sts-scroll-status.active { display: flex; }
+  .sts-scroll-icon { animation: sts-bounce 0.5s ease-in-out infinite alternate; font-size: 11px; }
+  @keyframes sts-bounce { from { transform: translateY(-2px); } to { transform: translateY(2px); } }
+  .sts-scroll-bar { flex: 1; height: 3px; border-radius: 3px; background: rgba(255,255,255,0.04); overflow: hidden; }
+  .sts-scroll-fill { height: 100%; border-radius: 3px; background: #60a5fa; transition: width 0.4s ease; }
+  .sts-scroll-status.done { background: var(--green-bg); color: var(--green); }
+
+  /* â”€â”€â”€ Footer â”€â”€â”€ */
+  .sts-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    background: rgba(0,0,0,0.25);
+  }
+  .sts-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+  .sts-toggle-track {
+    width: 32px; height: 18px; border-radius: 9px;
+    background: rgba(255,255,255,0.08); position: relative;
+    transition: all 0.3s; border: 1px solid var(--border);
+  }
+  .sts-toggle-track.on { background: var(--accent); border-color: var(--accent); }
+  .sts-toggle-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--text-muted); position: absolute; top: 1px; left: 1px;
+    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .sts-toggle-track.on .sts-toggle-thumb {
+    left: 15px; background: #fff;
+    box-shadow: 0 1px 4px rgba(78,205,196,0.4);
+  }
+  .sts-toggle-label { font-size: 12px; color: var(--text-dim); font-weight: 600; font-family: var(--display); }
+  .sts-btn {
+    padding: 12px 24px; border-radius: var(--radius-sm); border: none;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: var(--display);
+    line-height: 1;
+  }
+  .sts-btn-primary {
+    background: linear-gradient(135deg, var(--accent), #3eb8b0);
+    color: #0a0e13;
+    box-shadow: 0 2px 12px var(--accent-glow), 0 0 0 1px rgba(78,205,196,0.15) inset;
+  }
+  .sts-btn-primary:hover {
+    background: linear-gradient(135deg, var(--accent-hover), var(--accent));
+    box-shadow: 0 6px 24px var(--accent-glow), 0 0 0 1px rgba(78,205,196,0.25) inset;
+    transform: translateY(-2px);
+  }
+  .sts-btn-danger {
+    background: linear-gradient(135deg, var(--red), #e55a5a);
+    color: #0a0e13;
+    box-shadow: 0 2px 12px rgba(255,107,107,0.2);
+  }
+  .sts-btn-danger:hover {
+    background: linear-gradient(135deg, #ff8585, var(--red));
+    box-shadow: 0 6px 24px rgba(255,107,107,0.3);
+    transform: translateY(-2px);
+  }
+  .sts-btn:active { transform: scale(0.96) translateY(0); }
+  .sts-btn-ghost {
+    background: rgba(255,255,255,0.03); color: var(--text-dim);
+    border: 1px solid var(--border); box-shadow: none;
+  }
+  .sts-btn-ghost:hover {
+    background: rgba(255,255,255,0.06); color: var(--text);
+    border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow);
+    transform: translateY(-2px);
+  }
+  .sts-foot-btns { display: flex; gap: 12px; }
+  .sts-row.error-clickable { cursor: pointer; }
+  .sts-row.error-clickable:hover { background: var(--red-bg); }
+  button#sts-action-btn { padding: 1rem; }
+</style>
+
+<div id="sts-pill" class="sts-pill" style="display: none;">
+  <div id="sts-pill-dot" class="sts-pill-dot on"></div>
+  <span class="sts-pill-label">Assets Sync</span>
+  <span class="sts-pill-proj" id="sts-pill-proj">pp_9O8HFU</span>
+  <div class="sts-pill-counts">
+    <span class="sts-c-pend" id="sts-pill-p">0</span>
+    <span class="sts-c-rdy" id="sts-pill-r">13</span>
+  </div>
+</div>
+
+<div id="sts-expanded" class="sts-panel" style="">
+  <div class="sts-head">
+    <div class="sts-head-left">
+      <div id="sts-head-dot" class="sts-head-dot on"></div>
+      <h3>Assets Sync</h3>
+      <span class="sts-head-proj" id="sts-head-proj">pp_9O8HFU</span>
+      <span class="sts-head-port" id="sts-head-port">:5050</span>
+      <span class="sts-head-autotype off" id="sts-head-autotype">auto-type: off</span>
+    </div>
+    <div class="sts-head-btns">
+      <button class="sts-hb" id="sts-gear" title="Settings">⚙</button>
+      <button class="sts-hb" id="sts-collapse" title="Collapse">−</button>
+    </div>
+  </div>
+
+  <div class="sts-settings" id="sts-settings">
+    <label>URL</label>
+    <input class="sts-url-input" id="sts-url" type="text">
+    <label>Rows</label>
+    <input class="sts-scroll-input" id="sts-scroll-rows" type="number" min="1" max="50">
+    <button class="sts-url-save" id="sts-url-save">Save</button>
+  </div>
+
+  <div class="sts-timer">
+    <span>Last poll</span>
+    <span class="sts-timer-val" id="sts-timer-val">8s ago</span>
+  </div>
+
+  <div id="sts-conn-bar" class="sts-conn-bar" style="display:none">
+    <span id="sts-conn-icon">⚠</span>
+    <span id="sts-conn-msg">Backend disconnected</span>
+  </div>
+
+  <div class="sts-scroll-status" id="sts-scroll-status">
+    <span class="sts-scroll-icon" id="sts-scroll-icon">▼</span>
+    <span id="sts-scroll-label">Sync complete - 14/14 matched</span>
+    <div class="sts-scroll-bar"><div class="sts-scroll-fill" id="sts-scroll-fill" style="width: 0%;"></div></div>
+  </div>
+
+  <div class="sts-stats">
+    <div class="sts-stat"><span class="sts-stat-n sts-c-pend" id="sts-n-q">0</span><span class="sts-stat-l">Queued</span></div>
+    <div class="sts-stat"><span class="sts-stat-n sts-c-proc" id="sts-n-typed">14</span><span class="sts-stat-l">Typed</span></div>
+    <div class="sts-stat"><span class="sts-stat-n sts-c-rdy" id="sts-n-rdy">0</span><span class="sts-stat-l">Ready</span></div>
+    <div class="sts-stat"><span class="sts-stat-n sts-c-sent" id="sts-n-sent">13</span><span class="sts-stat-l">Synced</span></div>
+  </div>
+
+
+  <div class="sts-tabs">
+    <button class="sts-tab" id="sts-tab-typing" data-tab="typing">Typing</button>
+    <button class="sts-tab active" id="sts-tab-sync" data-tab="sync">Sync</button>
+  </div>
+
+  <div class="sts-typing-prog" id="sts-typing-prog">
+    <div class="sts-prog-text">
+      <span id="sts-prog-label">Downloading 14/14 (scene 13)</span>
+      <span class="sts-cd" id="sts-prog-cd"></span>
+    </div>
+    <div class="sts-prog-bar"><div class="sts-prog-fill" id="sts-prog-fill" style="width: 100%;"></div></div>
+  </div>
+
+  <div class="sts-list" id="sts-list"><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">0</div><div class="sts-card-prompt">medium shot, a stickman with a perplexed expression ...</div><span class="sts-card-badge sts-badge-error">error</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/bc82afe8-b7d0-4c97-9aa0-73a52896cc9a/preview_image.jpg" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">1</div><div class="sts-card-prompt">close-up, a stickman head with wide, worried dot eye...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/f10b772a-36a1-4070-96a6-fe6a563eb3bf/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">2</div><div class="sts-card-prompt">wide shot, a tiny stick figure floating alone in a v...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/5dec21bd-811f-4a1c-a7f9-19c5b882bc3a/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">3</div><div class="sts-card-prompt">centered-symmetrical, a hand-drawn spiral galaxy fil...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/f522d14a-dc78-4df6-a417-20ad5a00568a/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">4</div><div class="sts-card-prompt">medium shot, a simple grid drawn on a whiteboard, wi...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/2d165d9b-65e1-441b-98b5-8442279e2c72/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">5</div><div class="sts-card-prompt">wide shot, a stick figure looking up at a sky full o...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/0a65e2c9-7528-431a-ba85-4e67fece7cff/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">6</div><div class="sts-card-prompt">extreme-close-up, a stickman's ear with a red 'NOISE...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/a7a2f1ef-7c60-4e17-be2e-e45090f01106/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">7</div><div class="sts-card-prompt">blurred background of faint, abstract starfield on a...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/7b41b226-612b-47f5-8212-2b0930252dc8/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">8</div><div class="sts-card-prompt">blurred background of faint, abstract starfield on a...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/924feec5-bb67-4d79-bc51-e1ca3666734c/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">9</div><div class="sts-card-prompt">wide shot, a stickman floating alone in the center o...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/4a95084c-38be-4f5f-ac82-4b63e2b2eeaf/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">10</div><div class="sts-card-prompt">POV, looking at a single, newly sprouted stick figur...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/a8f53886-ce02-4c0c-b9bd-e38302699578/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">11</div><div class="sts-card-prompt">medium shot, a stick figure civilization (simple cit...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/be54fd7d-dc1a-4e0a-8a2a-0ff8653673ed/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">12</div><div class="sts-card-prompt">close-up, a stick figure peering out from behind a l...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/116ce793-ec2e-46f1-a987-35a63353742d/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div><div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">13</div><div class="sts-card-prompt">low-angle, three stick figures standing in a line, e...</div><span class="sts-card-badge sts-badge-downloaded">1 synced</span></div><div class="sts-thumbs cols2"><div class="sts-thumb"><img src="https://assets.grok.com/users/8530a300-36cf-489a-b75d-e379db670c38/generated/3a79f68a-a699-42f1-a5d6-84e2b64e3c43/preview_image.jpg?cache=1" loading="lazy" onerror="this.style.display='none'"></div></div></div></div>
+
+  <div class="sts-foot">
+    <div class="sts-toggle" id="sts-toggle">
+      <div class="sts-toggle-track on" id="sts-toggle-track"><div class="sts-toggle-thumb"></div></div>
+      <span class="sts-toggle-label">Auto-sync</span>
+    </div>
+    <div class="sts-foot-btns">
+      <button class="sts-btn sts-btn-ghost" id="sts-retry-btn" style="">Retry</button>
+      <button class="sts-btn sts-btn-primary" id="sts-action-btn">Sync Saved</button>
+    </div>
+  </div>
+</div>
+</div>

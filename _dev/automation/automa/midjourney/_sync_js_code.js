@@ -830,25 +830,27 @@ async function sendResults(num, urls) {
   console.log('Fetching', urls.length, 'images for scene', num, 'as blobs...');
 
   async function fetchBlob(url) {
-    // MJ video elements use crossorigin="anonymous" — match that with credentials:'omit'
-    const isVideo = url.includes('.mp4');
-    const strategies = isVideo
-      ? [{ mode: 'cors', credentials: 'omit' }, {}, { credentials: 'include' }]
-      : [{}, { credentials: 'include' }];
-    for (const opts of strategies) {
+    const strategies = [
+      { credentials: 'include' },
+      { mode: 'cors', credentials: 'omit' },
+      {},
+    ];
+    for (let i = 0; i < strategies.length; i++) {
       try {
-        const r = await fetch(url, opts);
+        const r = await fetch(url, strategies[i]);
         if (r.ok) return await r.blob();
+        console.warn(`Blob fetch retry ${i + 1} for`, url.split('/').pop(), `(${r.status})`);
       } catch (e) { /* CORS may block, try next strategy */ }
     }
     return null;
   }
 
   const images = [];
+  const failedUrls = [];
   for (const url of urls) {
     try {
       const blob = await fetchBlob(url);
-      if (!blob) { console.warn('All fetch attempts failed for', url); continue; }
+      if (!blob) { console.warn('Browser fetch failed for', url, '— will delegate to server'); failedUrls.push(url); continue; }
       const b64 = await new Promise((res, rej) => {
         const reader = new FileReader();
         reader.onload = () => res(reader.result);
@@ -863,12 +865,36 @@ async function sendResults(num, urls) {
       else if (ct.includes('jpeg') || ct.includes('jpg')) ext = '.jpg';
       images.push({ data: b64, source_url: url, ext });
       console.log('Fetched', url.split('/').slice(-2).join('/'), '(' + (blob.size / 1024).toFixed(0) + ' KB,', ext + ')');
-    } catch (e) { console.warn('Blob fetch failed for', url, e.message); }
+    } catch (e) { console.warn('Blob fetch failed for', url, e.message); failedUrls.push(url); }
   }
 
-  if (!images.length) {
+  if (!images.length && !failedUrls.length) {
     console.error('No images fetched for scene', num);
     if (sc) sc.status = 'error';
+    render();
+    return;
+  }
+
+  // Server-side download for URLs that browser couldn't fetch (403/CORS)
+  if (failedUrls.length) {
+    console.log('Delegating', failedUrls.length, 'URLs to server-side download...');
+    try {
+      const r = await fetch(S.studioUrl + '/api/assets/grabber/download-urls', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: S.projectId, scenes: [{ scene: parseInt(num), urls: failedUrls }] })
+      });
+      if (r.ok) {
+        console.log('Server-side download started for', failedUrls.length, 'URLs');
+      } else {
+        console.error('Server-side download request failed:', r.status);
+      }
+    } catch (e) { console.error('Server-side download request error:', e.message); }
+  }
+
+  // Upload base64 images that browser successfully fetched
+  if (!images.length) {
+    // All handled by server-side download
+    if (sc) sc.status = failedUrls.length ? 'sent' : 'error';
     render();
     return;
   }

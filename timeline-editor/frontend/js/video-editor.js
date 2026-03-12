@@ -3335,6 +3335,9 @@ function renderProjectAssets(pane, data) {
         <span>Project Assets</span>
         <span style="display:flex;align-items:center;gap:6px">
             <span class="asset-browser-count">${totalFiles} files</span>
+            <button class="asset-reload-btn" onclick="window.openProjectAssetsFolder()" title="Open folder">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </button>
             <button class="asset-reload-btn" onclick="window.reloadProjectAssets()" title="Reload assets">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             </button>
@@ -7784,6 +7787,14 @@ window.reloadProjectAssets = function () {
     _projectAssetsCache = null;
     _projectAssetsCacheId = null;
     loadProjectAssets();
+};
+
+window.openProjectAssetsFolder = async function () {
+    const projectId = EditorState.project?.id;
+    if (!projectId) { showToast('No project loaded', 'info'); return; }
+    try {
+        await fetch(`/api/assets/open-folder/${encodeURIComponent(projectId)}/0`, { method: 'POST' });
+    } catch (_) { /* ignore */ }
 };
 
 window.editorCloseMusicPicker = function () {

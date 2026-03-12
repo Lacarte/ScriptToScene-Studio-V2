@@ -12,6 +12,7 @@ Directory structure (grabber mode):
 import base64
 import json
 import os
+import re
 import time
 from urllib.parse import urlparse
 
@@ -20,14 +21,20 @@ from loguru import logger
 
 from studio.io_utils import safe_json_write
 
-# Midjourney CDN blocks bare requests — mimic a real browser
-_DL_HEADERS = {
+# CDN servers often block bare requests — mimic a real browser
+_DL_HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.midjourney.com/",
 }
+
+
+def _dl_headers(url):
+    """Build download headers with a Referer derived from the URL's origin."""
+    parsed = urlparse(url)
+    referer = f"{parsed.scheme}://{parsed.netloc}/"
+    return {**_DL_HEADERS_BASE, "Referer": referer}
 
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
@@ -66,12 +73,15 @@ def organize_grabber_assets(project_id, scene_num, urls, assets_dir):
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 resp = http_requests.get(
-                    url, headers=_DL_HEADERS, timeout=120, stream=True,
+                    url, headers=_dl_headers(url), timeout=120, stream=True,
                 )
                 resp.raise_for_status()
 
                 ext = _detect_ext(url, resp.headers.get("Content-Type", ""))
-                filepath, filename = _unique_filepath(scene_dir, str(i), ext)
+                # Use UUID from URL as filename if available (e.g. generated/{uuid}/...)
+                uuid_match = re.search(r"generated/([a-f0-9-]+)/", url)
+                basename = uuid_match.group(1) if uuid_match else str(i)
+                filepath, filename = _unique_filepath(scene_dir, basename, ext)
 
                 with open(filepath, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=65536):
@@ -137,7 +147,9 @@ def save_base64_assets(project_id, scene_num, images, assets_dir):
             logger.error("Invalid base64 for scene {}, image {}: {}", scene_num, i, e)
             continue
 
-        filepath, filename = _unique_filepath(scene_dir, str(i), ext)
+        # Use UUID-based filename from client if provided, else sequential index
+        basename = img.get("filename") or str(i)
+        filepath, filename = _unique_filepath(scene_dir, basename, ext)
         with open(filepath, "wb") as f:
             f.write(data)
 
