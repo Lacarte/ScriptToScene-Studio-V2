@@ -4360,15 +4360,12 @@ async function resetToInitialState() {
 function renderTimeline() {
     if (!elements.videoTrack) return;
 
-    const lastSceneIdx = EditorState.scenes.length - 1;
     const clips = EditorState.scenes.map((scene, idx) => {
         const width = getScenePixelWidth(scene);
         const color = SCENE_COLORS[scene.type] || '#666666';
         const icon = SCENE_ICONS[scene.type] || SCENE_ICONS.default;
-        const leftHandle = idx === 0
-            ? `<div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>` : '';
-        const rightHandle = idx === lastSceneIdx
-            ? `<div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>` : '';
+        const leftHandle = `<div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>`;
+        const rightHandle = `<div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>`;
 
         return `
             <div class="scene-clip"
@@ -4404,9 +4401,8 @@ function renderTimeline() {
     // Add click listeners
     elements.videoTrack.querySelectorAll('.scene-clip').forEach(clip => {
         clip.addEventListener('click', (e) => {
-            if (!e.target.classList.contains('resize-handle')) {
-                selectScene(parseInt(clip.dataset.id));
-            }
+            if (e.target.closest('.resize-handle')) return;
+            selectScene(parseInt(clip.dataset.id));
         });
     });
 
@@ -4439,11 +4435,13 @@ function renderTextTrack() {
                      data-id="${scene.id}"
                      style="position:absolute;left:${offset}px;width:${width}px;"
                      title="${text.replace(/"/g, '&quot;')}">
+                    <div class="resize-handle resize-handle-left"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.6">
                         <path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M8 20h8"/>
                     </svg>
                     <span class="text-clip-label">${truncText.replace(/</g, '&lt;')}</span>
                     <span class="text-clip-duration">${scene.duration}s</span>
+                    <div class="resize-handle resize-handle-right"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>
                 </div>
             `);
         }
@@ -4455,7 +4453,8 @@ function renderTextTrack() {
 
         // Click to select scene
         elements.textTrack.querySelectorAll('.text-clip').forEach(clip => {
-            clip.addEventListener('click', () => {
+            clip.addEventListener('click', (e) => {
+                if (e.target.closest('.resize-handle')) return;
                 selectScene(parseInt(clip.dataset.id));
             });
         });
@@ -4952,75 +4951,129 @@ function _receiveCaptionData(captionData) {
  * Setup resize handlers for scene clips
  */
 function setupResizeHandlers() {
-    elements.videoTrack.querySelectorAll('.scene-clip').forEach(clip => {
+    const attachResizeHandlers = (clip) => {
         const leftHandle = clip.querySelector('.resize-handle-left');
         const rightHandle = clip.querySelector('.resize-handle-right');
         const sceneId = parseInt(clip.dataset.id);
 
-        if (rightHandle) {
+        if (rightHandle && rightHandle.dataset.resizeBound !== '1') {
+            rightHandle.dataset.resizeBound = '1';
             rightHandle.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 startResize(sceneId, 'right', e);
             });
         }
 
-        if (leftHandle) {
+        if (leftHandle && leftHandle.dataset.resizeBound !== '1') {
+            leftHandle.dataset.resizeBound = '1';
             leftHandle.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 startResize(sceneId, 'left', e);
             });
         }
-    });
+    };
+
+    elements.videoTrack.querySelectorAll('.scene-clip').forEach(attachResizeHandlers);
+    elements.textTrack?.querySelectorAll('.text-clip').forEach(attachResizeHandlers);
+}
+
+function updateSceneAndTextClipLayout() {
+    let textOffsetPx = 0;
+
+    for (const scene of EditorState.scenes) {
+        const widthPx = getScenePixelWidth(scene);
+        const sceneClip = elements.videoTrack?.querySelector(`.scene-clip[data-id="${scene.id}"]`);
+        if (sceneClip) {
+            sceneClip.style.width = `${widthPx}px`;
+            sceneClip.title = `${scene.type} - ${scene.duration}s`;
+            const durationEl = sceneClip.querySelector('.scene-clip-duration');
+            if (durationEl) durationEl.textContent = `${scene.duration}s`;
+        }
+
+        const textClip = elements.textTrack?.querySelector(`.text-clip[data-id="${scene.id}"]`);
+        if (textClip) {
+            textClip.style.left = `${textOffsetPx}px`;
+            textClip.style.width = `${widthPx}px`;
+            const durationEl = textClip.querySelector('.text-clip-duration');
+            if (durationEl) durationEl.textContent = `${scene.duration}s`;
+        }
+
+        textOffsetPx += widthPx;
+    }
+
+    const textTrackInner = elements.textTrack?.firstElementChild;
+    if (textTrackInner && textTrackInner.style.position === 'relative') {
+        textTrackInner.style.width = `${textOffsetPx}px`;
+    }
 }
 
 /**
  * Start resizing a scene clip
  */
 function startResize(sceneId, handle, startEvent) {
-    const scene = EditorState.scenes.find(s => s.id === sceneId);
+    const sceneIndex = EditorState.scenes.findIndex(s => s.id === sceneId);
+    const scene = EditorState.scenes[sceneIndex];
     if (!scene) return;
+
+    const prevScene = EditorState.scenes[sceneIndex - 1] || null;
+    const nextScene = EditorState.scenes[sceneIndex + 1] || null;
+    const minDuration = 0.5;
 
     const startX = startEvent.clientX;
     const startDuration = scene.duration;
+    const startPrevDuration = prevScene?.duration ?? null;
+    const startNextDuration = nextScene?.duration ?? null;
 
     const onMouseMove = (e) => {
         const deltaX = e.clientX - startX;
-        const deltaDuration = deltaX / (EditorState.pixelsPerSecond * EditorState.zoomLevel);
+        let deltaDuration = deltaX / (EditorState.pixelsPerSecond * EditorState.zoomLevel);
+        deltaDuration = Math.round(deltaDuration * 2) / 2;
 
-        let newDuration;
-        if (handle === 'right') {
-            newDuration = Math.max(0.5, startDuration + deltaDuration);
+        if (handle === 'right' && nextScene) {
+            const maxGrow = Math.max(0, startNextDuration - minDuration);
+            const maxShrink = Math.max(0, startDuration - minDuration);
+            deltaDuration = Math.max(-maxShrink, Math.min(maxGrow, deltaDuration));
+            scene.duration = Math.round((startDuration + deltaDuration) * 2) / 2;
+            nextScene.duration = Math.round((startNextDuration - deltaDuration) * 2) / 2;
+        } else if (handle === 'left' && prevScene) {
+            const maxGrow = Math.max(0, startPrevDuration - minDuration);
+            const maxShrink = Math.max(0, startDuration - minDuration);
+            deltaDuration = Math.max(-maxGrow, Math.min(maxShrink, deltaDuration));
+            prevScene.duration = Math.round((startPrevDuration + deltaDuration) * 2) / 2;
+            scene.duration = Math.round((startDuration - deltaDuration) * 2) / 2;
         } else {
-            newDuration = Math.max(0.5, startDuration - deltaDuration);
+            let newDuration;
+            if (handle === 'right') {
+                newDuration = Math.max(minDuration, startDuration + deltaDuration);
+            } else {
+                newDuration = Math.max(minDuration, startDuration - deltaDuration);
+            }
+            scene.duration = Math.round(newDuration * 2) / 2;
         }
 
-        // Snap to 0.5s increments
-        newDuration = Math.round(newDuration * 2) / 2;
-
-        // Update scene duration
-        scene.duration = newDuration;
-
-        // Re-render the clip
-        const clip = elements.videoTrack.querySelector(`[data-id="${sceneId}"]`);
-        if (clip) {
-            const width = newDuration * EditorState.pixelsPerSecond * EditorState.zoomLevel;
-            clip.style.width = `${width}px`;
-            clip.querySelector('.scene-clip-duration').textContent = `${newDuration}s`;
-        }
+        updateSceneAndTextClipLayout();
     };
 
     const onMouseUp = () => {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
 
-        // Record the edit if duration actually changed
+        // Record edits for changed durations
         if (scene.duration !== startDuration) {
             recordEdit(`Resize duration (Scene ${sceneId})`, sceneId, 'duration', startDuration, scene.duration);
+        }
+        if (prevScene && prevScene.duration !== startPrevDuration) {
+            recordEdit(`Resize duration (Scene ${prevScene.id})`, prevScene.id, 'duration', startPrevDuration, prevScene.duration);
+        }
+        if (nextScene && nextScene.duration !== startNextDuration) {
+            recordEdit(`Resize duration (Scene ${nextScene.id})`, nextScene.id, 'duration', startNextDuration, nextScene.duration);
         }
 
         // Recalculate total duration
         recalculateDuration();
         renderTimeRuler();
+        renderTextTrack();
+        setupResizeHandlers();
 
         // Sync preview with updated scenes
         if (EditorState.preview) {

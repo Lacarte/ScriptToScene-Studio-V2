@@ -2381,7 +2381,8 @@ body.asset-dragging .scene-clip:hover {
 }
 
 /* Resize handles */
-.scene-clip .resize-handle {
+.scene-clip .resize-handle,
+.text-clip .resize-handle {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -2395,17 +2396,20 @@ body.asset-dragging .scene-clip:hover {
     z-index: 3;
 }
 
-.scene-clip:hover .resize-handle {
+.scene-clip:hover .resize-handle,
+.text-clip:hover .resize-handle {
     opacity: 1;
 }
 
-.scene-clip .resize-handle-left {
+.scene-clip .resize-handle-left,
+.text-clip .resize-handle-left {
     left: 0;
     background: linear-gradient(to right, rgba(78, 205, 196, 0.5), transparent);
     border-radius: 4px 0 0 4px;
 }
 
-.scene-clip .resize-handle-right {
+.scene-clip .resize-handle-right,
+.text-clip .resize-handle-right {
     right: 0;
     background: linear-gradient(to left, rgba(78, 205, 196, 0.5), transparent);
     border-radius: 0 4px 4px 0;
@@ -2440,6 +2444,10 @@ body.asset-dragging .scene-clip:hover {
     overflow: hidden;
     box-sizing: border-box;
     transition: border-color 0.15s, background 0.15s;
+}
+
+.text-clip .resize-handle {
+    z-index: 3;
 }
 
 .text-clip:hover {
