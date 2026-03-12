@@ -8468,10 +8468,8 @@ function setupTransitionsTab() {
 
             const type = card.dataset.tr;
             const oldTr = scene.transition ? JSON.stringify(scene.transition) : 'none';
-            let duration = 0;
-
-            if (type === 'crossfade') duration = 0.3;
-            else if (type === 'fade_black') duration = 0.4;
+            const TRANSITION_DURATIONS = { cut: 0, none: 0, crossfade: 0.3, fade_black: 0.4, fade_white: 0.4, slide_left: 0.4, slide_right: 0.4, slide_up: 0.4, slide_down: 0.4, wipe_left: 0.4, wipe_right: 0.4, zoom_in: 0.5, zoom_out: 0.5 };
+            let duration = TRANSITION_DURATIONS[type] || 0;
 
             scene.transition = { type, duration };
             recordEdit(`Change transition (Scene ${scene.id})`, scene.id, 'transition', oldTr, JSON.stringify(scene.transition));
@@ -8547,7 +8545,7 @@ function setupTransitionsTab() {
                 return;
             }
 
-            const durations = { cut: 0, crossfade: 0.3, fade_black: 0.4 };
+            const durations = { cut: 0, crossfade: 0.3, fade_black: 0.4, fade_white: 0.4, slide_left: 0.4, slide_right: 0.4, slide_up: 0.4, slide_down: 0.4, wipe_left: 0.4, wipe_right: 0.4, zoom_in: 0.5, zoom_out: 0.5 };
             let lastTr = '';
 
             EditorState.scenes.forEach((scene, i) => {
@@ -8600,7 +8598,7 @@ function updateTransitionsTab() {
     const durationSlider = document.getElementById('tr-duration-slider');
     const durationValue = document.getElementById('tr-duration-value');
 
-    const hasDuration = tr.type === 'crossfade' || tr.type === 'fade_black';
+    const hasDuration = tr.type !== 'none' && tr.type !== 'cut';
     if (durationRow) durationRow.style.display = hasDuration ? 'flex' : 'none';
     if (hasDuration && durationSlider) {
         durationSlider.value = tr.duration || 0.3;

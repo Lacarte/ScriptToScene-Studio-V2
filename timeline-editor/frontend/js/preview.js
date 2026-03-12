@@ -374,20 +374,162 @@ export class CanvasPreview {
 
         this.renderSceneTextOverlay(scene, current.localTime, progress);
 
-        // Transition blending: crossfade into next scene
-        if (scene.transition && scene.transition.type === 'crossfade' && scene.transition.duration > 0) {
+        // Transition blending into next scene
+        if (scene.transition && scene.transition.type !== 'none' && scene.transition.type !== 'cut' && scene.transition.duration > 0) {
             const transStart = 1.0 - (scene.transition.duration / scene.duration);
             if (progress > transStart) {
-                const nextScene = this._getNextScene();
-                if (nextScene) {
-                    const nextMedia = this.imageCache.get(nextScene.id);
-                    if (nextMedia) {
-                        const alpha = (progress - transStart) / (1.0 - transStart);
-                        this.ctx.save();
-                        this.ctx.globalAlpha = alpha;
-                        if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
-                        this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
-                        this.ctx.restore();
+                const alpha = (progress - transStart) / (1.0 - transStart); // 0→1
+                const trType = scene.transition.type;
+
+                if (trType === 'crossfade') {
+                    const nextScene = this._getNextScene();
+                    if (nextScene) {
+                        const nextMedia = this.imageCache.get(nextScene.id);
+                        if (nextMedia) {
+                            this.ctx.save();
+                            this.ctx.globalAlpha = alpha;
+                            if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
+                            this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
+                            this.ctx.restore();
+                        }
+                    }
+                } else if (trType === 'fade_black') {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = alpha < 0.5 ? alpha * 2 : 1.0;
+                    this.ctx.fillStyle = '#000000';
+                    this.ctx.fillRect(0, 0, this.width, this.height);
+                    this.ctx.restore();
+                    if (alpha > 0.5) {
+                        const nextScene = this._getNextScene();
+                        if (nextScene) {
+                            const nextMedia = this.imageCache.get(nextScene.id);
+                            if (nextMedia) {
+                                this.ctx.save();
+                                this.ctx.globalAlpha = (alpha - 0.5) * 2;
+                                if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
+                                this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
+                                this.ctx.restore();
+                            }
+                        }
+                    }
+                } else if (trType === 'fade_white') {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = alpha < 0.5 ? alpha * 2 : 1.0;
+                    this.ctx.fillStyle = '#ffffff';
+                    this.ctx.fillRect(0, 0, this.width, this.height);
+                    this.ctx.restore();
+                    if (alpha > 0.5) {
+                        const nextScene = this._getNextScene();
+                        if (nextScene) {
+                            const nextMedia = this.imageCache.get(nextScene.id);
+                            if (nextMedia) {
+                                this.ctx.save();
+                                this.ctx.globalAlpha = (alpha - 0.5) * 2;
+                                if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
+                                this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
+                                this.ctx.restore();
+                            }
+                        }
+                    }
+                } else if (trType === 'slide_left' || trType === 'slide_right' || trType === 'slide_up' || trType === 'slide_down') {
+                    const nextScene = this._getNextScene();
+                    if (nextScene) {
+                        const nextMedia = this.imageCache.get(nextScene.id);
+                        if (nextMedia) {
+                            const ease = alpha * alpha * (3 - 2 * alpha); // smoothstep
+                            // Clear canvas — we'll redraw both scenes at shifted positions
+                            this.ctx.clearRect(0, 0, this.width, this.height);
+                            this.ctx.save();
+                            if (trType === 'slide_left') {
+                                this.ctx.translate(-this.width * ease, 0);
+                            } else if (trType === 'slide_right') {
+                                this.ctx.translate(this.width * ease, 0);
+                            } else if (trType === 'slide_up') {
+                                this.ctx.translate(0, -this.height * ease);
+                            } else {
+                                this.ctx.translate(0, this.height * ease);
+                            }
+                            // Redraw current scene at shifted position
+                            if (img) this.renderImage(img, scene.visual_fx || 'static', progress);
+                            else this.renderPlaceholder(scene);
+                            // Draw next scene adjacent
+                            if (trType === 'slide_left') {
+                                this.ctx.translate(this.width, 0);
+                            } else if (trType === 'slide_right') {
+                                this.ctx.translate(-this.width, 0);
+                            } else if (trType === 'slide_up') {
+                                this.ctx.translate(0, this.height);
+                            } else {
+                                this.ctx.translate(0, -this.height);
+                            }
+                            if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
+                            this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
+                            this.ctx.restore();
+                        }
+                    }
+                } else if (trType === 'wipe_left' || trType === 'wipe_right') {
+                    const nextScene = this._getNextScene();
+                    if (nextScene) {
+                        const nextMedia = this.imageCache.get(nextScene.id);
+                        if (nextMedia) {
+                            const ease = alpha * alpha * (3 - 2 * alpha);
+                            this.ctx.save();
+                            if (trType === 'wipe_left') {
+                                this.ctx.beginPath();
+                                this.ctx.rect(this.width * (1 - ease), 0, this.width * ease, this.height);
+                            } else {
+                                this.ctx.beginPath();
+                                this.ctx.rect(0, 0, this.width * ease, this.height);
+                            }
+                            this.ctx.clip();
+                            if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
+                            this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
+                            this.ctx.restore();
+                        }
+                    }
+                } else if (trType === 'zoom_in') {
+                    const nextScene = this._getNextScene();
+                    if (nextScene) {
+                        const nextMedia = this.imageCache.get(nextScene.id);
+                        if (nextMedia) {
+                            const ease = alpha * alpha * (3 - 2 * alpha);
+                            const scale = 1 + ease * 0.3; // current scene zooms in
+                            this.ctx.save();
+                            this.ctx.translate(this.width / 2, this.height / 2);
+                            this.ctx.scale(scale, scale);
+                            this.ctx.translate(-this.width / 2, -this.height / 2);
+                            this.ctx.globalAlpha = 1 - ease;
+                            if (img) this.renderImage(img, scene.visual_fx || 'static', progress);
+                            this.ctx.restore();
+                            // Next scene fades in
+                            this.ctx.save();
+                            this.ctx.globalAlpha = ease;
+                            if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
+                            this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
+                            this.ctx.restore();
+                        }
+                    }
+                } else if (trType === 'zoom_out') {
+                    const nextScene = this._getNextScene();
+                    if (nextScene) {
+                        const nextMedia = this.imageCache.get(nextScene.id);
+                        if (nextMedia) {
+                            const ease = alpha * alpha * (3 - 2 * alpha);
+                            const scale = 1 - ease * 0.3; // current scene shrinks
+                            this.ctx.save();
+                            this.ctx.globalAlpha = ease;
+                            if (nextMedia._isVideo) this._syncVideo(nextMedia, 0);
+                            this.renderImage(nextMedia, nextScene.visual_fx || 'static', 0);
+                            this.ctx.restore();
+                            // Current scene shrinks on top
+                            this.ctx.save();
+                            this.ctx.translate(this.width / 2, this.height / 2);
+                            this.ctx.scale(scale, scale);
+                            this.ctx.translate(-this.width / 2, -this.height / 2);
+                            this.ctx.globalAlpha = 1 - ease;
+                            if (img) this.renderImage(img, scene.visual_fx || 'static', progress);
+                            this.ctx.restore();
+                        }
                     }
                 }
             }
