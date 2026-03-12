@@ -6,6 +6,41 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => s ? s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') : '';
 
+// ---- Welcome Overlay (first visit) ----
+const _welcomeQuotes = [
+  '"The secret of getting ahead is getting started." — Mark Twain',
+  '"Creativity is intelligence having fun." — Albert Einstein',
+  '"Vision without execution is just hallucination." — Thomas Edison',
+  '"The best way to predict the future is to create it." — Peter Drucker',
+  '"Do what you can, with what you have, where you are." — Theodore Roosevelt',
+  '"Simplicity is the ultimate sophistication." — Leonardo da Vinci',
+  '"Make it work, make it right, make it fast." — Kent Beck',
+  '"Start where you are. Use what you have. Do what you can." — Arthur Ashe',
+  '"Every master was once a disaster." — T. Harv Eker',
+  '"Ideas are easy. Execution is everything." — John Doerr',
+];
+
+function _initWelcome() {
+  const seen = localStorage.getItem('sts-welcome-seen');
+  const overlay = $('#welcome-overlay');
+  if (!overlay) return;
+  if (seen) { overlay.remove(); return; }
+  // Pick a random quote
+  const q = $('#welcome-quote');
+  if (q) q.textContent = _welcomeQuotes[Math.floor(Math.random() * _welcomeQuotes.length)];
+  overlay.style.display = 'flex';
+}
+
+function dismissWelcome() {
+  const overlay = $('#welcome-overlay');
+  if (!overlay) return;
+  localStorage.setItem('sts-welcome-seen', '1');
+  overlay.classList.add('dismissing');
+  overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
+}
+
+document.addEventListener('DOMContentLoaded', _initWelcome);
+
 // ---- Settings Manager (server JSON with .bak, localStorage only for sts-sidebar) ----
 window.STS = {
   _cache: {},           // in-memory cache of all settings
@@ -496,6 +531,7 @@ async function settingsClearConfirm() {
       if (assetsEmpty) assetsEmpty.style.display = '';
       const exportsMsg = data.exports_deleted ? ` (${data.exports_deleted} export item${data.exports_deleted !== 1 ? 's' : ''} deleted)` : '';
       toast(`Cleared ${data.count} project item${data.count !== 1 ? 's' : ''}${exportsMsg}`, 'success');
+      setTimeout(() => location.reload(), 600);
     } else {
       toast(data.error || 'Failed to clear projects', 'error');
     }

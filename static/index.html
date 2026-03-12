@@ -34,6 +34,137 @@
 
 <body>
 
+  <!-- Welcome Overlay (first visit) -->
+  <div id="welcome-overlay" style="display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;
+    background:#0a0e13;overflow:hidden;flex-direction:column;gap:0">
+
+    <!-- Animated diagonal gradient background -->
+    <div style="position:absolute;inset:0;overflow:hidden">
+      <div id="welcome-gradient" style="position:absolute;inset:-50%;width:200%;height:200%;
+        background:linear-gradient(135deg,
+          #0a0e13 0%, #0f1a2a 15%, #132a35 25%, rgba(78,205,196,0.12) 35%,
+          #0f1520 45%, #1a1535 55%, rgba(167,139,250,0.10) 65%,
+          #0f1520 75%, rgba(78,205,196,0.08) 85%, #0a0e13 100%);
+        background-size:200% 200%;
+        animation:welcomeGradient 12s ease infinite"></div>
+
+      <!-- Subtle grid overlay -->
+      <div style="position:absolute;inset:0;
+        background-image:linear-gradient(rgba(78,205,196,0.03) 1px,transparent 1px),
+          linear-gradient(90deg,rgba(78,205,196,0.03) 1px,transparent 1px);
+        background-size:60px 60px"></div>
+
+      <!-- Floating orbs -->
+      <div style="position:absolute;top:20%;left:15%;width:300px;height:300px;border-radius:50%;
+        background:radial-gradient(circle,rgba(78,205,196,0.08),transparent 70%);
+        animation:welcomeFloat 8s ease-in-out infinite"></div>
+      <div style="position:absolute;bottom:20%;right:15%;width:250px;height:250px;border-radius:50%;
+        background:radial-gradient(circle,rgba(167,139,250,0.06),transparent 70%);
+        animation:welcomeFloat 10s ease-in-out infinite reverse"></div>
+    </div>
+
+    <!-- Content -->
+    <div style="position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:40px;
+      animation:welcomeFadeUp 1.2s cubic-bezier(0.16,1,0.3,1) both">
+
+      <!-- App Logo SVG with animated stroke -->
+      <svg id="welcome-logo" width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg"
+        style="filter:drop-shadow(0 0 30px rgba(78,205,196,0.3))">
+        <rect x="4" y="4" width="72" height="72" rx="16" fill="#0f1520" stroke="url(#welcome-stroke-grad)"
+          stroke-width="2" />
+        <path d="M24 4v72" stroke="url(#welcome-stroke-grad)" stroke-width="2" opacity="0.6"
+          style="stroke-dasharray:72;stroke-dashoffset:72;animation:welcomeStroke 2s ease 0.6s forwards" />
+        <circle cx="46" cy="40" r="12" fill="none" stroke="url(#welcome-stroke-grad)" stroke-width="2"
+          style="stroke-dasharray:76;stroke-dashoffset:76;animation:welcomeStroke 2s ease 0.8s forwards" />
+        <rect x="4" y="4" width="72" height="72" rx="16" fill="none" stroke="url(#welcome-stroke-grad)"
+          stroke-width="2"
+          style="stroke-dasharray:272;stroke-dashoffset:272;animation:welcomeStroke 2s ease 0.3s forwards" />
+        <defs>
+          <linearGradient id="welcome-stroke-grad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#4ECDC4" />
+            <stop offset="100%" stop-color="#A78BFA" />
+          </linearGradient>
+        </defs>
+      </svg>
+
+      <!-- App Name -->
+      <div style="text-align:center">
+        <h1 style="font-family:'Space Grotesk',system-ui,sans-serif;font-size:clamp(32px,5vw,48px);font-weight:800;
+          letter-spacing:-0.02em;line-height:1.1;margin:0;
+          background:linear-gradient(135deg,#e8edf3 0%,#4ECDC4 50%,#A78BFA 100%);
+          background-size:200% 200%;animation:welcomeTextGrad 6s ease infinite;
+          -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+          background-clip:text">ScriptToScene</h1>
+        <p style="font-family:'Space Grotesk',system-ui,sans-serif;font-size:clamp(14px,2vw,18px);font-weight:600;
+          letter-spacing:0.35em;text-transform:uppercase;margin:6px 0 0;
+          color:#4ECDC4;opacity:0;animation:welcomeFadeUp 0.8s ease 1s forwards">STUDIO</p>
+      </div>
+
+      <!-- Divider line -->
+      <div style="width:60px;height:1px;background:linear-gradient(90deg,transparent,rgba(78,205,196,0.4),transparent);
+        opacity:0;animation:welcomeFadeUp 0.6s ease 1.4s forwards"></div>
+
+      <!-- Quote -->
+      <p id="welcome-quote" style="font-family:'DM Sans',system-ui,sans-serif;font-size:clamp(13px,1.5vw,15px);
+        color:rgba(136,153,170,0.8);max-width:400px;text-align:center;line-height:1.7;font-style:italic;
+        opacity:0;animation:welcomeFadeUp 0.8s ease 1.6s forwards">
+        "The secret of getting ahead is getting started."
+      </p>
+
+      <!-- Made by -->
+      <p style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;
+        color:rgba(136,153,170,0.4);opacity:0;animation:welcomeFadeUp 0.6s ease 2s forwards">
+        Made by <span style="color:rgba(78,205,196,0.6)">Mr. Lacarte</span>
+      </p>
+
+      <!-- Enter button -->
+      <button id="welcome-enter-btn" onclick="dismissWelcome()" style="margin-top:10px;padding:12px 40px;
+        font-family:'Space Grotesk',system-ui,sans-serif;font-size:13px;font-weight:600;letter-spacing:0.15em;
+        text-transform:uppercase;color:#0f1520;border:none;border-radius:12px;cursor:pointer;
+        background:linear-gradient(135deg,#4ECDC4,#5edfd6);
+        box-shadow:0 4px 24px rgba(78,205,196,0.3),inset 0 1px 0 rgba(255,255,255,0.2);
+        opacity:0;animation:welcomeFadeUp 0.6s ease 2.4s forwards;
+        transition:transform 0.2s,box-shadow 0.2s"
+        onmouseenter="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 32px rgba(78,205,196,0.4),inset 0 1px 0 rgba(255,255,255,0.2)'"
+        onmouseleave="this.style.transform='';this.style.boxShadow='0 4px 24px rgba(78,205,196,0.3),inset 0 1px 0 rgba(255,255,255,0.2)'">
+        Enter Studio
+      </button>
+    </div>
+
+    <style>
+      @keyframes welcomeGradient {
+        0%   { transform:translate(0,0) rotate(0deg) }
+        25%  { transform:translate(-5%,-5%) rotate(2deg) }
+        50%  { transform:translate(-10%,-10%) rotate(0deg) }
+        75%  { transform:translate(-5%,-5%) rotate(-2deg) }
+        100% { transform:translate(0,0) rotate(0deg) }
+      }
+      @keyframes welcomeFloat {
+        0%,100% { transform:translateY(0) scale(1) }
+        50%     { transform:translateY(-30px) scale(1.05) }
+      }
+      @keyframes welcomeFadeUp {
+        from { opacity:0;transform:translateY(20px) }
+        to   { opacity:1;transform:translateY(0) }
+      }
+      @keyframes welcomeTextGrad {
+        0%   { background-position:0% 50% }
+        50%  { background-position:100% 50% }
+        100% { background-position:0% 50% }
+      }
+      @keyframes welcomeStroke {
+        to { stroke-dashoffset:0 }
+      }
+      #welcome-overlay.dismissing {
+        animation:welcomeOut 0.8s cubic-bezier(0.4,0,0.2,1) forwards;
+      }
+      @keyframes welcomeOut {
+        0%   { opacity:1;filter:blur(0) }
+        100% { opacity:0;filter:blur(12px) }
+      }
+    </style>
+  </div>
+
   <!-- Toast -->
   <div id="toast-wrap"
     style="position:fixed;top:20px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px"></div>
