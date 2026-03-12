@@ -4543,13 +4543,21 @@ body.asset-dragging .scene-clip:hover {
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 1px 3px;
-    font-size: 14px;
-    line-height: 1;
-    opacity: 0.4;
-    transition: opacity 0.12s, color 0.12s;
+    padding: 3px;
+    line-height: 0;
+    opacity: 0.3;
+    border-radius: 4px;
+    transition: opacity 0.15s, color 0.15s, background 0.15s, transform 0.15s;
 }
-.audio-track-remove-btn:hover { opacity: 1; color: var(--coral, #ff6b6b); }
+.audio-track-remove-btn:hover {
+    opacity: 1;
+    color: var(--coral, #ff6b6b);
+    background: rgba(255, 107, 107, 0.1);
+    transform: scale(1.15);
+}
+.audio-track-remove-btn:active {
+    transform: scale(0.9);
+}
 
 /* ---- Volume Popup ---- */
 .volume-popup {

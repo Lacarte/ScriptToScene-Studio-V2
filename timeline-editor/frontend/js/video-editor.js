@@ -1168,17 +1168,19 @@ function renderAudioProperties() {
     // Wire loop toggle
     const loopToggle = document.getElementById('audio-prop-loop');
     loopToggle?.addEventListener('change', () => {
+        const oldLoop = track.loop;
         track.loop = loopToggle.checked;
         if (track.element) track.element.loop = track.loop;
         renderAllAudioTracks();
-        saveProjectEdits();
+        recordEdit(`Toggle ${trackLabel} loop`, track.id, 'loop', oldLoop, track.loop);
     });
 
     // Wire ducking toggle
     const duckingToggle = document.getElementById('audio-prop-ducking');
     duckingToggle?.addEventListener('change', () => {
+        const oldDucking = track.duckingEnabled;
         track.duckingEnabled = duckingToggle.checked;
-        saveProjectEdits();
+        recordEdit(`Toggle ${trackLabel} ducking`, track.id, 'duckingEnabled', oldDucking, track.duckingEnabled);
     });
 }
 
@@ -1664,6 +1666,23 @@ function undoEdit() {
 
     // Handle audio edits (legacy 'audio' key or track ID like 'at_1')
     if (entry.sceneId === 'audio' || entry.sceneId?.startsWith('at_')) {
+        if (entry.field === 'removeTrack' && entry.oldValue) {
+            // Undo track removal — re-insert the track
+            const restored = { ...entry.oldValue, element: null };
+            const insertAt = Math.min(restored._index ?? EditorState.audioTracks.length, EditorState.audioTracks.length);
+            delete restored._index;
+            EditorState.audioTracks.splice(insertAt, 0, restored);
+            // Re-create audio element if it had a file
+            if (restored.path) {
+                const el = new Audio(restored.path);
+                el.preload = 'metadata';
+                restored.element = el;
+            }
+            recalculateDuration();
+            renderAllAudioTracks();
+            renderTimeRuler();
+            showToast(`Undo: ${entry.action}`, 'info');
+        } else {
         const track = entry.sceneId === 'audio' ? getVoiceTrack() : getAudioTrackById(entry.sceneId);
         if (entry.field === 'trimmedDuration' && track) {
             track.trimmedDuration = entry.oldValue;
@@ -1674,8 +1693,7 @@ function undoEdit() {
             if (EditorState.preview) {
                 EditorState.preview.setDuration(getTotalDuration());
             }
-        }
-        if (entry.field === 'trimRange' && track) {
+        } else if (entry.field === 'trimRange' && track) {
             applyTrackTrimState(track, entry.oldValue || {});
             if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             recalculateDuration();
@@ -1684,8 +1702,7 @@ function undoEdit() {
             if (EditorState.preview) {
                 EditorState.preview.setDuration(getTotalDuration());
             }
-        }
-        if (entry.field === 'timelineOffset' && track) {
+        } else if (entry.field === 'timelineOffset' && track) {
             track.timelineOffset = entry.oldValue;
             if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             recalculateDuration();
@@ -1694,7 +1711,73 @@ function undoEdit() {
             if (EditorState.preview) {
                 EditorState.preview.setDuration(getTotalDuration());
             }
+        } else if (['loop', 'duckingEnabled', 'muted', 'volume', 'fadeIn', 'fadeOut'].includes(entry.field) && track) {
+            track[entry.field] = entry.oldValue;
+            if (entry.field === 'volume') applyTrackVolumeLive(track, entry.oldValue);
+            if (entry.field === 'muted') applyTrackVolumeLive(track, track.volume);
+            if (entry.field === 'loop' && track.element) track.element.loop = entry.oldValue;
+            renderAllAudioTracks();
         }
+        showToast(`Undo: ${entry.action}`, 'info');
+        }
+    } else if (entry.sceneId === 'bulk' && entry.field === 'flipFillers') {
+        // Undo bulk filler flip — restore all durations
+        const oldState = entry.oldValue;
+        if (Array.isArray(oldState)) {
+            EditorState.scenes.forEach((s, i) => {
+                if (oldState[i]) {
+                    s.duration = oldState[i].duration;
+                    s.filler_shift = oldState[i].filler_shift;
+                }
+            });
+            const isNowApplied = EditorState.scenes.some(s => s.filler_shift && s.filler_shift !== 0);
+            elements.flipFillerBtn?.classList.toggle('active', isNowApplied);
+            recalculateDuration();
+            renderTimeline();
+            renderTimeRuler();
+            renderCaptionTrack();
+        }
+        showToast(`Undo: ${entry.action}`, 'info');
+    } else if (entry.sceneId === 'captions') {
+        if (entry.field === 'captionsEnabled') {
+            EditorState.captionsEnabled = entry.oldValue;
+            const capToggle = document.getElementById('caption-enabled-toggle');
+            if (capToggle) capToggle.checked = entry.oldValue;
+            const row = elements.captionTrackRow;
+            if (row) row.style.display = entry.oldValue ? '' : 'none';
+            if (EditorState.preview) {
+                if (entry.oldValue && EditorState.captionData) {
+                    EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style || {});
+                } else {
+                    EditorState.preview.setCaptions(null, null);
+                }
+            }
+            renderCaptionTrack();
+        } else if (entry.field === 'style' && EditorState.captionData) {
+            EditorState.captionData.style = entry.oldValue;
+            if (typeof _capSyncStyleUI === 'function') _capSyncStyleUI();
+            if (EditorState.preview && EditorState.captionsEnabled) {
+                EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
+            }
+        } else if (entry.field?.startsWith('style.') && EditorState.captionData?.style) {
+            const key = entry.field.split('.')[1];
+            EditorState.captionData.style[key] = entry.oldValue;
+            if (typeof _capSyncStyleUI === 'function') _capSyncStyleUI();
+            if (EditorState.preview && EditorState.captionsEnabled) {
+                EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
+            }
+        }
+        _saveCaptionsToStorage();
+        showToast(`Undo: ${entry.action}`, 'info');
+    } else if (entry.field === 'trackDisabled') {
+        if (entry.oldValue) {
+            EditorState.disabledTracks.add(entry.sceneId);
+        } else {
+            EditorState.disabledTracks.delete(entry.sceneId);
+        }
+        const trackEl = document.querySelector(`.track[data-track="${entry.sceneId}"]`);
+        trackEl?.classList.toggle('disabled', entry.oldValue);
+        updatePreviewFromDisabledTracks();
         showToast(`Undo: ${entry.action}`, 'info');
     } else {
         // Handle scene edits
@@ -1744,6 +1827,18 @@ function redoEdit() {
 
     // Handle audio edits (legacy 'audio' key or track ID like 'at_1')
     if (entry.sceneId === 'audio' || entry.sceneId?.startsWith('at_')) {
+        if (entry.field === 'removeTrack') {
+            // Redo track removal — remove it again
+            const track = getAudioTrackById(entry.sceneId);
+            if (track) {
+                if (track.element) { track.element.pause(); track.element.src = ''; }
+                EditorState.audioTracks = EditorState.audioTracks.filter(t => t.id !== entry.sceneId);
+                recalculateDuration();
+                renderAllAudioTracks();
+                renderTimeRuler();
+            }
+            showToast(`Redo: ${entry.action}`, 'info');
+        } else {
         const track = entry.sceneId === 'audio' ? getVoiceTrack() : getAudioTrackById(entry.sceneId);
         if (entry.field === 'trimmedDuration' && track) {
             track.trimmedDuration = entry.newValue;
@@ -1754,8 +1849,7 @@ function redoEdit() {
             if (EditorState.preview) {
                 EditorState.preview.setDuration(getTotalDuration());
             }
-        }
-        if (entry.field === 'trimRange' && track) {
+        } else if (entry.field === 'trimRange' && track) {
             applyTrackTrimState(track, entry.newValue || {});
             if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             recalculateDuration();
@@ -1764,8 +1858,7 @@ function redoEdit() {
             if (EditorState.preview) {
                 EditorState.preview.setDuration(getTotalDuration());
             }
-        }
-        if (entry.field === 'timelineOffset' && track) {
+        } else if (entry.field === 'timelineOffset' && track) {
             track.timelineOffset = entry.newValue;
             if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             recalculateDuration();
@@ -1774,7 +1867,72 @@ function redoEdit() {
             if (EditorState.preview) {
                 EditorState.preview.setDuration(getTotalDuration());
             }
+        } else if (['loop', 'duckingEnabled', 'muted', 'volume', 'fadeIn', 'fadeOut'].includes(entry.field) && track) {
+            track[entry.field] = entry.newValue;
+            if (entry.field === 'volume') applyTrackVolumeLive(track, entry.newValue);
+            if (entry.field === 'muted') applyTrackVolumeLive(track, track.volume);
+            if (entry.field === 'loop' && track.element) track.element.loop = entry.newValue;
+            renderAllAudioTracks();
         }
+        showToast(`Redo: ${entry.action}`, 'info');
+        }
+    } else if (entry.sceneId === 'bulk' && entry.field === 'flipFillers') {
+        const newState = entry.newValue;
+        if (Array.isArray(newState)) {
+            EditorState.scenes.forEach((s, i) => {
+                if (newState[i]) {
+                    s.duration = newState[i].duration;
+                    s.filler_shift = newState[i].filler_shift;
+                }
+            });
+            const isNowApplied = EditorState.scenes.some(s => s.filler_shift && s.filler_shift !== 0);
+            elements.flipFillerBtn?.classList.toggle('active', isNowApplied);
+            recalculateDuration();
+            renderTimeline();
+            renderTimeRuler();
+            renderCaptionTrack();
+        }
+        showToast(`Redo: ${entry.action}`, 'info');
+    } else if (entry.sceneId === 'captions') {
+        if (entry.field === 'captionsEnabled') {
+            EditorState.captionsEnabled = entry.newValue;
+            const capToggle = document.getElementById('caption-enabled-toggle');
+            if (capToggle) capToggle.checked = entry.newValue;
+            const row = elements.captionTrackRow;
+            if (row) row.style.display = entry.newValue ? '' : 'none';
+            if (EditorState.preview) {
+                if (entry.newValue && EditorState.captionData) {
+                    EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style || {});
+                } else {
+                    EditorState.preview.setCaptions(null, null);
+                }
+            }
+            renderCaptionTrack();
+        } else if (entry.field === 'style' && EditorState.captionData) {
+            EditorState.captionData.style = entry.newValue;
+            if (typeof _capSyncStyleUI === 'function') _capSyncStyleUI();
+            if (EditorState.preview && EditorState.captionsEnabled) {
+                EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
+            }
+        } else if (entry.field?.startsWith('style.') && EditorState.captionData?.style) {
+            const key = entry.field.split('.')[1];
+            EditorState.captionData.style[key] = entry.newValue;
+            if (typeof _capSyncStyleUI === 'function') _capSyncStyleUI();
+            if (EditorState.preview && EditorState.captionsEnabled) {
+                EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
+            }
+        }
+        _saveCaptionsToStorage();
+        showToast(`Redo: ${entry.action}`, 'info');
+    } else if (entry.field === 'trackDisabled') {
+        if (entry.newValue) {
+            EditorState.disabledTracks.add(entry.sceneId);
+        } else {
+            EditorState.disabledTracks.delete(entry.sceneId);
+        }
+        const trackEl = document.querySelector(`.track[data-track="${entry.sceneId}"]`);
+        trackEl?.classList.toggle('disabled', entry.newValue);
+        updatePreviewFromDisabledTracks();
         showToast(`Redo: ${entry.action}`, 'info');
     } else {
         // Handle scene edits
@@ -4446,7 +4604,7 @@ function renderAllAudioTracks() {
 
         // Remove button (only for non-voice tracks)
         const removeBtn = !isVoice
-            ? `<button class="audio-track-remove-btn" data-track-id="${track.id}" title="Remove track">&times;</button>`
+            ? `<button class="audio-track-remove-btn" data-track-id="${track.id}" title="Remove track"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>`
             : '';
 
         return `
@@ -4782,6 +4940,7 @@ function toggleVolumePopup(trackId, anchorBtn) {
     // Wire slider — update volume immediately on every drag tick
     const slider = popup.querySelector('.volume-slider');
     const label = popup.querySelector('.volume-label');
+    const volBefore = track.volume;
     const applyVolume = () => {
         const vol = parseInt(slider.value) / 100;
         _saveVolume(track.type, vol);
@@ -4790,15 +4949,24 @@ function toggleVolumePopup(trackId, anchorBtn) {
         applyTrackVolumeLive(track, vol, { resumeContext: true });
     };
     slider.addEventListener('input', applyVolume);
-    slider.addEventListener('change', () => { applyVolume(); saveProjectEdits(); });
+    slider.addEventListener('change', () => {
+        applyVolume();
+        const volAfter = track.volume;
+        if (volBefore !== volAfter) {
+            recordEdit(`Change ${track.label} volume`, track.id, 'volume', volBefore, volAfter);
+        } else {
+            saveProjectEdits();
+        }
+    });
 
     // Wire mute toggle
     popup.querySelector('.volume-mute-toggle').addEventListener('click', () => {
+        const wasMuted = track.muted;
         track.muted = !track.muted;
         applyTrackVolumeLive(track, track.volume, { resumeContext: true });
         popup.remove();
         renderAllAudioTracks();
-        saveProjectEdits();
+        recordEdit(`${track.muted ? 'Mute' : 'Unmute'} ${track.label}`, track.id, 'muted', wasMuted, track.muted);
     });
 
     // Close on click outside
@@ -4821,15 +4989,21 @@ function removeAudioTrack(trackId) {
         showToast('Cannot remove voice track', 'warning');
         return;
     }
-    if (track.element) {
-        track.element.pause();
-        track.element.src = '';
+    // Save track data for undo (strip non-serializable element)
+    const trackIndex = EditorState.audioTracks.indexOf(track);
+    const { element, ...trackData } = track;
+    trackData._index = trackIndex;
+
+    if (element) {
+        element.pause();
+        element.src = '';
     }
     EditorState.audioTracks = EditorState.audioTracks.filter(t => t.id !== trackId);
     recalculateDuration();
     renderAllAudioTracks();
     renderTimeRuler();
-    saveProjectEdits();
+
+    recordEdit(`Remove ${track.label}`, trackId, 'removeTrack', trackData, null);
     showToast(`${track.label} removed`, 'info');
 }
 
@@ -5619,6 +5793,9 @@ function flipFillers() {
 
     const MIN_PREV_DUR = 0.3; // never shrink prev below this
 
+    // Snapshot durations + filler_shift before modification
+    const oldState = scenes.map(s => ({ duration: s.duration, filler_shift: s.filler_shift || 0 }));
+
     // If already applied → undo
     const isApplied = scenes.some(s => s.filler_shift && s.filler_shift !== 0);
 
@@ -5677,12 +5854,14 @@ function flipFillers() {
         showToast(`Adjusted ${total} scene(s) (${detail})`, 'success');
     }
 
+    // Record the bulk edit for undo/redo
+    const newState = scenes.map(s => ({ duration: s.duration, filler_shift: s.filler_shift || 0 }));
+    recordEdit(isApplied ? 'Restore filler timing' : 'Flip filler timing', 'bulk', 'flipFillers', oldState, newState);
+
     renderTimeline();
     renderTimeRuler();
     renderCaptionTrack();
     renderSceneProperties();
-    saveProjectEdits();
-    _debouncedServerSave();
 }
 
 /**
@@ -5698,6 +5877,7 @@ function setupCaptionControls() {
     updateCapToggleLabel();
 
     toggle.addEventListener('change', () => {
+        const wasEnabled = EditorState.captionsEnabled;
         EditorState.captionsEnabled = toggle.checked;
         updateCapToggleLabel();
         const row = elements.captionTrackRow;
@@ -5722,6 +5902,7 @@ function setupCaptionControls() {
         renderCaptionTrack();
         _saveCaptionsToStorage();
         _debouncedServerSave();
+        recordEdit(toggle.checked ? 'Enable captions' : 'Disable captions', 'captions', 'captionsEnabled', wasEnabled, toggle.checked);
     });
 
     // Style controls
@@ -5736,12 +5917,16 @@ function setupCaptionControls() {
 
     const updateStyle = (key, value) => {
         if (!EditorState.captionData?.style) return;
+        const oldVal = EditorState.captionData.style[key];
         EditorState.captionData.style[key] = value;
         if (EditorState.preview && EditorState.captionsEnabled) {
             EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
         }
         _saveCaptionsToStorage();
         _debouncedServerSave();
+        if (oldVal !== value) {
+            recordEdit(`Change caption ${key}`, 'captions', `style.${key}`, oldVal, value);
+        }
     };
 
     loadCaptionPresetOptions(presetSel, EditorState.captionData?.style?.preset || 'bold_popup');
@@ -5749,6 +5934,7 @@ function setupCaptionControls() {
     presetSel?.addEventListener('change', () => {
         const p = captionPresetMap[presetSel.value];
         if (p && EditorState.captionData) {
+            const oldStyle = { ...EditorState.captionData.style };
             EditorState.captionData.style = { ...p, preset: presetSel.value };
             _capSyncStyleUI();
             if (EditorState.preview && EditorState.captionsEnabled) {
@@ -5756,6 +5942,7 @@ function setupCaptionControls() {
             }
             _saveCaptionsToStorage();
             _debouncedServerSave();
+            recordEdit(`Change caption preset to ${presetSel.value}`, 'captions', 'style', oldStyle, { ...EditorState.captionData.style });
         }
     });
 
@@ -7213,9 +7400,10 @@ function setupEventListeners() {
             if (!trackEl) return;
 
             const trackType = trackEl.dataset.track;
+            const wasDisabled = EditorState.disabledTracks.has(trackType);
 
             // Toggle state
-            if (EditorState.disabledTracks.has(trackType)) {
+            if (wasDisabled) {
                 EditorState.disabledTracks.delete(trackType);
                 trackEl.classList.remove('disabled');
                 showToast(`${trackType.charAt(0).toUpperCase() + trackType.slice(1)} track enabled`, 'info');
@@ -7227,7 +7415,7 @@ function setupEventListeners() {
 
             // Update preview and playback if necessary
             updatePreviewFromDisabledTracks();
-            saveProjectEdits();
+            recordEdit(`${wasDisabled ? 'Enable' : 'Disable'} ${trackType} track`, trackType, 'trackDisabled', wasDisabled, !wasDisabled);
         });
     });
 
