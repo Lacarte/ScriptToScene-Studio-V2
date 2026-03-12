@@ -1531,8 +1531,8 @@ export class CanvasPreview {
                     this.ctx.fillRect(bx, by, bw, bh);
                 }
 
-                // Stroke
-                if (!isSingleLine && strokeColor && strokeColor !== 'none' && strokeWidth > 0) {
+                // Stroke (skip for doHighlight — handled per-word below)
+                if (!isSingleLine && !doHighlight && strokeColor && strokeColor !== 'none' && strokeWidth > 0) {
                     this.ctx.strokeStyle = strokeColor;
                     this.ctx.lineWidth = strokeWidth;
                     this.ctx.lineJoin = 'round';
@@ -1638,9 +1638,33 @@ export class CanvasPreview {
                             this.ctx.fill();
                         }
 
+                        // Shadow for per-word rendering
+                        if (shadowColor && shadowColor !== 'none') {
+                            this.ctx.shadowColor = shadowColor;
+                            this.ctx.shadowBlur = shadowBlur;
+                            this.ctx.shadowOffsetX = shadowOffX;
+                            this.ctx.shadowOffsetY = shadowOffY;
+                        }
+
+                        // Per-word stroke (aligned with scaled word position)
+                        if (strokeColor && strokeColor !== 'none' && strokeWidth > 0) {
+                            this.ctx.strokeStyle = strokeColor;
+                            this.ctx.lineWidth = strokeWidth;
+                            this.ctx.lineJoin = 'round';
+                            this.ctx.strokeText(wordText, drawX, wordY);
+                        }
+
                         // Text mode: active word gets highlight color; box mode keeps base color.
                         this.ctx.fillStyle = (isActive && highlightMode === 'text') ? highlightColor : color;
                         this.ctx.fillText(wordText, drawX, wordY);
+
+                        // Reset shadow after each word to avoid bleeding into next draw ops
+                        if (shadowColor && shadowColor !== 'none') {
+                            this.ctx.shadowColor = 'transparent';
+                            this.ctx.shadowBlur = 0;
+                            this.ctx.shadowOffsetX = 0;
+                            this.ctx.shadowOffsetY = 0;
+                        }
 
                         drawX += wordW + (w < lineWords.length - 1 ? spaceW : 0);
                     }

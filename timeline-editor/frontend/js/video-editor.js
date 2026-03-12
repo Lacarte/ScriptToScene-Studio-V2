@@ -806,6 +806,48 @@ function ensureTrackGainNode(track) {
     }
 }
 
+async function ensureAudioContextReady() {
+    if (!EditorState._audioCtx) return null;
+    if (EditorState._audioCtx.state === 'suspended') {
+        try {
+            await EditorState._audioCtx.resume();
+        } catch (e) {
+            console.warn('AudioContext resume failed:', e);
+        }
+    }
+    return EditorState._audioCtx;
+}
+
+function applyTrackVolumeLive(track, requestedVol = track?.volume, options = {}) {
+    if (!track?.element) return;
+
+    const nextVol = Number.isFinite(+requestedVol) ? Math.max(0, +requestedVol) : Number(track.volume ?? 1.0);
+    track.volume = nextVol;
+    ensureTrackGainNode(track);
+
+    const applyVolume = () => {
+        const effectiveVol = getEffectiveTrackVolume(track, track.volume, isVoiceAudible());
+        if (track._gainNode && EditorState._audioCtx) {
+            try {
+                const now = EditorState._audioCtx.currentTime;
+                track._gainNode.gain.cancelScheduledValues(now);
+                track._gainNode.gain.setValueAtTime(effectiveVol, now);
+            } catch (_) {
+                track._gainNode.gain.value = effectiveVol;
+            }
+            track.element.volume = 1.0;
+        } else {
+            track.element.volume = Math.min(1.0, effectiveVol);
+        }
+    };
+
+    if (options.resumeContext) {
+        ensureAudioContextReady().finally(applyVolume);
+    } else {
+        applyVolume();
+    }
+}
+
 /**
  * Generate waveform data from an audio track's element.
  * Fetches the audio file, decodes it, and stores sampled peaks on track._waveformData.
@@ -1048,15 +1090,9 @@ function renderAudioProperties() {
     const volLabel = document.getElementById('audio-prop-volume-val');
     volSlider?.addEventListener('input', () => {
         const vol = parseInt(volSlider.value) / 100;
-        track.volume = vol;
         _saveVolume(track.type, vol);
         volLabel.textContent = `${volSlider.value}%`;
-        const effectiveVol = getEffectiveTrackVolume(track, vol, isVoiceAudible());
-        if (track._gainNode) {
-            track._gainNode.gain.value = effectiveVol;
-        } else if (track.element) {
-            track.element.volume = Math.min(1.0, effectiveVol);
-        }
+        applyTrackVolumeLive(track, vol, { resumeContext: true });
     });
     volSlider?.addEventListener('change', () => saveProjectEdits());
 
@@ -1139,8 +1175,10 @@ function applyAudioFades() {
         }
 
         const baseVol = getEffectiveTrackVolume(track, track.volume, isVoiceAudible());
-        if (track._gainNode) {
-            track._gainNode.gain.value = baseVol * fadeMultiplier;
+        if (track._gainNode && EditorState._audioCtx) {
+            const now = EditorState._audioCtx.currentTime;
+            track._gainNode.gain.cancelScheduledValues(now);
+            track._gainNode.gain.setValueAtTime(baseVol * fadeMultiplier, now);
         } else {
             track.element.volume = Math.min(1.0, baseVol * fadeMultiplier);
         }
@@ -2974,12 +3012,7 @@ async function loadProjectData(data) {
 
                         if (track.element.paused) {
                             track.element.currentTime = getTrackPlaybackTime(track, time);
-                            const targetVol = getEffectiveTrackVolume(track, track.volume, isVoiceAudible());
-                            if (track._gainNode) {
-                                track._gainNode.gain.value = targetVol;
-                            } else {
-                                track.element.volume = Math.min(1.0, targetVol);
-                            }
+                            applyTrackVolumeLive(track, track.volume);
                             track.element.play().catch(() => {});
                         }
                     }
@@ -4515,17 +4548,10 @@ function toggleVolumePopup(trackId, anchorBtn) {
     const label = popup.querySelector('.volume-label');
     const applyVolume = () => {
         const vol = parseInt(slider.value) / 100;
-        track.volume = vol;
         _saveVolume(track.type, vol);
         label.textContent = `${slider.value}%`;
         anchorBtn.title = `${track.label} - Vol ${slider.value}%`;
-        const effectiveVol = getEffectiveTrackVolume(track, vol, isVoiceAudible());
-        // Apply volume via gain node (supports boost >100%) or native fallback
-        if (track._gainNode) {
-            track._gainNode.gain.value = effectiveVol;
-        } else if (track.element) {
-            track.element.volume = Math.min(1.0, effectiveVol);
-        }
+        applyTrackVolumeLive(track, vol, { resumeContext: true });
     };
     slider.addEventListener('input', applyVolume);
     slider.addEventListener('change', () => { applyVolume(); saveProjectEdits(); });
@@ -7486,8 +7512,6 @@ function syncAudioPlayback() {
 
     if (EditorState.isPlaying) {
         // Play all audio tracks
-        const voicePlaying = isVoiceAudible();
-
         for (const track of EditorState.audioTracks) {
             if (!track.element || !track.file) continue;
             if (track.muted) { track.element.pause(); continue; }
@@ -7514,12 +7538,7 @@ function syncAudioPlayback() {
             }
 
             // Apply ducking on music tracks when voice is playing
-            const targetVol = getEffectiveTrackVolume(track, track.volume, voicePlaying);
-            if (track._gainNode) {
-                track._gainNode.gain.value = targetVol;
-            } else {
-                track.element.volume = Math.min(1.0, targetVol);
-            }
+            applyTrackVolumeLive(track, track.volume);
 
             track.element.play().catch(() => {});
         }

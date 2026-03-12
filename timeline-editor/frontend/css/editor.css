@@ -293,6 +293,95 @@
     border-radius: 2px;
 }
 
+/* ---- Collapsible tab instruction ---- */
+.tab-instruction {
+    margin: 0 0 6px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.tab-instruction-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 7px 10px;
+    background: rgba(78, 205, 196, 0.04);
+    border: 1px solid rgba(78, 205, 196, 0.08);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 0.6rem;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+.tab-instruction-toggle:hover {
+    color: var(--accent);
+    border-color: rgba(78, 205, 196, 0.18);
+    background: rgba(78, 205, 196, 0.06);
+}
+.tab-instruction-toggle[aria-expanded="true"] {
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    border-bottom-color: transparent;
+    background: rgba(78, 205, 196, 0.04);
+}
+.tab-instruction-icon {
+    flex-shrink: 0;
+    opacity: 0.5;
+    color: var(--accent);
+}
+.tab-instruction-label {
+    flex: 1;
+    text-align: left;
+}
+.tab-instruction-chevron {
+    flex-shrink: 0;
+    opacity: 0.35;
+    transition: transform 0.25s ease;
+}
+.tab-instruction-toggle[aria-expanded="true"] .tab-instruction-chevron {
+    transform: rotate(180deg);
+}
+/* Collapsible body — empty-state card style */
+.tab-instruction-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    max-height: 0;
+    overflow: hidden;
+    padding: 0 14px;
+    background: rgba(78, 205, 196, 0.03);
+    border: 1px solid rgba(78, 205, 196, 0.08);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.2s ease;
+    opacity: 0;
+}
+.tab-instruction-toggle[aria-expanded="true"] + .tab-instruction-body {
+    max-height: 200px;
+    padding: 16px 14px 14px;
+    opacity: 1;
+}
+.tab-instruction-body svg {
+    margin-bottom: 10px;
+    opacity: 0.25;
+    color: var(--accent);
+}
+.tab-instruction-title {
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+.tab-instruction-hint {
+    margin: 6px 0 0;
+    font-size: 0.6rem;
+    line-height: 1.55;
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
 /* Empty state placeholder */
 .media-empty {
     display: flex;
