@@ -918,9 +918,19 @@ class VideoProcessor:
                 volume = audio_config.get('volume', 1.0)
                 audio = audio.filter('volume', volume=volume)
 
+                start_offset = audio_config.get('start_offset', 0)
+                timeline_offset = audio_config.get('timeline_offset', 0)
                 trimmed_duration = audio_config.get('trimmed_duration')
-                if trimmed_duration:
-                    audio = audio.filter('atrim', duration=trimmed_duration)
+                if start_offset or trimmed_duration:
+                    trim_kwargs = {}
+                    if start_offset:
+                        trim_kwargs['start'] = start_offset
+                    if trimmed_duration:
+                        trim_kwargs['duration'] = trimmed_duration
+                    audio = audio.filter('atrim', **trim_kwargs).filter('asetpts', 'PTS-STARTPTS')
+                if timeline_offset:
+                    delay_ms = int(round(float(timeline_offset) * 1000))
+                    audio = audio.filter('adelay', delays=f'{delay_ms}|{delay_ms}')
 
                 fade_out = audio_config.get('fade_out', 0.5)
                 total_duration = self.export_data.get('timeline', {}).get('total_duration', 60)
@@ -998,13 +1008,27 @@ class VideoProcessor:
         if has_narration:
             vol = audio_config.get('volume', 1.0)
             fade_out = audio_config.get('fade_out', 0.5)
+            start_offset = audio_config.get('start_offset', 0)
+            timeline_offset = audio_config.get('timeline_offset', 0)
+            trimmed_duration = audio_config.get('trimmed_duration')
             fade_start = max(0, total_duration - fade_out)
             # apad pads with silence so audio never ends before video
-            filters.append(
-                f"[1:a]volume={vol},"
-                f"afade=t=out:st={fade_start}:d={fade_out},"
+            narration_parts = [f"[1:a]volume={vol}"]
+            if start_offset or trimmed_duration:
+                atrim = 'atrim='
+                if start_offset:
+                    atrim += f"start={start_offset}"
+                if trimmed_duration:
+                    atrim += f"{':' if start_offset else ''}duration={trimmed_duration}"
+                narration_parts.extend([atrim, "asetpts=PTS-STARTPTS"])
+            if timeline_offset:
+                delay_ms = int(round(float(timeline_offset) * 1000))
+                narration_parts.append(f"adelay={delay_ms}|{delay_ms}")
+            narration_parts.extend([
+                f"afade=t=out:st={fade_start}:d={fade_out}",
                 f"apad=whole_dur={total_duration}[narration]"
-            )
+            ])
+            filters.append(','.join(narration_parts))
             narration_label = '[narration]'
             logger.debug("Audio filter: narration vol={} fade_out={}s", vol, fade_out)
 

@@ -187,6 +187,8 @@ function createAudioTrack(overrides = {}) {
         file: null,
         path: null,
         duration: 0,
+        timelineOffset: 0,
+        startOffset: 0,
         trimmedDuration: null,
         volume: 1.0,
         loop: false,
@@ -212,6 +214,91 @@ function getVoiceTrack() {
 }
 function getAudioTrackById(id) {
     return EditorState.audioTracks.find(t => t.id === id);
+}
+
+function getTrackStartOffset(track) {
+    return Math.max(0, Number(track?.startOffset) || 0);
+}
+
+function getTrackTimelineOffset(track) {
+    return Math.max(0, Number(track?.timelineOffset) || 0);
+}
+
+function getTrackMinDuration(track) {
+    return Math.min(1, Math.max(0.1, Number(track?.duration) || 1));
+}
+
+function getTrackVisibleDuration(track) {
+    if (!track) return 0;
+    const duration = Math.max(0, Number(track.duration) || 0);
+    const requested = Number(track.trimmedDuration);
+
+    if (track.loop) {
+        return requested > 0 ? requested : duration;
+    }
+
+    const maxVisible = Math.max(0, duration - getTrackStartOffset(track));
+    if (requested > 0) {
+        return Math.min(requested, maxVisible || requested);
+    }
+    return maxVisible;
+}
+
+function getTrackSourceEnd(track) {
+    return getTrackStartOffset(track) + getTrackVisibleDuration(track);
+}
+
+function getTrackTimelineDuration(track, timelineFallback = 0) {
+    if (!track) return 0;
+    if (track.loop && !(Number(track.trimmedDuration) > 0)) {
+        return Math.max(0, timelineFallback - getTrackTimelineOffset(track));
+    }
+    return getTrackVisibleDuration(track);
+}
+
+function getTrackTimelineEnd(track, timelineFallback = 0) {
+    return getTrackTimelineOffset(track) + getTrackTimelineDuration(track, timelineFallback);
+}
+
+function applyTrackTrimState(track, nextState = {}) {
+    if (!track) return null;
+
+    const duration = Math.max(0, Number(track.duration) || 0);
+    const minDuration = getTrackMinDuration(track);
+    let timelineOffset = Math.max(0, Number(nextState.timelineOffset ?? track.timelineOffset) || 0);
+    let startOffset = Math.max(0, Number(nextState.startOffset ?? track.startOffset) || 0);
+    let trimmedDuration = Number(nextState.trimmedDuration ?? track.trimmedDuration);
+
+    if (track.loop) {
+        if (duration > 0) startOffset = Math.min(startOffset, duration);
+        if (!(trimmedDuration > 0)) trimmedDuration = duration || minDuration;
+        trimmedDuration = Math.max(minDuration, trimmedDuration);
+    } else {
+        startOffset = Math.min(startOffset, Math.max(0, duration - minDuration));
+        const maxVisible = Math.max(minDuration, duration - startOffset);
+        if (!(trimmedDuration > 0)) trimmedDuration = maxVisible;
+        trimmedDuration = Math.min(Math.max(minDuration, trimmedDuration), maxVisible);
+    }
+
+    track.timelineOffset = Math.round(timelineOffset * 1000) / 1000;
+    track.startOffset = Math.round(startOffset * 1000) / 1000;
+    track.trimmedDuration = Math.round(trimmedDuration * 1000) / 1000;
+    return {
+        timelineOffset: track.timelineOffset,
+        startOffset: track.startOffset,
+        trimmedDuration: track.trimmedDuration
+    };
+}
+
+function getTrackPlaybackTime(track, timelineTime) {
+    const timelineOffset = getTrackTimelineOffset(track);
+    const startOffset = getTrackStartOffset(track);
+    const clipTime = Math.max(0, timelineTime - timelineOffset);
+    if (track?.loop) {
+        const duration = Math.max(0.1, Number(track.duration) || 0.1);
+        return (startOffset + clipTime) % duration;
+    }
+    return Math.min(startOffset + clipTime, getTrackSourceEnd(track));
 }
 
 function isVoiceAudible() {
@@ -303,26 +390,36 @@ function drawWaveformCanvas(canvas, track) {
     const peaks = track._waveformData;
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
+    const w = Math.max(1, canvas.clientWidth);
+    const h = Math.max(1, canvas.clientHeight);
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     const color = track.color || AUDIO_TRACK_COLORS[track.type] || AUDIO_TRACK_COLORS.voice;
-    const trackDur = track.trimmedDuration || track.duration || 1;
+    const trackDur = getTrackVisibleDuration(track) || track.duration || 1;
+    const sourceDur = Math.max(track.duration || trackDur || 1, 0.1);
+    const startOffset = getTrackStartOffset(track);
     const fadeIn = track.fadeIn || 0;
     const fadeOut = track.fadeOut || 0;
     const fadeInFrac = Math.min(1, fadeIn / trackDur);
     const fadeOutFrac = Math.min(1, fadeOut / trackDur);
 
-    // Draw waveform bars with fade envelope applied
+    // Keep waveform density tied to the source duration so trimming crops instead of stretching.
     const barColor = color.replace(/[\d.]+\)$/, '0.4)');
-    const barWidth = w / peaks.length;
+    const cycleWidth = Math.max(1, timeToPixels(sourceDur));
+    const barWidth = Math.max(1, cycleWidth / peaks.length);
+    const barDrawWidth = Math.max(1, barWidth - 0.75);
+    const barCount = Math.ceil(w / barWidth);
     const midY = h / 2;
-    for (let i = 0; i < peaks.length; i++) {
-        const frac = i / peaks.length;
+    for (let i = 0; i < barCount; i++) {
+        const x = i * barWidth;
+        const frac = x / w;
+        const sourceTime = startOffset + (x / Math.max(1, cycleWidth)) * sourceDur;
+        const peakIndex = track.loop
+            ? Math.floor(((sourceTime % sourceDur) / sourceDur) * peaks.length)
+            : Math.min(peaks.length - 1, Math.floor((Math.min(sourceTime, sourceDur) / sourceDur) * peaks.length));
         let envelope = 1.0;
         if (fadeInFrac > 0 && frac < fadeInFrac) {
             envelope = frac / fadeInFrac;
@@ -330,9 +427,10 @@ function drawWaveformCanvas(canvas, track) {
         if (fadeOutFrac > 0 && frac > 1 - fadeOutFrac) {
             envelope = Math.min(envelope, (1 - frac) / fadeOutFrac);
         }
-        const barH = Math.max(1, peaks[i] * (h * 0.85) * envelope);
+        const peak = peaks[Math.max(0, Math.min(peaks.length - 1, peakIndex))];
+        const barH = Math.max(1, peak * (h * 0.85) * envelope);
         ctx.fillStyle = barColor;
-        ctx.fillRect(i * barWidth, midY - barH / 2, Math.max(1, barWidth - 0.5), barH);
+        ctx.fillRect(x, midY - barH / 2, Math.min(barDrawWidth, w - x), barH);
     }
 
     // Draw fade-in curve
@@ -433,7 +531,7 @@ function renderAudioProperties() {
         </div>
         <div class="property-group">
             <label>Duration</label>
-            <span class="property-value">${formatTimestamp(track.trimmedDuration || track.duration)}</span>
+            <span class="property-value">${formatTimestamp(getTrackVisibleDuration(track) || track.duration)}</span>
         </div>
         ` : ''}
         <div class="property-group">
@@ -555,17 +653,18 @@ function applyAudioFades() {
         if (!fadeIn && !fadeOut) continue;
 
         const currentTime = track.element.currentTime;
-        const trackEnd = track.trimmedDuration || track.duration || 0;
+        const clipTime = currentTime - getTrackStartOffset(track);
+        const trackEnd = getTrackVisibleDuration(track);
         if (!trackEnd) continue;
 
         let fadeMultiplier = 1.0;
         // Fade in
-        if (fadeIn > 0 && currentTime < fadeIn) {
-            fadeMultiplier = Math.min(fadeMultiplier, currentTime / fadeIn);
+        if (fadeIn > 0 && clipTime < fadeIn) {
+            fadeMultiplier = Math.min(fadeMultiplier, Math.max(0, clipTime) / fadeIn);
         }
         // Fade out
-        if (fadeOut > 0 && currentTime > trackEnd - fadeOut) {
-            const remaining = trackEnd - currentTime;
+        if (fadeOut > 0 && clipTime > trackEnd - fadeOut) {
+            const remaining = trackEnd - clipTime;
             fadeMultiplier = Math.min(fadeMultiplier, Math.max(0, remaining / fadeOut));
         }
 
@@ -695,6 +794,8 @@ function saveProjectEdits() {
     // Include audio settings if audio is loaded
     const audioSettings = EditorState.audio?.loaded ? {
         trimmedDuration: EditorState.audio.trimmedDuration,
+        timelineOffset: EditorState.audio.timelineOffset || 0,
+        startOffset: EditorState.audio.startOffset || 0,
         fileName: EditorState.audio.fileName
     } : null;
 
@@ -781,6 +882,8 @@ function _buildSavePayload() {
             id: t.id, label: t.label, type: t.type,
             file: t.file || null, path: t.path || null,
             duration: t.duration || 0,
+            timelineOffset: t.timelineOffset || 0,
+            startOffset: t.startOffset || 0,
             trimmedDuration: t.trimmedDuration || null,
             volume: t.volume ?? 1.0, loop: !!t.loop, muted: !!t.muted,
             duckingEnabled: !!t.duckingEnabled,
@@ -976,6 +1079,27 @@ function undoEdit() {
         const track = entry.sceneId === 'audio' ? getVoiceTrack() : getAudioTrackById(entry.sceneId);
         if (entry.field === 'trimmedDuration' && track) {
             track.trimmedDuration = entry.oldValue;
+            if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+            recalculateDuration();
+            renderAllAudioTracks();
+            renderTimeRuler();
+            if (EditorState.preview) {
+                EditorState.preview.setDuration(getTotalDuration());
+            }
+        }
+        if (entry.field === 'trimRange' && track) {
+            applyTrackTrimState(track, entry.oldValue || {});
+            if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+            recalculateDuration();
+            renderAllAudioTracks();
+            renderTimeRuler();
+            if (EditorState.preview) {
+                EditorState.preview.setDuration(getTotalDuration());
+            }
+        }
+        if (entry.field === 'timelineOffset' && track) {
+            track.timelineOffset = entry.oldValue;
+            if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             recalculateDuration();
             renderAllAudioTracks();
             renderTimeRuler();
@@ -1035,6 +1159,27 @@ function redoEdit() {
         const track = entry.sceneId === 'audio' ? getVoiceTrack() : getAudioTrackById(entry.sceneId);
         if (entry.field === 'trimmedDuration' && track) {
             track.trimmedDuration = entry.newValue;
+            if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+            recalculateDuration();
+            renderAllAudioTracks();
+            renderTimeRuler();
+            if (EditorState.preview) {
+                EditorState.preview.setDuration(getTotalDuration());
+            }
+        }
+        if (entry.field === 'trimRange' && track) {
+            applyTrackTrimState(track, entry.newValue || {});
+            if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+            recalculateDuration();
+            renderAllAudioTracks();
+            renderTimeRuler();
+            if (EditorState.preview) {
+                EditorState.preview.setDuration(getTotalDuration());
+            }
+        }
+        if (entry.field === 'timelineOffset' && track) {
+            track.timelineOffset = entry.newValue;
+            if (track.element) track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             recalculateDuration();
             renderAllAudioTracks();
             renderTimeRuler();
@@ -1459,16 +1604,10 @@ function getTotalDuration() {
     // Compute max duration across all audio tracks
     let maxAudioDur = 0;
     for (const track of EditorState.audioTracks) {
-        let dur = 0;
         if (track.loaded || track.file) {
-            if (track.trimmedDuration) {
-                dur = track.trimmedDuration;
-            } else if (!track.loop) {
-                dur = track.duration || 0;
-            }
-            // Looping tracks without explicit trim don't contribute to total (they fill whatever length)
+            const dur = getTrackTimelineEnd(track, scenesDuration);
+            if (dur > maxAudioDur) maxAudioDur = dur;
         }
-        if (dur > maxAudioDur) maxAudioDur = dur;
     }
 
     let captionsDuration = 0;
@@ -1488,12 +1627,7 @@ function _getTimelineConstraintDuration() {
     let target = EditorState.project?.totalDuration || 0;
 
     for (const track of EditorState.audioTracks) {
-        let dur = 0;
-        if (track.trimmedDuration) {
-            dur = track.trimmedDuration;
-        } else if (!track.loop) {
-            dur = track.duration || 0;
-        }
+        const dur = getTrackTimelineEnd(track, target || getScenesDuration());
         if (dur > target) target = dur;
     }
 
@@ -1830,7 +1964,10 @@ async function loadProjectFromServer(projectId) {
             projectData.audio = {
                 url: voiceTrack.path,
                 source_file: voiceTrack.file || '',
-                duration: voiceTrack.duration || 0
+                duration: voiceTrack.duration || 0,
+                trimmedDuration: voiceTrack.trimmedDuration || null,
+                timelineOffset: voiceTrack.timelineOffset || voiceTrack.timeline_offset || 0,
+                startOffset: voiceTrack.startOffset || voiceTrack.start_offset || 0
             };
         }
 
@@ -1954,6 +2091,8 @@ function _applyExtraState(saved) {
             file: t.file,
             path: t.path,
             duration: t.duration || 0,
+            timelineOffset: t.timelineOffset || t.timeline_offset || 0,
+            startOffset: t.startOffset || t.start_offset || 0,
             trimmedDuration: t.trimmedDuration || null,
             volume: t.volume ?? 1.0,
             loop: !!t.loop,
@@ -2064,6 +2203,8 @@ function _restoreSavedEditorState() {
             file: t.file,
             path: t.path,
             duration: t.duration || 0,
+            timelineOffset: t.timelineOffset || t.timeline_offset || 0,
+            startOffset: t.startOffset || t.start_offset || 0,
             trimmedDuration: t.trimmedDuration || null,
             volume: t.volume ?? 1.0,
             loop: !!t.loop,
@@ -2279,10 +2420,28 @@ async function loadProjectData(data) {
                 if (EditorState.isPlaying) {
                     applyAudioFades();
                     for (const track of EditorState.audioTracks) {
-                        if (!track.element || track.muted || track.loop || !track.file) continue;
-                        const trackEnd = track.trimmedDuration || track.duration;
-                        if (trackEnd && track.element.currentTime >= trackEnd && !track.element.paused) {
-                            track.element.pause();
+                        if (!track.element || !track.file) continue;
+
+                        const trackStart = getTrackTimelineOffset(track);
+                        const trackEnd = getTrackTimelineEnd(track, getTotalDuration()) || Infinity;
+                        const isActive = !track.muted && time >= trackStart && (track.loop || time < trackEnd);
+
+                        if (!isActive) {
+                            if (!track.element.paused) {
+                                track.element.pause();
+                            }
+                            continue;
+                        }
+
+                        if (track.element.paused) {
+                            track.element.currentTime = getTrackPlaybackTime(track, time);
+                            const targetVol = getEffectiveTrackVolume(track, track.volume, isVoiceAudible());
+                            if (track._gainNode) {
+                                track._gainNode.gain.value = targetVol;
+                            } else {
+                                track.element.volume = Math.min(1.0, targetVol);
+                            }
+                            track.element.play().catch(() => {});
                         }
                     }
                     if (elements.timelineTracks) {
@@ -2295,19 +2454,11 @@ async function loadProjectData(data) {
                     EditorState.playbackPosition = 0;
                     // Restart all audio tracks
                     seekAudio(0);
-                    for (const track of EditorState.audioTracks) {
-                        if (track.element && track.file && !track.muted) {
-                            track.element.play().catch(() => {});
-                        }
-                    }
                     if (EditorState.preview) {
                         EditorState.preview.seek(0);
                         EditorState.preview.play();
-                        const voiceTrack = getVoiceTrack();
-                        if (voiceTrack?.element && voiceTrack.loaded) {
-                            EditorState.preview.setTimeSource(() => voiceTrack.element.currentTime);
-                        }
                     }
+                    syncAudioPlayback();
                     if (elements.timelineTracks) {
                         elements.timelineTracks.scrollLeft = 0;
                     }
@@ -2321,7 +2472,7 @@ async function loadProjectData(data) {
                 for (const track of EditorState.audioTracks) {
                     if (track.element) {
                         track.element.pause();
-                        track.element.currentTime = 0;
+                        track.element.currentTime = getTrackStartOffset(track);
                     }
                 }
                 if (EditorState.preview) {
@@ -3150,18 +3301,22 @@ function loadDefaultAudio(stagedData) {
         voiceTrack.duration = audio.duration;
         voiceTrack.loaded = true;
 
-        // Restore saved audio trim duration if available
-        if (EditorState.savedAudioSettings?.trimmedDuration) {
-            voiceTrack.trimmedDuration = EditorState.savedAudioSettings.trimmedDuration;
-            console.log('Restored audio trim duration:', voiceTrack.trimmedDuration);
+        const savedTrim = EditorState.savedAudioSettings || stagedData?.audio || null;
+        if (savedTrim) {
+            applyTrackTrimState(voiceTrack, {
+                timelineOffset: savedTrim.timelineOffset ?? savedTrim.timeline_offset ?? 0,
+                startOffset: savedTrim.startOffset ?? savedTrim.start_offset ?? 0,
+                trimmedDuration: savedTrim.trimmedDuration ?? savedTrim.trimmed_duration ?? null
+            });
+            console.log('Restored audio trim:', { startOffset: voiceTrack.startOffset, trimmedDuration: voiceTrack.trimmedDuration });
         }
 
-        normalizeTimelineDurations(voiceTrack.trimmedDuration || audio.duration);
+        normalizeTimelineDurations(getTrackTimelineEnd(voiceTrack, audio.duration) || audio.duration);
 
         recalculateDuration();
         renderTimeline();
         renderAllAudioTracks();
-        showToast('Audio loaded: ' + formatTimestamp(voiceTrack.trimmedDuration || audio.duration), 'success');
+        showToast('Audio loaded: ' + formatTimestamp(getTrackVisibleDuration(voiceTrack) || audio.duration), 'success');
     });
 
     audio.addEventListener('error', (e) => {
@@ -3227,8 +3382,16 @@ function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
     audio.addEventListener('loadedmetadata', () => {
         voiceTrack.duration = audio.duration;
         voiceTrack.loaded = true;
+        const savedTrim = EditorState.savedAudioSettings || null;
+        if (savedTrim) {
+            applyTrackTrimState(voiceTrack, {
+                timelineOffset: savedTrim.timelineOffset ?? savedTrim.timeline_offset ?? 0,
+                startOffset: savedTrim.startOffset ?? savedTrim.start_offset ?? 0,
+                trimmedDuration: savedTrim.trimmedDuration ?? savedTrim.trimmed_duration ?? null
+            });
+        }
 
-        const audioDur = audio.duration;
+        const audioDur = getTrackTimelineEnd(voiceTrack, audio.duration) || audio.duration;
         const scenesDur = getScenesDuration();
         if (EditorState.scenes.length > 0 && audioDur > scenesDur + 0.05) {
             const lastScene = EditorState.scenes[EditorState.scenes.length - 1];
@@ -3245,7 +3408,7 @@ function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
         recalculateDuration();
         renderAllAudioTracks();
         saveProjectEdits();
-        showToast('Audio loaded: ' + formatTimestamp(audio.duration), 'success');
+        showToast('Audio loaded: ' + formatTimestamp(getTrackVisibleDuration(voiceTrack) || audio.duration), 'success');
     });
 
     audio.addEventListener('error', () => {
@@ -3427,9 +3590,10 @@ function renderAllAudioTracks() {
         let clipHTML;
         if (track.file) {
             const duration = isVoice
-                ? (track.trimmedDuration || (track.loaded ? track.duration : (EditorState.project?.totalDuration || 0)))
-                : (track.trimmedDuration || (track.loop ? timelineDur : track.duration));
+                ? (getTrackTimelineDuration(track, EditorState.project?.totalDuration || timelineDur) || (track.loaded ? track.duration : (EditorState.project?.totalDuration || 0)))
+                : (getTrackTimelineDuration(track, timelineDur) || (track.loop ? timelineDur : track.duration));
             const width = duration * pps;
+            const offsetPx = timeToPixels(getTrackTimelineOffset(track));
             const errorClass = track.error ? 'audio-clip-universal-error' : '';
             const statusText = track.error ? '(not found)' : formatTimestamp(duration);
 
@@ -3440,13 +3604,13 @@ function renderAllAudioTracks() {
 
             const selectedClass = EditorState.selectedAudioTrack?.id === track.id ? ' selected' : '';
             clipHTML = `
-                <div class="audio-clip-wrap" style="width:${width}px;">
+                <div class="audio-clip-wrap" data-track-id="${track.id}" style="width:${width}px; margin-left:${offsetPx}px;">
                     <span class="audio-clip-tag" style="background:${color}">${track.file}</span>
                     <div class="audio-clip-universal ${errorClass}${selectedClass}" data-track-id="${track.id}" style="width:100%; border-left: 3px solid ${color};">
                         <canvas class="audio-waveform-canvas" data-track-id="${track.id}"></canvas>
                         <span class="audio-clip-duration">${statusText}</span>
-                        <div class="audio-resize-handle-universal audio-resize-left" data-track-id="${track.id}"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M5 1L1 7l4 6M3 1l4 6-4 6"/></svg></div>
-                        <div class="audio-resize-handle-universal audio-resize-right" data-track-id="${track.id}"><svg class="resize-arrows" viewBox="0 0 8 14"><path d="M3 1l4 6-4 6M5 1L1 7l4 6"/></svg></div>
+                        <div class="audio-resize-handle-universal audio-resize-left" data-track-id="${track.id}"></div>
+                        <div class="audio-resize-handle-universal audio-resize-right" data-track-id="${track.id}"></div>
                     </div>
                 </div>`;
         } else {
@@ -3478,8 +3642,10 @@ function renderAllAudioTracks() {
             </div>`;
     }).join('');
 
-    // Wire up resize handles
+    // Wire up resize handles + edge hover indicators
     setupAllAudioResizeHandlers();
+    setupAudioResizeHoverIndicators(container);
+    setupAudioTrackDragHandlers(container);
 
     // Wire up speaker buttons (volume popup)
     container.querySelectorAll('.audio-track-speaker-btn').forEach(btn => {
@@ -3503,6 +3669,10 @@ function renderAllAudioTracks() {
     container.querySelectorAll('.audio-clip-universal').forEach(clip => {
         clip.addEventListener('click', (e) => {
             if (e.target.classList.contains('audio-resize-handle-universal')) return;
+            if (clip.dataset.suppressClick === '1') {
+                delete clip.dataset.suppressClick;
+                return;
+            }
             const trackId = clip.dataset.trackId;
             selectAudioTrack(trackId);
         });
@@ -3533,48 +3703,216 @@ function setupAllAudioResizeHandlers() {
             const trackId = handle.dataset.trackId;
             const track = getAudioTrackById(trackId);
             if (!track || (!track.loaded && track.type === 'voice')) return;
-            startUniversalAudioResize(e, track);
+            const handleSide = handle.classList.contains('audio-resize-left') ? 'left' : 'right';
+            startUniversalAudioResize(e, track, handleSide);
         });
     });
 }
 
 /**
- * Generic audio resize for any track
+ * Show the resize cue only on the clip edge nearest the pointer.
  */
-function startUniversalAudioResize(startEvent, track) {
-    const startX = startEvent.clientX;
-    const timelineDur = getTotalDuration() || 60;
-    const startDuration = track.trimmedDuration || (track.loop ? timelineDur : track.duration);
-    const maxDuration = track.loop ? 3600 : (track.duration || 600); // looping tracks can extend up to 1hr
+function setupAudioResizeHoverIndicators(root = document) {
+    root.querySelectorAll('.audio-clip-universal').forEach(clip => {
+        const updateHoverEdge = (clientX) => {
+            if (clip.classList.contains('audio-resizing')) return;
 
-    const clip = document.querySelector(`.audio-clip-universal[data-track-id="${track.id}"]`);
-    const durationSpan = clip?.querySelector('.audio-clip-duration');
+            const rect = clip.getBoundingClientRect();
+            const hoverX = clientX - rect.left;
+            const edgeThreshold = Math.min(18, Math.max(10, rect.width * 0.12), rect.width / 2);
+
+            clip.classList.remove('resize-hover-left', 'resize-hover-right', 'drag-hover-middle');
+
+            if (hoverX <= edgeThreshold) {
+                clip.classList.add('resize-hover-left');
+            } else if ((rect.width - hoverX) <= edgeThreshold) {
+                clip.classList.add('resize-hover-right');
+            } else {
+                clip.classList.add('drag-hover-middle');
+            }
+        };
+
+        clip.addEventListener('mouseenter', (e) => updateHoverEdge(e.clientX));
+        clip.addEventListener('mousemove', (e) => updateHoverEdge(e.clientX));
+        clip.addEventListener('mouseleave', () => {
+            if (!clip.classList.contains('audio-resizing')) {
+                clip.classList.remove('resize-hover-left', 'resize-hover-right', 'drag-hover-middle');
+            }
+        });
+    });
+}
+
+function setupAudioTrackDragHandlers(root = document) {
+    root.querySelectorAll('.audio-clip-universal').forEach(clip => {
+        clip.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            if (e.target.closest('.audio-resize-handle-universal')) return;
+            if (clip.classList.contains('resize-hover-left') || clip.classList.contains('resize-hover-right')) return;
+            startAudioTrackDrag(e, clip.dataset.trackId);
+        });
+    });
+}
+
+function startAudioTrackDrag(startEvent, trackId) {
+    const track = getAudioTrackById(trackId);
+    const clip = document.querySelector(`.audio-clip-universal[data-track-id="${trackId}"]`);
+    const clipWrap = clip?.closest('.audio-clip-wrap');
+    if (!track || !clip || !clipWrap) return;
+
+    startEvent.preventDefault();
+    const startX = startEvent.clientX;
+    const startOffset = getTrackTimelineOffset(track);
+    let moved = false;
+
+    clip.classList.add('audio-dragging');
+    clip.classList.remove('drag-hover-middle', 'resize-hover-left', 'resize-hover-right');
 
     const onMouseMove = (e) => {
         const deltaX = e.clientX - startX;
-        const deltaDuration = pixelsToTime(deltaX);
+        let newOffset = Math.max(0, startOffset + pixelsToTime(deltaX));
+        newOffset = Math.round(newOffset * 2) / 2;
+        moved = moved || Math.abs(deltaX) > 2;
 
-        let newDuration = Math.max(1, Math.min(maxDuration, startDuration + deltaDuration));
-        newDuration = Math.round(newDuration * 2) / 2; // snap 0.5s
+        track.timelineOffset = newOffset;
+        clipWrap.style.marginLeft = `${timeToPixels(newOffset)}px`;
 
-        track.trimmedDuration = newDuration;
-
-        if (clip) clip.style.width = `${timeToPixels(newDuration)}px`;
-        if (durationSpan) durationSpan.textContent = formatTimestamp(newDuration);
+        if (track.element) {
+            track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+            if (EditorState.isPlaying) {
+                const timelineEnd = getTrackTimelineEnd(track, getTotalDuration());
+                if (EditorState.playbackPosition < newOffset || EditorState.playbackPosition >= timelineEnd) {
+                    track.element.pause();
+                } else if (!track.muted && track.file) {
+                    track.element.play().catch(() => {});
+                }
+            }
+        }
     };
 
     const onMouseUp = () => {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        clip.classList.remove('audio-dragging');
+        clip.classList.add('drag-hover-middle');
 
-        const newDuration = track.trimmedDuration || track.duration;
-        if (newDuration !== startDuration) {
-            recordEdit(`Resize ${track.label} duration`, track.id, 'trimmedDuration', startDuration, newDuration);
+        if (moved) {
+            clip.dataset.suppressClick = '1';
+            recalculateDuration();
+            renderTimeRuler();
+            if (EditorState.preview) EditorState.preview.setDuration(getTotalDuration());
+            if (track.timelineOffset !== startOffset) {
+                recordEdit(`Move ${track.label}`, track.id, 'timelineOffset', startOffset, track.timelineOffset);
+            }
+        }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+}
+
+/**
+ * Generic audio resize for any track
+ */
+function startUniversalAudioResize(startEvent, track, handleSide = 'right') {
+    const startX = startEvent.clientX;
+    const timelineDur = getTotalDuration() || 60;
+    const startTrim = {
+        timelineOffset: getTrackTimelineOffset(track),
+        startOffset: getTrackStartOffset(track),
+        trimmedDuration: getTrackVisibleDuration(track) || (track.loop ? timelineDur : track.duration)
+    };
+    const sourceDuration = Math.max(track.duration || 0, startTrim.trimmedDuration || 0);
+    const minDuration = getTrackMinDuration(track);
+    const maxRightDuration = track.loop ? 3600 : Math.max(minDuration, sourceDuration - startTrim.startOffset);
+
+    const clip = document.querySelector(`.audio-clip-universal[data-track-id="${track.id}"]`);
+    const clipWrap = clip?.closest('.audio-clip-wrap');
+    const waveformCanvas = clip?.querySelector('.audio-waveform-canvas');
+    const durationSpan = clip?.querySelector('.audio-clip-duration');
+    if (clip) {
+        clip.classList.add('audio-resizing');
+        clip.classList.remove('resize-hover-left', 'resize-hover-right');
+        clip.classList.add(handleSide === 'left' ? 'resize-hover-left' : 'resize-hover-right');
+    }
+
+    const onMouseMove = (e) => {
+        const deltaX = e.clientX - startX;
+        const deltaDuration = pixelsToTime(deltaX);
+        let nextTrim;
+
+        if (handleSide === 'left') {
+            const maxDelta = startTrim.trimmedDuration - minDuration;
+            const minDelta = -Math.min(startTrim.startOffset, startTrim.timelineOffset);
+            const trimDelta = Math.max(minDelta, Math.min(deltaDuration, maxDelta));
+            const newTimelineOffset = startTrim.timelineOffset + trimDelta;
+            const newStartOffset = startTrim.startOffset + trimDelta;
+            const newDuration = startTrim.trimmedDuration - trimDelta;
+
+            nextTrim = applyTrackTrimState(track, {
+                timelineOffset: Math.round(newTimelineOffset * 2) / 2,
+                startOffset: Math.round(newStartOffset * 2) / 2,
+                trimmedDuration: Math.round(newDuration * 2) / 2
+            });
+        } else {
+            let newDuration = Math.max(minDuration, Math.min(maxRightDuration, startTrim.trimmedDuration + deltaDuration));
+            newDuration = Math.round(newDuration * 2) / 2; // snap 0.5s
+            nextTrim = applyTrackTrimState(track, {
+                startOffset: startTrim.startOffset,
+                trimmedDuration: newDuration
+            });
+        }
+
+        const newWidthPx = timeToPixels(nextTrim?.trimmedDuration || getTrackVisibleDuration(track));
+        if (clipWrap) {
+            clipWrap.style.width = `${newWidthPx}px`;
+            clipWrap.style.marginLeft = `${timeToPixels(nextTrim?.timelineOffset || getTrackTimelineOffset(track))}px`;
+            clip.style.width = '100%';
+        } else if (clip) {
+            clip.style.width = `${newWidthPx}px`;
+        }
+        if (durationSpan) durationSpan.textContent = formatTimestamp(nextTrim?.trimmedDuration || getTrackVisibleDuration(track));
+        if (waveformCanvas) drawWaveformCanvas(waveformCanvas, track);
+        if (track.element) {
+            track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+            if (EditorState.isPlaying) {
+                const timelineStart = getTrackTimelineOffset(track);
+                const timelineEnd = getTrackTimelineEnd(track, getTotalDuration());
+                if (EditorState.playbackPosition < timelineStart || EditorState.playbackPosition >= timelineEnd) {
+                    track.element.pause();
+                } else if (!track.muted && track.file) {
+                    track.element.play().catch(() => {});
+                }
+            }
+        }
+    };
+
+    const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        if (clip) {
+            clip.classList.remove('audio-resizing', 'resize-hover-left', 'resize-hover-right');
+        }
+
+        const newTrim = {
+            timelineOffset: getTrackTimelineOffset(track),
+            startOffset: getTrackStartOffset(track),
+            trimmedDuration: getTrackVisibleDuration(track) || track.duration
+        };
+        if (track.element && track.element.paused) {
+            track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+        }
+
+        if (handleSide === 'left') {
+            if (newTrim.startOffset !== startTrim.startOffset || newTrim.trimmedDuration !== startTrim.trimmedDuration) {
+                recordEdit(`Trim ${track.label} start`, track.id, 'trimRange', startTrim, newTrim);
+            }
+        } else if (newTrim.trimmedDuration !== startTrim.trimmedDuration) {
+            recordEdit(`Resize ${track.label} duration`, track.id, 'trimmedDuration', startTrim.trimmedDuration, newTrim.trimmedDuration);
         }
         recalculateDuration();
         renderTimeRuler();
         if (EditorState.preview) EditorState.preview.setDuration(getTotalDuration());
-        showToast(`${track.label} duration: ${formatTimestamp(newDuration)}`, 'info');
+        showToast(`${track.label} duration: ${formatTimestamp(newTrim.trimmedDuration)}`, 'info');
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -3729,7 +4067,7 @@ function openShareDialog() {
 
     // Show/hide reset button depending on whether WIP exists
     const resetBtn = document.getElementById('share-reset-initial');
-    if (resetBtn) resetBtn.closest('div').style.display = isWip ? '' : 'none';
+    if (resetBtn) resetBtn.style.display = isWip ? '' : 'none';
 
     // Reset progress indicators
     _resetShareStatus('export');
@@ -5969,17 +6307,24 @@ function syncAudioPlayback() {
             if (track.muted) { track.element.pause(); continue; }
 
             // Determine effective end time for this track
-            const trackEnd = track.trimmedDuration || track.duration || Infinity;
+            const trackStart = getTrackTimelineOffset(track);
+            const trackEnd = getTrackTimelineEnd(track, getTotalDuration()) || Infinity;
+
+            if (EditorState.playbackPosition < trackStart) {
+                track.element.pause();
+                track.element.currentTime = getTrackPlaybackTime(track, trackStart);
+                continue;
+            }
 
             if (track.loop) {
-                track.element.currentTime = EditorState.playbackPosition % (track.duration || 999);
+                track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             } else {
                 // Don't play past trimmed/actual duration
                 if (EditorState.playbackPosition >= trackEnd) {
                     track.element.pause();
                     continue;
                 }
-                track.element.currentTime = EditorState.playbackPosition;
+                track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
             }
 
             // Apply ducking on music tracks when voice is playing
@@ -6000,9 +6345,9 @@ function syncAudioPlayback() {
             EditorState.preview.setTimeSource(() => {
                 const timeFromStart = startPlayPos + (performance.now() - startSysTime) / 1000;
                 if (voiceTrack?.element && voiceTrack.loaded && !voiceTrack.element.paused) {
-                    const audioTrimEnd = voiceTrack.trimmedDuration || voiceTrack.element.duration || 0;
+                    const audioTrimEnd = getTrackSourceEnd(voiceTrack);
                     if (voiceTrack.element.currentTime < audioTrimEnd) {
-                        return voiceTrack.element.currentTime;
+                        return getTrackTimelineOffset(voiceTrack) + Math.max(0, voiceTrack.element.currentTime - getTrackStartOffset(voiceTrack));
                     }
                 }
                 return timeFromStart;
@@ -6028,9 +6373,9 @@ function seekAudio(time) {
     for (const track of EditorState.audioTracks) {
         if (!track.element) continue;
         if (track.loop) {
-            track.element.currentTime = time % (track.duration || 999);
+            track.element.currentTime = getTrackPlaybackTime(track, time);
         } else {
-            track.element.currentTime = Math.min(time, track.element.duration || 999);
+            track.element.currentTime = getTrackPlaybackTime(track, time);
         }
     }
 }
@@ -6372,8 +6717,11 @@ function getExportData() {
         path: voiceTrack.path,
         duration: voiceTrack.duration,
         trimmedDuration: voiceTrack.trimmedDuration,
+        timelineOffset: voiceTrack.timelineOffset || 0,
+        startOffset: voiceTrack.startOffset || 0,
         volume: voiceTrack.volume || 1.0,
-        start_offset: 0
+        timeline_offset: voiceTrack.timelineOffset || 0,
+        start_offset: voiceTrack.startOffset || 0
     } : null;
 
     // Find first music track for legacy bgMusic export
@@ -6980,7 +7328,7 @@ function setupEffectsTab() {
     const grid = document.getElementById('fx-grid');
     if (!grid) return;
 
-    // Click on effect cards — apply to selected scene, or toggle pool if clicking the dot
+    // Click on effect cards — apply to selected scene, or all scenes if none selected
     const fxCardGrid = document.getElementById('fx-card-grid');
     grid.querySelectorAll('.fx-card[data-fx]').forEach(card => {
         card.addEventListener('click', (e) => {
@@ -6989,13 +7337,24 @@ function setupEffectsTab() {
                 card.classList.toggle('in-pool');
                 return;
             }
-            const scene = EditorState.selectedScene;
-            if (!scene || scene.type === 'text' || scene.type === 'cta') return;
-
-            const oldValue = scene.visual_fx;
             const newValue = card.dataset.fx;
-            scene.visual_fx = newValue;
-            recordEdit(`Change effect (Scene ${scene.id})`, scene.id, 'visual_fx', oldValue, newValue);
+            const scene = EditorState.selectedScene;
+            if (scene && scene.type !== 'text' && scene.type !== 'cta') {
+                // Apply to selected scene
+                const oldValue = scene.visual_fx;
+                scene.visual_fx = newValue;
+                recordEdit(`Change effect (Scene ${scene.id})`, scene.id, 'visual_fx', oldValue, newValue);
+            } else {
+                // No scene selected — apply to ALL non-text scenes
+                EditorState.scenes.forEach(s => {
+                    if (s.type === 'text' || s.type === 'cta') return;
+                    const old = s.visual_fx;
+                    s.visual_fx = newValue;
+                    if (old !== newValue) recordEdit(`Set effect (Scene ${s.id})`, s.id, 'visual_fx', old, newValue);
+                });
+                saveProjectEdits();
+                showToast(`Applied "${newValue}" to all scenes`, 'success');
+            }
             updateEffectsTab();
             renderSceneProperties();
         });
@@ -7102,14 +7461,14 @@ function updateEffectsTab() {
     const scene = EditorState.selectedScene;
     const hasScene = scene && scene.type !== 'text' && scene.type !== 'cta';
 
-    noScene.style.display = hasScene ? 'none' : 'flex';
-    grid.style.display = hasScene ? 'flex' : 'none';
+    // Always show the grid so randomize/auto-assign are accessible
+    noScene.style.display = 'none';
+    grid.style.display = 'flex';
 
-    if (!hasScene) return;
-
-    const activeFx = scene.visual_fx || 'static';
+    // Highlight active effect only when a scene is selected
+    const activeFx = hasScene ? (scene.visual_fx || 'static') : null;
     grid.querySelectorAll('.fx-card[data-fx]').forEach(card => {
-        card.classList.toggle('active', card.dataset.fx === activeFx);
+        card.classList.toggle('active', activeFx !== null && card.dataset.fx === activeFx);
     });
 }
 

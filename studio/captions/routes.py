@@ -293,7 +293,7 @@ def list_captions():
         json_path = os.path.join(CAPTIONS_DIR, entry, "captions.json")
         if os.path.isfile(json_path):
             try:
-                with open(json_path) as f:
+                with open(json_path, encoding="utf-8") as f:
                     data = json.load(f)
                 items.append({
                     "project_id": data.get("project_id", entry),
@@ -317,7 +317,7 @@ def get_captions(project_id):
     if not os.path.isfile(json_path):
         return jsonify({"error": "Not found"}), 404
     try:
-        with open(json_path) as f:
+        with open(json_path, encoding="utf-8") as f:
             return jsonify(json.load(f))
     except (json.JSONDecodeError, OSError) as e:
         return jsonify({"error": f"Failed to read caption data: {e}"}), 500

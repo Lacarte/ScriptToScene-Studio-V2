@@ -1,7 +1,5 @@
-import os
+"""FFmpeg scene rendering test — prints result + writes err.log on failure."""
 import subprocess
-
-from typing import List
 
 FFMPEG_BIN = r"D:\@Workspace\@Development\@Scripts\@Python\ScriptToScene-Studio\bin\ffmpeg.exe"
 media_path = r"D:\@Workspace\@Development\@Scripts\@Python\ScriptToScene-Studio\output\assets\pp_ER7T57\0\0.webp"
@@ -34,10 +32,16 @@ cmd = [
 ]
 
 print("Running command:", " ".join(cmd))
-result = subprocess.run(cmd, capture_output=True, text=True)
-if result.returncode != 0:
-    print("STDOUT:", result.stdout)
-    print("STDERR:")
-    print(result.stderr)
-else:
-    print("Success!")
+try:
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout)
+        print("STDERR:", result.stderr)
+        with open("err.log", "w") as f:
+            f.write(f"RC: {result.returncode}\nOUT: {result.stdout}\nERR: {result.stderr}\n")
+    else:
+        print("Success!")
+except Exception as e:
+    print(f"EXCEPTION: {e}")
+    with open("err.log", "w") as f:
+        f.write(f"EXCEPTION: {e}")

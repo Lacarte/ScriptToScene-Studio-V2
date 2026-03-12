@@ -316,7 +316,8 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
     console.log('[prepareExportData] BgMusic:', bgMusicConfig ? bgMusicConfig.file : 'none');
 
     // Determine total video duration (max of scenes, audio, bgMusic, and captions)
-    const audioDuration = audioConfig?.trimmedDuration || audioConfig?.duration || 0;
+    const audioDuration = (audioConfig?.timeline_offset || audioConfig?.timelineOffset || 0) +
+        (audioConfig?.trimmedDuration || audioConfig?.duration || 0);
     const bgMusicDuration = bgMusicConfig?.duration || 0;
 
     let captionsDuration = 0;
@@ -378,6 +379,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
             path: audioConfig.path && audioConfig.path.startsWith('/output/') ? '..' + audioConfig.path : audioConfig.path,
             original_duration: audioConfig.duration,
             trimmed_duration: audioConfig.trimmedDuration || audioConfig.duration,
+            timeline_offset: audioConfig.timeline_offset || audioConfig.timelineOffset || 0,
             volume: audioConfig.volume || 1.0,
             start_offset: audioConfig.start_offset || 0,
             fade_out: 0.5

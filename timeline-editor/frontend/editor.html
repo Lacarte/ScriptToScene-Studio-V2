@@ -63,6 +63,12 @@
                                 </svg>
                             </button>
                         </div>
+                        <button id="share-reset-initial" class="btn-reset-initial" title="Discard all edits and revert to the original state">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-11.36L1 10"/>
+                            </svg>
+                            Reset to Initial
+                        </button>
                         <ul id="history-list" class="history-list">
                             <li class="history-empty">No history yet</li>
                         </ul>
@@ -189,11 +195,11 @@
                     <div class="tab-pane-body"
                         style="padding:8px;display:flex;flex-direction:column;gap:8px;overflow-y:auto">
                         <!-- No scene selected state -->
-                        <div id="fx-no-scene" class="fx-empty-state">
+                        <div id="fx-no-scene" class="fx-empty-state" style="display:none">
                             <span>Select a scene to apply effects</span>
                         </div>
                         <!-- Effects grid -->
-                        <div id="fx-grid" class="fx-grid" style="display:none">
+                        <div id="fx-grid" class="fx-grid">
                             <div class="fx-section-label">Motion Effects</div>
                             <div class="fx-card-grid" id="fx-card-grid">
                                 <button class="fx-card" data-fx="static" title="No motion">
@@ -1132,23 +1138,6 @@
                         </div>
                         <div id="share-import-status" style="font-size:10px;color:var(--text-muted);margin-top:4px"></div>
                     </div>
-                </div>
-                <!-- Divider -->
-                <div style="height:1px;background:var(--border);margin:2px 8px;opacity:0.5"></div>
-                <!-- Reset to Initial -->
-                <div>
-                    <button id="share-reset-initial" class="btn btn-secondary" style="display:flex;align-items:center;gap:12px;padding:12px 14px;text-align:left;width:100%;justify-content:flex-start;border-radius:10px;transition:all 0.15s ease">
-                        <div style="flex-shrink:0;width:34px;height:34px;border-radius:8px;background:rgba(255,107,107,0.1);display:flex;align-items:center;justify-content:center">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF6B6B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-11.36L1 10"/>
-                            </svg>
-                        </div>
-                        <div style="flex:1;min-width:0">
-                            <div style="font-size:13px;font-weight:600">Reset to Initial</div>
-                            <div style="font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px">Discard all edits and revert to the original state</div>
-                        </div>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
-                    </button>
                 </div>
             </div>
             <input type="file" id="share-import-file" accept=".zip" style="display:none" />

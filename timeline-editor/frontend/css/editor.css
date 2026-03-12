@@ -1798,6 +1798,29 @@ body.asset-dragging .scene-clip:hover {
     color: var(--coral);
 }
 
+.btn-reset-initial {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: calc(100% - 16px);
+    margin: 6px 8px 4px;
+    padding: 6px 10px;
+    background: rgba(255, 107, 107, 0.08);
+    border: 1px solid rgba(255, 107, 107, 0.2);
+    border-radius: 6px;
+    color: #FF6B6B;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-reset-initial:hover {
+    background: rgba(255, 107, 107, 0.15);
+    border-color: rgba(255, 107, 107, 0.4);
+}
+
 .history-list {
     list-style: none;
     margin: 0;
@@ -2655,37 +2678,65 @@ body.asset-dragging .scene-clip:hover {
 .audio-resize-handle-universal {
     position: absolute;
     top: 0;
+    bottom: 0;
     width: 12px;
     height: 100%;
-    background: rgba(255, 255, 255, 0.1);
-    cursor: ew-resize;
+    background: transparent;
+    cursor: col-resize;
     opacity: 0;
     transition: opacity 0.15s ease;
+    z-index: 3;
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 3;
+}
+
+.audio-resize-handle-universal::after {
+    content: '';
+    width: 5px;
+    height: 12px;
+    border-left: 1px solid rgba(78, 205, 196, 0.85);
+    border-right: 1px solid rgba(78, 205, 196, 0.85);
+    opacity: 0.9;
 }
 
 .audio-resize-handle,
 .audio-resize-handle-universal.audio-resize-right {
     right: 0;
+    background: linear-gradient(to left, rgba(78, 205, 196, 0.5), transparent);
     border-radius: 0 4px 4px 0;
 }
 
 .audio-resize-handle-universal.audio-resize-left {
     left: 0;
+    background: linear-gradient(to right, rgba(78, 205, 196, 0.5), transparent);
     border-radius: 4px 0 0 4px;
 }
 
 .audio-clip:hover .audio-resize-handle,
-.audio-clip-universal:hover .audio-resize-handle-universal {
+.audio-clip-universal.resize-hover-left .audio-resize-handle-universal.audio-resize-left,
+.audio-clip-universal.resize-hover-right .audio-resize-handle-universal.audio-resize-right,
+.audio-clip-universal.audio-resizing .audio-resize-handle-universal {
     opacity: 1;
 }
 
 .audio-resize-handle:hover,
 .audio-resize-handle-universal:hover {
-    background: rgba(78, 205, 196, 0.45);
+    background: rgba(78, 205, 196, 0.7);
+}
+
+.audio-clip-universal.resize-hover-left,
+.audio-clip-universal.resize-hover-right,
+.audio-clip-universal.audio-resizing {
+    cursor: col-resize;
+}
+
+.audio-clip-universal.drag-hover-middle {
+    cursor: grab;
+}
+
+.audio-clip-universal.audio-dragging {
+    cursor: grabbing;
 }
 
 .audio-clip.audio-clip-error,
@@ -2741,10 +2792,13 @@ body.asset-dragging .scene-clip:hover {
 /* Ensure clip content overlays the waveform */
 .audio-clip-universal svg,
 .audio-clip-name,
-.audio-clip-duration,
-.audio-resize-handle-universal {
+.audio-clip-duration {
     position: relative;
     z-index: 1;
+}
+
+.audio-resize-handle-universal {
+    z-index: 3;
 }
 
 /* ---- Audio Properties Panel ---- */
