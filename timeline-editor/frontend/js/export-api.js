@@ -7,6 +7,26 @@ import { backendLog } from './utils.js';
 
 const DEFAULT_API_URL = window.location.origin;
 
+/** Resolve a text_color value ('white', 'black', or '#hex') to a hex string. */
+function _resolveColorHex(c) {
+    if (c === 'white') return '#ffffff';
+    if (c === 'black') return '#000000';
+    return c.startsWith('#') ? c : '#ffffff';
+}
+
+/** Return a contrasting background hex for a given text_color. */
+function _resolveContrastHex(c) {
+    if (c === 'white') return '#000000';
+    if (c === 'black') return '#ffffff';
+    if (!c || !c.startsWith('#')) return '#000000';
+    const hex = c.length === 4
+        ? '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3] : c;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5 ? '#000000' : '#ffffff';
+}
+
 // ---- Export Profile Presets ----
 export const EXPORT_PROFILES = {
     yt_shorts: {
@@ -437,7 +457,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     font_size: scene.text_size || 48,
                     font_style: scene.font_style || 'bold',
                     color: scene.text_color || 'white',
-                    color_hex: (scene.text_color || 'white') === 'white' ? '#ffffff' : '#000000',
+                    color_hex: _resolveColorHex(scene.text_color || 'white'),
                     position: {
                         x: scene.text_x ?? null,
                         y: scene.text_y ?? null
@@ -447,11 +467,11 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     background: {
                         enabled: !!scene.text_background_enabled,
                         color: scene.text_background_color ||
-                            ((scene.text_color || 'white') === 'white' ? '#000000' : '#ffffff'),
+                            _resolveContrastHex(scene.text_color || 'white'),
                         image: !scene.text_background_enabled && scene.image ? scene.image : null,
                         image_path: !scene.text_background_enabled && (scene.mediaUrl || scene.image) ? mediaPath : null,
                         fallback_color: scene.text_background_color ||
-                            ((scene.text_color || 'white') === 'white' ? '#000000' : '#ffffff')
+                            _resolveContrastHex(scene.text_color || 'white')
                     },
                     fade_in: 0.25,
                     fade_out: 0.25
@@ -466,7 +486,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     font_size: scene.text_size || 48,
                     font_style: scene.font_style || 'bold',
                     color: scene.text_color || 'white',
-                    color_hex: (scene.text_color || 'white') === 'white' ? '#ffffff' : '#000000',
+                    color_hex: _resolveColorHex(scene.text_color || 'white'),
                     position: {
                         x: scene.text_x ?? null,
                         y: scene.text_y ?? null
@@ -476,7 +496,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     background: {
                         enabled: !!scene.text_background_enabled,
                         color: scene.text_background_color ||
-                            ((scene.text_color || 'white') === 'white' ? '#000000' : '#ffffff')
+                            _resolveContrastHex(scene.text_color || 'white')
                     }
                 } : null,
 
