@@ -428,6 +428,14 @@ body {
   }
 }
 
+@keyframes assets-build-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent); }
+  50% { box-shadow: 0 0 0 8px transparent; }
+}
+.assets-build-pulse {
+  animation: assets-build-pulse 1.5s ease-in-out 3;
+}
+
 @keyframes modal-in {
   from {
     opacity: 0;
@@ -893,7 +901,7 @@ body {
   padding: 2px 4px;
   border-radius: 4px;
   cursor: pointer;
-  user-select: none;
+  /* user-select: none; */
   white-space: nowrap;
   transition: color 0.15s, background 0.15s;
 }

@@ -53,7 +53,7 @@ def list_music():
         duration = _get_duration(fpath)
         files.append({
             "filename": fname,
-            "path": f"/output/music/{fname}",
+            "path": f"/output/musics/{fname}",
             "size_mb": size_mb,
             "duration": duration,
         })
@@ -83,13 +83,13 @@ def upload_music():
     duration = _get_duration(dest)
     return jsonify({
         "filename": fname,
-        "path": f"/output/music/{fname}",
+        "path": f"/output/musics/{fname}",
         "size_mb": size_mb,
         "duration": duration,
     })
 
 
-@music_bp.route("/output/music/<path:filename>")
+@music_bp.route("/output/musics/<path:filename>")
 def serve_music(filename):
     """Serve music files for playback."""
     return send_from_directory(MUSIC_DIR, filename)

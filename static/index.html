@@ -617,7 +617,7 @@
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 10px;border-radius:8px;background:var(--bg-darkest);border:1px solid var(--border)">
             <input type="checkbox" id="pipeline-auto-scenes" checked style="accent-color:var(--accent);cursor:pointer">
-            <label for="pipeline-auto-scenes" style="font-size:11px;color:var(--text-secondary);cursor:pointer;user-select:none">
+            <label for="pipeline-auto-scenes" style="font-size:11px;color:var(--text-secondary);cursor:pointer;/* user-select:none */">
               Auto-generate scenes <span style="color:var(--text-muted)">— run scene generation with the selected style after pipeline completes</span>
             </label>
           </div>
@@ -1143,7 +1143,7 @@
           <!-- Fork per Style -->
           <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--bg-darkest);border:1px solid var(--border)">
             <input type="checkbox" id="scenes-fork-style" checked style="accent-color:var(--accent);cursor:pointer">
-            <label for="scenes-fork-style" style="font-size:11px;color:var(--text-secondary);cursor:pointer;user-select:none">
+            <label for="scenes-fork-style" style="font-size:11px;color:var(--text-secondary);cursor:pointer;/* user-select:none */">
               New project per style <span style="color:var(--text-muted)">— generate a separate project for each template so you can compare results</span>
             </label>
           </div>
@@ -1284,7 +1284,7 @@
           <div style="padding:12px 16px">
             <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center">
               <span id="assets-analysis-toggle"
-                style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--accent);margin-right:4px;cursor:pointer;user-select:none">
+                style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.15em;color:var(--accent);margin-right:4px;cursor:pointer;/* user-select:none */">
                 <span id="assets-analysis-arrow" style="display:inline-block;transition:transform 0.2s;font-size:8px">&#9660;</span> Analysis</span>
               <div id="assets-analysis-chips" style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center"></div>
             </div>
@@ -1431,7 +1431,7 @@
                 </svg>
                 <span id="assets-grabber-label">Start Grabber</span>
               </button>
-              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none">
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;/* user-select:none */">
                 <input type="checkbox" id="assets-auto-type"
                   style="accent-color:var(--accent);cursor:pointer"
                   onchange="STS.set('sts-auto-type', this.checked)">
@@ -1727,7 +1727,7 @@
               <p class="font-mono" style="font-size:11px;color:var(--text-muted);margin:0;text-align:center">Loading modules to clear...</p>
             </div>
             <div style="text-align:center;margin-bottom:16px">
-              <span id="settings-clear-challenge" style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;letter-spacing:0.3em;color:#ef4444;user-select:none"></span>
+              <span id="settings-clear-challenge" style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;letter-spacing:0.3em;color:#ef4444;/* user-select:none */"></span>
             </div>
             <input id="settings-clear-input" type="text" autocomplete="off" spellcheck="false"
               placeholder="Type the characters above"

@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.io_utils import safe_json_write, safe_json_read
@@ -36,7 +36,8 @@ EXPORT_DIR_ABS = os.path.abspath(EXPORT_DIR)
 EXPORT_MAX_JOB_AGE = 3600  # evict finished jobs after 1 hour
 
 logger.info("Export output directory: {}", EXPORT_DIR)
-logger.info("Editor save directory: {}", EDITOR_SAVE_DIR)
+logger.info("Projects directory: {}", PROJECTS_DIR)
+logger.info("Legacy editor directory: {}", EDITOR_SAVE_DIR)
 
 WIP_FILENAME = "work@in@progress.json"
 INITIAL_FILENAME = "initial.json"
@@ -46,8 +47,36 @@ _LEGACY_WIP_SUFFIX = "-work@in@progress"
 
 
 def _project_dir(project_id: str) -> str:
-    """Return the per-project directory inside EDITOR_SAVE_DIR."""
-    return os.path.join(EDITOR_SAVE_DIR, project_id)
+    """Return the per-project directory inside PROJECTS_DIR."""
+    new_path = os.path.join(PROJECTS_DIR, project_id)
+    # Auto-migrate from old layout: output/editor/{id}/ → output/projects/{id}/
+    old_path = os.path.join(EDITOR_SAVE_DIR, project_id)
+    if os.path.isdir(old_path) and not os.path.isdir(new_path):
+        os.makedirs(PROJECTS_DIR, exist_ok=True)
+        try:
+            import shutil
+            shutil.move(old_path, new_path)
+            logger.info("Migrated editor data: {} -> {}", old_path, new_path)
+        except OSError as e:
+            logger.warning("Failed to migrate editor data for {}: {}", project_id, e)
+            return old_path  # Fall back to old path
+    # Also migrate from output/projects/{id}/editor/ → output/projects/{id}/
+    editor_subdir = os.path.join(new_path, "editor")
+    if os.path.isdir(editor_subdir):
+        try:
+            import shutil
+            for fname in os.listdir(editor_subdir):
+                src = os.path.join(editor_subdir, fname)
+                dst = os.path.join(new_path, fname)
+                if not os.path.exists(dst):
+                    shutil.move(src, dst)
+            # Remove editor subdir if now empty
+            if not os.listdir(editor_subdir):
+                os.rmdir(editor_subdir)
+            logger.info("Flattened editor subdir for {}", project_id)
+        except OSError as e:
+            logger.warning("Failed to flatten editor subdir for {}: {}", project_id, e)
+    return new_path
 
 
 def _wip_path(project_id: str) -> str:
@@ -93,48 +122,88 @@ def _migrate_legacy_files(project_id: str):
             os.remove(legacy)
 
 
-SETTINGS_PATH = os.path.join(EDITOR_SAVE_DIR, "settings.json")
+def _read_app_config():
+    """Read the full app-config.json file."""
+    try:
+        return safe_json_read(APP_CONFIG_PATH)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"version": 2, "defaults": {}, "localStorage": []}
+
+
+def _write_app_config(cfg):
+    """Write the full app-config.json file."""
+    safe_json_write(APP_CONFIG_PATH, cfg, indent=2)
+
+
+def _migrate_legacy_settings():
+    """One-time migration: merge output/editor/settings.json into app-config.json['user']."""
+    legacy_path = os.path.join(EDITOR_SAVE_DIR, "settings.json")
+    if not os.path.isfile(legacy_path):
+        return
+    cfg = _read_app_config()
+    if cfg.get("user"):
+        # Already has user settings — skip migration, just delete legacy
+        os.remove(legacy_path)
+        logger.info("Removed legacy settings.json (user settings already in app-config.json)")
+        return
+    try:
+        legacy_data = safe_json_read(legacy_path)
+        if isinstance(legacy_data, dict) and legacy_data:
+            cfg["user"] = legacy_data
+            _write_app_config(cfg)
+            logger.info("Migrated {} settings from legacy settings.json into app-config.json", len(legacy_data))
+        os.remove(legacy_path)
+        # Also remove .bak if present
+        bak = legacy_path + ".bak"
+        if os.path.isfile(bak):
+            os.remove(bak)
+    except Exception as e:
+        logger.warning("Failed to migrate legacy settings: {}", e)
+
+
+# Run migration on import
+_migrate_legacy_settings()
 
 
 @editor_bp.route("/api/settings", methods=["GET"])
 def get_settings():
-    """Return user settings (server JSON with .bak fallback)."""
-    try:
-        data = safe_json_read(SETTINGS_PATH)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
-    return jsonify(data)
+    """Return user settings from app-config.json['user']."""
+    cfg = _read_app_config()
+    return jsonify(cfg.get("user", {}))
 
 
 @editor_bp.route("/api/settings", methods=["PUT"])
 def put_settings():
-    """Replace all user settings."""
+    """Replace all user settings in app-config.json['user']."""
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Expected JSON object"}), 400
-    safe_json_write(SETTINGS_PATH, data, indent=2)
+    cfg = _read_app_config()
+    cfg["user"] = data
+    _write_app_config(cfg)
     return jsonify({"ok": True})
 
 
 @editor_bp.route("/api/settings", methods=["PATCH"])
 def patch_settings():
-    """Merge partial updates into user settings."""
+    """Merge partial updates into app-config.json['user']."""
     patch = request.get_json(silent=True)
     if not isinstance(patch, dict):
         return jsonify({"error": "Expected JSON object"}), 400
-    try:
-        data = safe_json_read(SETTINGS_PATH)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
-    data.update(patch)
-    safe_json_write(SETTINGS_PATH, data, indent=2)
+    cfg = _read_app_config()
+    user = cfg.get("user", {})
+    user.update(patch)
+    cfg["user"] = user
+    _write_app_config(cfg)
     return jsonify({"ok": True})
 
 
 @editor_bp.route("/api/settings", methods=["DELETE"])
 def delete_settings():
-    """Reset all user settings to empty."""
-    safe_json_write(SETTINGS_PATH, {}, indent=2)
+    """Reset user settings in app-config.json."""
+    cfg = _read_app_config()
+    cfg["user"] = {}
+    _write_app_config(cfg)
     return jsonify({"ok": True})
 
 
@@ -442,56 +511,377 @@ def editor_load_project(project_id):
 @editor_bp.route("/api/editor/projects", methods=["GET"])
 def editor_list_projects():
     """List all saved editor projects from per-project subdirectories."""
+    seen_ids = set()
     projects = []
-    if not os.path.isdir(EDITOR_SAVE_DIR):
-        return jsonify(projects)
 
-    for entry in os.listdir(EDITOR_SAVE_DIR):
-        proj_dir = os.path.join(EDITOR_SAVE_DIR, entry)
+    def _collect_from_dir(proj_dir, pid):
+        """Read project metadata from an editor subdirectory."""
+        if pid in seen_ids:
+            return
+        wip = os.path.join(proj_dir, WIP_FILENAME)
+        initial = os.path.join(proj_dir, INITIAL_FILENAME)
+        has_wip = os.path.isfile(wip)
+        fpath = wip if has_wip else initial
+        if not os.path.isfile(fpath):
+            return
+        try:
+            data = safe_json_read(fpath)
+            seen_ids.add(pid)
+            projects.append({
+                "project_id": data.get("project_id", pid),
+                "project_name": data.get("project_name", ""),
+                "saved_at": data.get("saved_at", ""),
+                "scene_count": data.get("scene_count", 0),
+                "total_duration": data.get("total_duration", 0),
+                "has_wip": has_wip,
+            })
+        except Exception:
+            pass
 
-        # Per-project subdirectory (new layout)
-        if os.path.isdir(proj_dir):
-            pid = entry
-            wip = os.path.join(proj_dir, WIP_FILENAME)
-            initial = os.path.join(proj_dir, INITIAL_FILENAME)
-            has_wip = os.path.isfile(wip)
-            fpath = wip if has_wip else initial
-            if not os.path.isfile(fpath):
-                continue
-            try:
-                data = safe_json_read(fpath)
-                projects.append({
-                    "project_id": data.get("project_id", pid),
-                    "project_name": data.get("project_name", ""),
-                    "saved_at": data.get("saved_at", ""),
-                    "scene_count": data.get("scene_count", 0),
-                    "total_duration": data.get("total_duration", 0),
-                    "has_wip": has_wip,
-                })
-            except Exception:
-                continue
+    # 1. Scan new layout: output/projects/{id}/
+    if os.path.isdir(PROJECTS_DIR):
+        for entry in os.listdir(PROJECTS_DIR):
+            proj_dir = os.path.join(PROJECTS_DIR, entry)
+            if os.path.isdir(proj_dir):
+                _collect_from_dir(proj_dir, entry)
 
-        # Legacy flat files (auto-migrated on next load/save)
-        elif entry.endswith(".json") and _LEGACY_WIP_SUFFIX not in entry and not entry.endswith(".bak"):
-            pid = entry.replace(".json", "")
-            legacy_wip = os.path.join(EDITOR_SAVE_DIR, f"{pid}{_LEGACY_WIP_SUFFIX}.json")
-            has_wip = os.path.isfile(legacy_wip)
-            fpath = legacy_wip if has_wip else proj_dir  # proj_dir is the .json file here
-            try:
-                data = safe_json_read(fpath)
-                projects.append({
-                    "project_id": data.get("project_id", pid),
-                    "project_name": data.get("project_name", ""),
-                    "saved_at": data.get("saved_at", ""),
-                    "scene_count": data.get("scene_count", 0),
-                    "total_duration": data.get("total_duration", 0),
-                    "has_wip": has_wip,
-                })
-            except Exception:
-                continue
+    # 2. Scan legacy layout: output/editor/{id}/
+    if os.path.isdir(EDITOR_SAVE_DIR):
+        for entry in os.listdir(EDITOR_SAVE_DIR):
+            proj_dir = os.path.join(EDITOR_SAVE_DIR, entry)
+
+            if os.path.isdir(proj_dir):
+                _collect_from_dir(proj_dir, entry)
+
+            # Legacy flat files (auto-migrated on next load/save)
+            elif entry.endswith(".json") and _LEGACY_WIP_SUFFIX not in entry and not entry.endswith(".bak"):
+                pid = entry.replace(".json", "")
+                if pid in seen_ids:
+                    continue
+                legacy_wip = os.path.join(EDITOR_SAVE_DIR, f"{pid}{_LEGACY_WIP_SUFFIX}.json")
+                has_wip = os.path.isfile(legacy_wip)
+                fpath = legacy_wip if has_wip else proj_dir
+                try:
+                    data = safe_json_read(fpath)
+                    seen_ids.add(pid)
+                    projects.append({
+                        "project_id": data.get("project_id", pid),
+                        "project_name": data.get("project_name", ""),
+                        "saved_at": data.get("saved_at", ""),
+                        "scene_count": data.get("scene_count", 0),
+                        "total_duration": data.get("total_duration", 0),
+                        "has_wip": has_wip,
+                    })
+                except Exception:
+                    continue
 
     projects.sort(key=lambda p: p.get("saved_at", ""), reverse=True)
     return jsonify(projects)
+
+
+# ---------------------------------------------------------------------------
+# Project Discovery — scans all output dirs for available projects
+# ---------------------------------------------------------------------------
+
+def _discover_projects() -> list[dict]:
+    """Scan output directories to discover all projects and their status."""
+    projects = {}  # project_id → info dict
+
+    # 1. Scan scenes dir (source of truth for generated projects)
+    if os.path.isdir(SCENES_DIR):
+        for entry in os.listdir(SCENES_DIR):
+            scenes_path = os.path.join(SCENES_DIR, entry, "scenes.json")
+            if not os.path.isfile(scenes_path):
+                continue
+            try:
+                mtime = os.path.getmtime(scenes_path)
+                with open(scenes_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                projects[entry] = {
+                    "project_id": entry,
+                    "project_name": data.get("project_name", entry),
+                    "source_folder": data.get("source_folder", entry),
+                    "scene_count": data.get("scene_count", len(data.get("scenes", []))),
+                    "total_duration": data.get("total_duration", 0),
+                    "style": data.get("style", ""),
+                    "created_at": data.get("timestamp", ""),
+                    "has_scenes": True,
+                    "has_assets": False,
+                    "has_audio": False,
+                    "has_editor": False,
+                    "asset_count": 0,
+                }
+            except Exception:
+                continue
+
+    # 2. Check assets
+    if os.path.isdir(ASSETS_DIR):
+        for entry in os.listdir(ASSETS_DIR):
+            asset_dir = os.path.join(ASSETS_DIR, entry)
+            if not os.path.isdir(asset_dir):
+                continue
+            if entry not in projects:
+                projects[entry] = {
+                    "project_id": entry,
+                    "project_name": entry,
+                    "source_folder": entry,
+                    "scene_count": 0,
+                    "total_duration": 0,
+                    "style": "",
+                    "created_at": "",
+                    "has_scenes": False,
+                    "has_assets": False,
+                    "has_audio": False,
+                    "has_editor": False,
+                    "asset_count": 0,
+                }
+            # Count asset subdirs (scene folders with media)
+            asset_count = sum(
+                1 for d in os.listdir(asset_dir)
+                if os.path.isdir(os.path.join(asset_dir, d)) and d.isdigit()
+            )
+            projects[entry]["has_assets"] = asset_count > 0
+            projects[entry]["asset_count"] = asset_count
+
+    # 3. Check audio (alignments)
+    if os.path.isdir(ALIGN_DIR):
+        for entry in os.listdir(ALIGN_DIR):
+            align_path = os.path.join(ALIGN_DIR, entry)
+            if not os.path.isdir(align_path):
+                continue
+            has_wav = any(f.endswith((".wav", ".mp3")) for f in os.listdir(align_path))
+            if has_wav:
+                # Find the project this audio belongs to (source_folder match)
+                for pid, info in projects.items():
+                    if info.get("source_folder") == entry:
+                        info["has_audio"] = True
+                        break
+
+    # 4. Check editor saves (new: output/projects/{id}/, legacy: output/editor/{id}/)
+    for pid in list(projects.keys()):
+        proj_dir = os.path.join(PROJECTS_DIR, pid)
+        legacy_dir = os.path.join(EDITOR_SAVE_DIR, pid)
+        for d in (proj_dir, legacy_dir):
+            if os.path.isdir(d):
+                has_save = os.path.isfile(os.path.join(d, WIP_FILENAME)) or \
+                           os.path.isfile(os.path.join(d, INITIAL_FILENAME))
+                if has_save:
+                    projects[pid]["has_editor"] = True
+                    break
+
+    # 5. Enrich with TTS metadata (text, voice, speed)
+    if os.path.isdir(TTS_DIR):
+        for pid, info in projects.items():
+            sf = info.get("source_folder", pid)
+            tts_meta = os.path.join(TTS_DIR, sf, "tts.json")
+            if os.path.isfile(tts_meta):
+                try:
+                    with open(tts_meta, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                    info["text_preview"] = (meta.get("prompt", "") or "")[:120]
+                    info["voice"] = meta.get("voice", "")
+                    info["audio_duration"] = meta.get("duration_seconds", 0)
+                except Exception:
+                    pass
+
+    # 6. Write/update manifests to PROJECTS_DIR (skip if initial.json already exists)
+    for pid, info in projects.items():
+        manifest_dir = os.path.join(PROJECTS_DIR, pid)
+        project_file = os.path.join(manifest_dir, "project.json")
+        initial_file = os.path.join(manifest_dir, INITIAL_FILENAME)
+        os.makedirs(manifest_dir, exist_ok=True)
+        # Don't overwrite if initial.json or a full project.json already exists
+        if os.path.isfile(initial_file):
+            continue
+        if os.path.isfile(project_file):
+            try:
+                existing = safe_json_read(project_file)
+                if existing.get("scenes"):
+                    continue  # Already has full project data
+            except Exception:
+                pass
+        safe_json_write(project_file, info, indent=2)
+
+    result = sorted(projects.values(), key=lambda p: p.get("created_at", ""), reverse=True)
+    return result
+
+
+@editor_bp.route("/api/projects", methods=["GET"])
+def list_all_projects():
+    """Discover and list all projects across output directories."""
+    projects = _discover_projects()
+    return jsonify(projects)
+
+
+@editor_bp.route("/api/projects/<project_id>/assemble", methods=["POST"])
+def assemble_project_for_editor(project_id):
+    """Assemble a project from scenes + assets into editor-ready format.
+
+    Creates initial.json in the editor directory if it doesn't exist,
+    then returns the assembled data ready for the editor to load.
+    """
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+
+    force = request.args.get("force", "0") == "1"
+
+    # Check if editor save already exists → return it directly (unless force rebuild)
+    _migrate_legacy_files(safe_id)
+    wip = _wip_path(safe_id)
+    initial = _initial_path(safe_id)
+
+    if not force and (os.path.isfile(wip) or os.path.isfile(initial)):
+        try:
+            data = safe_json_read(wip if os.path.isfile(wip) else initial)
+            _resolve_project_audio(data, safe_id)
+            _resolve_project_captions(data, safe_id)
+            data["_source"] = "wip" if os.path.isfile(wip) else "initial"
+            return jsonify(data)
+        except Exception as e:
+            logger.warning("Existing editor data corrupt for {}, rebuilding: {}", safe_id, e)
+
+    # Build from scenes.json
+    scenes_path = os.path.join(SCENES_DIR, safe_id, "scenes.json")
+    if not os.path.isfile(scenes_path):
+        return jsonify({"error": "No scenes found for this project"}), 404
+
+    try:
+        with open(scenes_path, "r", encoding="utf-8") as f:
+            scenes_data = json.load(f)
+    except Exception as e:
+        return jsonify({"error": f"Failed to read scenes: {e}"}), 500
+
+    source_folder = scenes_data.get("source_folder", safe_id)
+    raw_scenes = scenes_data.get("scenes", [])
+
+    # Build editor-format scenes
+    editor_scenes = []
+    for i, s in enumerate(raw_scenes):
+        scene_index = s.get("index", i)
+        scene_type = s.get("type_of_scene", s.get("type", "image"))
+        duration = s.get("duration", 3)
+        media_url = ""
+
+        # Find media asset — asset dirs use sequential position (i), not scene_index
+        # because the grabber saves files by array position, not by scene.index
+        for asset_key in (str(i), str(scene_index)):
+            asset_dir = os.path.join(ASSETS_DIR, safe_id, asset_key)
+            if os.path.isdir(asset_dir):
+                for fname in os.listdir(asset_dir):
+                    if fname.endswith((".mp4", ".webm", ".mov", ".jpg", ".jpeg", ".png", ".webp")):
+                        media_url = f"/output/assets/{safe_id}/{asset_key}/{fname}"
+                        ext = fname.rsplit(".", 1)[-1].lower()
+                        if ext in ("mp4", "webm", "mov"):
+                            scene_type = "video"
+                        break
+            if media_url:
+                break
+
+        is_video = scene_type == "video" or media_url.endswith((".mp4", ".webm", ".mov"))
+
+        editor_scenes.append({
+            "id": i,
+            "scene_id": i,
+            "type": scene_type,
+            "scene_type": s.get("narrative_role", s.get("type_of_scene", scene_type)),
+            "duration": duration,
+            "visual_fx": s.get("visual_fx", "static"),
+            "effect": {"type": "none"},
+            "transition": {"type": "none", "duration": 0},
+            "image_url": media_url,
+            "mediaUrl": media_url,
+            "image": "",
+            "image_prompt": s.get("image_prompt", ""),
+            "prompt": s.get("image_prompt", ""),
+            "description": s.get("description", ""),
+            "style": s.get("style", ""),
+            "text_content": s.get("text_content"),
+            "text_x": None,
+            "text_y": None,
+            "text_timeline_offset": 0,
+            "text_overlay_duration": duration,
+            "text_background_enabled": s.get("text_content") is not None and scene_type == "text",
+            "text_background_color": "#000000",
+            "timestamp": 0,
+            "status": "done" if media_url else "pending",
+            "isVideo": is_video,
+            "script": s.get("segment_words", ""),
+            "narrative_role": s.get("narrative_role", ""),
+            "filler_shift": 0,
+            "segment_start": s.get("segment_start"),
+            "segment_end": s.get("segment_end"),
+            "segment_duration": s.get("segment_duration"),
+            "asset_files": [media_url] if media_url else [],
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        })
+
+    # Compute cumulative timeline positions
+    cumulative = 0
+    for es in editor_scenes:
+        es["timestamp"] = cumulative
+        cumulative += es["duration"]
+
+    # Build audio tracks
+    audio_tracks = []
+    audio_url = _resolve_audio_url(source_folder)
+    if audio_url:
+        audio_tracks.append({
+            "id": "at_1",
+            "label": "Voice",
+            "type": "voice",
+            "file": audio_url["source_file"],
+            "path": audio_url["url"],
+            "duration": 0,
+            "timelineOffset": 0,
+            "startOffset": 0,
+            "trimmedDuration": None,
+            "volume": 1,
+            "loop": False,
+            "muted": False,
+            "duckingEnabled": False,
+            "duckingLevel": 0.2,
+            "fadeIn": 0,
+            "fadeOut": 0,
+        })
+
+    total_duration = sum(s["duration"] for s in editor_scenes)
+    editor_data = {
+        "project_id": safe_id,
+        "project_name": scenes_data.get("project_name", safe_id),
+        "source_folder": source_folder,
+        "style": scenes_data.get("style", ""),
+        "total_duration": total_duration,
+        "scene_count": len(editor_scenes),
+        "scenes": editor_scenes,
+        "audio_tracks": audio_tracks,
+        "grain_overlay": {
+            "enabled": False,
+            "opacity": 0.16,
+            "start": 0,
+            "fade_in": 0,
+            "hold": 0,
+            "fade_out": 0,
+            "noise_strength": 88,
+            "threshold": 246,
+        },
+        "captionsEnabled": False,
+        "edit_history": [],
+        "history_index": -1,
+        "disabled_tracks": [],
+    }
+
+    # Resolve captions
+    _resolve_project_captions(editor_data, safe_id)
+
+    # Save as initial.json in output/projects/{id}/
+    editor_data["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    proj_dir = _project_dir(safe_id)
+    os.makedirs(proj_dir, exist_ok=True)
+    safe_json_write(os.path.join(proj_dir, INITIAL_FILENAME), editor_data, indent=2)
+
+    logger.info("Assembled editor project for {}", safe_id)
+
+    editor_data["_source"] = "initial"
+    return jsonify(editor_data)
 
 
 @editor_bp.route("/api/editor/reset/<project_id>", methods=["POST"])

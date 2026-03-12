@@ -17,7 +17,7 @@ from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
-    EXPORT_DIR,
+    EXPORT_DIR, APP_CONFIG_PATH,
 )
 from studio.security import is_loopback_remote
 
@@ -82,7 +82,11 @@ def index():
 
 @app.route("/app-config.json")
 def serve_app_config():
-    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "app-config.json")
+    """Serve app-config.json with no-cache to ensure fresh user settings."""
+    return send_from_directory(
+        os.path.dirname(os.path.abspath(__file__)), "app-config.json",
+        max_age=0,
+    )
 
 
 @app.route("/css/<path:filename>")

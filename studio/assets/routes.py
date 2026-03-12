@@ -12,7 +12,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import ASSETS_DIR, SCENES_DIR, KIE_AI_MODEL
+from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, KIE_AI_MODEL
 from studio.io_utils import safe_json_write
 from studio.security import sanitize_project_id
 
@@ -676,6 +676,10 @@ def assets_history():
                     break
             if project_info["preview"]:
                 break
+
+        # Check if a build (initial.json) already exists for this project
+        proj_dir = os.path.join(PROJECTS_DIR, project_id)
+        project_info["has_build"] = os.path.isfile(os.path.join(proj_dir, "initial.json"))
 
         projects.append(project_info)
 

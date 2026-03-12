@@ -213,6 +213,20 @@ function createAudioTrack(overrides = {}) {
 function getVoiceTrack() {
     return EditorState.audioTracks.find(t => t.type === 'voice');
 }
+function _getAudioForPersist() {
+    if (EditorState.savedAudioSettings) return { audio: EditorState.savedAudioSettings };
+    const vt = getVoiceTrack();
+    if (vt?.path) {
+        return { audio: {
+            url: vt.path, source_file: vt.file || '',
+            duration: vt.duration || 0,
+            trimmedDuration: vt.trimmedDuration || null,
+            timelineOffset: vt.timelineOffset || 0,
+            startOffset: vt.startOffset || 0
+        }};
+    }
+    return {};
+}
 function getAudioTrackById(id) {
     return EditorState.audioTracks.find(t => t.id === id);
 }
@@ -376,7 +390,8 @@ function hasSceneBackgroundMedia(scene) {
 
 function getSceneThumbSource(scene) {
     if (!scene) return null;
-    if (scene.isVideo) {
+    const isVid = scene.isVideo || isVideoFile(scene.mediaUrl);
+    if (isVid) {
         return scene.videoThumb || scene.mediaUrl || scene.image_url || null;
     }
     if (scene.mediaUrl) return scene.mediaUrl;
@@ -412,7 +427,8 @@ function getSceneClipThumbMarkup(scene, icon) {
         `;
     }
 
-    const typeBadge = scene.isVideo && thumbSrc
+    const isVid = scene.isVideo || isVideoFile(scene.mediaUrl);
+    const typeBadge = isVid && thumbSrc
         ? '<span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>'
         : thumbSrc
             ? '<span class="media-image-badge" data-tooltip="Image"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>'
@@ -2937,7 +2953,21 @@ function buildBootProjectData(raw) {
         scene_count: raw.scene_count || scenes.length,
         staged_at: raw.staged_at || raw.saved_at || new Date().toISOString(),
         scenes,
-        ...(raw.audio ? { audio: raw.audio } : {})
+        ...(raw.audio ? { audio: raw.audio } : (() => {
+            // Extract audio from audio_tracks if no top-level audio key
+            const vt = (raw.audio_tracks || []).find(t => t.type === 'voice');
+            if (vt?.path) {
+                return { audio: {
+                    url: vt.path,
+                    source_file: vt.file || '',
+                    duration: vt.duration || 0,
+                    trimmedDuration: vt.trimmedDuration || null,
+                    timelineOffset: vt.timelineOffset || vt.timeline_offset || 0,
+                    startOffset: vt.startOffset || vt.start_offset || 0
+                }};
+            }
+            return {};
+        })())
     };
 }
 
@@ -3122,7 +3152,8 @@ async function loadProjectData(data) {
         ...scene,
         id: scene.id || scene.scene_id,
         mediaLoaded: !!scene.image_url,
-        mediaUrl: scene.image_url || null
+        mediaUrl: scene.image_url || null,
+        isVideo: scene.isVideo || isVideoFile(scene.image_url || scene.mediaUrl)
     }));
     persistBootProjectData({
         ...data,
@@ -3400,7 +3431,7 @@ async function loadProjectMediaWithProgress() {
             image_url: scene.mediaUrl || scene.image_url || '',
             asset_files: Array.isArray(scene.asset_files) ? scene.asset_files : []
         })),
-        ...(EditorState.savedAudioSettings ? { audio: EditorState.savedAudioSettings } : {})
+        ...(_getAudioForPersist())
     }, {
         markSavedProject: EditorState.project?.loadedFrom === 'wip' || EditorState.project?.loadedFrom === 'initial'
     });
@@ -3676,6 +3707,7 @@ function renderMediaGrid() {
 
     grid.innerHTML = EditorState.scenes.map(scene => {
         const hasMedia = !!scene.mediaUrl;
+        const isVid = scene.isVideo || (hasMedia && isVideoFile(scene.mediaUrl));
         const dur = (scene.duration || 0).toFixed(1);
         const icon = SCENE_ICONS[scene.type] || SCENE_ICONS.default;
         const label = scene.image_prompt
@@ -3686,11 +3718,11 @@ function renderMediaGrid() {
             <div class="media-grid-item${EditorState.selectedScene?.id === scene.id ? ' selected' : ''}"
                  data-scene-id="${scene.id}" title="${(scene.image_prompt || 'Scene ' + scene.id).replace(/"/g, '&quot;')}">
                 ${hasMedia
-                ? (scene.isVideo && scene.videoThumb
+                ? (isVid && scene.videoThumb
                     ? `<img src="${scene.videoThumb}" alt="Scene ${scene.id}" style="width:100%;height:100%;object-fit:cover">
                        <span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>`
-                    : scene.isVideo
-                        ? `<div class="media-grid-placeholder">${icon}</div>
+                    : isVid
+                        ? `<video src="${scene.mediaUrl}" muted preload="metadata" style="width:100%;height:100%;object-fit:cover"></video>
                            <span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>`
                         : `<img src="${scene.mediaUrl}" alt="Scene ${scene.id}">`)
                 : `<div class="media-grid-placeholder">${icon}</div>`}
@@ -4095,16 +4127,29 @@ function loadDefaultAudio(stagedData) {
     audio.addEventListener('error', (e) => {
         console.warn('Failed to load audio:', audioPath, e);
 
-        // Try alternative extension before failing
-        if (!stagedData?._triedAltExtensionFallback && !stagedData?.audio?.url) {
-            const altFileName = audioFileName.endsWith('.wav')
-                ? audioFileName.replace('.wav', '.mp3')
-                : audioFileName.replace('.mp3', '.wav');
-            const altPath = `working-assets/${projectId}/${altFileName}`;
-            console.log('Trying alternative audio fallback:', altPath);
+        // Build a queue of fallback paths to try
+        const triedPaths = stagedData?._triedPaths || [audioPath];
+        const sourceFolder = EditorState.project?.sourceFolder || projectId;
+        const fallbackPaths = [
+            // working-assets alt extension
+            ...(audioFileName.endsWith('.wav')
+                ? [`working-assets/${projectId}/main-audio.mp3`]
+                : [`working-assets/${projectId}/main-audio.wav`]),
+            // alignments folder
+            `/output/alignments/${sourceFolder}/voice.wav`,
+            `/output/alignments/${sourceFolder}/voice.mp3`,
+            // tts folder
+            `/output/tts/${sourceFolder}/voice.wav`,
+            `/output/tts/${sourceFolder}/voice.mp3`,
+        ].filter(p => !triedPaths.includes(p));
+
+        if (fallbackPaths.length > 0) {
+            const nextPath = fallbackPaths[0];
+            const nextFile = nextPath.split('/').pop();
+            console.log('Trying audio fallback:', nextPath);
             loadDefaultAudio({
-                audio: { url: altPath, source_file: altFileName, duration: 0 },
-                _triedAltExtensionFallback: true
+                audio: { url: nextPath, source_file: nextFile, duration: 0 },
+                _triedPaths: [...triedPaths, nextPath]
             });
             return;
         }
@@ -4112,11 +4157,7 @@ function loadDefaultAudio(stagedData) {
         voiceTrack.loaded = false;
         voiceTrack.error = true;
         renderAllAudioTracks();
-
-        // Only show toast if we aren't about to successfully load from picker
-        if (stagedData?._triedAltExtensionFallback) {
-            showToast(`Audio not found: ${audioFileName}`, 'warning');
-        }
+        showToast(`Audio not found`, 'warning');
     });
 
     // Initial render (before duration is known)
@@ -7205,25 +7246,42 @@ function showAddTrackMenu(anchor) {
     menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
 
     menu.innerHTML = `
+        <div class="add-track-menu-header">New audio track</div>
         <button class="add-track-menu-item" data-action="music">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.9)" stroke-width="1.5">
-                <circle cx="5.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/>
-                <path d="M8 17.5V5l12-2v12.5"/>
-            </svg>
-            Music
+            <div class="add-track-menu-icon music">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.9)" stroke-width="1.5">
+                    <circle cx="5.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/>
+                    <path d="M8 17.5V5l12-2v12.5"/>
+                </svg>
+            </div>
+            <div class="add-track-menu-text">
+                <span>Music</span>
+                <span class="add-track-menu-desc">Browse music library</span>
+            </div>
         </button>
         <button class="add-track-menu-item" data-action="fx">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,183,77,0.9)" stroke-width="1.5">
-                <path d="M2 12h4l3-9 4 18 3-9h4"/>
-            </svg>
-            Sound FX
+            <div class="add-track-menu-icon fx">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,183,77,0.9)" stroke-width="1.5">
+                    <path d="M2 12h4l3-9 4 18 3-9h4"/>
+                </svg>
+            </div>
+            <div class="add-track-menu-text">
+                <span>Sound FX</span>
+                <span class="add-track-menu-desc">Add an empty FX track</span>
+            </div>
         </button>
+        <div class="add-track-menu-sep"></div>
         <button class="add-track-menu-item" data-action="upload">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            Upload File
+            <div class="add-track-menu-icon upload">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+            </div>
+            <div class="add-track-menu-text">
+                <span>Upload File</span>
+                <span class="add-track-menu-desc">mp3, wav, ogg, m4a</span>
+            </div>
         </button>
     `;
 
@@ -7299,7 +7357,7 @@ async function _handleAudioFileUpload(file) {
             label: file.name.replace(/\.[^.]+$/, ''),
             type: type,
             file: data.filename || file.name,
-            path: data.path || `/output/music/${file.name}`,
+            path: data.path || `/output/musics/${file.name}`,
             volume: 1.0,
             color: AUDIO_TRACK_COLORS[type],
             loaded: true,

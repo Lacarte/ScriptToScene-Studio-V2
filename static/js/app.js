@@ -388,18 +388,7 @@ function switchPage(page, editorSource = 'internal') {
     } catch (_) {}
     $('#main-content').style.overflowY = 'hidden';
     if (!hasStoredEditorProject()) {
-      // Hide the loading spinner and show empty state
-      const loadingEl = $('#editor-loading');
-      if (loadingEl) {
-        loadingEl.innerHTML = `
-          <div style="text-align:center">
-            <svg width="40" height="40" fill="none" stroke="var(--text-muted)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.4">
-              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
-            </svg>
-            <p style="color:var(--text-secondary);font-size:13px">No scenes or assets available</p>
-            <p style="font-size:11px;margin-top:6px;color:var(--text-muted);opacity:0.7">Generate content first, then open the editor</p>
-          </div>`;
-      }
+      _showProjectBrowser();
       return;
     }
     initEditorIframe();
@@ -417,6 +406,253 @@ function switchPage(page, editorSource = 'internal') {
 // Explicit editor entry from sidebar/mobile menu.
 function openEditorFromMenu() {
   switchPage('editor', 'menu');
+}
+
+// ---------------------------------------------------------------------------
+// Project Browser — shown when editor has no stored project
+// ---------------------------------------------------------------------------
+
+async function _showProjectBrowser() {
+  const loadingEl = $('#editor-loading');
+  if (!loadingEl) return;
+
+  loadingEl.innerHTML = `
+    <div style="text-align:center;padding:20px">
+      <div style="width:28px;height:28px;border:2px solid rgba(255,255,255,0.08);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px"></div>
+      <p style="color:var(--text-muted);font-size:12px">Scanning projects...</p>
+    </div>`;
+
+  try {
+    const projects = await api('/api/projects');
+
+    if (!projects || !projects.length) {
+      loadingEl.innerHTML = `
+        <div style="text-align:center">
+          <svg width="40" height="40" fill="none" stroke="var(--text-muted)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.4">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>
+          <p style="color:var(--text-secondary);font-size:13px">No projects found</p>
+          <p style="font-size:11px;margin-top:6px;color:var(--text-muted);opacity:0.7">Generate content in the Pipeline tab first</p>
+        </div>`;
+      return;
+    }
+
+    const cards = projects.map(p => {
+      const hasAssets = p.has_assets && p.asset_count > 0;
+      const statusDots = [
+        `<span title="Scenes" style="width:7px;height:7px;border-radius:50%;background:${p.has_scenes ? 'var(--accent)' : 'rgba(255,255,255,0.1)'};display:inline-block"></span>`,
+        `<span title="Assets (${p.asset_count})" style="width:7px;height:7px;border-radius:50%;background:${hasAssets ? '#60a5fa' : 'rgba(255,255,255,0.1)'};display:inline-block"></span>`,
+        `<span title="Audio" style="width:7px;height:7px;border-radius:50%;background:${p.has_audio ? '#a78bfa' : 'rgba(255,255,255,0.1)'};display:inline-block"></span>`,
+        `<span title="Editor Save" style="width:7px;height:7px;border-radius:50%;background:${p.has_editor ? '#FFB347' : 'rgba(255,255,255,0.1)'};display:inline-block"></span>`,
+      ].join('');
+
+      const preview = p.text_preview
+        ? `<p style="font-size:10px;color:var(--text-muted);margin:6px 0 0;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${p.text_preview}</p>`
+        : '';
+
+      const dur = p.total_duration ? `${p.total_duration.toFixed(1)}s` : '';
+      const meta = [
+        p.scene_count ? `${p.scene_count} scenes` : '',
+        dur,
+        p.voice || '',
+      ].filter(Boolean).join(' · ');
+
+      const readyState = hasAssets ? 'ready' : p.has_scenes ? 'scenes only' : 'partial';
+      const readyColor = hasAssets ? 'var(--accent)' : 'var(--text-muted)';
+
+      return `
+        <div class="project-card" data-project-id="${p.project_id}" style="
+          background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;
+          padding:12px 14px;transition:border-color 0.15s, background 0.15s;
+        " onmouseover="this.style.borderColor='rgba(78,205,196,0.3)'"
+           onmouseout="this.style.borderColor='var(--border)'">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span style="font-family:var(--font-mono,'JetBrains Mono',monospace);font-size:12px;font-weight:600;color:var(--text)">${p.project_id}</span>
+            <span style="font-size:9px;color:${readyColor};font-weight:600;text-transform:uppercase;letter-spacing:0.04em">${readyState}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;margin-top:6px">${statusDots}
+            <span style="font-size:9px;color:var(--text-muted);margin-left:6px">${meta}</span>
+          </div>
+          ${preview}
+          <div class="project-card-steps" style="display:none;margin-top:8px"></div>
+          <button class="project-build-btn" style="
+            margin-top:10px;width:100%;padding:7px 0;border-radius:6px;border:none;
+            background:var(--accent);color:#000;font-size:11px;font-weight:700;
+            cursor:pointer;letter-spacing:0.03em;transition:opacity 0.15s;
+          " onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Build, Assemble & Edit</button>
+        </div>`;
+    }).join('');
+
+    loadingEl.innerHTML = `
+      <div style="width:100%;max-width:520px;padding:20px">
+        <div style="text-align:center;margin-bottom:16px">
+          <p style="color:var(--text);font-size:14px;font-weight:600;margin-bottom:4px">Open a Project</p>
+          <p style="color:var(--text-muted);font-size:11px">${projects.length} project${projects.length !== 1 ? 's' : ''} found</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto;padding-right:4px">
+          ${cards}
+        </div>
+        <div style="text-align:center;margin-top:14px">
+          <div style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:9px;color:var(--text-muted);opacity:0.6">
+            <span style="width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block"></span> Scenes
+            <span style="width:7px;height:7px;border-radius:50%;background:#60a5fa;display:inline-block;margin-left:6px"></span> Assets
+            <span style="width:7px;height:7px;border-radius:50%;background:#a78bfa;display:inline-block;margin-left:6px"></span> Audio
+            <span style="width:7px;height:7px;border-radius:50%;background:#FFB347;display:inline-block;margin-left:6px"></span> Saved
+          </div>
+        </div>
+      </div>`;
+
+    // Click handler for build buttons
+    loadingEl.querySelectorAll('.project-build-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const card = btn.closest('.project-card');
+        const pid = card.dataset.projectId;
+        _buildAndOpenProject(pid, card);
+      });
+    });
+
+  } catch (e) {
+    console.error('Failed to load projects:', e);
+    loadingEl.innerHTML = `
+      <div style="text-align:center">
+        <svg width="40" height="40" fill="none" stroke="var(--coral)" stroke-width="1.5" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.7">
+          <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+        </svg>
+        <p style="color:var(--coral);font-size:13px">Failed to load projects</p>
+        <p style="font-size:11px;margin-top:6px;color:var(--text-muted)">${e.message || 'Check the server console'}</p>
+      </div>`;
+  }
+}
+
+async function _buildAndOpenProject(projectId, cardEl) {
+  const btn = cardEl.querySelector('.project-build-btn');
+  const stepsEl = cardEl.querySelector('.project-card-steps');
+
+  // Disable button, show steps area
+  btn.disabled = true;
+  btn.textContent = 'Building...';
+  btn.style.opacity = '0.5';
+  btn.style.cursor = 'wait';
+  stepsEl.style.display = 'block';
+  cardEl.style.borderColor = 'var(--accent)';
+
+  const _step = (label, status) => {
+    const colors = { pending: 'var(--text-muted)', running: 'var(--accent)', done: 'var(--accent)', error: 'var(--coral)', skip: 'var(--text-muted)' };
+    const icons = {
+      pending: '<span style="opacity:0.3">&#9679;</span>',
+      running: '<span style="display:inline-block;width:10px;height:10px;border:1.5px solid rgba(255,255,255,0.08);border-top-color:var(--accent);border-radius:50%;animation:spin 0.6s linear infinite"></span>',
+      done: '<span style="color:var(--accent)">&#10003;</span>',
+      error: '<span style="color:var(--coral)">&#10007;</span>',
+      skip: '<span style="opacity:0.3">&#8212;</span>',
+    };
+    // Find or create the step row
+    let row = stepsEl.querySelector(`[data-step="${label}"]`);
+    if (!row) {
+      row = document.createElement('div');
+      row.dataset.step = label;
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0;font-size:10px;';
+      stepsEl.appendChild(row);
+    }
+    row.innerHTML = `<span style="width:14px;text-align:center;flex-shrink:0">${icons[status]}</span><span style="color:${colors[status]}">${label}</span>`;
+  };
+
+  try {
+    // Step 1: Load scenes
+    _step('Loading scenes', 'running');
+    await new Promise(r => setTimeout(r, 80));
+
+    const data = await api(`/api/projects/${encodeURIComponent(projectId)}/assemble`, {
+      method: 'POST',
+    });
+
+    if (!data || data.error) {
+      _step('Loading scenes', 'error');
+      toast(data?.error || 'Failed to assemble project', 'error');
+      btn.textContent = 'Retry';
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+      return;
+    }
+
+    _step('Loading scenes', 'done');
+
+    // Step 2: Resolve assets
+    _step('Resolving assets', 'running');
+    await new Promise(r => setTimeout(r, 100));
+    const mediaCount = (data.scenes || []).filter(s => s.mediaUrl || s.image_url).length;
+    _step(`Resolving assets (${mediaCount}/${data.scene_count || 0})`, 'done');
+
+    // Step 3: Audio track
+    _step('Audio track', 'running');
+    await new Promise(r => setTimeout(r, 80));
+    const hasAudio = data.audio_tracks && data.audio_tracks.length > 0;
+    _step('Audio track', hasAudio ? 'done' : 'skip');
+
+    // Step 4: Captions
+    _step('Captions', 'running');
+    await new Promise(r => setTimeout(r, 80));
+    const hasCaps = data.captions && data.captions.captions && data.captions.captions.length > 0;
+    _step(`Captions${hasCaps ? ` (${data.captions.captions.length})` : ''}`, hasCaps ? 'done' : 'skip');
+
+    // Step 5: Save project
+    _step('Saving project', 'running');
+    await new Promise(r => setTimeout(r, 80));
+    _step('Saving project', 'done');
+
+    // Step 6: Launch editor
+    _step('Launching editor', 'running');
+
+    // Store as boot project for the editor
+    const bootData = {
+      project_id: data.project_id,
+      project_name: data.project_name || data.project_id,
+      source_folder: data.source_folder || '',
+      style: data.style || '',
+      total_duration: data.total_duration || 0,
+      scene_count: data.scene_count || 0,
+      staged_at: data.saved_at || new Date().toISOString(),
+      scenes: data.scenes || [],
+      audio_tracks: data.audio_tracks || [],
+      ...(data.audio ? { audio: data.audio } : {}),
+      ...(data.captions ? { captions: data.captions, captionsEnabled: true } : {}),
+    };
+
+    try {
+      sessionStorage.setItem('sts-staged-timeline', JSON.stringify(bootData));
+      localStorage.setItem('sts-editor-boot-project', JSON.stringify(bootData));
+      localStorage.setItem('sts-editor-scenes', JSON.stringify(bootData));
+      if (bootData.source_folder) {
+        localStorage.setItem('sts-editor-source-folder', bootData.source_folder);
+      }
+      localStorage.setItem('sts-editor-last-project-id', projectId);
+      localStorage.setItem('sts-editor-last-saved-project-id', projectId);
+    } catch (_) {}
+
+    if (data.captions) {
+      try {
+        localStorage.setItem('sts-editor-captions', JSON.stringify(data.captions));
+      } catch (_) {}
+    }
+
+    _step('Launching editor', 'done');
+    await new Promise(r => setTimeout(r, 200));
+
+    // Launch
+    sessionStorage.setItem('sts-editor-entry-source', 'internal');
+    STATE.editorLoaded = false;
+    initEditorIframe();
+
+  } catch (e) {
+    console.error('Failed to build project:', e);
+    _step('Error', 'error');
+    toast('Build failed: ' + (e.message || 'Unknown error'), 'error');
+    btn.textContent = 'Retry';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+  }
 }
 
 function restoreInitialPage() {

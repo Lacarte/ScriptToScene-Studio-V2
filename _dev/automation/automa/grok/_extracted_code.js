@@ -185,7 +185,7 @@ root.innerHTML = `
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.02) inset;
-    user-select: none;
+    /* user-select: none; */
     backdrop-filter: blur(20px) saturate(1.5);
   }
   .sts-pill:hover {
@@ -276,7 +276,7 @@ root.innerHTML = `
     font-size: 10px; font-family: var(--mono); font-weight: 600;
     padding: 4px 10px; border-radius: var(--radius-sm);
     text-transform: uppercase; letter-spacing: 0.04em;
-    transition: all 0.2s; user-select: none;
+    transition: all 0.2s; /* user-select: none; */
   }
   .sts-head-autotype.on {
     color: var(--accent); background: var(--accent-bg);
@@ -592,7 +592,7 @@ root.innerHTML = `
     border-top: 1px solid var(--border);
     background: rgba(0,0,0,0.25);
   }
-  .sts-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+  .sts-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; /* user-select: none;  */}
   .sts-toggle-track {
     width: 32px; height: 18px; border-radius: 9px;
     background: rgba(255,255,255,0.08); position: relative;

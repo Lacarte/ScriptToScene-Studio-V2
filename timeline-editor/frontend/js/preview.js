@@ -164,7 +164,9 @@ export class CanvasPreview {
         const TIMEOUT = 10000;
         for (const scene of this.scenes) {
             if (scene.mediaUrl && !this.imageCache.has(scene.id)) {
-                if (scene.isVideo) {
+                const ext = (scene.mediaUrl || '').split('.').pop().toLowerCase();
+                const isVid = scene.isVideo || ['mp4', 'webm', 'mov'].includes(ext);
+                if (isVid) {
                     // Load as <video> element for canvas drawing
                     try {
                         const video = document.createElement('video');

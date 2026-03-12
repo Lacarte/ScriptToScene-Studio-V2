@@ -1125,9 +1125,9 @@ class VideoProcessor:
         if not music_path:
             logger.debug("BgMusic: no path specified")
             return None
-        if music_path.startswith('/output/music/'):
+        if music_path.startswith('/output/musics/'):
             from config import MUSIC_DIR
-            fname = music_path.replace('/output/music/', '', 1)
+            fname = music_path.replace('/output/musics/', '', 1)
             full = os.path.join(MUSIC_DIR, fname)
             if os.path.isfile(full):
                 logger.debug("BgMusic resolved: {} -> {}", music_path, full)

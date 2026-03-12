@@ -48,7 +48,7 @@ root.innerHTML = `
     background: rgba(10,10,18,0.92); backdrop-filter: blur(24px);
     border: 1px solid rgba(255,255,255,0.06); border-radius: 40px;
     cursor: pointer; transition: all 0.25s ease;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4); user-select: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4); /* user-select: none; */
   }
   .sts-pill:hover {
     border-color: rgba(139,92,246,0.3);
@@ -326,7 +326,7 @@ root.innerHTML = `
     border-top: 1px solid rgba(255,255,255,0.04);
     background: rgba(255,255,255,0.01);
   }
-  .sts-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .sts-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; /* user-select: none;  */}
   .sts-toggle-track {
     width: 28px; height: 16px; border-radius: 8px;
     background: #27272a; position: relative; transition: background 0.2s;

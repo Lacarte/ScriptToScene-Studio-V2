@@ -925,6 +925,17 @@ function _startGrabberPolling(projectId) {
         loadAssetsHistory(); // refresh history
         if (data.status === 'done') {
           if (typeof playDoneSound === 'function') playDoneSound();
+          // Scroll to the build button and pulse it
+          setTimeout(() => {
+            const pid = STATE.assetsSceneData?.project_id;
+            if (!pid) return;
+            const histCard = document.querySelector(`.hist-item[data-project-id="${pid}"]`);
+            const buildBtn = histCard?.querySelector('button');
+            if (buildBtn) {
+              buildBtn.classList.add('assets-build-pulse');
+              buildBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 400);
         }
       }
     } catch (e) {
@@ -1053,7 +1064,7 @@ async function loadAssetsHistory() {
               ${p.provider ? `<span style="opacity:0.3">/</span><span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(167,139,250,0.1);color:#A78BFA">${esc(p.provider)}</span>` : ''}
             </div>
           </div>
-          ${readyCount > 0 ? `<button onclick="event.stopPropagation(); assetsAssembleFromHistory('${esc(p.project_id)}')" style="flex-shrink:0;padding:5px 12px;background:var(--accent);color:var(--bg-darkest);border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity 0.15s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">Assemble & Edit</button>` : `<svg width="16" height="16" fill="none" stroke="${isActive ? '#ff9f43' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>`}
+          ${readyCount > 0 ? `<button onclick="event.stopPropagation(); assetsAssembleFromHistory('${esc(p.project_id)}')" style="flex-shrink:0;padding:5px 12px;background:var(--accent);color:var(--bg-darkest);border:none;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;transition:opacity 0.15s,box-shadow 0.3s" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">${p.has_build ? 'Rebuild, Assemble & Edit' : 'Build, Assemble & Edit'}</button>` : `<svg width="16" height="16" fill="none" stroke="${isActive ? '#ff9f43' : 'var(--text-muted)'}" stroke-width="1.5" viewBox="0 0 24 24" style="flex-shrink:0;opacity:${isActive ? '0.8' : '0.4'}"><path d="M9 18l6-6-6-6"/></svg>`}
         </div>
       </div>`;
     }).join('');
@@ -1129,15 +1140,152 @@ async function assetsLoadFromHistory(projectId) {
 
 // ---- Auto-Assemble & Send to Editor ----
 
-async function assetsAssembleFromHistory(projectId) {
-  try {
-    toast('Loading project...', 'info');
-    await assetsLoadFromHistory(projectId);
-    await autoAssembleAndSendToEditor();
-    switchPage('editor');
-  } catch (e) {
-    toast(e.message || 'Failed to assemble', 'error');
+async function assetsAssembleFromHistory(projectId, { force = false } = {}) {
+  // Find the history card and inject a step-by-step progress UI
+  const card = document.querySelector(`.hist-item[data-project-id="${projectId}"]`);
+  if (!card) { toast('Card not found', 'error'); return; }
+
+  const btn = card.querySelector('button');
+  const isRebuild = btn && btn.textContent.startsWith('Rebuild');
+
+  // Disable button
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = isRebuild ? 'Rebuilding\u2026' : 'Building\u2026';
+    btn.style.opacity = '0.5';
+    btn.style.cursor = 'wait';
+    btn.classList.remove('assets-build-pulse');
   }
+
+  // Create steps container
+  let stepsEl = card.querySelector('.build-steps');
+  if (!stepsEl) {
+    stepsEl = document.createElement('div');
+    stepsEl.className = 'build-steps';
+    stepsEl.style.cssText = 'padding:8px 14px 10px;border-top:1px solid var(--border);';
+    card.appendChild(stepsEl);
+  }
+  stepsEl.innerHTML = '';
+
+  const _step = (label, status) => {
+    const colors = { pending: 'var(--text-muted)', running: 'var(--accent)', done: 'var(--accent)', error: 'var(--coral)', skip: 'var(--text-muted)' };
+    const icons = {
+      pending: '<span style="opacity:0.3">&#9679;</span>',
+      running: '<span style="display:inline-block;width:10px;height:10px;border:1.5px solid rgba(255,255,255,0.08);border-top-color:var(--accent);border-radius:50%;animation:spin 0.6s linear infinite"></span>',
+      done: '<span style="color:var(--accent)">&#10003;</span>',
+      error: '<span style="color:var(--coral)">&#10007;</span>',
+      skip: '<span style="opacity:0.3">&#8212;</span>',
+    };
+    let row = stepsEl.querySelector(`[data-step="${label}"]`);
+    if (!row) {
+      row = document.createElement('div');
+      row.dataset.step = label;
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0;font-size:10px;';
+      stepsEl.appendChild(row);
+    }
+    row.innerHTML = `<span style="width:14px;text-align:center;flex-shrink:0">${icons[status]}</span><span style="color:${colors[status]}">${label}</span>`;
+  };
+
+  // Force rebuild when button says "Rebuild" or explicitly requested
+  const useForce = force || isRebuild;
+  const forceParam = useForce ? '?force=1' : '';
+
+  try {
+    // Step 1: Assembling project (the API does all real work here)
+    _step('Assembling project', 'running');
+
+    const data = await api(`/api/projects/${encodeURIComponent(projectId)}/assemble${forceParam}`, {
+      method: 'POST',
+    });
+
+    if (!data || data.error) {
+      _step('Assembling project', 'error');
+      toast(data?.error || 'Failed to assemble project', 'error');
+      _resetBtn(btn, 'Retry');
+      return;
+    }
+
+    _step('Assembling project', 'done');
+
+    // Step 2: Show what was assembled (instant — just reading the response)
+    const mediaCount = (data.scenes || []).filter(s => s.mediaUrl || s.image_url).length;
+    _step(`Scenes: ${data.scene_count || 0} total, ${mediaCount} with media`, mediaCount > 0 ? 'done' : 'skip');
+
+    const totalDur = data.total_duration ? data.total_duration.toFixed(1) + 's' : '0s';
+    _step(`Timeline: ${totalDur} total duration`, 'done');
+
+    const hasAudio = data.audio_tracks && data.audio_tracks.length > 0;
+    _step(`Audio track`, hasAudio ? 'done' : 'skip');
+
+    const hasCaps = data.captions && data.captions.captions && data.captions.captions.length > 0;
+    _step(`Captions${hasCaps ? ` (${data.captions.captions.length})` : ''}`, hasCaps ? 'done' : 'skip');
+
+    _step(`Saved to projects/${projectId}/`, 'done');
+
+    // Step 3: Prepare editor launch
+    _step('Launching editor', 'running');
+
+    const bootData = {
+      project_id: data.project_id,
+      project_name: data.project_name || data.project_id,
+      source_folder: data.source_folder || '',
+      style: data.style || '',
+      total_duration: data.total_duration || 0,
+      scene_count: data.scene_count || 0,
+      staged_at: data.saved_at || new Date().toISOString(),
+      scenes: data.scenes || [],
+      audio_tracks: data.audio_tracks || [],
+      grain_overlay: data.grain_overlay || {},
+      captionsEnabled: data.captionsEnabled || false,
+      edit_history: data.edit_history || [],
+      history_index: data.history_index ?? -1,
+      disabled_tracks: data.disabled_tracks || [],
+      ...(data.audio ? { audio: data.audio } : {}),
+      ...(data.captions ? { captions: data.captions, captionsEnabled: true } : {}),
+    };
+
+    try {
+      sessionStorage.setItem('sts-staged-timeline', JSON.stringify(bootData));
+      localStorage.setItem('sts-editor-boot-project', JSON.stringify(bootData));
+      localStorage.setItem('sts-editor-scenes', JSON.stringify(bootData));
+      if (bootData.source_folder) {
+        localStorage.setItem('sts-editor-source-folder', bootData.source_folder);
+      }
+      localStorage.setItem('sts-editor-last-project-id', projectId);
+      localStorage.setItem('sts-editor-last-saved-project-id', projectId);
+    } catch (_) {}
+
+    if (data.captions) {
+      try {
+        localStorage.setItem('sts-editor-captions', JSON.stringify(data.captions));
+      } catch (_) {}
+    }
+
+    _step('Launching editor', 'done');
+    await new Promise(r => setTimeout(r, 300));
+
+    // Force a fresh editor iframe boot
+    STATE.editorLoaded = false;
+    const iframe = document.getElementById('editor-iframe');
+    if (iframe) { iframe.style.display = 'none'; iframe.src = ''; }
+
+    sessionStorage.setItem('sts-editor-entry-source', 'internal');
+    switchPage('editor');
+
+  } catch (e) {
+    console.error('Build failed:', e);
+    _step('Error', 'error');
+    toast('Build failed: ' + (e.message || 'Unknown error'), 'error');
+    _resetBtn(btn, 'Retry');
+  }
+}
+
+function _resetBtn(btn, text) {
+  if (!btn) return;
+  btn.textContent = text;
+  btn.disabled = false;
+  btn.style.opacity = '1';
+  btn.style.cursor = 'pointer';
 }
 
 async function autoAssembleAndSendToEditor() {
