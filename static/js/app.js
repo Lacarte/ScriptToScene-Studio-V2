@@ -258,8 +258,8 @@ function toggleSidebar() {
   STS.set('sts-sidebar', $('#sidebar').classList.contains('collapsed'));
 }
 
-// Restore sidebar state
-if (STS.get('sts-sidebar') === 'true') {
+// Restore sidebar state (read localStorage directly — runs before STS.init resolves)
+if (localStorage.getItem('sts-sidebar') === 'true') {
   $('#sidebar').classList.add('collapsed');
 }
 

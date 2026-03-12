@@ -152,8 +152,9 @@ def list_jobs():
                     data = json.load(f)
                 scene_count = data.get("scene_count", len(data.get("scenes", [])))
                 source = data.get("source_folder", "")
-                # extract short label from source folder
-                label = source.split("_2026")[0].replace("-", " ").strip() if source else entry
+                # extract human-readable part from project ID (pp_EA9W1W_my-cool-project)
+                parts = entry.split("_", 2)
+                label = parts[2].replace("-", " ") if len(parts) > 2 else entry
                 item = {
                     "project_id": entry,
                     "label": label[:40],

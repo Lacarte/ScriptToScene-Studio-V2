@@ -89,3 +89,22 @@ def safe_json_read(path: str) -> dict:
 
     # Primary exists but was corrupt and no backup
     raise json.JSONDecodeError(f"Corrupted JSON: {path}", "", 0)
+
+
+def move_to_unique_path(src_path: str, dest_dir: str, dest_name: str | None = None) -> str:
+    """Move a file or directory into ``dest_dir`` without clobbering an existing entry."""
+    os.makedirs(dest_dir, exist_ok=True)
+    target_name = dest_name or os.path.basename(src_path)
+    candidate = os.path.join(dest_dir, target_name)
+    if not os.path.exists(candidate):
+        shutil.move(src_path, candidate)
+        return candidate
+
+    stem, suffix = os.path.splitext(target_name)
+    counter = 2
+    while True:
+        candidate = os.path.join(dest_dir, f"{stem}-{counter}{suffix}")
+        if not os.path.exists(candidate):
+            shutil.move(src_path, candidate)
+            return candidate
+        counter += 1

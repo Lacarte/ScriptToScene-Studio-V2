@@ -73,6 +73,19 @@ body {
   white-space: nowrap;
 }
 
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  margin: 4px 8px;
+  padding: 4px 0;
+}
+.nav-group .nav-item {
+  margin: 2px 0;
+  width: 100%;
+}
+
 .nav-item {
   display: flex;
   align-items: center;

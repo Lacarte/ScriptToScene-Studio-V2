@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -108,7 +109,7 @@ def get_settings():
 @editor_bp.route("/api/settings", methods=["PUT"])
 def put_settings():
     """Replace all user settings."""
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Expected JSON object"}), 400
     safe_json_write(SETTINGS_PATH, data, indent=2)
@@ -118,7 +119,7 @@ def put_settings():
 @editor_bp.route("/api/settings", methods=["PATCH"])
 def patch_settings():
     """Merge partial updates into user settings."""
-    patch = request.get_json(force=True)
+    patch = request.get_json(silent=True)
     if not isinstance(patch, dict):
         return jsonify({"error": "Expected JSON object"}), 400
     try:
@@ -570,6 +571,24 @@ def export_project_zip(project_id):
     )
 
 
+def _coerce_imported_editor_project(raw_bytes: bytes, project_id: str, renamed_from: str | None = None) -> dict:
+    """Validate and normalize imported editor project payload before saving."""
+    try:
+        payload = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid project.json payload: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid project.json payload: expected JSON object")
+
+    payload["project_id"] = project_id
+    project_name = str(payload.get("project_name", "") or "").strip()
+    if not project_name or (renamed_from and project_name == renamed_from):
+        payload["project_name"] = project_id
+
+    EditorSaveRequest.model_validate(payload)
+    return payload
+
+
 @editor_bp.route("/api/editor/import-zip", methods=["POST"])
 def import_project_zip():
     """Import a project from an uploaded ZIP file."""
@@ -643,9 +662,16 @@ def import_project_zip():
                 if rel == "project.json":
                     proj_dir = _project_dir(safe_id)
                     os.makedirs(proj_dir, exist_ok=True)
+                    try:
+                        project_payload = _coerce_imported_editor_project(
+                            raw,
+                            safe_id,
+                            renamed_from=renamed_from,
+                        )
+                    except ValueError as exc:
+                        return jsonify({"error": str(exc)}), 400
                     dest = _initial_path(safe_id)
-                    with open(dest, "wb") as f:
-                        f.write(raw)
+                    safe_json_write(dest, project_payload, indent=2)
                     imported.append(rel)
 
                 elif rel == "scenes.json":
@@ -693,24 +719,21 @@ def import_project_zip():
                 scenes_json_path = os.path.join(SCENES_DIR, safe_id, "scenes.json")
                 if os.path.exists(scenes_json_path):
                     try:
-                        with open(scenes_json_path, "r", encoding="utf-8") as f:
-                            sdata = json.load(f)
+                        sdata = safe_json_read(scenes_json_path)
                         sdata["project_id"] = safe_id
-                        with open(scenes_json_path, "w", encoding="utf-8") as f:
-                            json.dump(sdata, f, ensure_ascii=False)
+                        safe_json_write(scenes_json_path, sdata, indent=2)
                     except Exception:
                         pass
                 editor_json_path = _initial_path(safe_id)
                 if os.path.exists(editor_json_path):
                     try:
-                        with open(editor_json_path, "r", encoding="utf-8") as f:
-                            edata = json.load(f)
-                        if "id" in edata:
-                            edata["id"] = safe_id
-                        if "name" in edata:
-                            edata["name"] = safe_id
-                        with open(editor_json_path, "w", encoding="utf-8") as f:
-                            json.dump(edata, f, ensure_ascii=False)
+                        edata = safe_json_read(editor_json_path)
+                        edata["project_id"] = safe_id
+                        project_name = str(edata.get("project_name", "") or "").strip()
+                        if not project_name or project_name == renamed_from:
+                            edata["project_name"] = safe_id
+                        EditorSaveRequest.model_validate(edata)
+                        safe_json_write(editor_json_path, edata, indent=2)
                     except Exception:
                         pass
 
@@ -952,6 +975,10 @@ def _process_video(job_id, export_data, output_path):
         job["message"] = message
         logger.debug("[{}] Step: {} — {}", short_id, step, message)
 
+    def _metadata_path():
+        base, _ext = os.path.splitext(output_path)
+        return base + ".json"
+
     try:
         # Import here to avoid circular imports at module load
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "timeline-editor", "backend"))
@@ -998,6 +1025,13 @@ def _process_video(job_id, export_data, output_path):
         logger.success("[{}] Export completed — {} ({:.1f} MB)",
                        short_id, output_path, file_size / (1024 * 1024))
 
+        safe_json_write(_metadata_path(), {
+            "job_id": job_id,
+            "project_id": job.get("project_id", ""),
+            "output_filename": job.get("output_filename", ""),
+            "completed_at": time.time(),
+        }, indent=2)
+
         job["status"] = "completed"
         job["progress"] = 100
         job["step"] = "done"
@@ -1013,6 +1047,12 @@ def _process_video(job_id, export_data, output_path):
                 logger.debug("[{}] Removed cancelled output: {}", short_id, output_path)
             except OSError as rm_err:
                 logger.warning("[{}] Could not remove cancelled output: {}", short_id, rm_err)
+        meta_path = _metadata_path()
+        if os.path.exists(meta_path):
+            try:
+                os.remove(meta_path)
+            except OSError:
+                pass
 
         job["status"] = "cancelled"
         job["error"] = None
@@ -1030,6 +1070,12 @@ def _process_video(job_id, export_data, output_path):
                 logger.debug("[{}] Removed partial output: {}", short_id, output_path)
             except OSError as rm_err:
                 logger.warning("[{}] Could not remove partial output: {}", short_id, rm_err)
+        meta_path = _metadata_path()
+        if os.path.exists(meta_path):
+            try:
+                os.remove(meta_path)
+            except OSError:
+                pass
 
         failed_step = job.get("step") or "unknown"
         job["status"] = "failed"
@@ -1128,7 +1174,20 @@ def export_library_list():
             rel_folder = os.path.relpath(root, EXPORT_DIR).replace("\\", "/")
             base = os.path.splitext(fname)[0]
             folder_project_id = _safe_project_id(os.path.basename(root))
-            project_id = _safe_project_id(base) or folder_project_id
+            meta_path = os.path.splitext(abs_video)[0] + ".json"
+            project_id = ""
+            if os.path.isfile(meta_path):
+                try:
+                    meta = safe_json_read(meta_path)
+                    project_id = _safe_project_id(meta.get("project_id", ""))
+                except Exception:
+                    project_id = ""
+            if not project_id:
+                match = re.match(r"^(?P<project>.+)_[0-9a-fA-F]{8}$", base)
+                if match:
+                    project_id = _safe_project_id(match.group("project"))
+            if not project_id:
+                project_id = folder_project_id or _safe_project_id(base)
 
             # Pair ZIP by same filename in the same folder, fallback to generated project ZIP.
             zip_name = f"{base}.zip"
@@ -1199,6 +1258,7 @@ def cancel_export(job_id):
         job = _export_jobs.get(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
+    meta_path = os.path.splitext(job["output_path"])[0] + ".json"
     logger.info("Cancelling export job: {} (status={})", job_id[:8], job["status"])
     if job["status"] in ("queued", "processing"):
         job["status"] = "cancelled"
@@ -1210,6 +1270,11 @@ def cancel_export(job_id):
                 logger.debug("Removed partial export file: {}", job["output_path"])
             except OSError as e:
                 logger.warning("Could not remove partial export file: {}", e)
+        if os.path.exists(meta_path):
+            try:
+                os.remove(meta_path)
+            except OSError:
+                pass
         return jsonify({"message": "Cancellation requested", "status": "cancelled"}), 202
 
     if os.path.exists(job["output_path"]):
@@ -1218,6 +1283,11 @@ def cancel_export(job_id):
             logger.debug("Removed export file: {}", job["output_path"])
         except OSError as e:
             logger.warning("Could not remove export file: {}", e)
+    if os.path.exists(meta_path):
+        try:
+            os.remove(meta_path)
+        except OSError:
+            pass
 
     with _export_jobs_lock:
         _export_jobs.pop(job_id, None)

@@ -265,6 +265,7 @@ async function pipelineLoadHistory() {
           <div style="font-size:10px;color:var(--text-muted);margin-top:1px">${esc(j.project_id)}${scenes ? ' · ' + scenes : ''}${styleHtml}</div>
         </div>
         <span class="font-mono" style="font-size:10px;color:var(--text-muted);flex-shrink:0;text-align:right">${date}</span>
+        <button onclick="event.stopPropagation();switchPage('scenes');loadScenesProject('${esc(j.project_id)}')" title="Open in Scene Generator" style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:10px;transition:all 0.15s;display:flex;align-items:center;gap:4px" onmouseenter="this.style.color='var(--accent)';this.style.borderColor='var(--accent)'" onmouseleave="this.style.color='var(--text-muted)';this.style.borderColor='var(--border)'"><svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M4 11V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/><path d="M4 11h16"/></svg>Scenes</button>
       </div>`;
     }).join('');
   } catch (e) { console.error('Pipeline history:', e); }

@@ -82,7 +82,7 @@ def index():
 
 @app.route("/app-config.json")
 def serve_app_config():
-    return send_from_directory(STATIC_DIR, "app-config.json")
+    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "app-config.json")
 
 
 @app.route("/css/<path:filename>")
@@ -195,6 +195,7 @@ def clear_all_projects():
     if not is_loopback_remote(request.remote_addr):
         return jsonify({"error": "Forbidden"}), 403
     total = 0
+    exports_deleted = 0
     errors = []
     for src_dir in _PROJECT_DIRS:
         if not os.path.isdir(src_dir):
@@ -214,10 +215,12 @@ def clear_all_projects():
                             os.remove(dest)
                     shutil.move(entry_path, dest)
                     total += 1
+                    if src_dir == EXPORT_DIR:
+                        exports_deleted += 1
                 except Exception as e:
                     errors.append(f"{entry}: {e}")
     logger.info("Cleared {} project folders to {}", total, TRASH_DIR)
-    result = {"status": "cleared", "count": total}
+    result = {"status": "cleared", "count": total, "exports_deleted": exports_deleted}
     if errors:
         result["errors"] = errors
     return jsonify(result)

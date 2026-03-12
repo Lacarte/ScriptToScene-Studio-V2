@@ -67,6 +67,40 @@ import random
 import string
 from datetime import datetime as _dt
 
+
+def _collect_existing_project_ids() -> set[str]:
+    """Scan project-bearing output locations for identifiers already in use."""
+    existing = set()
+    dir_only_roots = (
+        ALIGN_DIR,
+        SCENES_DIR,
+        ASSETS_DIR,
+        SEGMENTER_DIR,
+        CAPTIONS_DIR,
+        TTS_DIR,
+    )
+    for search_dir in dir_only_roots:
+        if not os.path.isdir(search_dir):
+            continue
+        for entry in os.listdir(search_dir):
+            if os.path.isdir(os.path.join(search_dir, entry)):
+                existing.add(entry)
+
+    if os.path.isdir(EDITOR_SAVE_DIR):
+        for entry in os.listdir(EDITOR_SAVE_DIR):
+            full_path = os.path.join(EDITOR_SAVE_DIR, entry)
+            if os.path.isdir(full_path):
+                existing.add(entry)
+                continue
+            if entry.endswith(".json"):
+                stem = entry[:-5]
+                if stem.endswith("-work@in@progress"):
+                    stem = stem[: -len("-work@in@progress")]
+                if stem:
+                    existing.add(stem)
+
+    return existing
+
 def generate_project_id(prefix="pm"):
     """Generate a unique project ID like pm_SLLGTM or pp_A3F82K.
 
@@ -76,12 +110,7 @@ def generate_project_id(prefix="pm"):
 
     Scans existing output directories to avoid collisions.
     """
-    existing = set()
-    for search_dir in (ALIGN_DIR, SCENES_DIR, ASSETS_DIR):
-        if os.path.exists(search_dir):
-            for entry in os.listdir(search_dir):
-                if os.path.isdir(os.path.join(search_dir, entry)):
-                    existing.add(entry)
+    existing = _collect_existing_project_ids()
 
     charset = string.ascii_uppercase + string.digits
     for _ in range(100):

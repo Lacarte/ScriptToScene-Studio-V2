@@ -17,7 +17,7 @@ from loguru import logger
 from werkzeug.utils import secure_filename
 
 from config import ALIGN_DIR, TRASH_DIR, BIN_DIR, generate_project_id
-from studio.io_utils import safe_json_write
+from studio.io_utils import move_to_unique_path, safe_json_write
 
 timing_bp = Blueprint("timing", __name__)
 
@@ -324,8 +324,7 @@ def delete_alignment(folder):
     job_dir = os.path.join(ALIGN_DIR, folder)
     if os.path.isdir(job_dir):
         align_trash = os.path.join(TRASH_DIR, "alignments")
-        os.makedirs(align_trash, exist_ok=True)
-        shutil.move(job_dir, os.path.join(align_trash, folder))
+        move_to_unique_path(job_dir, align_trash, folder)
         return jsonify({"status": "deleted", "folder": folder})
     return jsonify({"error": "Folder not found"}), 404
 

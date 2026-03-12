@@ -25,7 +25,7 @@ from flask import Blueprint, Response, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR
-from studio.io_utils import safe_json_write
+from studio.io_utils import move_to_unique_path, safe_json_write
 from studio.security import safe_join, sanitize_project_id
 from studio.validation import validate_json
 from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
@@ -466,8 +466,12 @@ def _cleanup_old_jobs(max_age_s=300):
 # --- Normalize text ---
 @tts_bp.route("/api/tts/normalize", methods=["POST"])
 def normalize_text():
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be JSON"}), 400
     text = data.get("text", "")
+    if not isinstance(text, str):
+        return jsonify({"error": "Text must be a string"}), 400
     if not text.strip():
         return jsonify({"error": "No text provided"}), 400
 
@@ -794,13 +798,20 @@ def abort_generation(job_id):
 # --- Stream audio (listen-only, no save) ---
 @tts_bp.route("/api/tts/stream", methods=["POST"])
 def stream_audio():
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be JSON"}), 400
     model_id = data.get("model", "kokoro")
     voice = data.get("voice", "af_bella")
     prompt = data.get("prompt", "")
-    speed = max(0.5, min(2.0, float(data.get("speed", 1.0))))
+    try:
+        speed = max(0.5, min(2.0, float(data.get("speed", 1.0))))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Speed must be a number between 0.5 and 2.0"}), 400
     blend = data.get("blend")
 
+    if not isinstance(prompt, str):
+        return jsonify({"error": "Prompt must be a string"}), 400
     if not prompt.strip():
         return jsonify({"error": "Prompt is required"}), 400
     if model_id not in MODELS:
@@ -808,9 +819,14 @@ def stream_audio():
 
     voice_param = voice
     if blend:
+        if not isinstance(blend, dict):
+            return jsonify({"error": "Blend must be an object"}), 400
         voice_a = blend.get("voice_a", "")
         voice_b = blend.get("voice_b", "")
-        ratio = max(0.0, min(1.0, float(blend.get("ratio", 0.5))))
+        try:
+            ratio = max(0.0, min(1.0, float(blend.get("ratio", 0.5))))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Blend ratio must be between 0.0 and 1.0"}), 400
         method = blend.get("method", "slerp")
         if method not in ("slerp", "lerp"):
             method = "slerp"
@@ -927,8 +943,7 @@ def delete_audio(filename):
         return jsonify({"error": str(e)}), 400
     if os.path.isdir(job_dir):
         tts_trash = os.path.join(TRASH_DIR, "tts")
-        os.makedirs(tts_trash, exist_ok=True)
-        shutil.move(job_dir, os.path.join(tts_trash, basename))
+        move_to_unique_path(job_dir, tts_trash, basename)
         return jsonify({"status": "deleted", "filename": _safe_file})
     return jsonify({"error": "File not found"}), 404
 
@@ -938,11 +953,10 @@ def delete_audio(filename):
 def delete_all_audio():
     count = 0
     tts_trash = os.path.join(TRASH_DIR, "tts")
-    os.makedirs(tts_trash, exist_ok=True)
     for entry in os.listdir(TTS_DIR):
         entry_path = os.path.join(TTS_DIR, entry)
         if os.path.isdir(entry_path):
-            shutil.move(entry_path, os.path.join(tts_trash, entry))
+            move_to_unique_path(entry_path, tts_trash, entry)
             count += 1
     return jsonify({"status": "deleted", "count": count})
 
