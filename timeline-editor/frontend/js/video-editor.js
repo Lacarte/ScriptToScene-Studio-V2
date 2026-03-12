@@ -748,6 +748,7 @@ function selectAudioTrack(trackId) {
     EditorState.selectedScene = null;
     EditorState.selectedTextOverlaySceneId = null;
     EditorState.selectedCaptionIdx = null;
+    EditorState.selectedOverlayIdx = null;
     document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
@@ -988,7 +989,8 @@ const EditorState = {
     captionData: null,      // Caption data { captions: [], style: {} }
     captionsEnabled: false, // Whether caption track is visible
     selectedCaptionIdx: null, // Currently selected caption index for detail panel
-    overlays: [],           // Stacked overlay URLs applied to entire timeline (bottom → top)
+    selectedOverlayIdx: null, // Currently selected overlay index for detail panel
+    overlays: [],           // Stacked overlay objects {url, opacity, blend} (bottom → top)
     grainOverlay: null,     // Optional animated white-dot grain config (export-time only)
     selectedExportProfile: 'yt_shorts',  // Export profile ID
     bgMusic: null,          // DEPRECATED — use audioTracks (type: 'music')
@@ -1008,6 +1010,21 @@ const DEFAULT_GRAIN_OVERLAY = Object.freeze({
     noise_strength: 88,
     threshold: 246
 });
+
+const OVERLAY_BLEND_MODES = ['normal','screen','multiply','overlay','soft-light','hard-light','lighten','darken','color-dodge'];
+
+function normalizeOverlayEntry(entry) {
+    if (typeof entry === 'string') return { url: entry, opacity: 1.0, blend: 'normal' };
+    return {
+        url: entry.url || '',
+        opacity: Number.isFinite(+entry.opacity) ? Math.max(0, Math.min(1, +entry.opacity)) : 1.0,
+        blend: OVERLAY_BLEND_MODES.includes(entry.blend) ? entry.blend : 'normal'
+    };
+}
+
+function findOverlayIdx(url) {
+    return EditorState.overlays.findIndex(o => o.url === url);
+}
 
 function normalizeGrainOverlay(cfg) {
     const src = cfg || {};
@@ -2343,6 +2360,7 @@ function _resetEditorForNewProject() {
     EditorState.savedAudioSettings = null;
     EditorState.captionData = null;
     EditorState.captionsEnabled = false;
+    EditorState.selectedOverlayIdx = null;
     EditorState.overlays = [];
     EditorState.grainOverlay = null;
     EditorState.disabledTracks = new Set();
@@ -2450,13 +2468,13 @@ function _applyExtraState(saved) {
         }
     }
 
-    // Restore global overlays
+    // Restore global overlays (support legacy string[] or new object[])
     const savedOverlays = saved.overlays
         ? (Array.isArray(saved.overlays) ? saved.overlays : [saved.overlays])
         : (saved.overlay ? [saved.overlay] : []);
     if (savedOverlays.length) {
-        EditorState.overlays = savedOverlays;
-        if (EditorState.preview) EditorState.preview.setOverlay(savedOverlays);
+        EditorState.overlays = savedOverlays.map(normalizeOverlayEntry);
+        if (EditorState.preview) EditorState.preview.setOverlay(EditorState.overlays);
         updateOverlaysTab();
     }
 
@@ -2569,14 +2587,14 @@ function _restoreSavedEditorState() {
         }
     }
 
-    // Restore global overlays (support legacy single string or new array)
+    // Restore global overlays (support legacy string[] or new object[])
     const savedOverlays = saved.overlays
         ? (Array.isArray(saved.overlays) ? saved.overlays : [saved.overlays])
         : (saved.overlay ? [saved.overlay] : []);
     if (savedOverlays.length) {
-        EditorState.overlays = savedOverlays;
+        EditorState.overlays = savedOverlays.map(normalizeOverlayEntry);
         if (EditorState.preview) {
-            EditorState.preview.setOverlay(savedOverlays);
+            EditorState.preview.setOverlay(EditorState.overlays);
         }
         updateOverlaysTab();
     }
@@ -4826,6 +4844,7 @@ function renderCaptionTrack() {
 
     const captionData = EditorState.captionData;
     if (!captionData || !captionData.captions || !captionData.captions.length) {
+        EditorState.selectedCaptionIdx = null;
         elements.captionTrack.innerHTML = `<div class="caption-track-empty">No captions</div>`;
         return;
     }
@@ -4841,11 +4860,16 @@ function renderCaptionTrack() {
     }
 
     const pxPerSec = totalWidth / totalDuration;
+    if (EditorState.selectedCaptionIdx != null && (EditorState.selectedCaptionIdx < 0 || EditorState.selectedCaptionIdx >= captions.length)) {
+        EditorState.selectedCaptionIdx = null;
+    }
+
     const clips = captions.map((c, i) => {
         const left = c.start * pxPerSec;
         const width = Math.max((c.end - c.start) * pxPerSec, 8);
         const label = c.text.length > 20 ? c.text.substring(0, 20) + '...' : c.text;
-        return `<div class="caption-clip" data-cap-idx="${i}" style="left:${left}px;width:${width}px" title="${c.text.replace(/"/g, '&quot;')}">
+        const selectedClass = EditorState.selectedCaptionIdx === i ? ' selected' : '';
+        return `<div class="caption-clip${selectedClass}" data-cap-idx="${i}" style="left:${left}px;width:${width}px" title="${c.text.replace(/"/g, '&quot;')}">
             <span class="caption-clip-label">${label.replace(/</g, '&lt;')}</span>
         </div>`;
     }).join('');
@@ -4875,6 +4899,7 @@ function selectCaption(idx) {
     EditorState.selectedScene = null;
     EditorState.selectedTextOverlaySceneId = null;
     EditorState.selectedAudioTrack = null;
+    EditorState.selectedOverlayIdx = null;
     document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
@@ -4896,7 +4921,7 @@ function selectCaption(idx) {
     updateTimeScrubber();
     updatePlayhead();
 
-    renderCaptionProperties();
+    renderSceneProperties();
 }
 
 /**
@@ -4945,6 +4970,21 @@ function renderCaptionProperties() {
             <textarea class="property-textarea" id="caption-text-edit"
                       rows="4" spellcheck="false">${cap.text.replace(/</g, '&lt;')}</textarea>
         </div>
+        ${cap.words && cap.words.length ? `
+        <div class="property-group property-stack">
+            <div class="caption-words-header">
+                <label>Words</label>
+                <span>${cap.words.length} words</span>
+            </div>
+            <div class="caption-words-list">
+                ${cap.words.map((w, wi) => `
+                <div class="caption-word-row" data-word-idx="${wi}">
+                    <input class="caption-word-input" value="${(w.word || '').replace(/"/g, '&quot;')}" data-word-idx="${wi}" />
+                    <span class="caption-word-time">${fmtTime(w.begin)}</span>
+                    <span class="caption-word-time">${fmtTime(w.end)}</span>
+                </div>`).join('')}
+            </div>
+        </div>` : ''}
     `;
 
     // Bind text editing
@@ -4963,6 +5003,45 @@ function renderCaptionProperties() {
                 if (labelEl) labelEl.textContent = label;
                 clipEl.title = newText;
             }
+        });
+    }
+
+    // Bind word-level editing
+    if (cap.words && cap.words.length) {
+        elements.sceneProperties.querySelectorAll('.caption-word-input').forEach(input => {
+            input.addEventListener('input', () => {
+                const wi = parseInt(input.dataset.wordIdx, 10);
+                if (isNaN(wi) || !cap.words[wi]) return;
+                cap.words[wi].word = input.value;
+                // Rebuild full text from words
+                cap.text = cap.words.map(w => w.word).join(' ');
+                captionData.captions[idx].text = cap.text;
+                if (textarea) textarea.value = cap.text;
+                _saveCaptionsToStorage();
+                // Update timeline clip label
+                const clipEl = elements.captionTrack.querySelector(`.caption-clip[data-cap-idx="${idx}"]`);
+                if (clipEl) {
+                    const label = cap.text.length > 20 ? cap.text.substring(0, 20) + '...' : cap.text;
+                    const labelEl = clipEl.querySelector('.caption-clip-label');
+                    if (labelEl) labelEl.textContent = label;
+                    clipEl.title = cap.text;
+                }
+            });
+        });
+
+        // Click word row → seek to that word's begin time
+        elements.sceneProperties.querySelectorAll('.caption-word-row').forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (e.target.classList.contains('caption-word-input')) return; // don't seek when clicking input
+                const wi = parseInt(row.dataset.wordIdx, 10);
+                if (isNaN(wi) || !cap.words[wi]) return;
+                const t = cap.words[wi].begin;
+                EditorState.playbackPosition = t;
+                if (EditorState.preview) EditorState.preview.seek(t);
+                seekAudio(t);
+                updateTimeScrubber();
+                updatePlayhead();
+            });
         });
     }
 }
@@ -5140,6 +5219,11 @@ function setupCaptionControls() {
         EditorState.captionsEnabled = toggle.checked;
         const row = elements.captionTrackRow;
         if (row) row.style.display = toggle.checked ? '' : 'none';
+        if (!toggle.checked) {
+            EditorState.selectedCaptionIdx = null;
+            document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
+            renderSceneProperties();
+        }
 
         // Show/hide caption overlay in preview
         if (EditorState.preview) {
@@ -5712,6 +5796,7 @@ function selectScene(sceneId) {
     EditorState.selectedAudioTrack = null;
     EditorState.selectedTextOverlaySceneId = null;
     EditorState.selectedCaptionIdx = null;
+    EditorState.selectedOverlayIdx = null;
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
 
@@ -5763,6 +5848,7 @@ function selectTextOverlay(sceneId) {
     EditorState.selectedTextOverlaySceneId = sceneId;
     EditorState.selectedAudioTrack = null;
     EditorState.selectedCaptionIdx = null;
+    EditorState.selectedOverlayIdx = null;
 
     document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
     document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
@@ -5799,6 +5885,11 @@ function renderSceneProperties() {
             renderCaptionProperties();
             return;
         }
+        // If an overlay is selected, show its properties instead
+        if (EditorState.selectedOverlayIdx != null) {
+            renderOverlayProperties();
+            return;
+        }
         elements.sceneProperties.innerHTML = '<div class="detail-placeholder">Select a scene to edit</div>';
         return;
     }
@@ -5814,14 +5905,17 @@ function renderSceneProperties() {
         !['text', 'cta'].includes(previousScene.type) &&
         !getSceneTextValue(previousScene);
 
-    elements.sceneProperties.innerHTML = `
+    elements.sceneProperties.innerHTML = (isTextScene || isTextOverlaySelected) ? `
+        <div class="caption-props-header">
+            <span class="caption-props-icon" style="background:rgba(78,205,196,0.15);color:rgba(78,205,196,0.9)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+            </span>
+            <span class="caption-props-title">${isTextOverlaySelected ? 'Text Overlay' : 'Text Scene'}</span>
+        </div>
+
         <div class="property-group">
             <label>Scene ID</label>
             <span class="property-value">${scene.id}</span>
-        </div>
-        <div class="property-group">
-            <label>Type</label>
-            <span class="property-value">${isTextOverlaySelected ? 'text overlay' : scene.type}</span>
         </div>
         ${!isTextOverlaySelected ? `
         <div class="property-group">
@@ -5836,139 +5930,170 @@ function renderSceneProperties() {
                    value="${getSceneTextDuration(scene)}" min="0.5" max="${scene.duration}" step="0.5">
         </div>
         <div class="property-group">
-            <label>Overlay Start In Scene</label>
+            <label>Start In Scene</label>
             <span class="property-value">${getSceneTextOffset(scene).toFixed(1)}s</span>
         </div>
         `}
-        ${(isTextScene || isTextOverlaySelected) ? `
-            <div class="property-group">
-                <label>Text Content</label>
-                <textarea class="property-textarea" id="prop-text-content"
-                          rows="4" placeholder="Enter text to display...">${scene.text_content || scene.script || ''}</textarea>
+
+        <div class="property-group property-stack">
+            <label>Text Content</label>
+            <textarea class="property-textarea" id="prop-text-content"
+                      rows="3" placeholder="Enter text to display...">${scene.text_content || scene.script || ''}</textarea>
+        </div>
+
+        <div class="property-section-divider"></div>
+
+        <div class="property-section-label">Typography</div>
+
+        <div class="property-group">
+            <label>Font</label>
+            <select class="property-select" id="prop-font-family"></select>
+        </div>
+        <div class="property-group">
+            <label>Size</label>
+            <input type="number" class="property-input" id="prop-text-size"
+                   value="${scene.text_size || 48}" min="12" max="200" step="2">
+        </div>
+        <div class="property-group">
+            <label>Style</label>
+            <select class="property-select" id="prop-font-style">
+                <option value="bold" ${(scene.font_style || 'bold') === 'bold' ? 'selected' : ''}>Bold</option>
+                <option value="normal" ${scene.font_style === 'normal' ? 'selected' : ''}>Regular</option>
+                <option value="light" ${scene.font_style === 'light' ? 'selected' : ''}>Light</option>
+                <option value="italic" ${scene.font_style === 'italic' ? 'selected' : ''}>Italic</option>
+                <option value="bold-italic" ${scene.font_style === 'bold-italic' ? 'selected' : ''}>Bold Italic</option>
+            </select>
+        </div>
+        <div class="property-group">
+            <label>Color</label>
+            <div class="text-color-picker">
+                <button class="text-color-swatch${(scene.text_color || 'white') === 'white' ? ' active' : ''}" data-color="white" style="background:#fff" title="White"></button>
+                <button class="text-color-swatch${scene.text_color === 'black' ? ' active' : ''}" data-color="black" style="background:#000" title="Black"></button>
+                <label class="text-color-custom-wrap" title="Custom color">
+                    <input type="color" id="prop-text-color-picker"
+                           value="${(scene.text_color || 'white') === 'white' ? '#ffffff' : scene.text_color === 'black' ? '#000000' : scene.text_color || '#ffffff'}">
+                    <span class="text-color-custom-swatch${scene.text_color && scene.text_color !== 'white' && scene.text_color !== 'black' ? ' active' : ''}"
+                          style="background:${scene.text_color && scene.text_color.startsWith('#') ? scene.text_color : 'conic-gradient(red,yellow,lime,aqua,blue,magenta,red)'}"></span>
+                </label>
             </div>
-            <div class="property-group">
-                <label>Font Family</label>
-                <select class="property-select" id="prop-font-family"></select>
+        </div>
+
+        <div class="property-section-divider"></div>
+
+        <div class="property-section-label">Layout</div>
+
+        <div class="property-group">
+            <label>Horizontal</label>
+            <select class="property-select" id="prop-text-align">
+                <option value="center" ${(scene.text_align || 'center') === 'center' ? 'selected' : ''}>Center</option>
+                <option value="left" ${scene.text_align === 'left' ? 'selected' : ''}>Left</option>
+                <option value="right" ${scene.text_align === 'right' ? 'selected' : ''}>Right</option>
+            </select>
+        </div>
+        <div class="property-group">
+            <label>Vertical</label>
+            <select class="property-select" id="prop-vertical-align">
+                <option value="center" ${(scene.vertical_align || 'center') === 'center' ? 'selected' : ''}>Center</option>
+                <option value="top" ${scene.vertical_align === 'top' ? 'selected' : ''}>Top</option>
+                <option value="bottom" ${scene.vertical_align === 'bottom' ? 'selected' : ''}>Bottom</option>
+            </select>
+        </div>
+        <div class="property-group property-stack">
+            <label>Position</label>
+            <div class="property-position-info">
+                ${scene.text_x !== undefined && scene.text_x !== null ?
+            `<span class="position-value">X: ${Math.round(scene.text_x)}%, Y: ${Math.round(scene.text_y)}%</span>` :
+            `<span class="position-value position-auto">Using alignment</span>`}
+                <button class="btn btn-small btn-reset-position" id="reset-text-position"
+                        ${scene.text_x === undefined || scene.text_x === null ? 'disabled' : ''}>
+                    Reset
+                </button>
             </div>
-            <div class="property-row">
-                <div class="property-group property-half">
-                    <label>Font Size (px)</label>
-                    <input type="number" class="property-input" id="prop-text-size"
-                           value="${scene.text_size || 48}" min="12" max="200" step="2">
-                </div>
-                <div class="property-group property-half">
-                    <label>Font Style</label>
-                    <select class="property-select" id="prop-font-style">
-                        <option value="bold" ${(scene.font_style || 'bold') === 'bold' ? 'selected' : ''}>Bold</option>
-                        <option value="normal" ${scene.font_style === 'normal' ? 'selected' : ''}>Regular</option>
-                        <option value="light" ${scene.font_style === 'light' ? 'selected' : ''}>Light</option>
-                        <option value="italic" ${scene.font_style === 'italic' ? 'selected' : ''}>Italic</option>
-                        <option value="bold-italic" ${scene.font_style === 'bold-italic' ? 'selected' : ''}>Bold Italic</option>
-                    </select>
-                </div>
-            </div>
-            <div class="property-row">
-                <div class="property-group property-half">
-                    <label>Text Align</label>
-                    <select class="property-select" id="prop-text-align">
-                        <option value="center" ${(scene.text_align || 'center') === 'center' ? 'selected' : ''}>Center</option>
-                        <option value="left" ${scene.text_align === 'left' ? 'selected' : ''}>Left</option>
-                        <option value="right" ${scene.text_align === 'right' ? 'selected' : ''}>Right</option>
-                    </select>
-                </div>
-                <div class="property-group property-half">
-                    <label>Vertical Align</label>
-                    <select class="property-select" id="prop-vertical-align">
-                        <option value="center" ${(scene.vertical_align || 'center') === 'center' ? 'selected' : ''}>Center</option>
-                        <option value="top" ${scene.vertical_align === 'top' ? 'selected' : ''}>Top</option>
-                        <option value="bottom" ${scene.vertical_align === 'bottom' ? 'selected' : ''}>Bottom</option>
-                    </select>
-                </div>
-            </div>
-            <div class="property-group">
-                <label>Text Color</label>
-                <select class="property-select" id="prop-text-color">
-                    <option value="white" ${(scene.text_color || 'white') === 'white' ? 'selected' : ''}>White (dark bg)</option>
-                    <option value="black" ${scene.text_color === 'black' ? 'selected' : ''}>Black (light bg)</option>
-                </select>
-            </div>
-            <div class="property-group">
-                <label>Background</label>
-                ${isTextScene ? `
-                    <div class="property-mode-buttons">
-                        <button class="property-mode-btn${!scene.text_background_enabled ? ' active' : ''}"
-                                id="prop-text-bg-scene"
-                                ${hasStoredSceneBackground ? '' : 'disabled'}>
-                            Use Scene Background
-                        </button>
-                        <button class="property-mode-btn${scene.text_background_enabled ? ' active' : ''}"
-                                id="prop-text-bg-solid">
-                            Use Solid Color
-                        </button>
-                    </div>
-                    <span class="property-hint">${hasStoredSceneBackground ? 'Switch between the original scene background and a solid color.' : 'This text scene has no stored scene background, so only solid color is available.'}</span>
-                ` : `
-                    <label style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-                        <span>Solid Background</span>
-                        <input type="checkbox" id="prop-text-bg-enabled" ${scene.text_background_enabled ? 'checked' : ''}>
-                    </label>
-                `}
-            </div>
-            <div class="property-group">
-                <label>Background Color</label>
-                <input type="color" class="property-input" id="prop-text-bg-color"
-                       value="${scene.text_background_color || '#000000'}"
-                       ${scene.text_background_enabled ? '' : 'disabled'}>
-            </div>
-            <div class="property-group">
-                <label>Position</label>
-                <div class="property-position-info">
-                    ${scene.text_x !== undefined && scene.text_x !== null ?
-                `<span class="position-value">X: ${Math.round(scene.text_x)}%, Y: ${Math.round(scene.text_y)}%</span>` :
-                `<span class="position-value position-auto">Using alignment</span>`}
-                    <button class="btn btn-small btn-reset-position" id="reset-text-position"
-                            ${scene.text_x === undefined || scene.text_x === null ? 'disabled' : ''}>
-                        Reset
+            <span class="property-hint">Drag text in preview to reposition</span>
+        </div>
+
+        <div class="property-section-divider"></div>
+
+        <div class="property-section-label">Background</div>
+
+        <div class="property-group property-stack">
+            ${isTextScene ? `
+                <div class="property-mode-buttons">
+                    <button class="property-mode-btn${!scene.text_background_enabled ? ' active' : ''}"
+                            id="prop-text-bg-scene"
+                            ${hasStoredSceneBackground ? '' : 'disabled'}>
+                        Scene Media
+                    </button>
+                    <button class="property-mode-btn${scene.text_background_enabled ? ' active' : ''}"
+                            id="prop-text-bg-solid">
+                        Solid Color
                     </button>
                 </div>
-                <span class="property-hint">Drag text in preview to position</span>
-            </div>
-        ` : `
-            <div class="property-group">
-                <label>Effect</label>
-                <select class="property-select" id="prop-effect">
-                    <option value="static" ${scene.visual_fx === 'static' ? 'selected' : ''}>Static</option>
-                    <option value="zoom_in" ${scene.visual_fx === 'zoom_in' ? 'selected' : ''}>Zoom In</option>
-                    <option value="zoom_out" ${scene.visual_fx === 'zoom_out' ? 'selected' : ''}>Zoom Out</option>
-                    <option value="pan_left" ${scene.visual_fx === 'pan_left' ? 'selected' : ''}>Pan Left</option>
-                    <option value="pan_right" ${scene.visual_fx === 'pan_right' ? 'selected' : ''}>Pan Right</option>
-                    <option value="fade" ${scene.visual_fx === 'fade' ? 'selected' : ''}>Fade</option>
-                    <option value="shake" ${scene.visual_fx === 'shake' ? 'selected' : ''}>Shake</option>
-                    <option value="pan_up" ${scene.visual_fx === 'pan_up' ? 'selected' : ''}>Pan Up</option>
-                    <option value="pan_down" ${scene.visual_fx === 'pan_down' ? 'selected' : ''}>Pan Down</option>
-                    <option value="pan_diagonal_tl" ${scene.visual_fx === 'pan_diagonal_tl' ? 'selected' : ''}>Pan Diagonal ↗</option>
-                    <option value="pan_diagonal_br" ${scene.visual_fx === 'pan_diagonal_br' ? 'selected' : ''}>Pan Diagonal ↘</option>
-                    <option value="ken_burns" ${scene.visual_fx === 'ken_burns' ? 'selected' : ''}>Ken Burns</option>
-                </select>
-            </div>
-        `}
-        ${scene.image ? `
-            <div class="property-group">
-                <label>Image</label>
-                <span class="property-value">${scene.image}</span>
-            </div>
-        ` : ''}
+                <span class="property-hint">${hasStoredSceneBackground ? 'Switch between scene background and solid color.' : 'No stored scene background — solid color only.'}</span>
+            ` : `
+                <label style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <span>Solid Background</span>
+                    <input type="checkbox" id="prop-text-bg-enabled" ${scene.text_background_enabled ? 'checked' : ''}>
+                </label>
+            `}
+        </div>
+        <div class="property-group">
+            <label>Color</label>
+            <input type="color" class="property-input property-input-color" id="prop-text-bg-color"
+                   value="${scene.text_background_color || '#000000'}"
+                   ${scene.text_background_enabled ? '' : 'disabled'}>
+        </div>
+
         ${isTextOverlaySelected ? `
+            <div class="property-section-divider"></div>
             <div class="property-group">
                 <button class="btn btn-small" id="convert-text-overlay-to-scene">Turn Text Into Scene</button>
             </div>
         ` : ''}
         ${isTextScene ? `
-            <div class="property-group">
+            <div class="property-section-divider"></div>
+            <div class="property-group property-stack">
                 <button class="btn btn-small" id="convert-text-scene-to-overlay" ${canConvertTextSceneToOverlay ? '' : 'disabled'}>
                     Turn Text Into Overlay
                 </button>
-                <span class="property-hint">${canConvertTextSceneToOverlay ? 'Move this text into the previous visual scene as an overlay.' : 'Needs a previous image or video scene without another text overlay.'}</span>
+                <span class="property-hint">${canConvertTextSceneToOverlay ? 'Move into the previous visual scene as an overlay.' : 'Needs a previous image/video scene without a text overlay.'}</span>
+            </div>
+        ` : ''}
+    ` : `
+        <div class="property-group">
+            <label>Scene ID</label>
+            <span class="property-value">${scene.id}</span>
+        </div>
+        <div class="property-group">
+            <label>Type</label>
+            <span class="property-value">${scene.type}</span>
+        </div>
+        <div class="property-group">
+            <label>Duration</label>
+            <input type="number" class="property-input" id="prop-duration"
+                   value="${scene.duration}" min="0.5" step="0.5">
+        </div>
+        <div class="property-group">
+            <label>Effect</label>
+            <select class="property-select" id="prop-effect">
+                <option value="static" ${scene.visual_fx === 'static' ? 'selected' : ''}>Static</option>
+                <option value="zoom_in" ${scene.visual_fx === 'zoom_in' ? 'selected' : ''}>Zoom In</option>
+                <option value="zoom_out" ${scene.visual_fx === 'zoom_out' ? 'selected' : ''}>Zoom Out</option>
+                <option value="pan_left" ${scene.visual_fx === 'pan_left' ? 'selected' : ''}>Pan Left</option>
+                <option value="pan_right" ${scene.visual_fx === 'pan_right' ? 'selected' : ''}>Pan Right</option>
+                <option value="fade" ${scene.visual_fx === 'fade' ? 'selected' : ''}>Fade</option>
+                <option value="shake" ${scene.visual_fx === 'shake' ? 'selected' : ''}>Shake</option>
+                <option value="pan_up" ${scene.visual_fx === 'pan_up' ? 'selected' : ''}>Pan Up</option>
+                <option value="pan_down" ${scene.visual_fx === 'pan_down' ? 'selected' : ''}>Pan Down</option>
+                <option value="pan_diagonal_tl" ${scene.visual_fx === 'pan_diagonal_tl' ? 'selected' : ''}>Pan Diagonal ↗</option>
+                <option value="pan_diagonal_br" ${scene.visual_fx === 'pan_diagonal_br' ? 'selected' : ''}>Pan Diagonal ↘</option>
+                <option value="ken_burns" ${scene.visual_fx === 'ken_burns' ? 'selected' : ''}>Ken Burns</option>
+            </select>
+        </div>
+        ${scene.image ? `
+            <div class="property-group">
+                <label>Image</label>
+                <span class="property-value">${scene.image}</span>
             </div>
         ` : ''}
     `;
@@ -5977,7 +6102,7 @@ function renderSceneProperties() {
     const durationInput = document.getElementById('prop-duration');
     const effectSelect = document.getElementById('prop-effect');
     const textContentInput = document.getElementById('prop-text-content');
-    const textColorSelect = document.getElementById('prop-text-color');
+    const textColorPicker = document.getElementById('prop-text-color-picker');
     const fontFamilySelect = document.getElementById('prop-font-family');
     if (fontFamilySelect) buildFontOptions(fontFamilySelect, scene.font_family || 'Inter');
     const textSizeInput = document.getElementById('prop-text-size');
@@ -6097,14 +6222,29 @@ function renderSceneProperties() {
     });
 
     // Text color change - update scene and refresh preview
-    textColorSelect?.addEventListener('change', (e) => {
+    // Text color — swatch buttons + custom picker
+    const _applyTextColor = (newValue) => {
         const oldValue = scene.text_color;
-        const newValue = e.target.value;
+        if (oldValue === newValue) return;
         scene.text_color = newValue;
         recordEdit(`Change text color (Scene ${scene.id})`, scene.id, 'text_color', oldValue, newValue);
-        if (EditorState.preview) {
-            EditorState.preview.seek(EditorState.playbackPosition);
+        if (EditorState.preview) EditorState.preview.seek(EditorState.playbackPosition);
+        // Update swatch active states
+        elements.sceneProperties.querySelectorAll('.text-color-swatch').forEach(s => {
+            s.classList.toggle('active', s.dataset.color === newValue);
+        });
+        const customSwatch = elements.sceneProperties.querySelector('.text-color-custom-swatch');
+        if (customSwatch) {
+            const isCustom = newValue !== 'white' && newValue !== 'black';
+            customSwatch.classList.toggle('active', isCustom);
+            if (isCustom) customSwatch.style.background = newValue;
         }
+    };
+    elements.sceneProperties.querySelectorAll('.text-color-swatch').forEach(btn => {
+        btn.addEventListener('click', () => _applyTextColor(btn.dataset.color));
+    });
+    textColorPicker?.addEventListener('input', (e) => {
+        _applyTextColor(e.target.value);
     });
 
     textBgEnabledInput?.addEventListener('change', (e) => {
@@ -6358,7 +6498,13 @@ function setupPlayheadDrag() {
     // Also allow clicking on timeline to seek
     timelineTracks.addEventListener('mousedown', (e) => {
         // Only if clicking on track content area, not on clips or audio clips
-        if (e.target.closest('.scene-clip') || e.target.closest('.track-header') || e.target.closest('.audio-clip-universal')) return;
+        if (
+            e.target.closest('.scene-clip') ||
+            e.target.closest('.text-clip') ||
+            e.target.closest('.caption-clip') ||
+            e.target.closest('.track-header') ||
+            e.target.closest('.audio-clip-universal')
+        ) return;
 
         isDragging = true;
         dragStartPosition = EditorState.playbackPosition;
@@ -8468,6 +8614,121 @@ function updateTransitionsTab() {
 
 let _overlaysList = null;
 
+/**
+ * Select an overlay from the stack for the detail panel
+ */
+function selectOverlay(idx) {
+    const stack = EditorState.overlays || [];
+    if (idx < 0 || idx >= stack.length) return;
+
+    // Deselect everything else
+    EditorState.selectedScene = null;
+    EditorState.selectedTextOverlaySceneId = null;
+    EditorState.selectedAudioTrack = null;
+    EditorState.selectedCaptionIdx = null;
+    document.querySelectorAll('.scene-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.text-clip.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.audio-clip-universal.selected').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll('.caption-clip.selected').forEach(el => el.classList.remove('selected'));
+
+    EditorState.selectedOverlayIdx = idx;
+    renderOverlayProperties();
+}
+
+/**
+ * Render overlay properties in the detail panel
+ */
+function renderOverlayProperties() {
+    if (!elements.sceneProperties) return;
+    const idx = EditorState.selectedOverlayIdx;
+    const stack = EditorState.overlays || [];
+    if (idx == null || idx < 0 || idx >= stack.length) return;
+
+    const ov = stack[idx];
+    const getName = (url) => {
+        const match = _overlaysList?.find(o => o.url === url);
+        return match ? match.name : url.split('/').pop().replace(/\.\w+$/, '');
+    };
+    const esc = (s) => s.replace(/</g, '&lt;');
+    const name = getName(ov.url);
+    const opVal = Math.round(ov.opacity * 100);
+
+    const blendOptions = OVERLAY_BLEND_MODES.map(m => {
+        const label = m === 'soft-light' ? 'Soft Light' : m === 'hard-light' ? 'Hard Light'
+            : m === 'color-dodge' ? 'Color Dodge' : m.charAt(0).toUpperCase() + m.slice(1);
+        return `<option value="${m}"${m === (ov.blend || 'normal') ? ' selected' : ''}>${label}</option>`;
+    }).join('');
+
+    elements.sceneProperties.innerHTML = `
+        <div class="caption-props-header">
+            <span class="caption-props-icon" style="background:rgba(99,102,241,0.15);color:rgba(99,102,241,0.9)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M2 12h20M12 2v20" opacity="0.4"/></svg>
+            </span>
+            <span class="caption-props-title">Overlay ${idx + 1} / ${stack.length}</span>
+        </div>
+        <div class="property-group">
+            <label>Name</label>
+            <span class="property-value">${esc(name)}</span>
+        </div>
+        <div class="property-group">
+            <label>Z-Order</label>
+            <span class="property-value">${idx + 1} (${idx === 0 ? 'bottom' : idx === stack.length - 1 ? 'top' : 'middle'})</span>
+        </div>
+        <div class="property-group property-stack">
+            <label>Opacity</label>
+            <div class="ov-detail-slider-row">
+                <input type="range" id="ov-detail-opacity" min="0" max="100" step="1" value="${opVal}" />
+                <span id="ov-detail-opacity-val" class="ov-stack-val">${opVal}%</span>
+            </div>
+        </div>
+        <div class="property-group property-stack">
+            <label>Blend Mode</label>
+            <select id="ov-detail-blend" class="ov-detail-select">${blendOptions}</select>
+        </div>
+        <div style="padding-top:8px">
+            <button class="ov-detail-remove" id="ov-detail-remove">Remove Overlay</button>
+        </div>
+    `;
+
+    // Bind opacity
+    const opSlider = document.getElementById('ov-detail-opacity');
+    const opValEl = document.getElementById('ov-detail-opacity-val');
+    if (opSlider) {
+        opSlider.addEventListener('input', () => {
+            const v = parseInt(opSlider.value, 10);
+            if (opValEl) opValEl.textContent = v + '%';
+            stack[idx].opacity = v / 100;
+            if (EditorState.preview) EditorState.preview.setOverlay(stack);
+        });
+        opSlider.addEventListener('change', () => saveProjectEdits());
+    }
+
+    // Bind blend
+    const blendSel = document.getElementById('ov-detail-blend');
+    if (blendSel) {
+        blendSel.addEventListener('change', () => {
+            stack[idx].blend = blendSel.value;
+            if (EditorState.preview) EditorState.preview.setOverlay(stack);
+            saveProjectEdits();
+        });
+    }
+
+    // Bind remove
+    const removeBtn = document.getElementById('ov-detail-remove');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            EditorState.overlays.splice(idx, 1);
+            EditorState.selectedOverlayIdx = null;
+            updateOverlaysTab();
+            if (EditorState.preview) {
+                EditorState.preview.setOverlay(EditorState.overlays.length ? EditorState.overlays : null);
+            }
+            saveProjectEdits();
+            renderSceneProperties();
+        });
+    }
+}
+
 async function setupOverlaysTab() {
     const grid = document.getElementById('ov-grid');
     if (!grid) return;
@@ -8498,13 +8759,28 @@ async function setupOverlaysTab() {
         html += `<button class="overlay-card" data-overlay="${esc(ov.url)}" title="${esc(ov.name)}">
             <div class="overlay-card-preview">
                 <img src="${esc(ov.url)}" alt="${esc(ov.name)}" loading="lazy">
+                <span class="ov-eye-btn" data-bg="0" title="Preview on different backgrounds">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </span>
             </div>
             <span class="overlay-card-label">${esc(ov.name)}</span>
         </button>`;
     }
     cardGrid.innerHTML = html;
 
-    // Click handler — toggle overlay in/out of stack, or clear all with "None"
+    // Eye icon — cycle preview background: dark → white → grey → dark
+    const _ovBgColors = ['', '#ffffff', '#808080'];
+    cardGrid.querySelectorAll('.ov-eye-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            let idx = (parseInt(btn.dataset.bg, 10) + 1) % _ovBgColors.length;
+            btn.dataset.bg = idx;
+            const preview = btn.closest('.overlay-card-preview');
+            if (preview) preview.style.background = _ovBgColors[idx] || '';
+        });
+    });
+
+    // Click handler — toggle overlay in/out of stack, or select for detail pane
     cardGrid.querySelectorAll('.overlay-card[data-overlay]').forEach(card => {
         card.addEventListener('click', () => {
             const url = card.dataset.overlay || null;
@@ -8513,14 +8789,17 @@ async function setupOverlaysTab() {
             if (!url) {
                 // "None" card — clear all
                 EditorState.overlays = [];
+                EditorState.selectedOverlayIdx = null;
             } else {
-                const idx = EditorState.overlays.indexOf(url);
+                const idx = findOverlayIdx(url);
                 if (idx >= 0) {
-                    // Already active — remove from stack
-                    EditorState.overlays.splice(idx, 1);
+                    // Already active — select it for the detail pane
+                    selectOverlay(idx);
+                    return;
                 } else {
-                    // Add to top of stack
-                    EditorState.overlays.push(url);
+                    // Add to top of stack and select it
+                    EditorState.overlays.push(normalizeOverlayEntry(url));
+                    selectOverlay(EditorState.overlays.length - 1);
                 }
             }
 
@@ -8558,7 +8837,7 @@ function updateOverlaysTab() {
 
     grid.querySelectorAll('.overlay-card[data-overlay]').forEach(card => {
         const url = card.dataset.overlay;
-        const idx = url ? stack.indexOf(url) : -1;
+        const idx = url ? findOverlayIdx(url) : -1;
         card.classList.toggle('active', idx >= 0);
 
         // Remove old badge
@@ -8572,6 +8851,7 @@ function updateOverlaysTab() {
             card.querySelector('.overlay-card-preview').appendChild(badge);
         }
     });
+
     syncGrainControlsUI();
 }
 

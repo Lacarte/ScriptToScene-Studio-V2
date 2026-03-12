@@ -545,24 +545,66 @@ class VideoProcessor:
 
         return output_path
 
-    def _apply_overlay(self, input_path, output_path, overlay_url):
-        """Composite an overlay PNG on top of the full video using ffmpeg overlay filter."""
+    # Supported blend modes mapping (CSS name → ffmpeg blend mode)
+    _BLEND_MAP = {
+        'normal': None,  # uses overlay filter
+        'screen': 'screen',
+        'multiply': 'multiply',
+        'overlay': 'overlay',
+        'soft-light': 'softlight',
+        'hard-light': 'hardlight',
+        'lighten': 'lighten',
+        'darken': 'darken',
+        'color-dodge': 'dodge',
+    }
+
+    def _apply_overlay(self, input_path, output_path, overlay_entry):
+        """Composite an overlay PNG on top of the full video using ffmpeg.
+
+        overlay_entry can be a URL string (legacy) or a dict with
+        {url, opacity, blend} keys.
+        """
+        if isinstance(overlay_entry, str):
+            overlay_url = overlay_entry
+            opacity = 1.0
+            blend = 'normal'
+        else:
+            overlay_url = overlay_entry.get('url', '')
+            opacity = max(0.0, min(1.0, float(overlay_entry.get('opacity', 1.0))))
+            blend = overlay_entry.get('blend', 'normal') or 'normal'
+
         app_root = os.path.dirname(os.path.dirname(self.project_root))
         rel = overlay_url.lstrip('/')
         overlay_path = os.path.join(app_root, rel)
         if not os.path.exists(overlay_path):
             logger.warning("Overlay not found: {} (resolved: {})", overlay_url, overlay_path)
-            # Fall back: just copy input to output
             shutil.copy2(input_path, output_path)
             return
 
-        logger.info("Applying overlay: {}", os.path.basename(overlay_path))
+        logger.info("Applying overlay: {} (opacity={}, blend={})", os.path.basename(overlay_path), opacity, blend)
+
+        # Build alpha adjustment (colorchannelmixer adjusts overlay alpha)
+        alpha_filter = f',colorchannelmixer=aa={opacity:.2f}' if opacity < 1.0 else ''
+        ff_blend = self._BLEND_MAP.get(blend)
+
+        if ff_blend:
+            # Blend mode: use ffmpeg blend filter
+            filter_complex = (
+                f'[1:v]scale={self.width}:{self.height}:flags=lanczos,format=rgba{alpha_filter}[ov];'
+                f'[0:v][ov]blend=all_mode={ff_blend}:all_opacity=1'
+            )
+        else:
+            # Normal mode: standard overlay compositing
+            filter_complex = (
+                f'[1:v]scale={self.width}:{self.height}:flags=lanczos,format=rgba{alpha_filter}[ov];'
+                f'[0:v][ov]overlay=0:0:format=auto'
+            )
+
         cmd = [
             FFMPEG_BIN, '-y',
             '-i', input_path,
             '-i', overlay_path,
-            '-filter_complex',
-            f'[1:v]scale={self.width}:{self.height}:flags=lanczos,format=rgba[ov];[0:v][ov]overlay=0:0:format=auto',
+            '-filter_complex', filter_complex,
             '-map', '0:a?',
             '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
             '-pix_fmt', 'yuv420p',
@@ -576,11 +618,19 @@ class VideoProcessor:
         else:
             logger.info("Overlay applied successfully")
 
-    def _is_white_dot_grain_overlay(self, overlay_url):
+    @staticmethod
+    def _overlay_url(entry):
+        """Extract URL from an overlay entry (string or dict)."""
+        if isinstance(entry, str):
+            return entry
+        return entry.get('url', '') if isinstance(entry, dict) else ''
+
+    def _is_white_dot_grain_overlay(self, overlay_entry):
         """Return True if overlay URL should use animated white-dot grain pass."""
-        if not overlay_url:
+        url = self._overlay_url(overlay_entry)
+        if not url:
             return False
-        name = os.path.basename(str(overlay_url)).lower()
+        name = os.path.basename(str(url)).lower()
         return name in ("grain-noise.png", "white-dot-grain", "white-dot-grain.png")
 
     def _apply_white_dot_grain_overlay(self, input_path, output_path, cfg=None):
@@ -1940,17 +1990,17 @@ class VideoProcessor:
             if has_overlay:
                 self._update_progress(85, f"Applying {len(overlay_list)} overlay(s)")
                 current_input = concat_output
-                for ov_idx, ov_url in enumerate(overlay_list):
+                for ov_idx, ov_entry in enumerate(overlay_list):
                     is_last_overlay = (ov_idx == len(overlay_list) - 1)
                     final_post_step = is_last_overlay and not has_captions and not has_grain_overlay
                     if final_post_step:
                         ov_output = output_path
                     else:
                         ov_output = os.path.join(temp_dir, f'overlay_{ov_idx}.mp4')
-                    if self._is_white_dot_grain_overlay(ov_url):
+                    if self._is_white_dot_grain_overlay(ov_entry):
                         self._apply_white_dot_grain_overlay(current_input, ov_output, grain_cfg)
                     else:
-                        self._apply_overlay(current_input, ov_output, ov_url)
+                        self._apply_overlay(current_input, ov_output, ov_entry)
                     current_input = ov_output
                 concat_output = current_input
 

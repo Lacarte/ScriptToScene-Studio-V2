@@ -17,3 +17,7 @@
 FIX SPECIAL CHARACTER AND FOREIGN THE NAME PRONUNCIACION IN THE TTS
 
  Thewisestickman - Channel Tiktok Youtube Instagram  Facebook
+
+ Fix cut initial audop voice.
+
+ how to add a little reverb in the tts voice

@@ -26,12 +26,6 @@ export class CanvasPreview {
         // Image cache
         this.imageCache = new Map();
 
-        // Text background images cache (wbg.png = white text bg, bbg.png = black text bg)
-        this.textBackgrounds = {
-            white: null,  // Background for white text (dark bg image)
-            black: null   // Background for black text (light bg image)
-        };
-
         // Project base path for loading assets
         this.projectBasePath = '';
 
@@ -54,54 +48,33 @@ export class CanvasPreview {
      */
     setProjectPath(basePath) {
         this.projectBasePath = basePath;
-        this.loadTextBackgrounds();
-    }
-
-    /**
-     * Load a background image only if it exists (HEAD check first to avoid 404 noise).
-     */
-    async _loadBgImage(path) {
-        try {
-            const check = await fetch(path, { method: 'HEAD' });
-            if (!check.ok) return null;
-            const img = new Image();
-            await new Promise((resolve, reject) => {
-                img.onload = resolve;
-                img.onerror = reject;
-                img.src = path;
-            });
-            return img;
-        } catch { return null; }
-    }
-
-    /**
-     * Load text background images from working-assets/{project_id}/
-     * wbg.png = background for white text (typically dark)
-     * bbg.png = background for black text (typically light)
-     */
-    async loadTextBackgrounds() {
-        if (!this.projectBasePath) return;
-        this.textBackgrounds.white = await this._loadBgImage(`${this.projectBasePath}/wbg.png`);
-        this.textBackgrounds.black = await this._loadBgImage(`${this.projectBasePath}/bbg.png`);
     }
 
     /**
      * Set the global overlay (applied to entire timeline).
-     * Accepts a single URL string (legacy) or an array of URLs (stacked, bottom → top).
+     * Accepts a single URL string (legacy), an array of URLs, or an array of
+     * {url, opacity, blend} objects (stacked, bottom → top).
      * Pass null/empty to remove all.
      */
     setOverlay(urlOrArray) {
-        // Normalise to array
+        // Normalise to array of {url, opacity, blend}
         if (!urlOrArray || (Array.isArray(urlOrArray) && urlOrArray.length === 0)) {
             this.activeOverlays = [];
             this.activeOverlayImgs = [];
+            this.overlayEntries = [];
             // Legacy compat
             this.activeOverlay = null;
             this.activeOverlayImg = null;
             this.render();
             return;
         }
-        const urls = Array.isArray(urlOrArray) ? urlOrArray : [urlOrArray];
+        const entries = Array.isArray(urlOrArray) ? urlOrArray : [urlOrArray];
+        // Normalise each entry to {url, opacity, blend}
+        this.overlayEntries = entries.map(e => {
+            if (typeof e === 'string') return { url: e, opacity: 1.0, blend: 'normal' };
+            return { url: e.url || '', opacity: e.opacity ?? 1.0, blend: e.blend || 'normal' };
+        });
+        const urls = this.overlayEntries.map(e => e.url);
         this.activeOverlays = urls;
         this.activeOverlayImgs = new Array(urls.length).fill(null);
         // Legacy compat (first overlay)
@@ -139,11 +112,23 @@ export class CanvasPreview {
     }
 
     /**
-     * Render global overlay stack on top of current frame (full canvas, preserving alpha)
+     * Render global overlay stack on top of current frame (full canvas, preserving alpha).
+     * Applies per-overlay opacity and blend mode.
      */
     renderOverlay() {
-        for (const img of this.activeOverlayImgs) {
-            if (img) this.ctx.drawImage(img, 0, 0, this.width, this.height);
+        const entries = this.overlayEntries || [];
+        for (let i = 0; i < this.activeOverlayImgs.length; i++) {
+            const img = this.activeOverlayImgs[i];
+            if (!img) continue;
+            const entry = entries[i] || {};
+            const opacity = entry.opacity ?? 1.0;
+            const blend = entry.blend || 'normal';
+
+            this.ctx.save();
+            this.ctx.globalAlpha = opacity;
+            this.ctx.globalCompositeOperation = blend === 'normal' ? 'source-over' : blend;
+            this.ctx.drawImage(img, 0, 0, this.width, this.height);
+            this.ctx.restore();
         }
     }
 
@@ -478,13 +463,30 @@ export class CanvasPreview {
     }
 
     /**
+     * Return a contrasting background color for a given text color.
+     */
+    _contrastBg(color) {
+        if (color === 'white') return '#000000';
+        if (color === 'black') return '#ffffff';
+        if (!color || !color.startsWith('#')) return '#000000';
+        // Parse hex and compute perceived luminance
+        const hex = color.length === 4
+            ? '#' + color[1] + color[1] + color[2] + color[2] + color[3] + color[3]
+            : color;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return lum > 0.5 ? '#000000' : '#ffffff';
+    }
+
+    /**
      * Render a text scene using its actual media background when available,
      * or a solid background when explicitly enabled.
      */
     renderTextScene(scene, localTime, progress) {
         const textColor = scene.text_color || 'white';
         const media = this.imageCache.get(scene.id);
-        const fallbackBgImage = textColor === 'white' ? this.textBackgrounds.white : this.textBackgrounds.black;
 
         if (scene.text_background_enabled) {
             this.ctx.fillStyle = scene.text_background_color || '#000000';
@@ -496,10 +498,8 @@ export class CanvasPreview {
             } else {
                 this.renderImage(media, scene.visual_fx || 'static', progress);
             }
-        } else if (fallbackBgImage) {
-            this.renderBackgroundImage(fallbackBgImage);
         } else {
-            this.ctx.fillStyle = textColor === 'white' ? '#000000' : '#ffffff';
+            this.ctx.fillStyle = this._contrastBg(textColor);
             this.ctx.fillRect(0, 0, this.width, this.height);
         }
 
@@ -527,30 +527,6 @@ export class CanvasPreview {
 
         // Store current scene for drag reference
         this.currentTextScene = showText ? scene : null;
-    }
-
-    /**
-     * Render background image (cover fit)
-     */
-    renderBackgroundImage(img) {
-        const imgAspect = img.width / img.height;
-        const canvasAspect = this.width / this.height;
-
-        let drawWidth, drawHeight, offsetX, offsetY;
-
-        if (imgAspect > canvasAspect) {
-            drawHeight = this.height;
-            drawWidth = drawHeight * imgAspect;
-            offsetX = (this.width - drawWidth) / 2;
-            offsetY = 0;
-        } else {
-            drawWidth = this.width;
-            drawHeight = drawWidth / imgAspect;
-            offsetX = 0;
-            offsetY = (this.height - drawHeight) / 2;
-        }
-
-        this.ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
     }
 
     /**
@@ -582,8 +558,10 @@ export class CanvasPreview {
         const fadeOut = Math.min(1, (1 - progress) * 4); // Fade out during last 25%
         this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
 
-        // Text styling based on color preference
-        this.ctx.fillStyle = textColor === 'white' ? '#ffffff' : '#000000';
+        // Text styling — support named presets and arbitrary hex
+        this.ctx.fillStyle = textColor === 'white' ? '#ffffff'
+            : textColor === 'black' ? '#000000'
+            : textColor.startsWith('#') ? textColor : '#ffffff';
         this.ctx.textBaseline = 'middle';
 
         // Calculate font size - support both pixel values and legacy string values
