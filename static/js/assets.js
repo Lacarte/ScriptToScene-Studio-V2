@@ -1264,10 +1264,8 @@ async function assetsAssembleFromHistory(projectId, { force = false } = {}) {
     _step('Launching editor', 'done');
     await new Promise(r => setTimeout(r, 300));
 
-    // Force a fresh editor iframe boot
+    // Reset editor state so it re-syncs data
     STATE.editorLoaded = false;
-    const iframe = document.getElementById('editor-iframe');
-    if (iframe) { iframe.style.display = 'none'; iframe.src = ''; }
 
     sessionStorage.setItem('sts-editor-entry-source', 'internal');
     switchPage('editor');
@@ -1385,13 +1383,8 @@ async function autoAssembleAndSendToEditor() {
   // Clear stale captions so they auto-regenerate from current alignment
   localStorage.removeItem('sts-editor-captions');
 
-  // Force a fresh editor iframe boot so stale modal/UI state cannot persist.
+  // Reset editor state so it re-syncs data
   STATE.editorLoaded = false;
-  const iframe = document.getElementById('editor-iframe');
-  if (iframe) {
-    iframe.style.display = 'none';
-    iframe.src = '';
-  }
 
   switchPage('editor');
   toast('Auto-assembling timeline...', 'info');

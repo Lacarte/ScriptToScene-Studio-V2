@@ -395,7 +395,7 @@ function switchPage(page, editorSource = 'internal') {
       _showProjectBrowser();
       return;
     }
-    initEditorIframe();
+    initEditorInline();
   } else {
     $('#main-content').style.overflowY = 'auto';
   }
@@ -419,6 +419,10 @@ function openEditorFromMenu() {
 async function _showProjectBrowser() {
   const loadingEl = $('#editor-loading');
   if (!loadingEl) return;
+
+  loadingEl.style.display = 'flex';
+  const shell = $('#editor-shell');
+  if (shell) shell.style.display = 'none';
 
   loadingEl.innerHTML = `
     <div style="text-align:center;padding:20px">
@@ -646,7 +650,7 @@ async function _buildAndOpenProject(projectId, cardEl) {
     // Launch
     sessionStorage.setItem('sts-editor-entry-source', 'internal');
     STATE.editorLoaded = false;
-    initEditorIframe();
+    initEditorInline();
 
   } catch (e) {
     console.error('Failed to build project:', e);

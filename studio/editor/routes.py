@@ -8,7 +8,6 @@ import platform
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import uuid
@@ -1118,12 +1117,13 @@ def list_overlays():
 # Static file serving
 # ---------------------------------------------------------------------------
 
+# Legacy route — editor is now inlined in static/ (Phase 1 merge).
+# Kept as redirect for any stale bookmarks or cached references.
 @editor_bp.route("/timeline-editor/<path:filename>")
 def serve_timeline_editor(filename):
-    """Serve timeline editor static files."""
-    resp = send_from_directory(TIMELINE_EDITOR_DIR, filename)
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return resp
+    """Redirect old timeline-editor paths to static/."""
+    from flask import redirect
+    return redirect(f"/static/{filename}", code=301)
 
 
 
@@ -1299,8 +1299,7 @@ def _process_video(job_id, export_data, output_path):
 
     try:
         # Import here to avoid circular imports at module load
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "timeline-editor", "backend"))
-        from video_processor import VideoProcessor
+        from studio.editor.video_processor import VideoProcessor
 
         logger.info("[{}] Processing started", short_id)
         job["status"] = "processing"

@@ -14,3 +14,5 @@ working-assets/
 !.claude/skills/
 !.claude/skills/**
 .mcp.json
+static/dist/
+*.bak

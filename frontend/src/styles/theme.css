@@ -1,6 +1,6 @@
 /* ================================================================
-   ScriptToScene Studio — Unified Design Tokens
-   Shared design tokens for the ScriptToScene Studio app.
+   ScriptToScene Studio — Design Tokens
+   Imported from shared-theme.css — single source of truth.
    ================================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -13,7 +13,6 @@
   --bg-surface-hover: #1c2536;
   --bg-elevated:      #222d3d;
 
-  /* Aliases used by the editor layout */
   --bg-primary:   var(--bg-darkest);
   --bg-secondary: var(--bg-dark);
   --bg-tertiary:  var(--bg-surface);
@@ -22,9 +21,7 @@
   --text:           #e8edf3;
   --text-secondary: #8899aa;
   --text-muted:     #6b7f93;
-
-  /* Aliases for editor */
-  --text-primary: var(--text);
+  --text-primary:   var(--text);
 
   /* ---- Accent ---- */
   --accent:       #4ECDC4;
@@ -32,9 +29,8 @@
   --accent-glow:  rgba(78, 205, 196, 0.20);
   --accent-dim:   rgba(78, 205, 196, 0.08);
 
-  /* Aliases for editor */
   --accent-primary:   var(--accent);
-  --accent-secondary: #A78BFA;   /* soft violet for audio tracks / secondary highlights */
+  --accent-secondary: #A78BFA;
   --accent-warning:   #FFB347;
   --accent-error:     #FF6B6B;
   --accent-success:   #4ECDC4;
@@ -42,15 +38,11 @@
 
   /* ---- Coral / Danger ---- */
   --coral: #FF6B6B;
-
-  /* Alias for editor status */
   --status-error: var(--coral);
 
   /* ---- Borders ---- */
   --border:       #1e2a3a;
   --border-hover: #2a3a4e;
-
-  /* Aliases for editor */
   --border-color: var(--border);
   --border-light: #2a3a4e;
 
@@ -71,19 +63,27 @@
   --font-body:    'DM Sans', system-ui, sans-serif;
   --font-mono:    'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
 
-  /* ---- Layout (studio sidebar) ---- */
+  /* ---- Layout ---- */
   --sidebar-w:         220px;
   --sidebar-collapsed:  64px;
 }
 
-/* ---- Global no-select (non-text elements) ---- */
+/* ---- Global Resets ---- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
 body {
-  -webkit-touch-callout: none;
-  /* -webkit-user-select: none; */
-  /* -khtml-user-select: none; */
-  /* -moz-user-select: none; */
-  /* -ms-user-select: none; */
-  /* user-select: none; */
+  font-family: var(--font-body);
+  background: var(--bg-darkest);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 input, textarea, [contenteditable="true"], pre, code {
@@ -91,4 +91,31 @@ input, textarea, [contenteditable="true"], pre, code {
   -moz-user-select: text;
   -ms-user-select: text;
   user-select: text;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
 }

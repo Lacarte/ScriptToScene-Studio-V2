@@ -1,7 +1,7 @@
 import sys
 import os
-sys.path.append(os.path.join(os.getcwd(), "timeline-editor", "backend"))
-from video_processor import VideoProcessor
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from studio.editor.video_processor import VideoProcessor
 
 # Initialize processor with same config
 config = {
