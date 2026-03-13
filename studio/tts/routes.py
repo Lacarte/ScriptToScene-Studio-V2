@@ -24,7 +24,7 @@ import urllib.request
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR
+from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR, generate_project_id
 from studio.io_utils import move_to_unique_path, safe_json_write
 from studio.security import safe_join, sanitize_project_id
 from studio.validation import validate_json
@@ -265,9 +265,8 @@ def _read_metadata(basename):
 
 
 def generate_filename(prompt: str) -> str:
-    excerpt = re.sub(r"[^a-zA-Z0-9]+", "-", prompt[:30].lower()).strip("-")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{excerpt}_{timestamp}"
+    """Generate a unique pm_ project ID for manual TTS generations."""
+    return generate_project_id("pm")
 
 
 # ---------------------------------------------------------------------------

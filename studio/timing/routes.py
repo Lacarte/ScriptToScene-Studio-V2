@@ -152,9 +152,8 @@ def force_align():
     if ext not in (".wav", ".mp3", ".flac", ".ogg"):
         return jsonify({"error": f"Unsupported format: {ext}"}), 400
 
-    safe_name = re.sub(r'[^a-zA-Z0-9]+', '-', os.path.splitext(original_name)[0][:40]).strip('-')
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    folder_name = f"{safe_name}_{timestamp}"
+    project_id = generate_project_id("pm")
+    folder_name = project_id
     job_dir = os.path.join(ALIGN_DIR, folder_name)
     os.makedirs(job_dir, exist_ok=True)
 
@@ -183,8 +182,6 @@ def force_align():
 
         if not alignment:
             return jsonify({"error": "Alignment produced no results"}), 500
-
-        project_id = generate_project_id("pm")
 
         result_data = {
             "project_id": project_id,
@@ -236,9 +233,8 @@ def align_and_segment():
     if ext not in (".wav", ".mp3", ".flac", ".ogg"):
         return jsonify({"error": f"Unsupported format: {ext}"}), 400
 
-    safe_name = re.sub(r'[^a-zA-Z0-9]+', '-', os.path.splitext(original_name)[0][:40]).strip('-')
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    folder_name = f"{safe_name}_{timestamp}"
+    project_id = generate_project_id("pm")
+    folder_name = project_id
     job_dir = os.path.join(ALIGN_DIR, folder_name)
     os.makedirs(job_dir, exist_ok=True)
 
@@ -269,8 +265,6 @@ def align_and_segment():
         if not alignment:
             return jsonify({"error": "Alignment produced no results"}), 500
 
-        project_id = generate_project_id("pm")
-
         align_data = {
             "project_id": project_id,
             "source_file": original_name,
@@ -295,7 +289,7 @@ def align_and_segment():
 
         seg_result = run_segmenter(alignment, seg_config, seg_metadata)
 
-        seg_folder = project_id or f"{folder_name}_{timestamp}"
+        seg_folder = project_id
         out_path = os.path.join(SEGMENTER_DIR, seg_folder, "segmented.json")
         save_output(seg_result, out_path)
         seg_result["output_folder"] = seg_folder

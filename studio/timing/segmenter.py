@@ -405,10 +405,8 @@ if __name__ == "__main__":
     if args.output:
         out_path = args.output
     else:
-        from config import SEGMENTER_DIR
-        project = metadata.get("source_folder", "untitled")
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder = f"{project}_{ts}"
+        from config import SEGMENTER_DIR, generate_project_id
+        folder = generate_project_id("pm")
         out_path = os.path.join(SEGMENTER_DIR, folder, "segmented.json")
 
     save_output(result, out_path)

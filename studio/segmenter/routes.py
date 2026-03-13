@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 from loguru import logger
 
-from config import SEGMENTER_DIR
+from config import SEGMENTER_DIR, generate_project_id
 from studio.validation import validate_json
 from studio.segmenter.schemas import SegmenterRunRequest
 
@@ -43,7 +43,7 @@ def segment_alignment(data: SegmenterRunRequest):
     # Save to disk
     should_save = data.save
     if should_save:
-        folder = data.project_id or f"{metadata.get('source_folder') or 'untitled'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        folder = data.project_id or generate_project_id("pm")
         out_path = os.path.join(SEGMENTER_DIR, folder, "segmented.json")
         save_output(result, out_path)
         result["output_folder"] = folder

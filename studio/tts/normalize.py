@@ -41,6 +41,10 @@ _ORDINALS = {
     r'\b23rd\b': 'twenty third', r'\b30th\b': 'thirtieth', r'\b31st\b': 'thirty first',
 }
 
+_FOREIGN_WORDS = {
+    r'\bANICCA\b': '[anicca](/ɐnˈiːkɐ/)',
+}
+
 _ABBREVIATIONS = {
     r'\bDr\.\b': 'Doctor', r'\bMr\.\b': 'Mister', r'\bMrs\.\b': 'Missus', r'\bMs\.\b': 'Miss',
     r'\bProf\.\b': 'Professor', r'\bSt\.\b': 'Saint', r'\bAve\.\b': 'Avenue',
@@ -122,6 +126,12 @@ def _expand_symbols(text):
     return text
 
 
+def _expand_foreign_words(text):
+    for p, r in _FOREIGN_WORDS.items():
+        text = re.sub(p, r, text, flags=re.IGNORECASE)
+    return text
+
+
 def _expand_contractions(text):
     for c, e in _CONTRACTIONS.items():
         text = re.sub(re.escape(c), e, text, flags=re.IGNORECASE)
@@ -199,6 +209,7 @@ def normalize_for_tts(text: str) -> str:
     Kokoro markdown links like [word](/phonetic/) and [word](-1) are
     protected from expansion and restored at the end.
     """
+    text = _expand_foreign_words(text)
     text, kokoro = _protect_kokoro(text)
     text = _expand_symbols(text)
     text = _expand_contractions(text)
@@ -220,6 +231,7 @@ def clean_for_tts(text: str) -> str:
     Preserves Kokoro pronunciation links [word](/phonetic/), stress
     markers (ˈ ˌ), and intonation punctuation (—…).
     """
+    text = _expand_foreign_words(text)
     text, kokoro = _protect_kokoro(text)
     text = re.sub(r"[*_#`~]", "", text)
     text = re.sub(r"https?://\S+", "link", text)
