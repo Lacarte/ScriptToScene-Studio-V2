@@ -1,6 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref } from 'vue'
 import SidebarNav from '../SidebarNav.vue'
 
 const collapsed = ref(false)
@@ -25,14 +24,17 @@ const toggle = () => { collapsed.value = !collapsed.value }
   display: flex;
   height: 100vh;
   overflow: hidden;
+  background: var(--bg-darkest);
 }
 
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 32px;
+  padding: 32px 40px;
   margin-left: var(--sidebar-w);
-  transition: margin-left 0.3s ease;
+  transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 100vh;
+  background: var(--bg-dark);
 }
 
 .layout.collapsed .content {
