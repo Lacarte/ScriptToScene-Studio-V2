@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, EDITOR_SAVE_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.io_utils import safe_json_write, safe_json_read
@@ -37,46 +37,14 @@ EXPORT_MAX_JOB_AGE = 3600  # evict finished jobs after 1 hour
 
 logger.info("Export output directory: {}", EXPORT_DIR)
 logger.info("Projects directory: {}", PROJECTS_DIR)
-logger.info("Legacy editor directory: {}", EDITOR_SAVE_DIR)
 
 WIP_FILENAME = "work@in@progress.json"
 INITIAL_FILENAME = "initial.json"
 
-# Legacy flat-file names (for migration)
-_LEGACY_WIP_SUFFIX = "-work@in@progress"
-
 
 def _project_dir(project_id: str) -> str:
     """Return the per-project directory inside PROJECTS_DIR."""
-    new_path = os.path.join(PROJECTS_DIR, project_id)
-    # Auto-migrate from old layout: output/editor/{id}/ → output/projects/{id}/
-    old_path = os.path.join(EDITOR_SAVE_DIR, project_id)
-    if os.path.isdir(old_path) and not os.path.isdir(new_path):
-        os.makedirs(PROJECTS_DIR, exist_ok=True)
-        try:
-            import shutil
-            shutil.move(old_path, new_path)
-            logger.info("Migrated editor data: {} -> {}", old_path, new_path)
-        except OSError as e:
-            logger.warning("Failed to migrate editor data for {}: {}", project_id, e)
-            return old_path  # Fall back to old path
-    # Also migrate from output/projects/{id}/editor/ → output/projects/{id}/
-    editor_subdir = os.path.join(new_path, "editor")
-    if os.path.isdir(editor_subdir):
-        try:
-            import shutil
-            for fname in os.listdir(editor_subdir):
-                src = os.path.join(editor_subdir, fname)
-                dst = os.path.join(new_path, fname)
-                if not os.path.exists(dst):
-                    shutil.move(src, dst)
-            # Remove editor subdir if now empty
-            if not os.listdir(editor_subdir):
-                os.rmdir(editor_subdir)
-            logger.info("Flattened editor subdir for {}", project_id)
-        except OSError as e:
-            logger.warning("Failed to flatten editor subdir for {}: {}", project_id, e)
-    return new_path
+    return os.path.join(PROJECTS_DIR, project_id)
 
 
 def _wip_path(project_id: str) -> str:
@@ -88,38 +56,6 @@ def _initial_path(project_id: str) -> str:
     """Return the path to the initial (pristine) project file."""
     return os.path.join(_project_dir(project_id), INITIAL_FILENAME)
 
-
-def _migrate_legacy_files(project_id: str):
-    """Move legacy flat files into the per-project folder if they exist."""
-    legacy_initial = os.path.join(EDITOR_SAVE_DIR, f"{project_id}.json")
-    legacy_wip = os.path.join(EDITOR_SAVE_DIR, f"{project_id}{_LEGACY_WIP_SUFFIX}.json")
-
-    has_legacy = os.path.isfile(legacy_initial) or os.path.isfile(legacy_wip)
-    if not has_legacy:
-        return
-
-    proj_dir = _project_dir(project_id)
-    os.makedirs(proj_dir, exist_ok=True)
-
-    new_initial = _initial_path(project_id)
-    new_wip = _wip_path(project_id)
-
-    if os.path.isfile(legacy_initial) and not os.path.isfile(new_initial):
-        os.rename(legacy_initial, new_initial)
-        logger.info("Migrated legacy initial: {} -> {}", legacy_initial, new_initial)
-    elif os.path.isfile(legacy_initial):
-        os.remove(legacy_initial)
-
-    if os.path.isfile(legacy_wip) and not os.path.isfile(new_wip):
-        os.rename(legacy_wip, new_wip)
-        logger.info("Migrated legacy WIP: {} -> {}", legacy_wip, new_wip)
-    elif os.path.isfile(legacy_wip):
-        os.remove(legacy_wip)
-
-    # Clean up .bak files too
-    for legacy in (legacy_initial + ".bak", legacy_wip + ".bak"):
-        if os.path.isfile(legacy):
-            os.remove(legacy)
 
 
 def _read_app_config():
@@ -134,35 +70,6 @@ def _write_app_config(cfg):
     """Write the full app-config.json file."""
     safe_json_write(APP_CONFIG_PATH, cfg, indent=2)
 
-
-def _migrate_legacy_settings():
-    """One-time migration: merge output/editor/settings.json into app-config.json['user']."""
-    legacy_path = os.path.join(EDITOR_SAVE_DIR, "settings.json")
-    if not os.path.isfile(legacy_path):
-        return
-    cfg = _read_app_config()
-    if cfg.get("user"):
-        # Already has user settings — skip migration, just delete legacy
-        os.remove(legacy_path)
-        logger.info("Removed legacy settings.json (user settings already in app-config.json)")
-        return
-    try:
-        legacy_data = safe_json_read(legacy_path)
-        if isinstance(legacy_data, dict) and legacy_data:
-            cfg["user"] = legacy_data
-            _write_app_config(cfg)
-            logger.info("Migrated {} settings from legacy settings.json into app-config.json", len(legacy_data))
-        os.remove(legacy_path)
-        # Also remove .bak if present
-        bak = legacy_path + ".bak"
-        if os.path.isfile(bak):
-            os.remove(bak)
-    except Exception as e:
-        logger.warning("Failed to migrate legacy settings: {}", e)
-
-
-# Run migration on import
-_migrate_legacy_settings()
 
 
 @editor_bp.route("/api/settings", methods=["GET"])
@@ -356,15 +263,24 @@ def _resolve_project_audio(data: dict, project_id: str):
     if not resolved:
         return
     correct_url = resolved["url"]
-    # Fix voice track in audio_tracks if it points to wrong audio
+    # Keep the persisted voice track aligned with the actual resolved source.
     for track in data.get("audio_tracks", []):
-        if track.get("type") == "voice" and track.get("path") != correct_url:
-            logger.info("Fixing voice track for {}: {} -> {}", project_id, track.get("path"), correct_url)
-            track["path"] = correct_url
-            # Preserve original display name; only set file if missing
-            if not track.get("file"):
-                track["file"] = resolved["source_file"]
-            break
+        if track.get("type") != "voice":
+            continue
+        prev_path = track.get("path")
+        prev_file = track.get("file")
+        if prev_path != correct_url or prev_file != resolved["source_file"]:
+            logger.info(
+                "Normalizing voice track for {}: path {} -> {}, file {} -> {}",
+                project_id,
+                prev_path,
+                correct_url,
+                prev_file,
+                resolved["source_file"],
+            )
+        track["path"] = correct_url
+        track["file"] = resolved["source_file"]
+        break
 
 
 def _resolve_project_captions(data: dict, project_id: str):
@@ -429,13 +345,7 @@ def _resolve_project_captions(data: dict, project_id: str):
 @editor_bp.route("/api/editor/save", methods=["POST"])
 @validate_json(EditorSaveRequest)
 def editor_save_project(data: EditorSaveRequest):
-    """Save editor project edits to the work-in-progress file.
-
-    The initial ``{project_id}.json`` is never overwritten by ongoing edits.
-    All changes go to ``{project_id}-work@in@progress.json``.  When the
-    project is loaded next time, the WIP file is preferred over the initial
-    state.
-    """
+    """Save editor project edits to the work-in-progress file."""
     safe_id = data.project_id  # already validated: alphanumeric + _ and -
 
     from datetime import datetime, timezone
@@ -450,8 +360,6 @@ def editor_save_project(data: EditorSaveRequest):
     _resolve_project_captions(save_data, safe_id)
     save_data["saved_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Migrate legacy flat files into per-project folder
-    _migrate_legacy_files(safe_id)
     os.makedirs(_project_dir(safe_id), exist_ok=True)
 
     # Always write to the WIP file — initial state stays untouched
@@ -484,7 +392,6 @@ def editor_load_project(project_id):
     field (``"wip"`` or ``"initial"``) so the frontend knows which was loaded.
     """
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    _migrate_legacy_files(safe_id)
 
     # Try WIP first, then initial
     wip = _wip_path(safe_id)
@@ -552,42 +459,11 @@ def editor_list_projects():
         except Exception:
             pass
 
-    # 1. Scan new layout: output/projects/{id}/
     if os.path.isdir(PROJECTS_DIR):
         for entry in os.listdir(PROJECTS_DIR):
             proj_dir = os.path.join(PROJECTS_DIR, entry)
             if os.path.isdir(proj_dir):
                 _collect_from_dir(proj_dir, entry)
-
-    # 2. Scan legacy layout: output/editor/{id}/
-    if os.path.isdir(EDITOR_SAVE_DIR):
-        for entry in os.listdir(EDITOR_SAVE_DIR):
-            proj_dir = os.path.join(EDITOR_SAVE_DIR, entry)
-
-            if os.path.isdir(proj_dir):
-                _collect_from_dir(proj_dir, entry)
-
-            # Legacy flat files (auto-migrated on next load/save)
-            elif entry.endswith(".json") and _LEGACY_WIP_SUFFIX not in entry and not entry.endswith(".bak"):
-                pid = entry.replace(".json", "")
-                if pid in seen_ids:
-                    continue
-                legacy_wip = os.path.join(EDITOR_SAVE_DIR, f"{pid}{_LEGACY_WIP_SUFFIX}.json")
-                has_wip = os.path.isfile(legacy_wip)
-                fpath = legacy_wip if has_wip else proj_dir
-                try:
-                    data = safe_json_read(fpath)
-                    seen_ids.add(pid)
-                    projects.append({
-                        "project_id": data.get("project_id", pid),
-                        "project_name": data.get("project_name", ""),
-                        "saved_at": data.get("saved_at", ""),
-                        "scene_count": data.get("scene_count", 0),
-                        "total_duration": data.get("total_duration", 0),
-                        "has_wip": has_wip,
-                    })
-                except Exception:
-                    continue
 
     projects.sort(key=lambda p: p.get("saved_at", ""), reverse=True)
     return jsonify(projects)
@@ -671,17 +547,14 @@ def _discover_projects() -> list[dict]:
                         info["has_audio"] = True
                         break
 
-    # 4. Check editor saves (new: output/projects/{id}/, legacy: output/editor/{id}/)
+    # 4. Check editor saves in output/projects/{id}/
     for pid in list(projects.keys()):
         proj_dir = os.path.join(PROJECTS_DIR, pid)
-        legacy_dir = os.path.join(EDITOR_SAVE_DIR, pid)
-        for d in (proj_dir, legacy_dir):
-            if os.path.isdir(d):
-                has_save = os.path.isfile(os.path.join(d, WIP_FILENAME)) or \
-                           os.path.isfile(os.path.join(d, INITIAL_FILENAME))
-                if has_save:
-                    projects[pid]["has_editor"] = True
-                    break
+        if os.path.isdir(proj_dir):
+            has_save = os.path.isfile(os.path.join(proj_dir, WIP_FILENAME)) or \
+                       os.path.isfile(os.path.join(proj_dir, INITIAL_FILENAME))
+            if has_save:
+                projects[pid]["has_editor"] = True
 
     # 5. Enrich with TTS metadata (text, voice, speed)
     if os.path.isdir(TTS_DIR):
@@ -739,7 +612,7 @@ def assemble_project_for_editor(project_id):
     force = request.args.get("force", "0") == "1"
 
     # Check if editor save already exists → return it directly (unless force rebuild)
-    _migrate_legacy_files(safe_id)
+
     wip = _wip_path(safe_id)
     initial = _initial_path(safe_id)
 
@@ -902,7 +775,7 @@ def assemble_project_for_editor(project_id):
 def editor_reset_to_initial(project_id):
     """Delete the WIP file and revert the project to its initial state."""
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    _migrate_legacy_files(safe_id)
+
 
     initial = _initial_path(safe_id)
     if not os.path.isfile(initial):
@@ -928,7 +801,7 @@ def export_project_zip(project_id):
     from datetime import datetime, timezone
 
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    _migrate_legacy_files(safe_id)
+
 
     # Prefer WIP file, then initial state, then scenes.json
     wip_file = _wip_path(safe_id)

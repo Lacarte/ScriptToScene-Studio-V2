@@ -171,6 +171,58 @@ const DEFAULT_MUSIC_DUCKING_LEVEL = 0.2;
 const MIN_MUSIC_DUCKING_LEVEL = 0.12;
 const MIN_TEXT_OVERLAY_DURATION = 0.5;
 
+function getPathFileName(path) {
+    const clean = String(path || '').split('#')[0].split('?')[0];
+    const parts = clean.split('/').filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+}
+
+function normalizeVoiceAudioConfig(audioLike = {}) {
+    if (!audioLike) return null;
+    const url = audioLike.url || audioLike.path || '';
+    const sourceFile = getPathFileName(url) || audioLike.source_file || audioLike.file || '';
+    return {
+        url,
+        source_file: sourceFile,
+        duration: Number(audioLike.duration) || 0,
+        trimmedDuration: audioLike.trimmedDuration ?? audioLike.trimmed_duration ?? null,
+        timelineOffset: audioLike.timelineOffset ?? audioLike.timeline_offset ?? 0,
+        startOffset: audioLike.startOffset ?? audioLike.start_offset ?? 0
+    };
+}
+
+function getDefaultVoiceAudioFallbacks(projectId, sourceFolder = '') {
+    const folder = sourceFolder || projectId || '';
+    return [
+        folder ? `/output/alignments/${folder}/voice.wav` : '',
+        folder ? `/output/alignments/${folder}/voice.mp3` : '',
+        folder ? `/output/tts/${folder}/voice.wav` : '',
+        folder ? `/output/tts/${folder}/voice.mp3` : ''
+    ].filter(Boolean);
+}
+
+async function resolveDefaultVoiceAudio(projectId, sourceFolder, stagedAudio) {
+    const normalized = normalizeVoiceAudioConfig(stagedAudio);
+    if (normalized?.url) return normalized;
+
+    if (sourceFolder) {
+        try {
+            const res = await fetch(`/api/scenes/audio/${encodeURIComponent(sourceFolder)}`, {
+                signal: AbortSignal.timeout(4000)
+            });
+            if (res.ok) {
+                const resolved = normalizeVoiceAudioConfig(await res.json());
+                if (resolved?.url) return resolved;
+            }
+        } catch (error) {
+            console.warn('Voice audio lookup failed:', sourceFolder, error);
+        }
+    }
+
+    const fallbackUrl = getDefaultVoiceAudioFallbacks(projectId, sourceFolder)[0] || '';
+    return fallbackUrl ? normalizeVoiceAudioConfig({ url: fallbackUrl }) : null;
+}
+
 function _getSavedVolume(type) {
     try { const v = parseFloat(localStorage.getItem(`sts-vol-${type}`)); return isNaN(v) ? null : v; } catch { return null; }
 }
@@ -214,17 +266,20 @@ function getVoiceTrack() {
     return EditorState.audioTracks.find(t => t.type === 'voice');
 }
 function _getAudioForPersist() {
-    if (EditorState.savedAudioSettings) return { audio: EditorState.savedAudioSettings };
     const vt = getVoiceTrack();
     if (vt?.path) {
-        return { audio: {
-            url: vt.path, source_file: vt.file || '',
+        const audio = normalizeVoiceAudioConfig({
+            url: vt.path,
+            source_file: vt.file || '',
             duration: vt.duration || 0,
             trimmedDuration: vt.trimmedDuration || null,
             timelineOffset: vt.timelineOffset || 0,
             startOffset: vt.startOffset || 0
-        }};
+        });
+        if (audio?.url) return { audio };
     }
+    const savedAudio = normalizeVoiceAudioConfig(EditorState.savedAudioSettings);
+    if (savedAudio?.url) return { audio: savedAudio };
     return {};
 }
 function getAudioTrackById(id) {
@@ -1261,6 +1316,9 @@ const EditorState = {
     historyIndex: -1,  // Current position in history (-1 = no history)
     sceneErrors: new Map(),  // Map of sceneId -> [error messages]
     savedAudioSettings: null,  // Saved audio settings from localStorage
+    voiceLoadPromise: Promise.resolve({ status: 'idle', reason: 'init' }),
+    voiceLoadToken: 0,
+    activeBootstrapId: 0,
     captionData: null,      // Caption data { captions: [], style: {} }
     captionsEnabled: false, // Whether caption track is visible
     selectedCaptionIdx: null, // Currently selected caption index for detail panel
@@ -1363,7 +1421,7 @@ function saveProjectEdits() {
         trimmedDuration: EditorState.audio.trimmedDuration,
         timelineOffset: EditorState.audio.timelineOffset || 0,
         startOffset: EditorState.audio.startOffset || 0,
-        fileName: EditorState.audio.fileName
+        file: EditorState.audio.file || null
     } : null;
 
     const data = {
@@ -1391,6 +1449,22 @@ let _serverSaveRetries = 0;
 const _MAX_SAVE_RETRIES = 3;
 const _SAVE_DEBOUNCE_MS = 2000;
 let _saveStatusTimer = null;
+
+function cancelPendingProjectSave() {
+    if (_serverSaveTimer) {
+        clearTimeout(_serverSaveTimer);
+        _serverSaveTimer = null;
+    }
+    _serverSaveRetries = 0;
+}
+
+function clearEditorBootCaches() {
+    try { sessionStorage.removeItem('sts-staged-timeline'); } catch (_) { /* ignore */ }
+    try { sessionStorage.removeItem('sts-editor-saved-state'); } catch (_) { /* ignore */ }
+    try { localStorage.removeItem('sts-editor-boot-project'); } catch (_) { /* ignore */ }
+    try { localStorage.removeItem('sts-editor-scenes'); } catch (_) { /* ignore */ }
+    try { localStorage.removeItem('sts-editor-source-folder'); } catch (_) { /* ignore */ }
+}
 
 function _debouncedServerSave() {
     if (_serverSaveTimer) clearTimeout(_serverSaveTimer);
@@ -2174,6 +2248,7 @@ function clearProjectEdits() {
 
     localStorage.removeItem(getProjectEditsKey(EditorState.project.id));
     localStorage.removeItem(getProjectHistoryKey(EditorState.project.id));
+    EditorState.savedAudioSettings = null;
     EditorState.editHistory = [];
     EditorState.historyIndex = -1;
     updateUndoButton();
@@ -2563,6 +2638,7 @@ const elements = {
 // Font Registry — loads custom + system fonts from backend
 // ---------------------------------------------------------------------------
 let _fontRegistry = [];  // [{family, source, variants:{variant: url}}]
+let _fontRegistryLoadPromise = null;
 
 async function loadFontRegistry() {
     try {
@@ -2607,6 +2683,13 @@ async function loadFontRegistry() {
     } catch (err) {
         console.warn('Failed to load font registry:', err);
     }
+}
+
+function ensureFontRegistryLoaded() {
+    if (!_fontRegistryLoadPromise) {
+        _fontRegistryLoadPromise = loadFontRegistry();
+    }
+    return _fontRegistryLoadPromise;
 }
 
 /**
@@ -2662,121 +2745,123 @@ function buildFontOptions(selectEl, selectedFamily) {
 
 async function loadProjectFromServer(projectId) {
     showLoadingOverlay('Loading saved project...');
+    updateLoadingOverlay('Fetching saved project...');
+
+    let saved;
     try {
         const res = await fetch(`/api/editor/load/${encodeURIComponent(projectId)}`, { signal: AbortSignal.timeout(15000) });
         if (!res.ok) throw new Error('Project not found');
-        const saved = await res.json();
-
-        // Resolve style template name/color
-        let styleName = '', styleColor = '';
-        if (saved.style) {
-            try {
-                const templates = await fetch('/api/scenes/templates').then(r => r.json());
-                const tmpl = templates.find(t => t.id === saved.style);
-                if (tmpl) { styleName = tmpl.name; styleColor = tmpl.color; }
-            } catch { /* ignore */ }
-        }
-
-        // Build project data directly (no sessionStorage)
-        const projectData = {
-            project_id: saved.project_id,
-            project_name: saved.project_name || saved.project_id,
-            _source: saved._source || 'initial',
-            style: saved.style || '',
-            style_name: styleName,
-            style_color: styleColor,
-            source_folder: saved.source_folder || '',
-            total_duration: saved.total_duration || 0,
-            scene_count: saved.scene_count || saved.scenes?.length || 0,
-            staged_at: saved.saved_at,
-            scenes: (saved.scenes || []).map((s, i) => ({
-                scene_id: s.id ?? i,
-                type: s.type || 'image',
-                image_prompt: s.image_prompt || '',
-                text_content: s.text_content || null,
-                duration: s.duration || 3,
-                timestamp: s.timestamp || 0,
-                image_url: s.mediaUrl || s.image_url || '',
-                visual_fx: s.visual_fx || 'static',
-                text_color: s.text_color,
-                text_size: s.text_size,
-                font_family: s.font_family,
-                font_style: s.font_style,
-                text_align: s.text_align,
-                vertical_align: s.vertical_align,
-                text_x: s.text_x,
-                text_y: s.text_y,
-                text_timeline_offset: s.text_timeline_offset ?? 0,
-                text_overlay_duration: s.text_overlay_duration ?? null,
-                text_background_enabled: !!s.text_background_enabled,
-                text_background_color: s.text_background_color || '#000000',
-                script: s.script || '',
-                narrative_role: s.narrative_role || '',
-                isVideo: s.isVideo || false,
-                image: s.image || '',
-                status: s.status || 'ready',
-                filler_shift: s.filler_shift || 0,
-                segment_start: s.segment_start ?? null,
-                segment_end: s.segment_end ?? null,
-                segment_duration: s.segment_duration ?? null
-            }))
-        };
-
-        // Restore voice audio path from saved tracks
-        const voiceTrack = (saved.audio_tracks || []).find(t => t.type === 'voice');
-        if (voiceTrack?.path) {
-            projectData.audio = {
-                url: voiceTrack.path,
-                source_file: voiceTrack.file || '',
-                duration: voiceTrack.duration || 0,
-                trimmedDuration: voiceTrack.trimmedDuration || null,
-                timelineOffset: voiceTrack.timelineOffset || voiceTrack.timeline_offset || 0,
-                startOffset: voiceTrack.startOffset || voiceTrack.start_offset || 0
-            };
-        }
-
-        // Reset editor state for new project
-        _resetEditorForNewProject();
-        hideNoDataOverlay();
-
-        // Load project data directly
-        updateLoadingOverlay('Loading project data...');
-        await loadProjectData(projectData);
-
-        // Load media assets
-        await loadProjectMediaWithProgress();
-
-        // Apply captions: prefer saved data, then check if already loaded
-        // from localStorage (inside loadProjectData), finally try localStorage again
-        if (saved.captions?.captions?.length) {
-            _receiveCaptionData(saved.captions);
-        } else if (!EditorState.captionData) {
-            _loadCaptionsFromStorage();
-        }
-        // If captions were loaded from localStorage but not in the server JSON,
-        // persist them immediately so they appear in the WIP file
-        if (EditorState.captionData && !saved.captions) {
-            saveProjectToServer();
-        }
-
-        // Restore extra state directly from saved data
-        _applyExtraState({
-            audio_tracks: (saved.audio_tracks || []).filter(t => t.type !== 'voice'),
-            edit_history: saved.edit_history || [],
-            history_index: saved.history_index ?? -1,
-            disabled_tracks: saved.disabled_tracks || [],
-            captionsEnabled: saved.captionsEnabled,
-            overlays: saved.overlays || (saved.overlay ? [saved.overlay] : []),
-            grain_overlay: saved.grain_overlay || saved.grainOverlay || null,
-            scenes: saved.scenes || []
-        });
-
-        await hideLoadingOverlay();
-        showToast('Project loaded', 'success');
+        saved = await res.json();
     } catch (e) {
-        hideLoadingOverlay();
+        await hideLoadingOverlay();
         showToast('Failed to load project: ' + e.message, 'error');
         showNoDataOverlay();
+        return;
+    }
+
+    // Resolve style template name/color
+    let styleName = '', styleColor = '';
+    if (saved.style) {
+        try {
+            const templates = await fetch('/api/scenes/templates').then(r => r.json());
+            const tmpl = templates.find(t => t.id === saved.style);
+            if (tmpl) { styleName = tmpl.name; styleColor = tmpl.color; }
+        } catch { /* ignore */ }
+    }
+
+    // Build project data directly (no sessionStorage)
+    const projectData = {
+        project_id: saved.project_id,
+        project_name: saved.project_name || saved.project_id,
+        _source: saved._source || 'initial',
+        style: saved.style || '',
+        style_name: styleName,
+        style_color: styleColor,
+        source_folder: saved.source_folder || '',
+        total_duration: saved.total_duration || 0,
+        scene_count: saved.scene_count || saved.scenes?.length || 0,
+        staged_at: saved.saved_at,
+        scenes: (saved.scenes || []).map((s, i) => ({
+            scene_id: s.id ?? i,
+            type: s.type || 'image',
+            image_prompt: s.image_prompt || '',
+            text_content: s.text_content || null,
+            duration: s.duration || 3,
+            timestamp: s.timestamp || 0,
+            image_url: s.mediaUrl || s.image_url || '',
+            visual_fx: s.visual_fx || 'static',
+            text_color: s.text_color,
+            text_size: s.text_size,
+            font_family: s.font_family,
+            font_style: s.font_style,
+            text_align: s.text_align,
+            vertical_align: s.vertical_align,
+            text_x: s.text_x,
+            text_y: s.text_y,
+            text_timeline_offset: s.text_timeline_offset ?? 0,
+            text_overlay_duration: s.text_overlay_duration ?? null,
+            text_background_enabled: !!s.text_background_enabled,
+            text_background_color: s.text_background_color || '#000000',
+            script: s.script || '',
+            narrative_role: s.narrative_role || '',
+            isVideo: s.isVideo || false,
+            image: s.image || '',
+            status: s.status || 'ready',
+            filler_shift: s.filler_shift || 0,
+            segment_start: s.segment_start ?? null,
+            segment_end: s.segment_end ?? null,
+            segment_duration: s.segment_duration ?? null
+        }))
+    };
+
+    // Restore voice audio path from saved tracks
+    const voiceTrack = (saved.audio_tracks || []).find(t => t.type === 'voice');
+    if (voiceTrack?.path) {
+        const audio = normalizeVoiceAudioConfig({
+            url: voiceTrack.path,
+            source_file: voiceTrack.file || '',
+            duration: voiceTrack.duration || 0,
+            trimmedDuration: voiceTrack.trimmedDuration || null,
+            timelineOffset: voiceTrack.timelineOffset || voiceTrack.timeline_offset || 0,
+            startOffset: voiceTrack.startOffset || voiceTrack.start_offset || 0
+        });
+        if (audio?.url) projectData.audio = audio;
+    }
+
+    _resetEditorForNewProject();
+
+    try {
+        await bootstrapProjectIntoEditor(projectData, {
+            initialMessage: 'Loading saved project...',
+            readyMessage: 'Project loaded',
+            failureMessage: 'Failed to load project',
+            showNoDataOnError: true,
+            afterCoreLoad: async () => {
+                if (saved.captions?.captions?.length) {
+                    _receiveCaptionData(saved.captions);
+                } else if (!EditorState.captionData) {
+                    _loadCaptionsFromStorage();
+                }
+                if (EditorState.captionData && !saved.captions) {
+                    saveProjectToServer();
+                }
+
+                _applyExtraState({
+                    audio_tracks: (saved.audio_tracks || []).filter(t => t.type !== 'voice'),
+                    edit_history: saved.edit_history || [],
+                    history_index: saved.history_index ?? -1,
+                    disabled_tracks: saved.disabled_tracks || [],
+                    captionsEnabled: saved.captionsEnabled,
+                    overlays: saved.overlays || (saved.overlay ? [saved.overlay] : []),
+                    grain_overlay: saved.grain_overlay || saved.grainOverlay || null,
+                    scenes: saved.scenes || []
+                });
+            }
+        });
+    } catch (e) {
+        if (e.message !== 'Editor load superseded by a newer request') {
+            console.warn('Saved project bootstrap failed:', e);
+        }
     }
 }
 
@@ -2797,6 +2882,8 @@ function _resetEditorForNewProject() {
     EditorState.audioTracks = [];
     EditorState.audio = null;
     EditorState.audioElement = null;
+    EditorState.voiceLoadToken++;
+    EditorState.voiceLoadPromise = Promise.resolve({ status: 'reset', reason: 'project-reset' });
 
     // Reset state
     EditorState.scenes = [];
@@ -3122,18 +3209,22 @@ function buildBootProjectData(raw) {
         scene_count: raw.scene_count || scenes.length,
         staged_at: raw.staged_at || raw.saved_at || new Date().toISOString(),
         scenes,
-        ...(raw.audio ? { audio: raw.audio } : (() => {
+        ...(raw.audio ? (() => {
+            const audio = normalizeVoiceAudioConfig(raw.audio);
+            return audio?.url ? { audio } : {};
+        })() : (() => {
             // Extract audio from audio_tracks if no top-level audio key
             const vt = (raw.audio_tracks || []).find(t => t.type === 'voice');
             if (vt?.path) {
-                return { audio: {
+                const audio = normalizeVoiceAudioConfig({
                     url: vt.path,
                     source_file: vt.file || '',
                     duration: vt.duration || 0,
                     trimmedDuration: vt.trimmedDuration || null,
                     timelineOffset: vt.timelineOffset || vt.timeline_offset || 0,
                     startOffset: vt.startOffset || vt.start_offset || 0
-                }};
+                });
+                if (audio?.url) return { audio };
             }
             return {};
         })())
@@ -3182,6 +3273,201 @@ function setEditorBootState(state) {
     }
 }
 
+function beginEditorBootstrap(message = 'Loading...') {
+    const bootId = Date.now() + Math.random();
+    EditorState.activeBootstrapId = bootId;
+    showLoadingOverlay(message);
+    return bootId;
+}
+
+function isEditorBootstrapActive(bootId) {
+    return EditorState.activeBootstrapId === bootId;
+}
+
+function assertEditorBootstrapActive(bootId) {
+    if (!isEditorBootstrapActive(bootId)) {
+        throw new Error('Editor load superseded by a newer request');
+    }
+}
+
+function validateBootProjectData(data) {
+    const errors = [];
+    const warnings = [];
+    const scenes = Array.isArray(data?.scenes) ? data.scenes : [];
+
+    if (!data || typeof data !== 'object') {
+        errors.push('Project payload is missing');
+    }
+    if (!String(data?.project_id || '').trim()) {
+        errors.push('Project ID is missing');
+    }
+    if (!scenes.length) {
+        errors.push('Project has no scenes');
+    }
+
+    scenes.forEach((scene, index) => {
+        if (!scene) {
+            errors.push(`Scene ${index + 1} is missing`);
+            return;
+        }
+        if (!(Number(scene.duration) > 0)) {
+            warnings.push(`Scene ${scene.scene_id ?? scene.id ?? index + 1} has an invalid duration`);
+        }
+    });
+
+    return {
+        ok: errors.length === 0,
+        errors,
+        warnings,
+        sceneCount: scenes.length
+    };
+}
+
+async function waitForVoiceAudioVerification(loadPromise = EditorState.voiceLoadPromise, timeoutMs = 12000) {
+    if (!loadPromise || typeof loadPromise.then !== 'function') {
+        return { status: 'skipped', reason: 'no-voice-load-promise' };
+    }
+
+    try {
+        return await Promise.race([
+            loadPromise,
+            new Promise(resolve => setTimeout(() => resolve({
+                status: 'timeout',
+                reason: 'voice-audio-timeout',
+                timeoutMs
+            }), timeoutMs))
+        ]);
+    } catch (error) {
+        return {
+            status: 'error',
+            reason: error?.message || 'voice-audio-verification-failed'
+        };
+    }
+}
+
+function validateLoadedEditorState({ mediaReport, voiceReport }) {
+    const errors = [];
+    const warnings = [];
+
+    if (!EditorState.project?.id) {
+        errors.push('Editor project state is empty');
+    }
+    if (!Array.isArray(EditorState.scenes) || EditorState.scenes.length === 0) {
+        errors.push('Editor scenes were not initialized');
+    }
+    if (elements.previewCanvas && !EditorState.preview) {
+        errors.push('Preview canvas failed to initialize');
+    }
+
+    if (EditorState.sceneErrors.size > 0) {
+        warnings.push(`${EditorState.sceneErrors.size} scene${EditorState.sceneErrors.size === 1 ? '' : 's'} still have validation errors`);
+    }
+    if (mediaReport?.missingCount > 0) {
+        warnings.push(`${mediaReport.missingCount} scene asset${mediaReport.missingCount === 1 ? '' : 's'} could not be verified`);
+    }
+    if (voiceReport?.status === 'error' || voiceReport?.status === 'timeout') {
+        warnings.push('Voice audio could not be verified');
+    }
+
+    return {
+        ok: errors.length === 0,
+        errors,
+        warnings
+    };
+}
+
+async function bootstrapProjectIntoEditor(projectData, options = {}) {
+    const {
+        initialMessage = 'Initializing editor...',
+        readyMessage = 'Editor ready',
+        failureMessage = 'Failed to load project',
+        showNoDataOnError = false,
+        afterCoreLoad = null
+    } = options;
+
+    const bootId = beginEditorBootstrap(initialMessage);
+
+    try {
+        updateLoadingOverlay('Validating project data...');
+        const projectValidation = validateBootProjectData(projectData);
+        if (!projectValidation.ok) {
+            throw new Error(projectValidation.errors[0]);
+        }
+
+        hideNoDataOverlay();
+
+        updateLoadingOverlay('Loading fonts...');
+        await ensureFontRegistryLoaded();
+        assertEditorBootstrapActive(bootId);
+
+        updateLoadingOverlay('Loading project data...');
+        const { voiceLoadPromise } = await loadProjectData(projectData);
+        assertEditorBootstrapActive(bootId);
+
+        updateLoadingOverlay('Verifying scene media...');
+        const mediaReport = await loadProjectMediaWithProgress();
+        assertEditorBootstrapActive(bootId);
+
+        updateLoadingOverlay('Verifying voice audio...');
+        const voiceReport = await waitForVoiceAudioVerification(voiceLoadPromise);
+        assertEditorBootstrapActive(bootId);
+
+        updateLoadingOverlay('Applying saved editor state...');
+        if (typeof afterCoreLoad === 'function') {
+            await afterCoreLoad({ projectValidation, mediaReport, voiceReport });
+        }
+        assertEditorBootstrapActive(bootId);
+
+        updateLoadingOverlay('Final verification...');
+        validateScenes();
+        applySceneErrorStyles();
+        const finalValidation = validateLoadedEditorState({ mediaReport, voiceReport });
+        if (!finalValidation.ok) {
+            throw new Error(finalValidation.errors[0]);
+        }
+
+        await hideLoadingOverlay(bootId);
+        if (!isEditorBootstrapActive(bootId)) {
+            return { projectValidation, mediaReport, voiceReport, finalValidation, superseded: true };
+        }
+        EditorState.activeBootstrapId = 0;
+
+        if (finalValidation.warnings.length > 0) {
+            console.warn('Editor bootstrap warnings:', finalValidation.warnings);
+            showToast(finalValidation.warnings[0], 'warning');
+        }
+        if (readyMessage) {
+            showToast(readyMessage, 'success');
+        }
+
+        return { projectValidation, mediaReport, voiceReport, finalValidation };
+    } catch (error) {
+        if (isEditorBootstrapActive(bootId)) {
+            await hideLoadingOverlay(bootId);
+            if (isEditorBootstrapActive(bootId)) {
+                EditorState.activeBootstrapId = 0;
+                showToast(`${failureMessage}: ${error.message}`, 'error');
+                if (showNoDataOnError) {
+                    showNoDataOverlay();
+                }
+            }
+        }
+        throw error;
+    }
+}
+
+let _captionBridgeListenerBound = false;
+
+function ensureCaptionBridgeListener() {
+    if (_captionBridgeListenerBound) return;
+    window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'load-captions' && e.data.data) {
+            _receiveCaptionData(e.data.data);
+        }
+    });
+    _captionBridgeListenerBound = true;
+}
+
 function persistBootProjectData(raw, options = {}) {
     const bootData = buildBootProjectData(raw);
     if (!bootData) return null;
@@ -3220,6 +3506,7 @@ async function init() {
     // a project is loaded later via loadProjectFromServer().
     setupEventListeners();
     applySavedSettings();
+    ensureCaptionBridgeListener();
 
     const editorEntrySource = sessionStorage.getItem('sts-editor-entry-source') || 'internal';
     // One-shot signal from Studio shell.
@@ -3242,43 +3529,24 @@ async function init() {
 
     persistBootProjectData(data);
 
-    // Data exists - hide no-data overlay immediately (in case browser cached old HTML)
-    hideNoDataOverlay();
+    try {
+        await bootstrapProjectIntoEditor(data, {
+            initialMessage: 'Initializing editor...',
+            readyMessage: 'Editor ready',
+            failureMessage: 'Failed to initialize editor',
+            showNoDataOnError: true,
+            afterCoreLoad: async () => {
+                _loadCaptionsFromStorage();
+                _restoreSavedEditorState();
+            }
+        });
 
-    // Show single loading overlay that stays until everything is ready
-    showLoadingOverlay('Initializing editor...');
-
-    // Load font registry FIRST (custom + system fonts)
-    updateLoadingOverlay('Loading fonts...');
-    await loadFontRegistry();
-
-    // (setupEventListeners + applySavedSettings already called at top of init)
-
-    // Load project data
-    updateLoadingOverlay('Loading project data...');
-    await loadProjectData(data);
-
-    // Load assets with progress
-    await loadProjectMediaWithProgress();
-
-    // Load captions from localStorage if available
-    _loadCaptionsFromStorage();
-
-    // Listen for captions sent from parent studio via postMessage
-    window.addEventListener('message', (e) => {
-        if (e.data && e.data.type === 'load-captions' && e.data.data) {
-            _receiveCaptionData(e.data.data);
+        console.log('Video Editor initialized');
+    } catch (error) {
+        if (error.message !== 'Editor load superseded by a newer request') {
+            console.warn('Editor initialization failed:', error);
         }
-    });
-
-    // Hide loading overlay and show editor
-    // Restore saved editor state (music tracks, history, etc.)
-    _restoreSavedEditorState();
-
-    await hideLoadingOverlay();
-    showToast('Editor ready', 'success');
-
-    console.log('Video Editor initialized');
+    }
 }
 
 /**
@@ -3459,7 +3727,8 @@ async function loadProjectData(data) {
     updatePlayhead();
 
     // Load audio — use staged alignment URL when available
-    loadDefaultAudio(data);
+    EditorState.voiceLoadPromise = loadDefaultAudio(data);
+    return { voiceLoadPromise: EditorState.voiceLoadPromise };
 }
 
 /**
@@ -3470,7 +3739,7 @@ async function loadProjectMediaWithProgress() {
     const projectId = EditorState.project?.id;
     if (!projectId) {
         console.warn('No project ID available for auto-loading media');
-        return;
+        return { projectId: '', totalScenes: 0, loadedCount: 0, missingCount: 0, missingSceneIds: [] };
     }
 
     const visualScenes = EditorState.scenes.filter(s => s.type !== 'text');
@@ -3580,6 +3849,7 @@ async function loadProjectMediaWithProgress() {
     }
 
     const scenesWithMedia = EditorState.scenes.filter(s => s.mediaUrl);
+    const missingScenes = visualScenes.filter(scene => !scene.mediaUrl);
     console.log(`Auto-load complete: ${scenesWithMedia.length} scenes have mediaUrl`);
     persistBootProjectData({
         project_id: EditorState.project?.id,
@@ -3625,6 +3895,15 @@ async function loadProjectMediaWithProgress() {
     } else {
         showToast('No media found for this project', 'info');
     }
+
+    return {
+        projectId,
+        totalScenes,
+        loadedCount: scenesWithMedia.length,
+        missingCount: missingScenes.length,
+        missingSceneIds: missingScenes.map(scene => scene.id),
+        videoCount: scenesWithMedia.filter(scene => scene.isVideo).length
+    };
 }
 
 /**
@@ -3666,6 +3945,9 @@ function showLoadingOverlay(message = 'Loading...') {
         `;
         document.body.appendChild(overlay);
     }
+    overlay.classList.remove('fade-out');
+    const textEl = overlay.querySelector('.loading-text');
+    if (textEl) textEl.textContent = message;
     setEditorBootState('loading');
     return overlay;
 }
@@ -3681,18 +3963,24 @@ function updateLoadingOverlay(message) {
 /**
  * Hide loading overlay with fade
  */
-function hideLoadingOverlay() {
+function hideLoadingOverlay(bootId = null) {
     return new Promise(resolve => {
         const overlay = document.getElementById('loading-overlay');
         if (overlay) {
             overlay.classList.add('fade-out');
             setTimeout(() => {
+                if (bootId !== null && !isEditorBootstrapActive(bootId)) {
+                    resolve();
+                    return;
+                }
                 overlay.remove();
                 setEditorBootState('ready');
                 resolve();
             }, 300);
         } else {
-            setEditorBootState('ready');
+            if (bootId === null || isEditorBootstrapActive(bootId)) {
+                setEditorBootState('ready');
+            }
             resolve();
         }
     });
@@ -4224,23 +4512,36 @@ function getVideoMeta(videoUrl) {
 }
 
 /**
- * Load audio — uses staged alignment URL when available, falls back to working-assets/
+ * Load audio — uses staged voice audio when available, otherwise resolves the scene audio file.
  * Creates or updates the voice track in audioTracks[].
  */
-function loadDefaultAudio(stagedData) {
+async function loadDefaultAudio(stagedData) {
     const projectId = EditorState.project?.id || 'default';
-
-    // Determine audio source: staged alignment URL first, then working-assets fallback
-    let audioPath, audioFileName;
-    if (stagedData?.audio?.url) {
-        audioPath = stagedData.audio.url;
-        audioFileName = stagedData.audio.source_file || audioPath.split('/').pop();
-        console.log('Using staged audio URL:', audioPath);
-    } else {
-        audioFileName = 'main-audio.mp3';
-        audioPath = `working-assets/${projectId}/${audioFileName}`;
-        console.log('No staged audio — falling back to:', audioPath);
+    const voiceLoadToken = ++EditorState.voiceLoadToken;
+    const isStale = () => EditorState.voiceLoadToken !== voiceLoadToken;
+    const sourceFolder = EditorState.project?.sourceFolder || projectId;
+    const triedPaths = stagedData?._triedPaths || [];
+    const resolvedAudio = await resolveDefaultVoiceAudio(projectId, sourceFolder, stagedData?.audio);
+    if (isStale()) {
+        return { status: 'stale', reason: 'superseded-before-audio-resolve' };
     }
+    const candidatePaths = [
+        resolvedAudio?.url || '',
+        ...getDefaultVoiceAudioFallbacks(projectId, sourceFolder)
+    ].filter((path, index, arr) => path && arr.indexOf(path) === index && !triedPaths.includes(path));
+
+    if (!candidatePaths.length) {
+        console.warn('No voice audio path available for project:', projectId);
+        return {
+            status: 'skipped',
+            reason: 'no-voice-audio-candidate',
+            projectId,
+            sourceFolder
+        };
+    }
+    const audioPath = candidatePaths[0];
+    const audioFileName = getPathFileName(audioPath) || resolvedAudio?.source_file || 'voice.wav';
+    console.log('Using voice audio URL:', audioPath);
 
     // Create or reuse voice track
     let voiceTrack = getVoiceTrack();
@@ -4253,11 +4554,12 @@ function loadDefaultAudio(stagedData) {
     if (voiceTrack.element) { voiceTrack.element.pause(); voiceTrack.element.src = ''; }
     voiceTrack._gainNode = null;
 
-    const audio = new Audio(audioPath);
+    const audio = new Audio();
+    audio.preload = 'auto';
     voiceTrack.element = audio;
     voiceTrack.file = audioFileName;
     voiceTrack.path = audioPath;
-    voiceTrack.duration = stagedData?.audio?.duration || 0;
+    voiceTrack.duration = resolvedAudio?.duration || 0;
     voiceTrack.loaded = false;
     voiceTrack.error = false;
 
@@ -4266,66 +4568,107 @@ function loadDefaultAudio(stagedData) {
     EditorState.audio = voiceTrack;
     ensureTrackGainNode(voiceTrack);
 
-    // When audio metadata is loaded, get the duration
-    audio.addEventListener('loadedmetadata', () => {
-        voiceTrack.duration = audio.duration;
-        voiceTrack.loaded = true;
+    const loadResultPromise = new Promise((resolve) => {
+        let handledMetadata = false;
+        let settled = false;
+        const resolveResult = (result) => {
+            if (settled) return;
+            settled = true;
+            resolve(result);
+        };
 
-        const savedTrim = EditorState.savedAudioSettings || stagedData?.audio || null;
-        if (savedTrim) {
-            applyTrackTrimState(voiceTrack, {
-                timelineOffset: savedTrim.timelineOffset ?? savedTrim.timeline_offset ?? 0,
-                startOffset: savedTrim.startOffset ?? savedTrim.start_offset ?? 0,
-                trimmedDuration: savedTrim.trimmedDuration ?? savedTrim.trimmed_duration ?? null
+        const handleLoadedMetadata = () => {
+            if (handledMetadata || isStale()) return;
+            handledMetadata = true;
+            voiceTrack.duration = audio.duration;
+            voiceTrack.loaded = true;
+            voiceTrack.error = false;
+
+            const savedTrim = EditorState.savedAudioSettings || resolvedAudio || null;
+            if (savedTrim) {
+                applyTrackTrimState(voiceTrack, {
+                    timelineOffset: savedTrim.timelineOffset ?? savedTrim.timeline_offset ?? 0,
+                    startOffset: savedTrim.startOffset ?? savedTrim.start_offset ?? 0,
+                    trimmedDuration: savedTrim.trimmedDuration ?? savedTrim.trimmed_duration ?? null
+                });
+                console.log('Restored audio trim:', { startOffset: voiceTrack.startOffset, trimmedDuration: voiceTrack.trimmedDuration });
+            }
+
+            normalizeTimelineDurations(getTrackTimelineEnd(voiceTrack, audio.duration) || audio.duration);
+
+            recalculateDuration();
+            renderTimeline();
+            renderAllAudioTracks();
+            showToast('Audio loaded: ' + formatTimestamp(getTrackVisibleDuration(voiceTrack) || audio.duration), 'success');
+            resolveResult({
+                status: 'loaded',
+                projectId,
+                sourceFolder,
+                path: audioPath,
+                file: audioFileName,
+                duration: audio.duration
             });
-            console.log('Restored audio trim:', { startOffset: voiceTrack.startOffset, trimmedDuration: voiceTrack.trimmedDuration });
+        };
+
+        audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+        audio.addEventListener('error', async (e) => {
+            if (isStale()) {
+                resolveResult({ status: 'stale', path: audioPath, file: audioFileName });
+                return;
+            }
+
+            console.warn('Failed to load audio:', audioPath, e);
+
+            const nextTriedPaths = [...triedPaths, audioPath];
+            const lookedUpAudio = await resolveDefaultVoiceAudio(projectId, sourceFolder, null);
+            const nextFallbacks = [
+                lookedUpAudio?.url || '',
+                ...getDefaultVoiceAudioFallbacks(projectId, sourceFolder)
+            ].filter((path, index, arr) => path && arr.indexOf(path) === index && !nextTriedPaths.includes(path));
+
+            if (nextFallbacks.length > 0) {
+                const nextPath = nextFallbacks[0];
+                console.log('Trying audio fallback:', nextPath);
+                const nextResult = await loadDefaultAudio({
+                    audio: {
+                        ...(resolvedAudio || {}),
+                        ...(lookedUpAudio || {}),
+                        url: nextPath,
+                        source_file: getPathFileName(nextPath)
+                    },
+                    _triedPaths: nextTriedPaths
+                });
+                resolveResult(nextResult);
+                return;
+            }
+
+            voiceTrack.loaded = false;
+            voiceTrack.error = true;
+            renderAllAudioTracks();
+            showToast('Audio not found', 'warning');
+            resolveResult({
+                status: 'error',
+                projectId,
+                sourceFolder,
+                path: audioPath,
+                file: audioFileName,
+                triedPaths: nextTriedPaths
+            });
+        });
+
+        audio.src = audioPath;
+        audio.load();
+        if (audio.readyState >= 1 && Number.isFinite(audio.duration)) {
+            queueMicrotask(handleLoadedMetadata);
         }
 
-        normalizeTimelineDurations(getTrackTimelineEnd(voiceTrack, audio.duration) || audio.duration);
-
-        recalculateDuration();
-        renderTimeline();
+        // Initial render (before duration is known)
         renderAllAudioTracks();
-        showToast('Audio loaded: ' + formatTimestamp(getTrackVisibleDuration(voiceTrack) || audio.duration), 'success');
     });
 
-    audio.addEventListener('error', (e) => {
-        console.warn('Failed to load audio:', audioPath, e);
-
-        // Build a queue of fallback paths to try
-        const triedPaths = stagedData?._triedPaths || [audioPath];
-        const sourceFolder = EditorState.project?.sourceFolder || projectId;
-        const fallbackPaths = [
-            // working-assets alt extension
-            ...(audioFileName.endsWith('.wav')
-                ? [`working-assets/${projectId}/main-audio.mp3`]
-                : [`working-assets/${projectId}/main-audio.wav`]),
-            // alignments folder
-            `/output/alignments/${sourceFolder}/voice.wav`,
-            `/output/alignments/${sourceFolder}/voice.mp3`,
-            // tts folder
-            `/output/tts/${sourceFolder}/voice.wav`,
-            `/output/tts/${sourceFolder}/voice.mp3`,
-        ].filter(p => !triedPaths.includes(p));
-
-        if (fallbackPaths.length > 0) {
-            const nextPath = fallbackPaths[0];
-            console.log('Trying audio fallback:', nextPath);
-            loadDefaultAudio({
-                audio: { url: nextPath, source_file: audioFileName, duration: stagedData?.audio?.duration || 0 },
-                _triedPaths: [...triedPaths, nextPath]
-            });
-            return;
-        }
-
-        voiceTrack.loaded = false;
-        voiceTrack.error = true;
-        renderAllAudioTracks();
-        showToast(`Audio not found`, 'warning');
-    });
-
-    // Initial render (before duration is known)
-    renderAllAudioTracks();
+    EditorState.voiceLoadPromise = loadResultPromise;
+    return loadResultPromise;
 }
 
 /**
@@ -4333,6 +4676,8 @@ function loadDefaultAudio(stagedData) {
  * Updates the voice track in audioTracks[].
  */
 function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
+    const voiceLoadToken = ++EditorState.voiceLoadToken;
+    const isStale = () => EditorState.voiceLoadToken !== voiceLoadToken;
     // Create or reuse voice track
     let voiceTrack = getVoiceTrack();
     if (!voiceTrack) {
@@ -4344,7 +4689,8 @@ function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
     if (voiceTrack.element) { voiceTrack.element.pause(); voiceTrack.element.src = ''; }
     voiceTrack._gainNode = null;
 
-    const audio = new Audio(audioPath);
+    const audio = new Audio();
+    audio.preload = 'auto';
     voiceTrack.element = audio;
     voiceTrack.file = audioFileName;
     voiceTrack.path = audioPath;
@@ -4357,46 +4703,86 @@ function loadAudioFromURL(audioPath, audioFileName, hintDuration) {
     EditorState.audio = voiceTrack;
     ensureTrackGainNode(voiceTrack);
 
-    audio.addEventListener('loadedmetadata', () => {
-        voiceTrack.duration = audio.duration;
-        voiceTrack.loaded = true;
-        const savedTrim = EditorState.savedAudioSettings || null;
-        if (savedTrim) {
-            applyTrackTrimState(voiceTrack, {
-                timelineOffset: savedTrim.timelineOffset ?? savedTrim.timeline_offset ?? 0,
-                startOffset: savedTrim.startOffset ?? savedTrim.start_offset ?? 0,
-                trimmedDuration: savedTrim.trimmedDuration ?? savedTrim.trimmed_duration ?? null
+    const loadResultPromise = new Promise((resolve) => {
+        let handledMetadata = false;
+        let settled = false;
+        const resolveResult = (result) => {
+            if (settled) return;
+            settled = true;
+            resolve(result);
+        };
+
+        const handleLoadedMetadata = () => {
+            if (handledMetadata || isStale()) return;
+            handledMetadata = true;
+            voiceTrack.duration = audio.duration;
+            voiceTrack.loaded = true;
+            voiceTrack.error = false;
+            const savedTrim = EditorState.savedAudioSettings || null;
+            if (savedTrim) {
+                applyTrackTrimState(voiceTrack, {
+                    timelineOffset: savedTrim.timelineOffset ?? savedTrim.timeline_offset ?? 0,
+                    startOffset: savedTrim.startOffset ?? savedTrim.start_offset ?? 0,
+                    trimmedDuration: savedTrim.trimmedDuration ?? savedTrim.trimmed_duration ?? null
+                });
+            }
+
+            const audioDur = getTrackTimelineEnd(voiceTrack, audio.duration) || audio.duration;
+            const scenesDur = getScenesDuration();
+            if (EditorState.scenes.length > 0 && audioDur > scenesDur + 0.05) {
+                const lastScene = EditorState.scenes[EditorState.scenes.length - 1];
+                const gap = parseFloat((audioDur - scenesDur).toFixed(3));
+                lastScene.duration = parseFloat((lastScene.duration + gap).toFixed(3));
+            } else if (EditorState.scenes.length > 0 && scenesDur > audioDur + 0.05) {
+                const ratio = audioDur / scenesDur;
+                EditorState.scenes.forEach(s => {
+                    s.duration = parseFloat((s.duration * ratio).toFixed(3));
+                });
+                renderTimeline();
+            }
+
+            recalculateDuration();
+            renderAllAudioTracks();
+            saveProjectEdits();
+            showToast('Audio loaded: ' + formatTimestamp(getTrackVisibleDuration(voiceTrack) || audio.duration), 'success');
+            resolveResult({
+                status: 'loaded',
+                path: audioPath,
+                file: audioFileName,
+                duration: audio.duration
             });
+        };
+
+        audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+        audio.addEventListener('error', () => {
+            if (isStale()) {
+                resolveResult({ status: 'stale', path: audioPath, file: audioFileName });
+                return;
+            }
+
+            voiceTrack.loaded = false;
+            voiceTrack.error = true;
+            renderAllAudioTracks();
+            showToast(`Audio not found: ${audioFileName}`, 'warning');
+            resolveResult({
+                status: 'error',
+                path: audioPath,
+                file: audioFileName
+            });
+        });
+
+        audio.src = audioPath;
+        audio.load();
+        if (audio.readyState >= 1 && Number.isFinite(audio.duration)) {
+            queueMicrotask(handleLoadedMetadata);
         }
 
-        const audioDur = getTrackTimelineEnd(voiceTrack, audio.duration) || audio.duration;
-        const scenesDur = getScenesDuration();
-        if (EditorState.scenes.length > 0 && audioDur > scenesDur + 0.05) {
-            const lastScene = EditorState.scenes[EditorState.scenes.length - 1];
-            const gap = parseFloat((audioDur - scenesDur).toFixed(3));
-            lastScene.duration = parseFloat((lastScene.duration + gap).toFixed(3));
-        } else if (EditorState.scenes.length > 0 && scenesDur > audioDur + 0.05) {
-            const ratio = audioDur / scenesDur;
-            EditorState.scenes.forEach(s => {
-                s.duration = parseFloat((s.duration * ratio).toFixed(3));
-            });
-            renderTimeline();
-        }
-
-        recalculateDuration();
         renderAllAudioTracks();
-        saveProjectEdits();
-        showToast('Audio loaded: ' + formatTimestamp(getTrackVisibleDuration(voiceTrack) || audio.duration), 'success');
     });
 
-    audio.addEventListener('error', () => {
-        voiceTrack.loaded = false;
-        voiceTrack.error = true;
-        renderAllAudioTracks();
-        showToast(`Audio not found: ${audioFileName}`, 'warning');
-    });
-
-    renderAllAudioTracks();
+    EditorState.voiceLoadPromise = loadResultPromise;
+    return loadResultPromise;
 }
 
 // Listen for audio load requests from the TTS picker
@@ -4563,10 +4949,13 @@ function renderAllAudioTracks() {
         const isVoice = track.type === 'voice';
         const color = track.color || AUDIO_TRACK_COLORS[track.type] || AUDIO_TRACK_COLORS.voice;
         const trackLabel = track.label || (isVoice ? 'Voice' : track.type === 'music' ? 'Music' : 'FX');
+        const displayFile = isVoice
+            ? (getPathFileName(track.path) || track.file || trackLabel)
+            : (track.file || getPathFileName(track.path) || trackLabel);
 
         // Build clip HTML
         let clipHTML;
-        if (track.file) {
+        if (track.file || track.path) {
             const duration = isVoice
                 ? (getTrackTimelineDuration(track, EditorState.project?.totalDuration || timelineDur) || track.duration || EditorState.project?.totalDuration || 0)
                 : (getTrackTimelineDuration(track, timelineDur) || (track.loop ? timelineDur : track.duration));
@@ -4583,7 +4972,7 @@ function renderAllAudioTracks() {
             const selectedClass = EditorState.selectedAudioTrack?.id === track.id ? ' selected' : '';
             clipHTML = `
                 <div class="audio-clip-wrap" data-track-id="${track.id}" style="width:${width}px; margin-left:${offsetPx}px;">
-                    <span class="audio-clip-tag" style="background:${color}">${track.file}</span>
+                    <span class="audio-clip-tag" style="background:${color}">${displayFile}</span>
                     <div class="audio-clip-universal ${errorClass}${selectedClass}" data-track-id="${track.id}" style="width:100%; border-left: 3px solid ${color};">
                         <canvas class="audio-waveform-canvas" data-track-id="${track.id}"></canvas>
                         <span class="audio-clip-duration">${statusText}</span>
@@ -5340,11 +5729,15 @@ function resetToInitialState() {
 
         try {
             // Stop playback and release audio before resetting
+            cancelPendingProjectSave();
             if (EditorState.isPlaying) togglePlayback();
             for (const track of EditorState.audioTracks) {
                 if (track.element) { track.element.pause(); track.element.src = ''; }
             }
             EditorState.audioTracks = [];
+            EditorState.audio = null;
+            EditorState.audioElement = null;
+            EditorState.savedAudioSettings = null;
             EditorState.selectedAudioTrack = null;
 
             const res = await fetch(`/api/editor/reset/${encodeURIComponent(pid)}`, { method: 'POST' });
@@ -5355,6 +5748,7 @@ function resetToInitialState() {
 
             // Clear all localStorage edits and history for this project
             clearProjectEdits();
+            clearEditorBootCaches();
 
             // Reload the project from initial state
             await loadProjectFromServer(pid);

@@ -782,9 +782,6 @@ def open_asset_scene_folder(project_id, scene_index):
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
     folder = os.path.join(ASSETS_DIR, safe_id, str(scene_index))
     if not os.path.isdir(folder):
-        # Fall back to project root
-        folder = os.path.join(ASSETS_DIR, safe_id)
-    if not os.path.isdir(folder):
         return jsonify({"error": "Folder not found"}), 404
     folder = os.path.abspath(folder)
     try:

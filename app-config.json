@@ -31,7 +31,7 @@
     "sts-sidebar"
   ],
   "user": {
-    "sts-tts-prompt": "The human brain consumes twenty watts of power — less than a dim light bulb — yet it runs a simulation of reality so detailed you forget it's a simulation. Everything you see, hear, and touch is a reconstruction. Your brain is locked in a dark, silent skull, and it builds the entire world from electrical signals. Color doesn't exist outside your mind. Neither does sound. You are living inside a model, and you have never once stepped outside it.",
+    "sts-tts-prompt": "",
     "sts-sidebar": true,
     "sts-normalize": true,
     "sts-clean": true,
@@ -49,9 +49,9 @@
     "sts-tts-blendRatio": 50,
     "sts-tts-blendMethod": "slerp",
     "sts-tts-genMode": "generate",
-    "sts-tts-speed": "1",
-    "sts-tts-voiceOpen": "",
-    "sts-auto-type": true,
+    "sts-tts-speed": "1.0",
+    "sts-tts-voiceOpen": "0",
+    "sts-auto-type": false,
     "sts-analysis-collapsed": true,
     "sts-scenes-webhook-enabled": true,
     "sts-vol-voice": 1,

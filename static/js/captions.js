@@ -77,7 +77,7 @@ function captionsCloseAlignPicker() {
 function _capUpdateSource(align) {
   const el = $('#captions-source-label');
   if (!align) { el.textContent = 'No alignment loaded'; el.style.color = 'var(--text-muted)'; return; }
-  const wc = align.word_count || (align.word_alignment || align.alignment || []).length;
+  const wc = align.word_count || (align.word_alignment || []).length;
   const dur = align.duration_seconds || 0;
   el.textContent = `${wc} words · ${dur.toFixed(1)}s · ${align.source_file || align.folder || ''}`;
   el.style.color = 'var(--accent)';
@@ -101,7 +101,7 @@ async function generateCaptions() {
   const align = STATE.captionAlignment;
   if (!align) { toast('Load alignment first', 'error'); return; }
 
-  const alignment = align.word_alignment || align.alignment || [];
+  const alignment = align.word_alignment || [];
   if (!alignment.length) { toast('No word alignment data', 'error'); return; }
 
   const wordsPerGroup = parseInt($('#cap-words-per-group')?.value || '3');

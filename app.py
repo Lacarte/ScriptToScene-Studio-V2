@@ -16,7 +16,7 @@ from loguru import logger
 from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
-    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
+    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR, APP_CONFIG_PATH,
 )
 from studio.security import is_loopback_remote
@@ -147,13 +147,13 @@ _CLEAR_MODULES = [
     {"page": "Scenes", "module": "Scene Generator", "dir": SCENES_DIR},
     {"page": "Assets", "module": "Asset Manager", "dir": ASSETS_DIR},
     {"page": "Captions", "module": "Captions", "dir": CAPTIONS_DIR},
-    {"page": "Editor", "module": "Timeline Editor", "dir": EDITOR_SAVE_DIR},
+    {"page": "Editor", "module": "Timeline Editor", "dir": PROJECTS_DIR},
     {"page": "Music", "module": "Music Library", "dir": MUSIC_DIR},
     {"page": "Exports", "module": "Export Library", "dir": EXPORT_DIR},
 ]
 _PROJECT_DIRS = [
     ALIGN_DIR, SCENES_DIR, ASSETS_DIR, SEGMENTER_DIR,
-    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, EDITOR_SAVE_DIR,
+    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR,
 ]
 

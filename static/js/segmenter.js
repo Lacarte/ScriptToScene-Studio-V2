@@ -78,12 +78,12 @@ function segHandleUpload(input) {
   reader.onload = (e) => {
     try {
       const data = JSON.parse(e.target.result);
-      const alignment = data.alignment || (Array.isArray(data) ? data : null);
+      const alignment = data.alignment;
       if (!alignment || !alignment.length) throw new Error('No alignment array found');
       STATE.segmenterAlignment = {
         alignment,
         transcript: data.transcript || '',
-        folder: data.source_folder || data.folder || file.name.replace(/\.json$/, ''),
+        folder: data.folder || file.name.replace(/\.json$/, ''),
         project_id: data.project_id || '',
       };
       setModuleBadge('segmenter', data.project_id);

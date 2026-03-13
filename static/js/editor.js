@@ -207,7 +207,7 @@ async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '', edi
     if (!alignment && STATE.captionAlignment) {
       const folder = STATE.captionAlignment.folder || '';
       if (!projectSourceFolder || !folder || folder === projectSourceFolder) {
-        alignment = STATE.captionAlignment.word_alignment || STATE.captionAlignment.alignment;
+        alignment = STATE.captionAlignment.word_alignment;
         sourceFolder = folder;
       }
     }

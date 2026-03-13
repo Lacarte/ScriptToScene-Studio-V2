@@ -32,7 +32,6 @@ MODELS_DIR = os.path.join(ROOT_DIR, "models")
 TIMELINE_EDITOR_DIR = os.path.join(ROOT_DIR, "timeline-editor", "frontend")
 BIN_DIR = os.path.join(ROOT_DIR, "bin")
 FONTS_DIR = os.path.join(ROOT_DIR, "assets", "fonts")
-EDITOR_SAVE_DIR = os.path.join(OUTPUT_DIR, "editor")
 EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
 PROJECTS_DIR = os.path.join(OUTPUT_DIR, "projects")
 APP_ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
@@ -42,7 +41,7 @@ APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app-config.json")
 # ---------------------------------------------------------------------------
 for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, ASSETS_DIR,
            SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
-           EDITOR_SAVE_DIR, EXPORT_DIR, PROJECTS_DIR):
+           EXPORT_DIR, PROJECTS_DIR):
     os.makedirs(_d, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -88,18 +87,10 @@ def _collect_existing_project_ids() -> set[str]:
             if os.path.isdir(os.path.join(search_dir, entry)):
                 existing.add(entry)
 
-    if os.path.isdir(EDITOR_SAVE_DIR):
-        for entry in os.listdir(EDITOR_SAVE_DIR):
-            full_path = os.path.join(EDITOR_SAVE_DIR, entry)
-            if os.path.isdir(full_path):
+    if os.path.isdir(PROJECTS_DIR):
+        for entry in os.listdir(PROJECTS_DIR):
+            if os.path.isdir(os.path.join(PROJECTS_DIR, entry)):
                 existing.add(entry)
-                continue
-            if entry.endswith(".json"):
-                stem = entry[:-5]
-                if stem.endswith("-work@in@progress"):
-                    stem = stem[: -len("-work@in@progress")]
-                if stem:
-                    existing.add(stem)
 
     return existing
 

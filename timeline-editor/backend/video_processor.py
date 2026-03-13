@@ -408,6 +408,19 @@ class VideoProcessor:
         img.save(output_path, 'PNG')
         logger.debug("Text image saved: {}", output_path)
 
+    def _probe_duration(self, video_path):
+        """Get duration of a video file in seconds via ffprobe."""
+        try:
+            r = subprocess.run(
+                [FFMPEG_BIN.replace('ffmpeg', 'ffprobe'), '-v', 'error',
+                 '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                capture_output=True, text=True, timeout=10,
+            )
+            return float(r.stdout.strip())
+        except Exception:
+            return 0.0
+
     def _apply_scene_text_overlay(self, input_path, output_path, overlay_config, temp_dir, index):
         """Burn a timed text overlay onto a rendered image/video scene clip."""
         duration = max(0.0, float(overlay_config.get('duration', 0) or 0))
@@ -434,6 +447,14 @@ class VideoProcessor:
         overlay_image_path = os.path.join(temp_dir, f"scene_{index:03d}_text_overlay.png")
         self._render_text_image(overlay_text_cfg, overlay_image_path)
 
+        # Probe the input video duration to cap the looped overlay input.
+        # -loop 1 on a still image creates an infinite stream; without an
+        # explicit -t, -shortest is unreliable with -filter_complex and FFmpeg
+        # hangs until the timeout fires.
+        video_dur = self._probe_duration(input_path)
+        if video_dur <= 0:
+            video_dur = 120  # safe fallback cap
+
         start_time = max(0.0, float(overlay_config.get('start_time', 0) or 0))
         end_time = start_time + duration
         filter_complex = (
@@ -443,14 +464,14 @@ class VideoProcessor:
         cmd = [
             FFMPEG_BIN, '-y',
             '-i', input_path,
-            '-loop', '1', '-i', overlay_image_path,
+            '-loop', '1', '-t', f'{video_dur:.3f}', '-i', overlay_image_path,
             '-filter_complex', filter_complex,
             '-map', '[v]',
             '-map', '0:a?',
             '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
             '-pix_fmt', self.pixel_format,
             '-c:a', 'copy',
-            '-shortest',
+            '-t', f'{video_dur:.3f}',
             output_path
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
