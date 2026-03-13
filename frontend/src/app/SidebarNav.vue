@@ -1,12 +1,18 @@
 <script setup>
+import { ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 const props = defineProps({ collapsed: Boolean })
 const emit = defineEmits(['toggle'])
 const route = useRoute()
+const audioPlaying = ref(false)
 
 function isActive(path) {
   return route.path === path
+}
+
+function toggleAudio() {
+  // Will be wired to global audio state later
 }
 </script>
 
@@ -15,9 +21,8 @@ function isActive(path) {
     <!-- Brand -->
     <div class="brand">
       <div class="brand-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"
-          stroke-linecap="round" stroke-linejoin="round" width="28" height="28">
-          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round">
+          <rect x="2" y="2" width="20" height="20" rx="2" />
           <path d="M7 2v20" /><path d="M2 12h5" />
           <circle cx="14.5" cy="12" r="3" />
         </svg>
@@ -32,63 +37,72 @@ function isActive(path) {
     <div class="nav-list">
       <!-- Pipeline -->
       <router-link to="/pipeline" class="nav-item" :class="{ active: isActive('/pipeline') }" title="Pipeline Dashboard">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
         <span v-show="!collapsed" class="nav-label">PIPELINE</span>
       </router-link>
+
+      <div class="divider" />
 
       <!-- TTS / Alignment / Segmenter group -->
       <div class="nav-group">
         <router-link to="/tts" class="nav-item" :class="{ active: isActive('/tts') }" title="Text to Speech">
-          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="20" height="20"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           <span v-show="!collapsed" class="nav-label">TTS</span>
         </router-link>
 
         <router-link to="/timing" class="nav-item" :class="{ active: isActive('/timing') }" title="Force Alignment">
-          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="20" height="20"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="19" cy="17" r="2"/></svg></span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="19" cy="17" r="2"/></svg>
           <span v-show="!collapsed" class="nav-label">ALIGNMENT</span>
         </router-link>
 
         <router-link to="/segmenter" class="nav-item" :class="{ active: isActive('/segmenter') }" title="Scene Segmenter">
-          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg></span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
           <span v-show="!collapsed" class="nav-label">SEGMENTER</span>
         </router-link>
       </div>
 
       <!-- Scenes -->
       <router-link to="/scenes" class="nav-item" :class="{ active: isActive('/scenes') }" title="Scene Generator">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M4 11v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><path d="M4 11V7a2 2 0 012-2h12a2 2 0 012 2v4"/><path d="M4 11h16"/><path d="M7 5l3 6"/><path d="M11 5l3 6"/><path d="M15 5l3 6"/></svg></span>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><path d="M4 11V7a2 2 0 012-2h12a2 2 0 012 2v4"/><path d="M4 11h16"/><path d="M7 5l3 6"/><path d="M11 5l3 6"/><path d="M15 5l3 6"/></svg>
         <span v-show="!collapsed" class="nav-label">SCENES</span>
       </router-link>
 
       <!-- Assets -->
       <router-link to="/assets" class="nav-item" :class="{ active: isActive('/assets') }" title="Asset Manager">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="20" height="20"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
         <span v-show="!collapsed" class="nav-label">ASSETS</span>
       </router-link>
 
       <!-- Editor -->
       <router-link to="/editor" class="nav-item" :class="{ active: isActive('/editor') }" title="Timeline Editor">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 17h5"/><path d="M17 7h5"/></svg></span>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 17h5"/><path d="M17 7h5"/></svg>
         <span v-show="!collapsed" class="nav-label">EDITOR</span>
       </router-link>
 
       <!-- Exports -->
       <router-link to="/export-library" class="nav-item" :class="{ active: isActive('/export-library') }" title="Export Library">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/></svg></span>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/></svg>
         <span v-show="!collapsed" class="nav-label">EXPORTS</span>
       </router-link>
     </div>
 
     <!-- Bottom -->
     <div class="nav-bottom">
+      <button class="nav-item audio-btn" :class="{ 'audio-playing': audioPlaying }" :title="audioPlaying ? 'Audio playing' : 'No audio playing'" @click="toggleAudio">
+        <svg class="nav-icon audio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="10" width="3" height="4" rx="1.5" fill="currentColor" stroke="none"/>
+          <rect x="8" y="7" width="3" height="10" rx="1.5" fill="currentColor" stroke="none"/>
+          <rect x="13" y="4" width="3" height="16" rx="1.5" fill="currentColor" stroke="none"/>
+          <rect x="18" y="8" width="3" height="8" rx="1.5" fill="currentColor" stroke="none"/>
+        </svg>
+        <span v-show="!collapsed" class="nav-label">AUDIO</span>
+      </button>
       <router-link to="/settings" class="nav-item" :class="{ active: isActive('/settings') }" title="Settings">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         <span v-show="!collapsed" class="nav-label">SETTINGS</span>
       </router-link>
       <button class="nav-item" @click="emit('toggle')" title="Toggle sidebar">
-        <span class="nav-icon collapse-icon" :class="{ flipped: collapsed }">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="18" height="18"><path d="M15 18l-6-6 6-6"/></svg>
-        </span>
+        <svg class="nav-icon collapse-icon" :class="{ flipped: collapsed }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
         <span v-show="!collapsed" class="nav-label">Collapse</span>
       </button>
     </div>
@@ -130,27 +144,30 @@ function isActive(path) {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px;
+  gap: 12px;
+  padding: 20px;
   border-bottom: 1px solid var(--border);
-  min-height: 62px;
 }
 
 .brand-icon {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #4ECDC4, #2FB8AE);
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 2px 12px rgba(78, 205, 196, 0.3);
 }
 
 .brand-text h1 {
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
   line-height: 1.1;
+  letter-spacing: -0.025em;
   white-space: nowrap;
 }
 
@@ -174,7 +191,7 @@ function isActive(path) {
   padding: 12px 0;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 2px;
   overflow-y: auto;
 }
 
@@ -199,20 +216,18 @@ function isActive(path) {
   padding: 11px 20px;
   margin: 2px 8px;
   border-radius: 10px;
+  cursor: pointer;
   color: var(--text-secondary);
-  text-decoration: none;
-  font-family: inherit;
+  transition: all 0.2s;
   font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  position: relative;
   border: none;
   background: none;
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
   width: calc(100% - 16px);
   text-align: left;
-  position: relative;
+  font-family: inherit;
+  text-decoration: none;
 }
 
 .nav-item:hover {
@@ -240,17 +255,46 @@ function isActive(path) {
   flex-shrink: 0;
   width: 20px;
   height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 8px 16px;
 }
 
 .nav-bottom {
   border-top: 1px solid var(--border);
-  padding: 8px 0;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 2px;
+}
+
+.nav-bottom .nav-item {
+  margin: 0;
+  width: 100%;
+}
+
+/* Audio button */
+@keyframes audio-playing-pulse {
+  0%, 100% { background: rgba(167, 139, 250, 0.05); }
+  50%      { background: rgba(167, 139, 250, 0.25); }
+}
+
+.audio-btn.audio-playing {
+  color: var(--accent-secondary);
+  animation: audio-playing-pulse 1.2s ease-in-out infinite;
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.4);
+}
+
+.audio-btn.audio-playing .audio-icon {
+  animation: audio-icon-bounce 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes audio-icon-bounce {
+  0%   { transform: scale(1); }
+  100% { transform: scale(1.15); }
 }
 
 .collapse-icon {
