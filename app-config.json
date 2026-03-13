@@ -31,7 +31,7 @@
     "sts-sidebar"
   ],
   "user": {
-    "sts-tts-prompt": "The Buddhist concept of impermanence  anicca  teaches that suffering does not come from change itself, but from our resistance to it. Everything you love will change. Everyone you know will die. Every moment you experience has already passed by the time you recognize it. This is not meant to be depressing; it is meant to be liberating. If nothing is permanent, then pain is not permanent either. The wave that knocks you down is the same water that lifts you up. Letting go is not giving up — it is acknowledging that the river was never yours to hold.\n",
+    "sts-tts-prompt": "The human brain consumes twenty watts of power — less than a dim light bulb — yet it runs a simulation of reality so detailed you forget it's a simulation. Everything you see, hear, and touch is a reconstruction. Your brain is locked in a dark, silent skull, and it builds the entire world from electrical signals. Color doesn't exist outside your mind. Neither does sound. You are living inside a model, and you have never once stepped outside it.",
     "sts-sidebar": true,
     "sts-normalize": true,
     "sts-clean": true,
@@ -51,7 +51,7 @@
     "sts-tts-genMode": "generate",
     "sts-tts-speed": "1",
     "sts-tts-voiceOpen": "",
-    "sts-auto-type": false,
+    "sts-auto-type": true,
     "sts-analysis-collapsed": true,
     "sts-scenes-webhook-enabled": true,
     "sts-vol-voice": 1,

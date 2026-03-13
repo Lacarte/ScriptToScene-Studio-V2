@@ -32,6 +32,7 @@ from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
 from .normalize import (
     normalize_for_tts, clean_for_tts, tts_breathing_blocks,
     format_breathing_blocks, validate_brackets,
+    _protect_kokoro, _restore_kokoro,
 )
 from .audio import pad_audio, concatenate_chunks, run_loudnorm, _find_ffmpeg
 
@@ -474,16 +475,20 @@ def normalize_text():
     if not text.strip():
         return jsonify({"error": "No text provided"}), 400
 
-    validity = validate_brackets(text)
+    # Protect Kokoro links so their brackets don't affect validation/extraction
+    text_safe, kokoro_saved = _protect_kokoro(text)
+    validity = validate_brackets(text_safe)
     if validity == "well_formed":
-        blocks = re.findall(r'\[([^\[\]]+)\]', text)
+        blocks = re.findall(r'\[([^\[\]]+)\]', text_safe)
+        blocks = [_restore_kokoro(b, kokoro_saved) for b in blocks]
         normalized_blocks = [normalize_for_tts(b) for b in blocks if b.strip()]
         if len(normalized_blocks) <= 1:
             formatted = normalized_blocks[0] if normalized_blocks else text.strip()
         else:
             formatted = "\n\n".join(f"[{b}]" for b in normalized_blocks)
     else:
-        stripped = re.sub(r'[\[\]]', '', text)
+        stripped = re.sub(r'[\[\]]', '', text_safe)
+        stripped = _restore_kokoro(stripped, kokoro_saved)
         normalized = normalize_for_tts(stripped)
         formatted = format_breathing_blocks(normalized)
 
@@ -644,10 +649,13 @@ def generate(data: TtsGenerateRequest):
     skip_clean = data.skip_clean
 
     # Match breathing-block brackets [text] but NOT Kokoro links [word](...)
-    pre_blocks = re.findall(r'\[([^\[\]]+)\](?!\()', prompt)
+    # Protect Kokoro links first so their inner brackets don't break extraction
+    prompt_safe, kokoro_saved = _protect_kokoro(prompt)
+    pre_blocks = re.findall(r'\[([^\[\]]+)\](?!\()', prompt_safe)
     if pre_blocks and len(pre_blocks) >= 2:
         blocks = []
         for b in pre_blocks:
+            b = _restore_kokoro(b, kokoro_saved)
             if not skip_clean:
                 b = re.sub(r"[*_#`~]", "", b)
                 b = re.sub(r"https?://\S+", "link", b)
@@ -658,6 +666,10 @@ def generate(data: TtsGenerateRequest):
     else:
         tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
         blocks = tts_breathing_blocks(tts_prompt)
+
+    if len(blocks) > 1:
+        logger.debug("Breathing blocks ({}): {}", len(blocks),
+                      [b[:60] + "..." if len(b) > 60 else b for b in blocks])
 
     # Multi-block: chunked background generation with SSE progress
     if len(blocks) > 1:

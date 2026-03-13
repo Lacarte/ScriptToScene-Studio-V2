@@ -61,8 +61,32 @@ def concatenate_chunks(chunks: list, sample_rate: int = 24000,
     return np.concatenate(parts)
 
 
+def _parse_loudnorm_stats(stderr: str) -> dict | None:
+    """Extract measured loudness stats from ffmpeg loudnorm pass-1 output."""
+    import json as _json
+    # loudnorm prints a JSON block in its summary output
+    idx = stderr.rfind('"input_i"')
+    if idx == -1:
+        return None
+    # Walk back to the opening brace
+    brace = stderr.rfind('{', 0, idx)
+    if brace == -1:
+        return None
+    end = stderr.find('}', idx)
+    if end == -1:
+        return None
+    try:
+        return _json.loads(stderr[brace:end + 1])
+    except Exception:
+        return None
+
+
 def run_loudnorm(wav_path):
-    """Normalize audio volume using ffmpeg loudnorm. Overwrites in-place."""
+    """Normalize audio volume using two-pass ffmpeg loudnorm. Overwrites in-place.
+
+    Two-pass avoids the "settling" artefact that distorts the first ~100 ms of
+    audio in single-pass mode.
+    """
     ffmpeg = _find_ffmpeg()
     if not ffmpeg:
         return False
@@ -73,22 +97,51 @@ def run_loudnorm(wav_path):
             sr = info.samplerate
         except Exception:
             sr = 24000
-        result = subprocess.run(
+
+        # ── Pass 1: measure loudness stats ──
+        pass1 = subprocess.run(
             [ffmpeg, "-nostdin", "-y", "-i", wav_path,
-             "-af", "loudnorm=I=-16:LRA=11:TP=-1.5",
+             "-af", "loudnorm=I=-16:LRA=11:TP=-1.5:print_format=json",
+             "-f", "null", os.devnull],
+            capture_output=True, timeout=60,
+        )
+        if pass1.returncode != 0:
+            stderr = pass1.stderr.decode(errors='replace')
+            logger.error("loudnorm pass-1 failed (rc={}): {}", pass1.returncode, stderr[-500:])
+            return False
+
+        stats = _parse_loudnorm_stats(pass1.stderr.decode(errors='replace'))
+        if not stats:
+            logger.warning("Could not parse loudnorm stats – falling back to single-pass")
+            # Fallback: single-pass with relaxed TP
+            af = "loudnorm=I=-16:LRA=11:TP=-1.5"
+        else:
+            af = (
+                f"loudnorm=I=-16:LRA=11:TP=-1.5"
+                f":measured_I={stats['input_i']}"
+                f":measured_LRA={stats['input_lra']}"
+                f":measured_TP={stats['input_tp']}"
+                f":measured_thresh={stats['input_thresh']}"
+                f":linear=true"
+            )
+
+        # ── Pass 2: apply correction with known measurements ──
+        pass2 = subprocess.run(
+            [ffmpeg, "-nostdin", "-y", "-i", wav_path,
+             "-af", af,
              "-ar", str(sr), "-ac", "1",
              tmp_path],
             capture_output=True, timeout=60,
         )
-        if result.returncode == 0 and os.path.exists(tmp_path):
+        if pass2.returncode == 0 and os.path.exists(tmp_path):
             os.replace(tmp_path, wav_path)
             return True
         else:
-            stderr = result.stderr.decode(errors='replace')
+            stderr = pass2.stderr.decode(errors='replace')
             err_lines = [ln for ln in stderr.splitlines()
                          if ln.strip() and not ln.startswith(('  ', 'ffmpeg version', '(c)', 'built with', 'configuration:', 'lib'))]
             err_msg = '\n'.join(err_lines[-5:]) if err_lines else stderr[-500:]
-            logger.error("ffmpeg loudnorm failed (rc={}): {}", result.returncode, err_msg)
+            logger.error("ffmpeg loudnorm pass-2 failed (rc={}): {}", pass2.returncode, err_msg)
             return False
     except subprocess.TimeoutExpired:
         logger.warning("Loudnorm timed out for {}", wav_path)
