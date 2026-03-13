@@ -792,6 +792,36 @@ def open_asset_scene_folder(project_id, scene_index):
         return jsonify({"error": str(e)}), 500
 
 
+@assets_bp.route("/api/assets/thumbnails/<project_id>", methods=["POST"])
+def generate_video_thumbnails(project_id):
+    """Generate _thumb.jpg for all video files in a project that lack one."""
+    safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
+    project_dir = os.path.join(ASSETS_DIR, safe_id)
+    if not os.path.isdir(project_dir):
+        return jsonify({"error": "Project not found"}), 404
+
+    generated = []
+    for scene_dir in sorted(os.listdir(project_dir)):
+        scene_path = os.path.join(project_dir, scene_dir)
+        if not os.path.isdir(scene_path):
+            continue
+        for fname in os.listdir(scene_path):
+            lower = fname.lower()
+            if not lower.endswith(VIDEO_EXTS):
+                continue
+            fpath = os.path.join(scene_path, fname)
+            thumb = _video_thumbnail(fpath)
+            if thumb:
+                thumb_name = os.path.basename(thumb)
+                generated.append({
+                    "scene": scene_dir,
+                    "thumb_url": f"/output/assets/{safe_id}/{scene_dir}/{thumb_name}",
+                    "video_url": f"/output/assets/{safe_id}/{scene_dir}/{fname}",
+                })
+
+    return jsonify({"project_id": safe_id, "thumbnails": generated})
+
+
 @assets_bp.route("/output/assets/<path:filename>")
 def serve_asset(filename):
     """Serve generated asset files (images and videos)."""

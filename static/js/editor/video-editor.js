@@ -447,7 +447,15 @@ function getSceneThumbSource(scene) {
     if (!scene) return null;
     const isVid = scene.isVideo || isVideoFile(scene.mediaUrl);
     if (isVid) {
-        return scene.videoThumb || scene.mediaUrl || scene.image_url || null;
+        // Prefer extracted/cached data-URL or server-assigned thumb
+        if (scene.videoThumb) return scene.videoThumb;
+        // Derive server-side _thumb.jpg path from video URL (never return raw .mp4)
+        const vidUrl = scene.mediaUrl || scene.image_url;
+        if (vidUrl) {
+            const dotIdx = vidUrl.lastIndexOf('.');
+            if (dotIdx !== -1) return vidUrl.substring(0, dotIdx) + '_thumb.jpg';
+        }
+        return null;
     }
     if (scene.mediaUrl) return scene.mediaUrl;
     if (scene.image_url) return scene.image_url;
@@ -489,7 +497,7 @@ function getSceneClipThumbMarkup(scene, icon) {
             ? '<span class="media-image-badge" data-tooltip="Image"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>'
             : '';
     const mediaMarkup = thumbSrc
-        ? `<img src="${thumbSrc}" alt="Scene ${scene.id}">`
+        ? `<img src="${thumbSrc}" alt="Scene ${scene.id}" onerror="this.style.display='none'">`
         : icon;
 
     return `
@@ -3831,18 +3839,52 @@ async function loadProjectMediaWithProgress() {
         }
     }
 
-    // ---- Phase 3: fetch video metadata in parallel for all video scenes ----
-    const videoScenes = EditorState.scenes.filter(s => s.isVideo && s.mediaUrl && !s.videoDuration);
+    // ---- Phase 3: generate server-side thumbnails for video scenes ----
+    const videoScenes = EditorState.scenes.filter(s => s.isVideo && s.mediaUrl && !s.videoThumb);
     if (videoScenes.length) {
-        updateLoadingOverlay(`Loading ${videoScenes.length} video metadata...`);
-        const metaResults = await Promise.all(
-            videoScenes.map(s => getVideoMeta(s.mediaUrl).then(meta => ({ scene: s, meta })))
-        );
-        for (const { scene, meta } of metaResults) {
-            if (meta) {
-                scene.videoDuration = meta.duration;
-                scene.videoThumb = meta.thumbDataUrl;
-                updateSceneClipThumb(scene.id, scene.mediaUrl, true, meta.thumbDataUrl);
+        updateLoadingOverlay(`Generating ${videoScenes.length} video thumbnails...`);
+
+        // Ask server to generate _thumb.jpg for all videos in this project
+        try {
+            const thumbRes = await fetch(`/api/assets/thumbnails/${projectId}`, { method: 'POST' });
+            if (thumbRes.ok) {
+                const thumbData = await thumbRes.json();
+                const thumbMap = {};
+                for (const t of (thumbData.thumbnails || [])) {
+                    thumbMap[t.video_url] = t.thumb_url;
+                }
+                let matched = 0;
+                for (const scene of videoScenes) {
+                    const thumbUrl = thumbMap[scene.mediaUrl] || thumbMap[scene.image_url];
+                    if (thumbUrl) {
+                        scene.videoThumb = thumbUrl;
+                        updateSceneClipThumb(scene.id, scene.mediaUrl, true, thumbUrl);
+                        matched++;
+                    }
+                }
+                console.log(`Server thumbnails: ${(thumbData.thumbnails || []).length} generated, ${matched}/${videoScenes.length} matched`);
+            } else {
+                console.warn('Server thumbnail request failed:', thumbRes.status);
+            }
+        } catch (e) {
+            console.warn('Server thumbnail generation failed, trying client-side:', e);
+        }
+
+        // Client-side fallback for any remaining scenes without thumbs
+        const stillMissing = videoScenes.filter(s => !s.videoThumb && !s.videoDuration);
+        if (stillMissing.length) {
+            updateLoadingOverlay(`Loading ${stillMissing.length} video metadata...`);
+            const metaResults = await Promise.all(
+                stillMissing.map(s => getVideoMeta(s.mediaUrl).then(meta => ({ scene: s, meta })))
+            );
+            for (const { scene, meta } of metaResults) {
+                if (meta) {
+                    scene.videoDuration = meta.duration;
+                    if (meta.thumbDataUrl) {
+                        scene.videoThumb = meta.thumbDataUrl;
+                        updateSceneClipThumb(scene.id, scene.mediaUrl, true, meta.thumbDataUrl);
+                    }
+                }
             }
         }
     }
@@ -4121,11 +4163,29 @@ function updateSceneClipThumb(sceneId, mediaPath, isVideo = false, videoThumbUrl
         thumb.innerHTML = `<img src="${videoThumbUrl}" alt="Scene ${sceneId}">${videoBadgeHtml}`;
     } else if (isVideo) {
         thumb.classList.add('loading');
+        // Try client-side canvas extraction first, fall back to server _thumb.jpg
         getVideoMeta(mediaPath).then(meta => {
             if (meta?.thumbDataUrl) {
                 thumb.innerHTML = `<img src="${meta.thumbDataUrl}" alt="Scene ${sceneId}">${videoBadgeHtml}`;
+                thumb.classList.remove('loading');
+            } else if (mediaPath) {
+                // Fall back to server-side _thumb.jpg
+                const dotIdx = mediaPath.lastIndexOf('.');
+                const thumbPath = dotIdx !== -1 ? mediaPath.substring(0, dotIdx) + '_thumb.jpg' : null;
+                if (thumbPath) {
+                    const img = new Image();
+                    img.onload = () => {
+                        thumb.innerHTML = `<img src="${thumbPath}" alt="Scene ${sceneId}">${videoBadgeHtml}`;
+                        thumb.classList.remove('loading');
+                    };
+                    img.onerror = () => thumb.classList.remove('loading');
+                    img.src = thumbPath;
+                } else {
+                    thumb.classList.remove('loading');
+                }
+            } else {
+                thumb.classList.remove('loading');
             }
-            thumb.classList.remove('loading');
         });
     } else {
         thumb.classList.add('loading');
@@ -4484,24 +4544,27 @@ function getVideoMeta(videoUrl) {
         const timeout = setTimeout(() => {
             video.src = '';
             resolve(null);
-        }, 8000);
-        const done = (result) => { clearTimeout(timeout); resolve(result); };
+        }, 12000);
+        const done = (result) => { clearTimeout(timeout); video.src = ''; resolve(result); };
         const video = document.createElement('video');
         video.muted = true;
-        video.preload = 'metadata';
-        video.onloadedmetadata = () => {
+        video.crossOrigin = 'anonymous';
+        video.preload = 'auto';
+        video.onloadeddata = () => {
             const duration = video.duration;
             // Seek to 1s or 10% for a representative frame
             video.currentTime = Math.min(1, duration * 0.1);
             video.onseeked = () => {
                 let thumbDataUrl = null;
                 try {
-                    const c = document.createElement('canvas');
-                    c.width = video.videoWidth;
-                    c.height = video.videoHeight;
-                    c.getContext('2d').drawImage(video, 0, 0);
-                    thumbDataUrl = c.toDataURL('image/jpeg', 0.7);
-                } catch (_) { /* cross-origin, ignore */ }
+                    if (video.videoWidth > 0 && video.videoHeight > 0) {
+                        const c = document.createElement('canvas');
+                        c.width = video.videoWidth;
+                        c.height = video.videoHeight;
+                        c.getContext('2d').drawImage(video, 0, 0);
+                        thumbDataUrl = c.toDataURL('image/jpeg', 0.7);
+                    }
+                } catch (_) { /* cross-origin / tainted canvas */ }
                 done({ duration, thumbDataUrl });
             };
         };
