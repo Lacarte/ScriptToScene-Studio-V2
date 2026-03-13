@@ -319,19 +319,31 @@ def _get_source_folder(project_id: str) -> str | None:
 
 
 def _resolve_audio_url(source_folder: str) -> dict | None:
-    """Resolve audio file URL from the alignment folder."""
-    folder_path = os.path.join(ALIGN_DIR, source_folder)
-    if not os.path.isdir(folder_path):
-        return None
-    try:
-        for f in os.listdir(folder_path):
-            if f.endswith((".wav", ".mp3")):
-                return {
-                    "url": f"/output/alignments/{source_folder}/{f}",
-                    "source_file": f,
-                }
-    except OSError:
-        pass
+    """Resolve audio file URL from the alignment or TTS folder."""
+    # Try alignment folder first (post-timing audio)
+    align_path = os.path.join(ALIGN_DIR, source_folder)
+    if os.path.isdir(align_path):
+        try:
+            for f in os.listdir(align_path):
+                if f.endswith((".wav", ".mp3")):
+                    return {
+                        "url": f"/output/alignments/{source_folder}/{f}",
+                        "source_file": f,
+                    }
+        except OSError:
+            pass
+    # Fall back to TTS folder (pre-timing audio)
+    tts_path = os.path.join(TTS_DIR, source_folder)
+    if os.path.isdir(tts_path):
+        try:
+            for f in os.listdir(tts_path):
+                if f.endswith((".wav", ".mp3")):
+                    return {
+                        "url": f"/output/tts/{source_folder}/{f}",
+                        "source_file": f,
+                    }
+        except OSError:
+            pass
     return None
 
 
@@ -349,7 +361,9 @@ def _resolve_project_audio(data: dict, project_id: str):
         if track.get("type") == "voice" and track.get("path") != correct_url:
             logger.info("Fixing voice track for {}: {} -> {}", project_id, track.get("path"), correct_url)
             track["path"] = correct_url
-            track["file"] = resolved["source_file"]
+            # Preserve original display name; only set file if missing
+            if not track.get("file"):
+                track["file"] = resolved["source_file"]
             break
 
 

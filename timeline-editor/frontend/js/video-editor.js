@@ -1569,9 +1569,9 @@ function loadProjectEdits() {
 function _updateResetButtonVisibility() {
     const resetBtn = document.getElementById('share-reset-initial');
     if (!resetBtn) return;
-    const hasEdits = EditorState.editHistory && EditorState.editHistory.length > 0;
-    const isWip = EditorState.project?.loadedFrom === 'wip';
-    resetBtn.style.display = (hasEdits || isWip) ? '' : 'none';
+    // Always show the button when a project is loaded — the confirmation
+    // dialog and backend validation guard against invalid resets.
+    resetBtn.style.display = EditorState.project?.id ? '' : 'none';
 }
 
 function recordEdit(action, sceneId, field, oldValue, newValue) {
@@ -4310,10 +4310,9 @@ function loadDefaultAudio(stagedData) {
 
         if (fallbackPaths.length > 0) {
             const nextPath = fallbackPaths[0];
-            const nextFile = nextPath.split('/').pop();
             console.log('Trying audio fallback:', nextPath);
             loadDefaultAudio({
-                audio: { url: nextPath, source_file: nextFile, duration: 0 },
+                audio: { url: nextPath, source_file: audioFileName, duration: stagedData?.audio?.duration || 0 },
                 _triedPaths: [...triedPaths, nextPath]
             });
             return;
@@ -4569,7 +4568,7 @@ function renderAllAudioTracks() {
         let clipHTML;
         if (track.file) {
             const duration = isVoice
-                ? (getTrackTimelineDuration(track, EditorState.project?.totalDuration || timelineDur) || (track.loaded ? track.duration : (EditorState.project?.totalDuration || 0)))
+                ? (getTrackTimelineDuration(track, EditorState.project?.totalDuration || timelineDur) || track.duration || EditorState.project?.totalDuration || 0)
                 : (getTrackTimelineDuration(track, timelineDur) || (track.loop ? timelineDur : track.duration));
             const width = duration * pps;
             const offsetPx = timeToPixels(getTrackTimelineOffset(track));
@@ -4657,19 +4656,21 @@ function renderAllAudioTracks() {
         });
     });
 
-    // Draw waveforms for tracks that have data, kick off generation for those that don't
-    for (const track of tracks) {
-        if (!track.file) continue;
-        const canvas = container.querySelector(`.audio-waveform-canvas[data-track-id="${track.id}"]`);
-        if (track._waveformData) {
-            drawWaveformCanvas(canvas, track);
-        } else if (!track._waveformLoading) {
-            generateWaveformData(track).then(() => {
-                const c = container.querySelector(`.audio-waveform-canvas[data-track-id="${track.id}"]`);
-                drawWaveformCanvas(c, track);
-            });
+    // Draw waveforms after DOM layout so canvas has correct dimensions
+    requestAnimationFrame(() => {
+        for (const track of tracks) {
+            if (!track.file) continue;
+            const canvas = container.querySelector(`.audio-waveform-canvas[data-track-id="${track.id}"]`);
+            if (track._waveformData) {
+                drawWaveformCanvas(canvas, track);
+            } else if (!track._waveformLoading) {
+                generateWaveformData(track).then(() => {
+                    const c = container.querySelector(`.audio-waveform-canvas[data-track-id="${track.id}"]`);
+                    drawWaveformCanvas(c, track);
+                });
+            }
         }
-    }
+    });
 }
 
 /**
