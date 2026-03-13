@@ -598,9 +598,9 @@ function truncate(str, len = 45) {
 }
 
 .page-subtitle {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
-  margin: 0;
+  margin-top: 4px;
 }
 
 /* ---- Card ---- */
@@ -610,6 +610,11 @@ function truncate(str, len = 45) {
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
+  transition: border-color 0.2s;
+}
+
+.card:hover {
+  border-color: var(--border-hover);
 }
 
 .card-heading {
@@ -617,7 +622,7 @@ function truncate(str, len = 45) {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 12px;
+  margin: 0 0 12px;
 }
 
 /* ---- Source ---- */

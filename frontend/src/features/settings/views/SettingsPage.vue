@@ -172,6 +172,11 @@ function featureLabel(val) {
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
+  transition: border-color 0.2s;
+}
+
+.card:hover {
+  border-color: var(--border-hover);
 }
 
 .card-heading {
@@ -179,7 +184,7 @@ function featureLabel(val) {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 8px;
+  margin: 0 0 8px;
 }
 
 /* ---- Feature Status ---- */

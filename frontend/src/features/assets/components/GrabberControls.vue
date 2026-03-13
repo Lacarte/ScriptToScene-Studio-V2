@@ -31,11 +31,9 @@ const emit = defineEmits([
 const providers = [
   { value: 'grok', label: 'Grok' },
   { value: 'midjourney', label: 'Midjourney' },
-  { value: 'meta-ai', label: 'Meta AI' },
+  { value: 'meta-ai', label: 'Meta AI (Imagine)' },
   { value: 'kie-ai', label: 'Kie AI' },
 ]
-
-const aspectRatios = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 
 const showMidjourneyArgs = computed(() => props.provider === 'midjourney')
 const showGrokOptions = computed(() => props.provider === 'grok')
@@ -43,11 +41,8 @@ const showKieOptions = computed(() => props.provider === 'kie-ai')
 
 const progressText = computed(() => {
   const p = props.progress
-  if (!p.total) return ''
-  const parts = [`${p.ready}/${p.total} ready`]
-  if (p.error) parts.push(`${p.error} errors`)
-  if (p.pending && props.grabberRunning) parts.push(`${p.pending} pending`)
-  return parts.join(' \u00B7 ')
+  if (!p.total) return '0 / 0 complete'
+  return `${p.ready} / ${p.total} complete`
 })
 
 const progressPercent = computed(() => props.progress.percent)
@@ -55,10 +50,8 @@ const progressPercent = computed(() => props.progress.percent)
 
 <template>
   <section class="controls-card card">
-    <h3 class="card-heading">Controls</h3>
-
-    <div class="controls-grid">
-      <!-- Provider -->
+    <!-- Controls row -->
+    <div class="controls-row">
       <div class="control-group">
         <label class="control-label">Provider</label>
         <select
@@ -72,32 +65,29 @@ const progressPercent = computed(() => props.progress.percent)
         </select>
       </div>
 
-      <!-- Aspect Ratio -->
-      <div class="control-group">
-        <label class="control-label">Aspect Ratio</label>
-        <div class="ratio-buttons">
-          <button
-            v-for="ar in aspectRatios"
-            :key="ar"
-            class="ratio-btn"
-            :class="{ active: aspectRatio === ar }"
-            @click="emit('update:aspectRatio', ar)"
-          >
-            {{ ar }}
-          </button>
-        </div>
-      </div>
-
       <!-- Midjourney arguments -->
-      <div v-if="showMidjourneyArgs" class="control-group full-width">
+      <div v-if="showMidjourneyArgs" class="control-group">
         <label class="control-label">Arguments</label>
         <input
           type="text"
-          class="control-input"
-          placeholder="--ar 16:9 --style raw --v 6"
+          class="control-select"
+          placeholder="--c 70 --v 7 --ar 9:16"
           :value="arguments"
           @input="emit('update:arguments', $event.target.value)"
         />
+      </div>
+
+      <div class="control-group">
+        <label class="control-label">Aspect Ratio</label>
+        <select
+          class="control-select"
+          :value="aspectRatio"
+          @change="emit('update:aspectRatio', $event.target.value)"
+        >
+          <option value="9:16">9:16 (Vertical)</option>
+          <option value="16:9">16:9 (Landscape)</option>
+          <option value="1:1">1:1 (Square)</option>
+        </select>
       </div>
 
       <!-- Grok options -->
@@ -106,35 +96,33 @@ const progressPercent = computed(() => props.progress.percent)
           <label class="control-label">Mode</label>
           <select
             class="control-select"
-            :value="providerOptions.grok_mode || 'default'"
+            :value="providerOptions.grok_mode || 'video'"
             @change="emit('update:providerOption', 'grok_mode', $event.target.value)"
           >
-            <option value="default">Default</option>
-            <option value="fast">Fast</option>
-            <option value="quality">Quality</option>
+            <option value="video">Video</option>
+            <option value="image">Image</option>
           </select>
         </div>
         <div class="control-group">
           <label class="control-label">Quality</label>
           <select
             class="control-select"
-            :value="providerOptions.grok_quality || 'standard'"
+            :value="providerOptions.grok_quality || '480p'"
             @change="emit('update:providerOption', 'grok_quality', $event.target.value)"
           >
-            <option value="standard">Standard</option>
-            <option value="high">High</option>
+            <option value="480p">480p</option>
+            <option value="720p">720p</option>
           </select>
         </div>
         <div class="control-group">
           <label class="control-label">Duration</label>
           <select
             class="control-select"
-            :value="providerOptions.grok_duration || '5'"
+            :value="providerOptions.grok_duration || '6s'"
             @change="emit('update:providerOption', 'grok_duration', $event.target.value)"
           >
-            <option value="5">5s</option>
-            <option value="10">10s</option>
-            <option value="15">15s</option>
+            <option value="6s">6s</option>
+            <option value="10s">10s</option>
           </select>
         </div>
       </template>
@@ -145,63 +133,51 @@ const progressPercent = computed(() => props.progress.percent)
           <label class="control-label">Model</label>
           <select
             class="control-select"
-            :value="providerOptions.model || 'default'"
+            :value="providerOptions.model || 'google/nano-banana'"
             @change="emit('update:providerOption', 'model', $event.target.value)"
           >
-            <option value="default">Default</option>
-            <option value="flux">Flux</option>
-            <option value="sdxl">SDXL</option>
+            <option value="google/nano-banana">Nano Banana — $0.02</option>
+            <option value="nano-banana-2">Nano Banana 2 — $0.04</option>
+            <option value="nano-banana-pro">Nano Banana Pro — $0.09</option>
           </select>
         </div>
         <div class="control-group">
           <label class="control-label">Resolution</label>
           <select
             class="control-select"
-            :value="providerOptions.resolution || '1024x1024'"
+            :value="providerOptions.resolution || '1'"
             @change="emit('update:providerOption', 'resolution', $event.target.value)"
           >
-            <option value="512x512">512x512</option>
-            <option value="768x768">768x768</option>
-            <option value="1024x1024">1024x1024</option>
-            <option value="1280x720">1280x720</option>
-            <option value="1920x1080">1920x1080</option>
+            <option value="1">1K</option>
+            <option value="2">2K</option>
           </select>
         </div>
         <div class="control-group">
-          <label class="control-label">Output Format</label>
+          <label class="control-label">Format</label>
           <select
             class="control-select"
-            :value="providerOptions.output_format || 'png'"
+            :value="providerOptions.output_format || 'jpg'"
             @change="emit('update:providerOption', 'output_format', $event.target.value)"
           >
-            <option value="png">PNG</option>
             <option value="jpg">JPG</option>
-            <option value="webp">WebP</option>
+            <option value="png">PNG</option>
           </select>
         </div>
       </template>
     </div>
 
-    <!-- Auto-type -->
-    <label class="auto-type-toggle">
-      <input
-        type="checkbox"
-        :checked="providerOptions.auto_type"
-        @change="emit('update:autoType', $event.target.checked)"
-      />
-      <span>Auto-type prompts into provider</span>
-    </label>
-
-    <!-- Start / Stop -->
-    <div class="action-row">
+    <!-- Grabber + Progress row -->
+    <div class="grabber-row">
       <button
         v-if="!grabberRunning"
-        class="btn-start"
+        class="gen-btn btn-grabber"
         :disabled="!sceneCount"
         @click="emit('start')"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="5,3 19,12 5,21" />
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:6px">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
         Start Grabber
       </button>
@@ -210,103 +186,96 @@ const progressPercent = computed(() => props.progress.percent)
         class="btn-stop"
         @click="emit('stop')"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:6px">
           <rect x="6" y="6" width="12" height="12" rx="1" />
         </svg>
         Stop Grabber
       </button>
+
+      <label class="auto-type-toggle">
+        <input
+          type="checkbox"
+          :checked="providerOptions.auto_type"
+          @change="emit('update:autoType', $event.target.checked)"
+        />
+        <span>Auto&#x2011;type</span>
+      </label>
+
+      <span class="progress-text">{{ progressText }}</span>
+
+      <button
+        class="action-btn"
+        style="padding:6px 14px;font-size:11px;margin-left:auto"
+        title="Retry failed/pending downloads"
+        @click="emit('resend-selected')"
+      >Retry Downloads</button>
+      <button
+        class="action-btn"
+        style="padding:6px 14px;font-size:11px"
+        @click="emit('select-all')"
+      >Download All</button>
     </div>
 
-    <!-- Progress display -->
-    <div v-if="progress.total" class="progress-section">
-      <div class="progress-text">{{ progressText }}</div>
+    <!-- Progress bar -->
+    <div v-if="progress.total && grabberRunning" class="progress-bar-wrap">
       <div class="progress-bar-track">
-        <div
-          class="progress-bar-fill"
-          :style="{ width: progressPercent + '%' }"
-        />
+        <div class="progress-bar-fill" :style="{ width: progressPercent + '%' }" />
       </div>
     </div>
 
     <!-- Selection bar -->
-    <div v-if="sceneCount" class="selection-bar">
+    <div v-if="selectedCount > 0" class="selection-bar">
       <span class="selection-count">{{ selectedCount }} selected</span>
-      <div class="selection-actions">
-        <button class="btn-sel" @click="emit('select-all')">Select All</button>
-        <button class="btn-sel" @click="emit('select-pending')">Select Pending</button>
-        <button
-          v-if="selectedCount"
-          class="btn-sel btn-sel-accent"
-          @click="emit('resend-selected')"
-        >
-          Resend Selected
-        </button>
-        <button
-          v-if="selectedCount"
-          class="btn-sel"
-          @click="emit('select-none')"
-        >
-          Clear
-        </button>
-      </div>
+      <button class="action-btn" style="padding:5px 12px;font-size:10px;font-weight:600;background:rgba(78,205,196,0.12);color:var(--accent);border:1px solid rgba(78,205,196,0.25);border-radius:6px" @click="emit('resend-selected')">Resend Selected</button>
+      <button class="action-btn" style="padding:5px 12px;font-size:10px" @click="emit('select-pending')">Select Pending</button>
+      <button class="action-btn" style="padding:5px 12px;font-size:10px" @click="emit('select-all')">Toggle All</button>
     </div>
   </section>
 </template>
 
 <style scoped>
 .controls-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
   padding: 20px;
-}
-
-.card-heading {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
   margin-bottom: 16px;
+  transition: border-color 0.2s;
 }
 
-/* ---- Controls grid ---- */
-.controls-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+.controls-card:hover {
+  border-color: var(--border-hover);
+}
+
+/* ---- Controls row (inline flex like original) ---- */
+.controls-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
   margin-bottom: 14px;
-}
-
-.control-group.full-width {
-  grid-column: 1 / -1;
 }
 
 .control-label {
   display: block;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 6px;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
 }
 
-.control-select,
-.control-input {
-  width: 100%;
-  font-size: 13px;
-  font-family: var(--font-mono);
+.control-select {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: inherit;
   color: var(--text);
-  background: var(--bg-deeper, #0a0a0a);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  transition: border-color 0.15s;
+  background: var(--bg-darkest);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s;
 }
 
-.control-select:focus,
-.control-input:focus {
-  outline: none;
+.control-select:focus {
   border-color: var(--accent);
 }
 
@@ -315,177 +284,140 @@ const progressPercent = computed(() => props.progress.percent)
   color: var(--text);
 }
 
-/* ---- Ratio buttons ---- */
-.ratio-buttons {
+/* ---- Grabber row (inline flex like original) ---- */
+.grabber-row {
   display: flex;
+  gap: 12px;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 
-.ratio-btn {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--bg-deeper, #0a0a0a);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
+.gen-btn.btn-grabber {
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #3BA89F);
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
+  border: none;
   cursor: pointer;
-  transition: all 0.15s;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.ratio-btn.active {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: rgba(78, 205, 196, 0.08);
+.gen-btn.btn-grabber:hover:not(:disabled) {
+  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
+  transform: translateY(-1px);
 }
 
-.ratio-btn:hover:not(.active) {
-  border-color: var(--text-secondary);
+.gen-btn.btn-grabber:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-/* ---- Auto-type ---- */
+.btn-stop {
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: white;
+  background: var(--coral);
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.btn-stop:hover {
+  opacity: 0.9;
+}
+
 .auto-type-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 14px;
+  gap: 5px;
   cursor: pointer;
 }
 
 .auto-type-toggle input {
   accent-color: var(--accent);
-  width: 15px;
-  height: 15px;
-}
-
-/* ---- Start / Stop ---- */
-.action-row {
-  margin-bottom: 14px;
-}
-
-.btn-start,
-.btn-stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  padding: 10px 24px;
-  border: none;
-  border-radius: 8px;
   cursor: pointer;
-  transition: opacity 0.15s;
 }
 
-.btn-start {
-  background: var(--accent);
-  color: #0d1117;
-}
-
-.btn-stop {
-  background: var(--coral);
-  color: #fff;
-}
-
-.btn-start:hover,
-.btn-stop:hover {
-  opacity: 0.9;
-}
-
-.btn-start:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* ---- Progress ---- */
-.progress-section {
-  margin-bottom: 14px;
+.auto-type-toggle span {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .progress-text {
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
+  color: var(--text-muted);
+}
+
+.action-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---- Progress bar ---- */
+.progress-bar-wrap {
+  margin-top: 10px;
 }
 
 .progress-bar-track {
-  width: 100%;
-  height: 6px;
-  background: var(--bg-deeper, #0a0a0a);
-  border-radius: 3px;
+  height: 3px;
+  background: var(--bg-darkest);
+  border-radius: 2px;
   overflow: hidden;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), #3BA89F);
+  border-radius: 2px;
   transition: width 0.4s ease;
 }
 
-/* ---- Selection ---- */
+/* ---- Selection bar ---- */
 .selection-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(78, 205, 196, 0.06);
+  border: 1px solid rgba(78, 205, 196, 0.2);
 }
 
 .selection-count {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.selection-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.btn-sel {
+  font-family: var(--font-mono);
   font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--bg-deeper, #0a0a0a);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-sel:hover {
-  color: var(--text);
-  border-color: var(--text-secondary);
-}
-
-.btn-sel-accent {
+  font-weight: 600;
   color: var(--accent);
-  border-color: var(--accent);
-  background: rgba(78, 205, 196, 0.06);
-}
-
-.btn-sel-accent:hover {
-  color: var(--accent);
-  background: rgba(78, 205, 196, 0.12);
-}
-
-@media (max-width: 600px) {
-  .controls-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .selection-bar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
 }
 </style>

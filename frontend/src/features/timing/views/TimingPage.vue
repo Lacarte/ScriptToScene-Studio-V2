@@ -37,6 +37,28 @@ const hasResults = computed(() => {
   return timing.alignment.value && timing.alignment.value.length > 0
 })
 
+const alignmentDuration = computed(() => {
+  if (timing.duration.value && isFinite(timing.duration.value)) return timing.duration.value
+  const words = timing.alignment.value || []
+  return words.length ? words[words.length - 1].end || 0 : 0
+})
+
+const resultsStats = computed(() => {
+  const parts = []
+  if (timing.projectId.value) parts.push(timing.projectId.value)
+  if (timing.wordCount.value) parts.push(`${timing.wordCount.value} words`)
+  if (alignmentDuration.value) parts.push(`${alignmentDuration.value.toFixed(1)}s duration`)
+  if (timing.inferenceTime.value !== null && isFinite(timing.inferenceTime.value)) {
+    parts.push(`${timing.inferenceTime.value.toFixed(2)}s processing`)
+  }
+  return parts.join(' · ')
+})
+
+const historyCountLabel = computed(() => {
+  const count = timing.history.value.length
+  return `${count} file${count === 1 ? '' : 's'}`
+})
+
 /* ── File handling ── */
 const ACCEPTED = ['.wav', '.mp3', '.flac', '.ogg']
 const ACCEPT_STR = ACCEPTED.join(',')
@@ -232,7 +254,11 @@ function formatDuration(secs) {
 function formatDate(ts) {
   if (!ts) return ''
   try {
-    return new Date(ts).toLocaleString()
+    const diff = (Date.now() - new Date(ts).getTime()) / 1000
+    if (diff < 60) return 'just now'
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+    return `${Math.floor(diff / 86400)}d ago`
   } catch {
     return ts
   }
@@ -251,29 +277,23 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="timing-page">
-    <!-- Header -->
     <div class="page-header">
       <div class="title-row">
         <h2 class="page-title">Force Alignment</h2>
-        <span v-if="timing.projectId.value" class="project-badge">{{ timing.projectId.value }}</span>
+        <span v-if="timing.projectId.value" class="module-project-badge visible">{{ timing.projectId.value }}</span>
       </div>
-      <p class="page-subtitle">Align transcript to audio with word-level timestamps</p>
+      <p class="page-subtitle">Align audio to text with word-level timestamps</p>
     </div>
 
-    <!-- TTS Source -->
-    <section class="card">
+    <section class="card legacy-card">
       <label class="section-label">From TTS</label>
       <div class="tts-source-row">
-        <button class="action-btn action-btn-lg" @click="useTtsResult">Use Current Result</button>
-        <button class="action-btn action-btn-lg" @click="openTtsPicker">Pick from History</button>
+        <button class="action-btn action-btn-lg hover-accent" @click="useTtsResult">Use Current Result</button>
+        <button class="action-btn action-btn-lg hover-accent" @click="openTtsPicker">Pick from History</button>
       </div>
-      <div v-if="timing.sourceFile.value" class="source-info">
-        <span class="source-tag">Source</span>
-        <span class="source-name">{{ timing.sourceFile.value }}</span>
-      </div>
+      <p v-if="timing.sourceFile.value" class="source-info">{{ timing.sourceFile.value }}</p>
     </section>
 
-    <!-- TTS Picker Modal -->
     <div v-if="showTtsPicker" class="modal-backdrop" @click.self="showTtsPicker = false">
       <div class="modal-card">
         <div class="modal-header">
@@ -299,8 +319,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Audio File -->
-    <section class="card">
+    <section class="card legacy-card">
       <label class="section-label">Audio File</label>
       <div
         class="drop-zone"
@@ -331,16 +350,16 @@ onBeforeUnmount(() => {
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
           <span>Drop a WAV/MP3 file here or click to browse</span>
+          <span class="drop-subtext">WAV, MP3, FLAC, OGG</span>
         </div>
       </div>
     </section>
 
-    <!-- Transcript -->
-    <section class="card">
+    <section class="card legacy-card">
       <label class="section-label">Transcript</label>
       <textarea
         v-model="textInput"
-        class="transcript-input"
+        class="input-field transcript-input"
         placeholder="Paste the transcript text that matches the audio..."
         rows="5"
       />
@@ -350,9 +369,8 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <!-- Run Button -->
     <button
-      class="gen-btn"
+      class="gen-btn run-btn"
       :disabled="!canRun"
       @click="runAlignment"
     >
@@ -363,7 +381,6 @@ onBeforeUnmount(() => {
       <span>{{ timing.isAligning.value ? 'Aligning...' : 'Run Alignment' }}</span>
     </button>
 
-    <!-- Hidden audio element -->
     <audio
       ref="audioEl"
       :src="timing.audioUrl.value"
@@ -372,90 +389,66 @@ onBeforeUnmount(() => {
       @ended="onAudioEnded"
     />
 
-    <!-- Results -->
     <template v-if="hasResults">
-      <section class="card">
-        <label class="section-label">Results</label>
-
-        <!-- Stats -->
-        <div class="stats-row">
-          <div class="stat">
-            <span class="stat-value">{{ timing.wordCount.value }}</span>
-            <span class="stat-label">Words</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value">{{ formatDuration(timing.duration.value) }}</span>
-            <span class="stat-label">Duration</span>
-          </div>
-          <div class="stat" v-if="timing.inferenceTime.value !== null">
-            <span class="stat-value">{{ timing.inferenceTime.value.toFixed(2) }}s</span>
-            <span class="stat-label">Inference</span>
+      <section class="card legacy-card results-card">
+        <div class="results-header">
+          <label class="section-label section-label--inline">Results</label>
+          <div class="results-actions">
+            <button class="action-btn hover-accent" @click="showKaraoke = true" title="Fullscreen Karaoke">
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24">
+                <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
+              </svg>
+              Karaoke
+            </button>
+            <button class="action-btn hover-accent" @click="copyJson" title="Copy JSON">Copy JSON</button>
+            <button class="action-btn hover-accent" @click="downloadJson" title="Download JSON">Download</button>
+            <button class="action-btn hover-coral-border" @click="deleteCurrentResult" title="Delete Result">Delete</button>
           </div>
         </div>
-
-        <!-- Timeline -->
+        <div class="results-stats">{{ resultsStats }}</div>
         <AlignmentTimeline
           :current-time="timing.currentTime.value"
-          :duration="timing.duration.value"
+          :duration="alignmentDuration"
           :is-playing="timing.isPlaying.value"
           @toggle-play="togglePlay"
           @seek="seekTo"
         />
-
-        <!-- Word Chips -->
         <WordChips
           :words="timing.alignment.value"
           :active-index="timing.activeWordIdx.value"
           :audio-loaded="audioLoaded"
           @seek-word="seekWord"
         />
-
-        <!-- Action Buttons -->
-        <div class="actions-row">
-          <button class="action-btn" @click="showKaraoke = true" title="Fullscreen Karaoke">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
-            </svg>
-            Karaoke
-          </button>
-          <button class="action-btn" @click="copyJson" title="Copy JSON">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
-            </svg>
-            Copy JSON
-          </button>
-          <button class="action-btn" @click="downloadJson" title="Download JSON">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
-            </svg>
-            Download
-          </button>
-          <button class="action-btn danger" @click="deleteCurrentResult" title="Delete Result">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
-            </svg>
-            Delete
-          </button>
-        </div>
       </section>
     </template>
 
-    <!-- History -->
-    <section class="card" v-if="timing.history.value.length">
-      <label class="section-label">History</label>
+    <section class="history-section">
+      <div class="history-header">
+        <h3 class="history-title">History</h3>
+        <span class="history-count">{{ historyCountLabel }}</span>
+      </div>
       <div class="history-list">
+        <p v-if="!timing.history.value.length" class="empty-history">No alignments yet</p>
         <div
           v-for="item in timing.history.value"
           :key="item.folder"
-          class="history-item"
+          class="history-item hist-item"
           :class="{ 'history-item--active': item.folder === timing.sourceFolder.value }"
         >
-          <div class="history-info" @click="loadHistoryItem(item)">
-            <span class="history-name">{{ item.source_file || item.folder }}</span>
-            <span class="history-meta">
-              {{ item.word_count || '?' }} words
-              <template v-if="item.timestamp"> &middot; {{ formatDate(item.timestamp) }}</template>
-            </span>
+          <div class="history-row" @click="loadHistoryItem(item)">
+            <div class="history-info">
+              <p class="history-name">{{ item.transcript || item.source_file || item.folder }}</p>
+              <div class="history-meta">
+                <span v-if="item.project_id">{{ item.project_id }}</span>
+                <span v-if="item.project_id" class="meta-sep">/</span>
+                <span class="meta-words">{{ item.word_count || '?' }} words</span>
+                <span class="meta-sep">/</span>
+                <span>{{ formatDuration(item.duration_seconds) }}</span>
+                <span v-if="item.timestamp" class="meta-sep">/</span>
+                <span v-if="item.timestamp">{{ formatDate(item.timestamp) }}</span>
+              </div>
+            </div>
+            <span class="history-source">{{ item.source_file || '' }}</span>
           </div>
           <div class="history-actions">
             <button class="btn-icon" @click="loadHistoryItem(item)" title="Load">
@@ -473,7 +466,6 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <!-- Karaoke Overlay -->
     <KaraokeOverlay
       v-if="showKaraoke"
       :words="timing.alignment.value"
@@ -487,10 +479,9 @@ onBeforeUnmount(() => {
 .timing-page {
   max-width: 780px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 32px 24px 40px;
 }
 
-/* ---- Header ---- */
 .page-header {
   margin-bottom: 24px;
 }
@@ -508,32 +499,17 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-.project-badge {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 10px;
-  background: rgba(78, 205, 196, 0.12);
-  color: var(--accent);
-}
-
 .page-subtitle {
   font-size: 14px;
   color: var(--text-secondary);
   margin-top: 4px;
 }
 
-/* ---- Card ---- */
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+.legacy-card {
   padding: 20px;
   margin-bottom: 16px;
 }
 
-/* ---- Labels ---- */
 .section-label {
   display: block;
   font-size: 10px;
@@ -544,59 +520,28 @@ onBeforeUnmount(() => {
   margin-bottom: 12px;
 }
 
-/* ---- TTS Source ---- */
+.section-label--inline {
+  margin-bottom: 0;
+}
+
 .tts-source-row {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
 }
 
-.action-btn {
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.action-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
 .action-btn-lg {
   padding: 6px 14px;
   font-size: 11px;
 }
 
 .source-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 4px;
-}
-
-.source-tag {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  margin: 8px 0 0;
+  font-size: 11px;
   color: var(--accent);
-  background: rgba(78, 205, 196, 0.1);
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-family: "JetBrains Mono", monospace;
 }
 
-.source-name {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-/* ---- Drop Zone ---- */
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: 10px;
@@ -638,6 +583,13 @@ onBeforeUnmount(() => {
   margin: 0 auto 8px;
 }
 
+.drop-subtext {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", monospace;
+}
+
 .file-info {
   display: flex;
   align-items: center;
@@ -662,7 +614,6 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
 }
 
-/* ---- Transcript ---- */
 .transcript-input {
   width: 100%;
   padding: 12px 14px;
@@ -692,8 +643,7 @@ onBeforeUnmount(() => {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* ---- Gen Button ---- */
-.gen-btn {
+.run-btn {
   width: 100%;
   padding: 14px 24px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -733,54 +683,59 @@ onBeforeUnmount(() => {
   to { transform: rotate(360deg); }
 }
 
-/* ---- Stats ---- */
-.stats-row {
-  display: flex;
-  gap: 24px;
-  margin-bottom: 8px;
+.results-card {
+  margin-top: 20px;
 }
 
-.stat {
+.results-header {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: space-between;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
-.stat-value {
-  font-family: var(--font-mono);
-  font-size: 18px;
+.results-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.results-stats {
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", monospace;
+}
+
+.history-section {
+  margin-top: 28px;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.history-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
   font-weight: 700;
   color: var(--text);
 }
 
-.stat-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+.history-count {
+  font-size: 12px;
   color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace;
 }
 
-/* ---- Actions ---- */
-.actions-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.action-btn.danger {
-  border-color: rgba(239, 68, 68, 0.3);
-  color: var(--coral, #ef4444);
-}
-.action-btn.danger:hover {
-  border-color: var(--coral, #ef4444);
-}
-
-/* ---- History ---- */
 .history-list {
   display: flex;
   flex-direction: column;
@@ -797,11 +752,22 @@ onBeforeUnmount(() => {
 }
 
 .history-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: transparent;
 }
 
 .history-item--active {
-  background: rgba(78, 205, 196, 0.06);
+  border-color: #ff9f43;
+  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0 10px 2px;
+  cursor: pointer;
 }
 
 .history-info {
@@ -814,18 +780,38 @@ onBeforeUnmount(() => {
 }
 
 .history-name {
-  font-family: var(--font-mono);
+  margin: 0;
   font-size: 13px;
-  font-weight: 500;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 .history-meta {
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 10px;
   color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace;
+}
+
+.meta-sep {
+  opacity: 0.3;
+}
+
+.meta-words {
+  color: var(--accent);
+}
+
+.history-source {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-darkest);
+  font-size: 9px;
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace;
 }
 
 .history-actions {
@@ -835,30 +821,40 @@ onBeforeUnmount(() => {
 }
 
 .btn-icon {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: none;
-  border: 1px solid transparent;
+  padding: 0;
+  border: none;
   border-radius: 6px;
-  color: var(--text-secondary);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  opacity: 0.55;
+  transition: all 0.2s;
 }
 
 .btn-icon:hover {
   color: var(--accent);
-  border-color: var(--border);
-  background: var(--bg-darkest);
+  background: rgba(78, 205, 196, 0.08);
+  opacity: 1;
 }
 
 .btn-icon--danger:hover {
   color: var(--coral);
+  background: rgba(255, 107, 107, 0.08);
 }
 
-/* ---- Modal ---- */
+.empty-history {
+  margin: 0;
+  padding: 32px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -951,5 +947,23 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
   font-size: 13px;
   padding: 24px 0;
+}
+
+@media (max-width: 720px) {
+  .timing-page {
+    padding: 24px 16px 32px;
+  }
+
+  .results-header,
+  .history-header,
+  .history-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .history-actions,
+  .results-actions {
+    width: 100%;
+  }
 }
 </style>

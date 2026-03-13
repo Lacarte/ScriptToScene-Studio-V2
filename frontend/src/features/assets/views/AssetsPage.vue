@@ -254,7 +254,7 @@ onMounted(() => {
       <h2 class="page-title">Asset Manager</h2>
       <span v-if="projectId" class="project-badge">{{ projectId }}</span>
     </div>
-    <p class="page-subtitle">Generate, download, and manage visual assets for your scenes.</p>
+    <p class="page-subtitle">Generate and manage visual assets for each scene</p>
 
     <!-- AI Analysis Bar -->
     <section
@@ -289,20 +289,27 @@ onMounted(() => {
     </section>
 
     <!-- Source Info -->
-    <section class="card">
-      <h3 class="card-heading">Source</h3>
+    <section class="card source-card">
       <div class="source-row">
+        <div class="source-info-left">
+          <span class="source-label">
+            <template v-if="sceneCount && projectId">
+              {{ projectId }} &middot; {{ sceneCount }} scenes
+              <template v-if="analysisData?.style">
+                &middot; <span class="source-style">&bullet;{{ analysisData.style }}</span>
+              </template>
+            </template>
+            <template v-else>No scenes loaded</template>
+          </span>
+        </div>
         <div class="source-actions">
-          <button class="action-btn action-btn-lg accent" @click="loadCurrentScenes">
-            Load Current Scenes
+          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="loadCurrentScenes">
+            Use Current Result
           </button>
-          <button class="action-btn action-btn-lg" @click="showHistory">
+          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="showHistory">
             Pick from History
           </button>
         </div>
-        <span v-if="sceneCount" class="scene-count-badge">
-          {{ sceneCount }} scene{{ sceneCount !== 1 ? 's' : '' }}
-        </span>
       </div>
     </section>
 
@@ -515,7 +522,7 @@ onMounted(() => {
 .page-subtitle {
   font-size: 14px;
   color: var(--text-secondary);
-  margin-top: -12px;
+  margin-top: 4px;
 }
 
 /* ---- Card base ---- */
@@ -525,6 +532,11 @@ onMounted(() => {
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
+  transition: border-color 0.2s;
+}
+
+.card:hover {
+  border-color: var(--border-hover);
 }
 
 .card-heading {
@@ -532,7 +544,7 @@ onMounted(() => {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 12px;
+  margin: 0 0 12px;
 }
 
 /* ---- Analysis ---- */
@@ -581,6 +593,10 @@ onMounted(() => {
 }
 
 /* ---- Source ---- */
+.source-card {
+  padding: 16px;
+}
+
 .source-row {
   display: flex;
   align-items: center;
@@ -589,9 +605,26 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+.source-info-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.source-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.source-style {
+  color: var(--accent);
+}
+
 .source-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .action-btn {
@@ -609,24 +642,6 @@ onMounted(() => {
 .action-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
-}
-.action-btn-lg {
-  padding: 6px 14px;
-  font-size: 11px;
-}
-.action-btn.accent {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.scene-count-badge {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--accent);
-  background: rgba(78, 205, 196, 0.1);
-  padding: 4px 12px;
-  border-radius: 8px;
-  font-weight: 600;
 }
 
 /* ---- Audio Player ---- */

@@ -249,6 +249,7 @@ onMounted(() => {
 .page-subtitle {
   font-size: 14px;
   color: var(--text-secondary);
+  margin-top: 4px;
 }
 
 .btn-refresh {

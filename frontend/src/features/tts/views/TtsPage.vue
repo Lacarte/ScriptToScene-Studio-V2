@@ -190,30 +190,37 @@ const genButtonLabel = computed(() => {
 
 <template>
   <div class="tts-page">
-    <!-- Header -->
-    <section class="header-section">
-      <h2 class="page-title">Text to Speech</h2>
-      <p class="page-subtitle">Kokoro TTS with 50+ voices and voice blending</p>
-      <div class="model-status">
-        <span v-if="tts.modelReady.value" class="status-badge ready">Model ready</span>
-        <span v-else class="status-badge not-ready">Model not downloaded</span>
-      </div>
-    </section>
-
-    <!-- Voice Selection -->
-    <section class="card">
-      <button class="voice-header" @click="toggleVoiceSection">
-        <div class="voice-header-left">
-          <span class="card-label">{{ tts.voiceSummaryLabel.value }}</span>
-          <span class="voice-summary">{{ tts.voiceSummary.value }}</span>
+    <div class="page-header">
+      <div>
+        <div class="title-row">
+          <h2 class="page-title">Text to Speech</h2>
         </div>
-        <svg
-          class="chevron"
-          :class="{ open: voiceSectionOpen }"
-          width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
+        <p class="page-subtitle">Kokoro TTS with 50+ voices and voice blending</p>
+      </div>
+      <div class="model-status">
+        <span v-if="tts.modelReady.value" class="status-text status-text--ready">Model ready</span>
+        <span v-else class="status-text status-text--not-ready">Model not downloaded</span>
+      </div>
+    </div>
+
+    <section class="card legacy-card">
+      <button class="section-toggle" @click="toggleVoiceSection">
+        <label class="section-label">{{ tts.voiceSummaryLabel.value }}</label>
+        <div class="section-toggle-summary">
+          <span class="section-summary">{{ tts.voiceSummary.value }}</span>
+          <svg
+            class="toggle-chevron"
+            :class="{ open: voiceSectionOpen }"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </div>
       </button>
 
       <div v-show="voiceSectionOpen" class="voice-grid">
@@ -239,29 +246,30 @@ const genButtonLabel = computed(() => {
       </div>
     </section>
 
-    <!-- Voice Mode (Single / Multi) -->
-    <section class="card">
-      <div class="voice-mode-toggle">
-        <span class="card-label">Voice Mode</span>
-        <div class="mode-btns">
+    <section class="card legacy-card">
+      <div class="inline-header">
+        <label class="section-label">Voice Mode</label>
+        <div class="pill-toggle">
           <button
-            class="mode-btn"
+            class="pill-btn"
             :class="{ active: !tts.multiVoiceMode.value }"
             @click="tts.setVoiceMode('single')"
-          >Single</button>
+          >Single Voice</button>
           <button
-            class="mode-btn"
+            class="pill-btn"
             :class="{ active: tts.multiVoiceMode.value }"
             @click="tts.setVoiceMode('multi')"
-          >Multi</button>
+          >Multi-Voice</button>
         </div>
       </div>
 
-      <!-- Multi-voice panel -->
       <div v-if="tts.multiVoiceMode.value" class="mv-panel">
-        <div class="mv-actions">
-          <button class="action-btn" @click="handleAutoDetect">Auto-detect</button>
-          <button class="action-btn" @click="handleAddSegment">+ Add</button>
+        <div class="inline-header inline-header--tight">
+          <span class="section-label section-label--compact">Segments</span>
+          <div class="inline-actions">
+            <button class="action-btn compact-btn hover-accent" @click="handleAutoDetect">Auto-detect</button>
+            <button class="action-btn compact-btn hover-accent" @click="handleAddSegment">+ Add</button>
+          </div>
         </div>
 
         <div class="mv-segments">
@@ -277,7 +285,7 @@ const genButtonLabel = computed(() => {
             <div class="mv-segment-body">
               <textarea
                 rows="2"
-                class="mv-textarea"
+                class="input-field mv-textarea"
                 :value="seg.text"
                 @change="tts.updateMvSegment(i, 'text', $event.target.value)"
               ></textarea>
@@ -325,106 +333,100 @@ const genButtonLabel = computed(() => {
       </div>
     </section>
 
-    <!-- Text Input -->
-    <section class="card">
-      <div class="prompt-header">
-        <span class="card-label">Text</span>
-        <span class="text-count">{{ tts.wordCount.value }} words ~ {{ tts.tokenCount.value }} tokens</span>
-      </div>
+    <section class="card legacy-card">
+      <label class="section-label section-label--spaced">Prompt</label>
       <textarea
-        class="prompt-textarea"
-        rows="6"
-        placeholder="Enter text to generate speech..."
+        class="input-field prompt-textarea"
+        rows="4"
+        placeholder="Type or paste something to speak aloud..."
         :value="tts.prompt.value"
         @input="onPromptInput"
       ></textarea>
-      <div class="prompt-actions">
-        <button class="action-btn" @click="handleNormalize">Format</button>
-        <button class="action-btn" @click="handleCopy">Copy</button>
-        <button class="action-btn" @click="handleRandom">Random</button>
-        <span class="ctrl-hint">Ctrl+Enter to generate</span>
+      <div class="prompt-footer">
+        <div class="prompt-actions">
+          <p class="meta-text">{{ tts.wordCount.value }} words ~ {{ tts.tokenCount.value }} tokens</p>
+          <button class="action-btn compact-btn hover-accent" @click="handleNormalize">Format</button>
+          <button class="action-btn compact-btn hover-accent" @click="handleCopy">Copy</button>
+          <button class="action-btn compact-btn hover-accent" @click="handleRandom">Random</button>
+        </div>
+        <div class="shortcut-hint">
+          <kbd>Ctrl</kbd>
+          <span>+</span>
+          <kbd>Enter</kbd>
+        </div>
       </div>
     </section>
 
-    <!-- Controls -->
-    <section class="card controls-row">
-      <div class="speed-control">
-        <label class="card-label" for="tts-speed">Speed</label>
-        <input
-          id="tts-speed"
-          type="number"
-          class="speed-input"
-          min="0.5"
-          max="2.0"
-          step="0.1"
-          :value="tts.speed.value"
-          @input="onSpeedInput"
-        />
-      </div>
-      <div class="gen-mode-toggle">
-        <button
-          class="mode-btn"
-          :class="{ active: tts.genMode.value === 'generate' }"
-          @click="tts.setGenMode('generate')"
-        >Generate</button>
-        <button
-          class="mode-btn"
-          :class="{ active: tts.genMode.value === 'listen' }"
-          @click="tts.setGenMode('listen')"
-        >Listen</button>
+    <section class="card legacy-card">
+      <div class="controls-row">
+        <div class="speed-group">
+          <label class="section-label section-label--inline" for="tts-speed">Speed</label>
+          <input
+            id="tts-speed"
+            type="number"
+            class="speed-input"
+            min="0.5"
+            max="2.0"
+            step="0.1"
+            :value="tts.speed.value"
+            @input="onSpeedInput"
+          />
+        </div>
+        <div class="pill-toggle pill-toggle--right">
+          <button
+            class="pill-btn"
+            :class="{ active: tts.genMode.value === 'generate' }"
+            @click="tts.setGenMode('generate')"
+          >Generate</button>
+          <button
+            class="pill-btn"
+            :class="{ active: tts.genMode.value === 'listen' }"
+            @click="tts.setGenMode('listen')"
+          >Listen</button>
+        </div>
       </div>
     </section>
 
-    <!-- Generate Button -->
-    <div class="gen-row">
+    <div class="generate-row">
       <button
-        class="gen-btn"
+        class="gen-btn generate-btn"
         :disabled="tts.isGenerating.value"
         @click="handleGenerate"
       >
-        <svg
-          v-if="tts.isGenerating.value"
-          class="spinner"
-          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-        >
-          <path d="M12 2a10 10 0 1 0 10 10" />
-        </svg>
+        <span v-if="tts.isGenerating.value" class="spinner-ring"></span>
         <span>{{ genButtonLabel }}</span>
       </button>
       <button
         v-if="tts.isGenerating.value"
         class="abort-btn"
         @click="handleAbort"
-      >
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-        </svg>
-        Abort
-      </button>
+      >Abort</button>
     </div>
 
-    <!-- Progress -->
     <div v-if="tts.progressText.value" class="progress-text">
       {{ tts.progressText.value }}
     </div>
 
-    <!-- Now Playing -->
     <NowPlaying
       :metadata="nowPlayingMeta"
       :audio-src="tts.audioSrc.value"
       @ended="() => {}"
     />
 
-    <!-- History -->
-    <section class="card" v-if="tts.history.value.length > 0">
+    <section class="history-section">
       <div class="history-header">
-        <div class="history-left">
-          <span class="card-label">History</span>
-          <span class="history-count">{{ tts.history.value.length }} files</span>
+        <h3 class="history-title">History</h3>
+        <div class="history-tools">
+          <span class="meta-text">{{ tts.history.value.length }} files</span>
+          <button
+            class="action-btn compact-btn hover-coral-border"
+            :disabled="!tts.history.value.length"
+            @click="handleDeleteAll"
+          >Delete All</button>
         </div>
-        <button class="action-btn danger" @click="handleDeleteAll">Delete All</button>
       </div>
       <div class="history-list">
+        <p v-if="!tts.history.value.length" class="empty-history">No generations yet</p>
         <HistoryCard
           v-for="(item, i) in tts.history.value"
           :key="item.filename || i"
@@ -441,61 +443,81 @@ const genButtonLabel = computed(() => {
 .tts-page {
   max-width: 780px;
   margin: 0 auto;
-  padding: 32px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding: 32px 24px 40px;
 }
 
-/* Header */
-.header-section {
-  margin-bottom: 4px;
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .page-title {
+  margin: 0;
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 700;
-  margin: 0 0 4px;
+  letter-spacing: -0.02em;
+  color: var(--text);
 }
 
 .page-subtitle {
-  font-size: 13px;
+  margin: 4px 0 0;
+  font-size: 14px;
   color: var(--text-secondary);
-  margin-bottom: 8px;
 }
 
 .model-status {
-  display: flex;
-  align-items: center;
-}
-
-.status-badge {
+  padding-top: 6px;
   font-size: 11px;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 10px;
+  font-family: "JetBrains Mono", monospace;
+  white-space: nowrap;
 }
 
-.status-badge.ready {
-  background: rgba(78, 205, 196, 0.12);
+.status-text--ready {
   color: var(--accent);
 }
 
-.status-badge.not-ready {
-  background: rgba(239, 68, 68, 0.12);
+.status-text--not-ready {
   color: var(--coral);
 }
 
-/* Card */
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+.legacy-card {
   padding: 20px;
+  margin-bottom: 16px;
 }
 
-.card-label {
+.section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.section-toggle-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-label {
+  display: block;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -503,93 +525,87 @@ const genButtonLabel = computed(() => {
   color: var(--text-muted);
 }
 
-/* Voice Header (collapsible) */
-.voice-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  font-family: inherit;
+.section-label--spaced {
+  margin-bottom: 10px;
 }
 
-.voice-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.section-label--compact {
+  font-size: 9px;
+  letter-spacing: 0.12em;
 }
 
-.voice-summary {
-  font-size: 13px;
-  color: var(--text);
-  font-weight: 500;
+.section-label--inline {
+  margin: 0;
 }
 
-.chevron {
+.section-summary {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.toggle-chevron {
   color: var(--text-muted);
   transition: transform 0.2s;
 }
 
-.chevron.open {
+.toggle-chevron.open {
   transform: rotate(180deg);
 }
 
 .voice-grid {
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
-/* Voice Mode Toggle */
-.voice-mode-toggle {
+.inline-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 
-.mode-btns {
+.inline-header--tight {
+  margin-bottom: 8px;
+}
+
+.inline-actions {
   display: flex;
+  gap: 4px;
+}
+
+.pill-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  border: 1.5px solid var(--border);
   overflow: hidden;
 }
 
-.mode-btn {
-  padding: 6px 16px;
-  font-size: 11px;
-  font-weight: 700;
-  font-family: inherit;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s;
-  background: transparent;
-  color: var(--text-muted);
+.pill-toggle--right {
+  margin-left: auto;
 }
 
-.mode-btn.active {
+.pill-btn {
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.pill-btn + .pill-btn {
+  border-left: 1px solid var(--border);
+}
+
+.pill-btn.active {
   background: rgba(78, 205, 196, 0.08);
   color: var(--accent);
 }
 
-/* Multi-voice panel */
 .mv-panel {
-  margin-top: 14px;
-}
-
-.mv-actions {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.mv-empty {
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 10px;
-  padding: 12px 0;
+  margin-top: 12px;
 }
 
 .mv-segments {
@@ -598,22 +614,30 @@ const genButtonLabel = computed(() => {
   gap: 6px;
 }
 
+.mv-empty {
+  margin: 0;
+  padding: 12px 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .mv-segment {
   display: flex;
-  gap: 6px;
   align-items: flex-start;
+  gap: 6px;
   padding: 8px;
-  background: var(--bg-darkest);
-  border-radius: 8px;
   border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-darkest);
 }
 
 .mv-index {
+  min-width: 16px;
+  padding-top: 6px;
   font-size: 10px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  padding-top: 6px;
-  min-width: 16px;
 }
 
 .mv-segment-body {
@@ -625,30 +649,27 @@ const genButtonLabel = computed(() => {
 
 .mv-textarea {
   width: 100%;
+  padding: 6px 8px;
   font-size: 11px;
   line-height: 1.5;
-  resize: vertical;
-  padding: 6px 8px;
-  background: var(--bg-darker, var(--bg-darkest));
-  border: 1px solid var(--border);
-  border-radius: 6px;
   color: var(--text);
-  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
 }
 
 .mv-segment-controls {
   display: flex;
-  gap: 4px;
   align-items: center;
+  gap: 4px;
 }
 
 .mv-select {
-  font-size: 10px;
   padding: 2px 6px;
-  background: var(--bg-darker, var(--bg-darkest));
   border: 1px solid var(--border);
   border-radius: 4px;
+  background: var(--bg-darkest);
   color: var(--text-muted);
+  font-size: 10px;
   font-family: inherit;
 }
 
@@ -665,120 +686,99 @@ const genButtonLabel = computed(() => {
 }
 
 .mv-remove {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
   padding: 4px;
-  transition: color 0.15s;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 
 .mv-remove:hover {
   color: var(--coral);
 }
 
-/* Text Input */
-.prompt-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.text-count {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
 .prompt-textarea {
   width: 100%;
   min-height: 120px;
-  padding: 12px;
+  padding: 12px 14px;
+  box-sizing: border-box;
   font-size: 13px;
-  line-height: 1.6;
-  background: var(--bg-darkest);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
+  line-height: 1.7;
   font-family: inherit;
-  resize: vertical;
-  transition: border-color 0.15s;
+  resize: none;
 }
 
-.prompt-textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.prompt-textarea::placeholder {
-  color: var(--text-muted);
+.prompt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .prompt-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.action-btn {
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
-  border: 1px solid var(--border);
-  background: transparent;
+.meta-text {
+  margin: 0;
+  font-size: 12px;
   color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s;
+  font-family: "JetBrains Mono", monospace;
 }
 
-.action-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.action-btn.danger {
-  border-color: rgba(239, 68, 68, 0.3);
-  color: var(--coral);
-}
-
-.action-btn.danger:hover {
-  border-color: var(--coral);
-}
-
-.ctrl-hint {
-  margin-left: auto;
+.compact-btn {
+  padding: 2px 8px;
+  border-radius: 5px;
   font-size: 9px;
-  color: var(--text-muted);
-  opacity: 0.5;
-  font-family: var(--font-mono);
 }
 
-/* Controls Row */
+.shortcut-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.shortcut-hint span {
+  font-size: 9px;
+}
+
+.shortcut-hint kbd {
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 9px;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 500;
+}
+
 .controls-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
-.speed-control {
+.speed-group {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .speed-input {
-  width: 64px;
-  padding: 6px 8px;
-  font-size: 13px;
-  font-family: var(--font-mono);
-  background: var(--bg-darkest);
+  width: 60px;
+  padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: var(--bg-darkest);
   color: var(--text);
+  font-size: 12px;
+  font-family: "JetBrains Mono", monospace;
   text-align: center;
 }
 
@@ -787,139 +787,125 @@ const genButtonLabel = computed(() => {
   border-color: var(--accent);
 }
 
-.gen-mode-toggle {
-  display: flex;
-  border-radius: 6px;
-  border: 1.5px solid var(--border);
-  overflow: hidden;
-}
-
-/* Generate Button */
-.gen-row {
+.generate-row {
   display: flex;
   gap: 8px;
-  align-items: stretch;
+  margin-bottom: 4px;
 }
 
-.gen-btn {
+.generate-btn {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   padding: 14px 24px;
-  background: linear-gradient(135deg, var(--accent), #3BA89F);
-  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
   border: none;
   border-radius: 12px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.02em;
   color: white;
-  cursor: pointer;
-  position: relative;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  letter-spacing: 0.02em;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.gen-btn:hover:not(:disabled) {
-  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
-  transform: translateY(-1px);
-}
-
-.gen-btn:active:not(:disabled) {
-  transform: scale(0.99);
-}
-
-.gen-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.spinner-ring {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
 
 .abort-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 20px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  padding: 14px 16px;
+  border: 1.5px solid rgba(255, 107, 107, 0.3);
   border-radius: 12px;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-size: 12px;
+  background: rgba(255, 107, 107, 0.15);
   color: var(--coral);
   cursor: pointer;
-  transition: background 0.15s;
-}
-
-.abort-btn:hover {
-  background: rgba(239, 68, 68, 0.18);
-}
-
-/* Progress */
-.progress-text {
   font-size: 12px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  padding: 8px 0;
-  text-align: center;
+  font-weight: 600;
 }
 
-/* History */
+.progress-text {
+  margin: 6px 0 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", monospace;
+}
+
+.history-section {
+  margin-top: 28px;
+}
+
 .history-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
-.history-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.history-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  color: var(--text);
 }
 
-.history-count {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
+.history-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .history-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   max-height: 400px;
   overflow-y: auto;
 }
 
-/* Responsive */
-@media (max-width: 600px) {
+.empty-history {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
   .tts-page {
-    padding: 16px 16px 32px;
+    padding: 24px 16px 32px;
   }
 
-  .controls-row {
+  .page-header {
     flex-direction: column;
-    gap: 12px;
-    align-items: stretch;
   }
 
-  .speed-control {
-    justify-content: space-between;
+  .inline-header,
+  .controls-row,
+  .history-header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
-  .gen-mode-toggle {
-    align-self: flex-end;
+  .pill-toggle--right {
+    margin-left: 0;
+  }
+
+  .generate-row {
+    flex-direction: column;
+  }
+
+  .history-tools,
+  .prompt-actions {
+    width: 100%;
   }
 }
 </style>

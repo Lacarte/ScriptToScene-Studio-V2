@@ -305,7 +305,7 @@ function esc(str) {
 .pipeline-page {
   max-width: 780px;
   margin: 0 auto;
-  padding: 24px 24px 32px;
+  padding: 32px 24px;
 }
 
 /* ---- Header ---- */
