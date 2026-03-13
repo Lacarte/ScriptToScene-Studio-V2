@@ -6,6 +6,7 @@
 let _alnAudio = null;
 let _alnAnimFrame = null;
 let _alnActiveIdx = -1;
+let _alignTTSPickerItems = [];
 
 $('#align-text-input').addEventListener('input', () => {
   const words = $('#align-text-input').value.trim().split(/\s+/).filter(Boolean).length;
@@ -129,6 +130,14 @@ function _alnGetAudioUrl(data) {
   return null;
 }
 
+function _alnGetAlignmentWords(result = STATE.alignResult) {
+  return result?.alignment || [];
+}
+
+function _alnGetTotalDuration(words = _alnGetAlignmentWords()) {
+  return words.length ? words[words.length - 1].end : _alnAudio?.duration || 1;
+}
+
 function _alnLoadAudio(data) {
   alnStopAudio();
   const url = _alnGetAudioUrl(data);
@@ -138,12 +147,28 @@ function _alnLoadAudio(data) {
     return;
   }
   _alnAudio = new Audio(url);
-  _alnAudio.addEventListener('ended', () => _alnResetPlayback());
+  _alnAudio.onplay = () => {
+    _alnSetPlayIcon(false);
+    _alnFsSetPlayIcon();
+    if (_alnFsOpen) _alnFsStartRAF();
+  };
+  _alnAudio.onpause = () => {
+    _alnSetPlayIcon(true);
+    _alnFsSetPlayIcon();
+    _alnFsStopRAF();
+  };
+  _alnAudio.onended = () => {
+    _alnResetPlayback();
+    _alnFsSetPlayIcon();
+    _alnFsStopRAF();
+  };
   stsAudioRegister('Alignment', _alnAudio);
-  _alnAudio.addEventListener('error', () => {
+  _alnAudio.onerror = () => {
+    _alnFsSetPlayIcon();
+    _alnFsStopRAF();
     const btn = $('#aln-play-btn');
     if (btn) btn.style.display = 'none';
-  });
+  };
 }
 
 function alnTogglePlay() {
@@ -186,8 +211,13 @@ function alnStopAudio() {
   if (_alnAudio) {
     _alnAudio.pause();
     _alnAudio.currentTime = 0;
+    _alnAudio.onplay = null;
+    _alnAudio.onpause = null;
+    _alnAudio.onended = null;
+    _alnAudio.onerror = null;
     _alnAudio = null;
   }
+  stsAudioUnregister('Alignment');
   if (_alnAnimFrame) { cancelAnimationFrame(_alnAnimFrame); _alnAnimFrame = null; }
   _alnSetPlayIcon(true);
   _alnClearHighlights();
@@ -198,7 +228,7 @@ function alnStopAudio() {
 
 function alnPlayWord(idx) {
   if (!_alnAudio || !STATE.alignResult) return;
-  const words = STATE.alignResult.alignment || [];
+  const words = _alnGetAlignmentWords();
   const w = words[idx];
   if (!w) return;
   _alnAudio.currentTime = w.begin;
@@ -218,9 +248,8 @@ function alnSeekFromClick(e) {
   if (!bar) return;
   const rect = bar.getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  const words = STATE.alignResult?.alignment || [];
-  const totalDuration = words.length ? words[words.length - 1].end : _alnAudio.duration || 1;
-  _alnAudio.currentTime = pct * totalDuration;
+  const words = _alnGetAlignmentWords();
+  _alnAudio.currentTime = pct * _alnGetTotalDuration(words);
   _alnUpdatePlayhead();
   if (_alnAudio.paused) alnTogglePlay();
 }
@@ -234,8 +263,8 @@ function _alnTick() {
 function _alnUpdatePlayhead() {
   if (!_alnAudio || !STATE.alignResult) return;
   const t = _alnAudio.currentTime;
-  const words = STATE.alignResult.alignment || [];
-  const totalDuration = words.length ? words[words.length - 1].end : _alnAudio.duration || 1;
+  const words = _alnGetAlignmentWords();
+  const totalDuration = _alnGetTotalDuration(words);
   const pct = (t / totalDuration * 100).toFixed(2);
 
   const playhead = $('#aln-playhead');
@@ -294,19 +323,19 @@ function _alnSetPlayIcon(isPlay) {
 
 function copyAlignJSON() {
   if (!STATE.alignResult) return;
-  const json = JSON.stringify(STATE.alignResult.alignment || [], null, 2);
+  const json = JSON.stringify(_alnGetAlignmentWords(), null, 2);
   navigator.clipboard.writeText(json).then(() => toast('JSON copied')).catch(() => toast('Copy failed', 'error'));
 }
 function downloadAlignJSON() {
   if (!STATE.alignResult) return;
-  const json = JSON.stringify(STATE.alignResult.alignment || [], null, 2);
+  const json = JSON.stringify(_alnGetAlignmentWords(), null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = (STATE.alignFile ? STATE.alignFile.name.replace(/\.[^.]+$/, '') : 'alignment') + '_alignment.json';
   document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function deleteAlignResult() {
   if (!STATE.alignResult || !STATE.alignResult.folder) return;
@@ -471,12 +500,11 @@ async function alignPickTTS() {
   }).join('');
 
   // Store items for selection
-  window._alignTTSPickerItems = items;
+  _alignTTSPickerItems = items;
 }
 
 function alignSelectTTS(idx) {
-  const items = window._alignTTSPickerItems || [];
-  const item = items[idx];
+  const item = _alignTTSPickerItems[idx];
   if (item) _alignLoadTTSItem(item);
   alignCloseTTSPicker();
 }
@@ -485,6 +513,7 @@ function alignCloseTTSPicker() {
   const modal = $('#align-tts-picker-modal');
   modal.classList.add('hidden');
   modal.style.display = 'none';
+  _alignTTSPickerItems = [];
 }
 
 // ---- Fullscreen Karaoke ----
@@ -650,8 +679,8 @@ function _alnFsStopRAF() {
   if (!seekInput) return;
   seekInput.addEventListener('input', () => {
     if (!_alnAudio) return;
-    const words = STATE.alignResult?.alignment;
-    const totalDuration = words?.length ? words[words.length - 1].end : (_alnAudio.duration || 1);
+    const words = _alnGetAlignmentWords();
+    const totalDuration = _alnGetTotalDuration(words);
     _alnAudio.currentTime = (seekInput.value / 100) * totalDuration;
     _alnFsActiveIdx = -1;
     const fill = $('#aln-fs-seek-fill');
@@ -666,6 +695,7 @@ document.addEventListener('keydown', (e) => {
 
 // Sync fullscreen play icon when audio events fire
 (function _alnFsAudioSync() {
+  return;
   // Observe _alnAudio changes — re-bind when new audio loads
   const origLoad = _alnLoadAudio;
   _alnLoadAudio = function(data) {

@@ -67,6 +67,10 @@ function _expLibRatioLabel(ratio) {
   return `${w}:${h}`;
 }
 
+function _expLibItemRatio(item) {
+  return item?.video_ratio || item?.ratio || '';
+}
+
 // Style label using scene templates if available
 function _expLibStyleLabel(styleId) {
   if (!styleId) return '';
@@ -104,7 +108,7 @@ function _expLibPopulateFilters() {
   // Ratios — prefer video_ratio (actual file dimensions), fall back to ratio (export config)
   const ratioSel = $('#explib-filter-ratio');
   if (ratioSel) {
-    const ratios = [...new Set(items.map(i => _expLibRatioLabel(i.video_ratio || i.ratio)).filter(Boolean))].sort();
+    const ratios = [...new Set(items.map(i => _expLibRatioLabel(_expLibItemRatio(i))).filter(Boolean))].sort();
     const cur = ratioSel.value;
     ratioSel.innerHTML = '<option value="">All ratios</option>' +
       ratios.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
@@ -131,7 +135,7 @@ function _expLibApplyFilters() {
 
   // Filter by ratio (use video_ratio from actual file, fallback to config ratio)
   if (ratioFilter) {
-    filtered = filtered.filter(i => _expLibRatioLabel(i.video_ratio || i.ratio) === ratioFilter);
+    filtered = filtered.filter(i => _expLibRatioLabel(_expLibItemRatio(i)) === ratioFilter);
   }
 
   // Filter by duration range
@@ -236,7 +240,7 @@ function _expLibRenderStats() {
   // Most used ratio
   const ratioCounts = {};
   items.forEach(i => {
-    const r = _expLibRatioLabel(i.video_ratio || i.ratio);
+    const r = _expLibRatioLabel(_expLibItemRatio(i));
     if (r) ratioCounts[r] = (ratioCounts[r] || 0) + 1;
   });
   const topRatio = Object.entries(ratioCounts).sort((a, b) => b[1] - a[1])[0];
@@ -318,7 +322,7 @@ function _expLibRenderGrid() {
         const origIdx = allItems.indexOf(item);
         const styleLabel = _expLibStyleLabel(item.style);
         const styleColor = _expLibStyleColor(item.style);
-        const ratioLabel = _expLibRatioLabel(item.video_ratio || item.ratio);
+        const ratioLabel = _expLibRatioLabel(_expLibItemRatio(item));
         const sceneCount = item.scene_count || 0;
         const durLabel = _expLibFmtDuration(item.duration);
 

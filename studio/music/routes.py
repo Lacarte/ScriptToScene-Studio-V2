@@ -1,11 +1,14 @@
 """Music Module — Browse and manage background music tracks."""
+import json
 import os
+import subprocess
 
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 from werkzeug.utils import secure_filename
 
 from config import MUSIC_DIR
+from studio.ffmpeg_utils import find_ffprobe
 
 music_bp = Blueprint("music", __name__)
 
@@ -14,10 +17,7 @@ ALLOWED_EXTENSIONS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 
 def _get_duration(filepath):
     """Try to get audio duration using ffprobe (optional)."""
-    import shutil
-    import subprocess
-
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = find_ffprobe()
     if not ffprobe:
         return None
     try:
@@ -27,7 +27,6 @@ def _get_duration(filepath):
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
-            import json
             data = json.loads(result.stdout)
             return round(float(data.get("format", {}).get("duration", 0)), 2)
     except Exception:

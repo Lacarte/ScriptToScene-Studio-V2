@@ -83,7 +83,7 @@ def is_safe_webhook_url(url: str | None, allow_private: bool = True) -> bool:
         return False
     try:
         parsed = urlparse(raw)
-    except Exception:
+    except ValueError:
         return False
     if parsed.scheme not in {"http", "https"}:
         return False

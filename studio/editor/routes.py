@@ -6,6 +6,7 @@ import mimetypes
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from loguru import logger
 from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
+from studio.ffmpeg_utils import find_ffprobe
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
 from studio.editor.schemas import EditorSaveRequest, ExportRequest
@@ -134,8 +136,7 @@ def _resolve_export_relpath(rel_path: str) -> str:
     return abs_path
 
 
-import shutil as _shutil
-_ffprobe_bin = _shutil.which("ffprobe")
+_ffprobe_bin = find_ffprobe()
 
 
 def _ffprobe_video(abs_path: str) -> dict:
@@ -160,7 +161,8 @@ def _ffprobe_video(abs_path: str) -> dict:
                 h = int(s.get("height", 0))
                 break
         return {"duration": round(dur, 2), "width": w, "height": h}
-    except Exception:
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError) as error:
+        logger.debug("ffprobe probe failed for {}: {}", abs_path, error)
         return {}
 
 
@@ -194,13 +196,12 @@ def _cleanup_orphaned_temp_dirs():
             try:
                 mtime = os.path.getmtime(path)
                 if mtime < cutoff:
-                    import shutil
                     shutil.rmtree(path, ignore_errors=True)
                     cleaned += 1
-            except OSError:
-                pass
-    except OSError:
-        pass
+            except OSError as error:
+                logger.debug("Skipping temp dir cleanup for {}: {}", path, error)
+    except OSError as error:
+        logger.debug("Could not scan temp root {}: {}", tmp_root, error)
     if cleaned:
         logger.info("Cleaned up {} orphaned video_export temp dir(s)", cleaned)
 
@@ -216,12 +217,13 @@ _cleanup_orphaned_temp_dirs()
 def _get_source_folder(project_id: str) -> str | None:
     """Look up source_folder from scenes.json for a given project."""
     scenes_path = os.path.join(SCENES_DIR, project_id, "scenes.json")
-    if not os.path.isfile(scenes_path):
-        return None
     try:
         with open(scenes_path, "r", encoding="utf-8") as f:
             return json.load(f).get("source_folder")
-    except (json.JSONDecodeError, OSError):
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, OSError) as error:
+        logger.debug("Could not read source_folder from {}: {}", scenes_path, error)
         return None
 
 
@@ -316,7 +318,8 @@ def _resolve_project_captions(data: dict, project_id: str):
                 continue
             try:
                 payload = safe_json_read(cap_json)
-            except Exception:
+            except Exception as error:
+                logger.debug("Skipping captions payload {}: {}", cap_json, error)
                 continue
             if payload.get("source_folder") != source_folder:
                 continue
@@ -456,8 +459,8 @@ def editor_list_projects():
                 "total_duration": data.get("total_duration", 0),
                 "has_wip": has_wip,
             })
-        except Exception:
-            pass
+        except Exception as error:
+            logger.debug("Skipping project manifest {}: {}", json_path, error)
 
     if os.path.isdir(PROJECTS_DIR):
         for entry in os.listdir(PROJECTS_DIR):
@@ -501,7 +504,8 @@ def _discover_projects() -> list[dict]:
                     "has_editor": False,
                     "asset_count": 0,
                 }
-            except Exception:
+            except Exception as error:
+                logger.debug("Skipping scenes manifest {}: {}", json_path, error)
                 continue
 
     # 2. Check assets
@@ -568,8 +572,8 @@ def _discover_projects() -> list[dict]:
                     info["text_preview"] = (meta.get("prompt", "") or "")[:120]
                     info["voice"] = meta.get("voice", "")
                     info["audio_duration"] = meta.get("duration_seconds", 0)
-                except Exception:
-                    pass
+                except Exception as error:
+                    logger.debug("Skipping TTS metadata {}: {}", tts_meta, error)
 
     # 6. Write/update manifests to PROJECTS_DIR (skip if initial.json already exists)
     for pid, info in projects.items():
@@ -585,8 +589,8 @@ def _discover_projects() -> list[dict]:
                 existing = safe_json_read(project_file)
                 if existing.get("scenes"):
                     continue  # Already has full project data
-            except Exception:
-                pass
+            except Exception as error:
+                logger.debug("Could not read existing project manifest {}: {}", project_file, error)
         safe_json_write(project_file, info, indent=2)
 
     result = sorted(projects.values(), key=lambda p: p.get("created_at", ""), reverse=True)
@@ -1036,8 +1040,8 @@ def import_project_zip():
                         sdata = safe_json_read(scenes_json_path)
                         sdata["project_id"] = safe_id
                         safe_json_write(scenes_json_path, sdata, indent=2)
-                    except Exception:
-                        pass
+                    except Exception as error:
+                        logger.debug("Could not update imported scenes.json {}: {}", scenes_json_path, error)
                 editor_json_path = _initial_path(safe_id)
                 if os.path.exists(editor_json_path):
                     try:
@@ -1048,8 +1052,8 @@ def import_project_zip():
                             edata["project_name"] = safe_id
                         EditorSaveRequest.model_validate(edata)
                         safe_json_write(editor_json_path, edata, indent=2)
-                    except Exception:
-                        pass
+                    except Exception as error:
+                        logger.debug("Could not update imported editor manifest {}: {}", editor_json_path, error)
 
             logger.info("Project ZIP imported: {} ({} files){}", safe_id, len(imported),
                         f" (renamed from {renamed_from})" if renamed_from else "")
@@ -1351,8 +1355,8 @@ def _process_video(job_id, export_data, output_path):
             if os.path.isfile(_scenes_json):
                 _sdata = safe_json_read(_scenes_json)
                 _style = _sdata.get("style", "")
-        except Exception:
-            pass
+        except Exception as error:
+            logger.debug("Could not read style metadata from {}: {}", _scenes_json, error)
 
         # Probe exported video for duration and dimensions
         _probe = _ffprobe_video(output_path)
@@ -1397,8 +1401,8 @@ def _process_video(job_id, export_data, output_path):
         if os.path.exists(meta_path):
             try:
                 os.remove(meta_path)
-            except OSError:
-                pass
+            except OSError as error:
+                logger.debug("Could not remove cancelled metadata {}: {}", meta_path, error)
 
         job["status"] = "cancelled"
         job["error"] = None
@@ -1420,8 +1424,8 @@ def _process_video(job_id, export_data, output_path):
         if os.path.exists(meta_path):
             try:
                 os.remove(meta_path)
-            except OSError:
-                pass
+            except OSError as error:
+                logger.debug("Could not remove failed metadata {}: {}", meta_path, error)
 
         failed_step = job.get("step") or "unknown"
         job["status"] = "failed"
@@ -1539,7 +1543,8 @@ def export_library_list():
                     meta_duration = meta.get("duration", 0)
                     meta_width = meta.get("width", 0)
                     meta_height = meta.get("height", 0)
-                except Exception:
+                except Exception as error:
+                    logger.debug("Could not read export metadata {}: {}", meta_path, error)
                     project_id = ""
 
             # Probe video if duration/dimensions are missing
@@ -1567,8 +1572,8 @@ def export_library_list():
                     existing["width"] = meta_width
                     existing["height"] = meta_height
                     safe_json_write(meta_path, existing, indent=2)
-                except Exception:
-                    pass
+                except Exception as error:
+                    logger.debug("Could not update export metadata {}: {}", meta_path, error)
             if not project_id:
                 match = re.match(r"^(?P<project>.+)_[0-9a-fA-F]{8}$", base)
                 if match:
@@ -1597,8 +1602,8 @@ def export_library_list():
                         meta_style = _sd.get("style", "")
                         if not meta_scene_count:
                             meta_scene_count = len(_sd.get("scenes", []))
-                except Exception:
-                    pass
+                except Exception as error:
+                    logger.debug("Could not read scene metadata {}: {}", _sp, error)
 
             items.append({
                 "project_id": pid,

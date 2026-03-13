@@ -5,6 +5,29 @@
 
 ---
 
+## Audit Update
+
+### Resolved In This Pass
+
+- Backend cleanup completed for shared ffmpeg/ffprobe lookup, duplicate imports, narrowed exception handling, debug logging for previously silent error paths, and the stale comment fixes in `timeline-editor/backend/video_processor.py`.
+- Frontend cleanup completed for the audio sidebar poll leak, the scene/segment/alignment audio rebinding issues, transient `window` state in pipeline/timing, optional-chaining cleanup in `static/js/editor.js`, ratio normalization in `static/js/export-library.js`, and the targeted console-log removal in the editor frontend modules.
+- Object URL cleanup is now standardized to `1000ms` in the affected Studio download helpers.
+
+### Verified Stale Or Incorrect Findings
+
+- `P3` is stale in the original report. `studio/tts/routes.py` did use ffmpeg lookup logic; the real cleanup was consolidating it onto shared `find_ffmpeg()` instead of removing a dead import.
+- `P12` points to the wrong file/function. The large export flow lives in `timeline-editor/backend/video_processor.py::process()`, not `studio/editor/routes.py::_process_video()`.
+- `J12` is not a defect. `sts-staged-timeline`, `sts-editor-boot-project`, and `sts-editor-scenes` are all still actively written and read across Studio/editor handoff flows.
+- `J14` is stale. The redundant nested `if (!force)` pattern is no longer present in `static/js/export-library.js`.
+- `J1` was already worse-described than implemented: the old sidebar poll was `250ms`, not `100ms`. It has now been replaced with event-driven sync.
+
+### Remaining Refactor Opportunities
+
+- Shared audio/timeline utilities across `scenes.js`, `segmenter.js`, `timing.js`, and related modules are still a worthwhile follow-up, but they are no longer blocking correctness for this cleanup pass.
+- Some timeline-editor debug logging remains outside the originally reported module set. That is a separate hygiene pass, not part of the specific fixes validated here.
+
+---
+
 ## Table of Contents
 
 1. [Backend Python Issues](#1-backend-python-issues)

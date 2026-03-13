@@ -17,8 +17,6 @@ class App {
     }
 
     async init() {
-        console.log('App initializing...');
-
         // Remove any leftover staging overlay
         const stagingOverlay = document.getElementById('staging-overlay');
         if (stagingOverlay) stagingOverlay.remove();
@@ -52,8 +50,6 @@ class App {
 
         // Hide the app loading overlay
         this.hideAppLoadingOverlay();
-
-        console.log('App initialized');
     }
 
     hideAppLoadingOverlay() {

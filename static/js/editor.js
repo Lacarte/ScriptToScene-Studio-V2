@@ -61,8 +61,6 @@ function initEditorIframe() {
 
     const bootProject = getStoredEditorBootProject();
 
-    // Send scenes data only for internal flows (Auto-Assemble / Send to Editor).
-    // When opened directly from menu, let the editor decide via no-data/import UI.
     if (bootProject && entrySource !== 'menu') {
       try {
         iframe.contentWindow.postMessage({
@@ -85,7 +83,6 @@ function initEditorIframe() {
         const capData = JSON.parse(captionsData);
         // Skip stale captions from a different project
         if (currentSourceFolder && capData.source_folder && capData.source_folder !== currentSourceFolder) {
-          console.log('Skipping stale captions (source_folder mismatch):', capData.source_folder, '!=', currentSourceFolder);
           localStorage.removeItem('sts-editor-captions');
           // Only auto-generate for internal pipeline entries, not direct/menu loads
           if (entrySource !== 'menu') {
@@ -181,7 +178,6 @@ async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '', edi
             // Fetch full caption data from the matched project
             const fullData = await api(`/api/captions/${encodeURIComponent(match.project_id)}`);
             if (fullData?.captions?.length) {
-              console.log('Captions already exist for this project, reusing', match.project_id);
               localStorage.setItem('sts-editor-captions', JSON.stringify(fullData));
               iframe.contentWindow.postMessage({ type: 'load-captions', data: fullData }, '*');
               return;
@@ -195,7 +191,7 @@ async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '', edi
     let sourceFolder = '';
 
     // 1) Try current alignment result (only if it matches the current project)
-    if (STATE.alignResult && STATE.alignResult.alignment && STATE.alignResult.alignment.length) {
+    if (STATE.alignResult?.alignment?.length) {
       const folder = STATE.alignResult.folder || '';
       if (!projectSourceFolder || !folder || folder === projectSourceFolder) {
         alignment = STATE.alignResult.alignment;
@@ -253,8 +249,6 @@ async function _editorAutoGenerateCaptions(iframe, projectSourceFolder = '', edi
         type: 'load-captions',
         data: res,
       }, '*');
-
-      console.log(`Auto-generated ${res.captions.length} captions from alignment`);
     }
   } catch (e) {
     console.error('Auto-generate captions failed:', e);

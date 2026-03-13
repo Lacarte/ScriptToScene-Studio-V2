@@ -537,8 +537,8 @@ def list_scenes():
                 if data.get("parent_id"):
                     item["parent_id"] = data["parent_id"]
                 items.append(item)
-            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-                pass
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as error:
+                logger.debug("Skipping unreadable scenes history entry {}: {}", json_path, error)
     items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return jsonify(items)
 

@@ -273,25 +273,32 @@ window.stsStopExportVideos = function (exceptVideo = null) {
 window.stsAudioRegister = function (label, audioEl) {
   if (!audioEl) return;
   window._stsAudioRegistry[label] = audioEl;
-  if (audioEl.__stsExclusiveBound) return;
-  audioEl.__stsExclusiveBound = true;
-  audioEl.addEventListener('play', () => {
-    for (const [otherLabel, otherEl] of Object.entries(window._stsAudioRegistry)) {
-      if (!otherEl || otherEl === audioEl) continue;
-      if (!otherEl.paused) {
-        otherEl.pause();
-        otherEl.currentTime = 0;
+  if (!audioEl.__stsExclusiveBound) {
+    audioEl.__stsExclusiveBound = true;
+    audioEl.addEventListener('play', () => {
+      for (const [, otherEl] of Object.entries(window._stsAudioRegistry)) {
+        if (!otherEl || otherEl === audioEl) continue;
+        if (!otherEl.paused) {
+          otherEl.pause();
+          otherEl.currentTime = 0;
+        }
       }
-    }
-    if (typeof window.stsStopExportVideos === 'function') {
-      window.stsStopExportVideos();
-    }
-  });
+      if (typeof window.stsStopExportVideos === 'function') {
+        window.stsStopExportVideos();
+      }
+      _stsAudioSyncIndicator();
+    });
+    audioEl.addEventListener('pause', _stsAudioSyncIndicator);
+    audioEl.addEventListener('ended', _stsAudioSyncIndicator);
+    audioEl.addEventListener('error', _stsAudioSyncIndicator);
+  }
+  _stsAudioSyncIndicator();
 };
 
 /** Unregister an audio element by label */
 window.stsAudioUnregister = function (label) {
   delete window._stsAudioRegistry[label];
+  _stsAudioSyncIndicator();
 };
 
 /** Stop all registered audio and return which ones were playing */
@@ -308,6 +315,7 @@ window.stsAudioStopAll = function (exceptExportVideo = null) {
     const exportStopped = window.stsStopExportVideos(exceptExportVideo);
     if (exportStopped.length) stopped.push(...exportStopped);
   }
+  _stsAudioSyncIndicator();
   return stopped;
 };
 
@@ -319,11 +327,8 @@ window.stsAudioGetPlaying = function () {
   return null;
 };
 
-// Poll for audio state changes and update the sidebar indicator
-let _stsAudioPollId = null;
-function _stsAudioStartPoll() {
-  if (_stsAudioPollId) return;
-  _stsAudioPollId = setInterval(() => {
+// Update the sidebar audio indicator from the current registry state
+function _stsAudioSyncIndicator() {
     const btn = document.getElementById('sidebar-audio-btn');
     if (!btn) return;
     const playing = window.stsAudioGetPlaying();
@@ -337,9 +342,8 @@ function _stsAudioStartPoll() {
       btn.title = 'No audio playing';
       if (labelEl) labelEl.textContent = '';
     }
-  }, 250);
 }
-document.addEventListener('DOMContentLoaded', _stsAudioStartPoll);
+document.addEventListener('DOMContentLoaded', _stsAudioSyncIndicator);
 
 function stsAudioToggle() {
   const playing = window.stsAudioGetPlaying();

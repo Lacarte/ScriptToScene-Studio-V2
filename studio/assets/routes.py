@@ -3,7 +3,6 @@
 import json
 import os
 import platform
-import shutil
 import subprocess
 import threading
 from datetime import datetime
@@ -13,17 +12,17 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
 from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, KIE_AI_MODEL
+from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import safe_json_write
 from studio.security import sanitize_project_id
+from studio.validation import validate_json
+from .schemas import GrabberStartRequest
+from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
+from .providers.kie_ai import generate_image as kie_ai_generate
 
 BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "bin")
 
 VIDEO_EXTS = (".mp4", ".webm", ".mov")
-
-
-def _find_ffmpeg():
-    local = os.path.join(BIN_DIR, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
-    return local if os.path.isfile(local) else shutil.which("ffmpeg")
 
 
 def _video_thumbnail(video_path):
@@ -31,7 +30,7 @@ def _video_thumbnail(video_path):
     thumb_path = video_path.rsplit(".", 1)[0] + "_thumb.jpg"
     if os.path.isfile(thumb_path):
         return thumb_path
-    ffmpeg = _find_ffmpeg()
+    ffmpeg = find_ffmpeg()
     if not ffmpeg:
         return None
     try:
@@ -45,10 +44,6 @@ def _video_thumbnail(video_path):
     except Exception:
         pass
     return None
-from studio.validation import validate_json
-from .schemas import GrabberStartRequest
-from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
-from .providers.kie_ai import generate_image as kie_ai_generate
 
 assets_bp = Blueprint("assets", __name__)
 

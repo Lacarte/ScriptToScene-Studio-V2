@@ -140,10 +140,7 @@ export class CanvasPreview {
      */
     setScenes(scenes) {
         this.scenes = scenes;
-        const withMedia = scenes.filter(s => s.mediaUrl).length;
-        console.log(`Preview: setScenes called with ${scenes.length} scenes (${withMedia} with mediaUrl)`);
         this._preloadPromise = this.preloadImages().then(() => {
-            console.log(`Preview: preloadImages complete, cache has ${this.imageCache.size} entries`);
             this.render();
         });
         return this._preloadPromise;
@@ -184,7 +181,6 @@ export class CanvasPreview {
                             }, TIMEOUT);
                             video.onloadeddata = () => {
                                 clearTimeout(timer);
-                                console.log(`Preview: Loaded video for scene ${scene.id} (${video.videoWidth}x${video.videoHeight})`);
                                 resolve();
                             };
                             video.onerror = (e) => {
@@ -213,7 +209,6 @@ export class CanvasPreview {
                             }, TIMEOUT);
                             img.onload = () => {
                                 clearTimeout(timer);
-                                console.log(`Preview: Loaded image for scene ${scene.id}`);
                                 resolve();
                             };
                             img.onerror = (e) => {

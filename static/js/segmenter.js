@@ -308,14 +308,14 @@ function _segLoadAudio() {
     return;
   }
   _segAudio = new Audio(url);
-  _segAudio.addEventListener('ended', () => {
+  _segAudio.onended = () => {
     _segResetPlayback();
-  });
+  };
   stsAudioRegister('Segmenter', _segAudio);
-  _segAudio.addEventListener('error', () => {
+  _segAudio.onerror = () => {
     const btn = $('#seg-play-btn');
     if (btn) btn.style.display = 'none';
-  });
+  };
 }
 
 function segTogglePlay() {
@@ -352,14 +352,21 @@ function segStopAudio() {
   if (_segAudio) {
     _segAudio.pause();
     _segAudio.currentTime = 0;
+    _segAudio.onended = null;
+    _segAudio.onerror = null;
     _segAudio = null;
   }
+  stsAudioUnregister('Segmenter');
   if (_segAnimFrame) { cancelAnimationFrame(_segAnimFrame); _segAnimFrame = null; }
   _segSetPlayIcon(true);
   _segClearHighlights();
   const playhead = $('#seg-playhead');
   if (playhead) playhead.style.opacity = '0';
   _segActiveIdx = -1;
+}
+
+function _segGetTotalDuration() {
+  return STATE.segmenterResult?.metadata?.total_duration || _segAudio?.duration || 1;
 }
 
 function segPlayBlock(idx) {
@@ -384,8 +391,7 @@ function segSeekFromClick(e) {
   if (!bar) return;
   const rect = bar.getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  const totalDuration = STATE.segmenterResult?.metadata?.total_duration || _segAudio.duration || 1;
-  _segAudio.currentTime = pct * totalDuration;
+  _segAudio.currentTime = pct * _segGetTotalDuration();
   _segUpdatePlayhead();
   // Start playing if paused
   if (_segAudio.paused) segTogglePlay();
@@ -400,7 +406,7 @@ function _segTick() {
 function _segUpdatePlayhead() {
   if (!_segAudio || !STATE.segmenterResult) return;
   const t = _segAudio.currentTime;
-  const totalDuration = STATE.segmenterResult.metadata?.total_duration || _segAudio.duration || 1;
+  const totalDuration = _segGetTotalDuration();
   const pct = (t / totalDuration * 100).toFixed(2);
 
   // Move playhead
@@ -478,7 +484,7 @@ function downloadSegJSON() {
   const folder = STATE.segmenterResult.output_folder || 'segmented';
   a.download = folder + '.json';
   document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ---- History ----

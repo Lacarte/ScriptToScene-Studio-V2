@@ -5,19 +5,13 @@ Padding, chunk concatenation with crossfade, and loudnorm via ffmpeg.
 
 import os
 import subprocess
+import json
 
 import numpy as np
 import soundfile as sf
 from loguru import logger
 
-from config import BIN_DIR
-
-
-def _find_ffmpeg():
-    """Locate ffmpeg: local bin/ first, then PATH."""
-    import shutil
-    local = os.path.join(BIN_DIR, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
-    return local if os.path.isfile(local) else shutil.which("ffmpeg")
+from studio.ffmpeg_utils import find_ffmpeg
 
 
 def pad_audio(audio, sample_rate=24000, pad_ms=50):
@@ -63,7 +57,6 @@ def concatenate_chunks(chunks: list, sample_rate: int = 24000,
 
 def _parse_loudnorm_stats(stderr: str) -> dict | None:
     """Extract measured loudness stats from ffmpeg loudnorm pass-1 output."""
-    import json as _json
     # loudnorm prints a JSON block in its summary output
     idx = stderr.rfind('"input_i"')
     if idx == -1:
@@ -76,7 +69,7 @@ def _parse_loudnorm_stats(stderr: str) -> dict | None:
     if end == -1:
         return None
     try:
-        return _json.loads(stderr[brace:end + 1])
+        return json.loads(stderr[brace:end + 1])
     except Exception:
         return None
 
@@ -87,7 +80,7 @@ def run_loudnorm(wav_path):
     Two-pass avoids the "settling" artefact that distorts the first ~100 ms of
     audio in single-pass mode.
     """
-    ffmpeg = _find_ffmpeg()
+    ffmpeg = find_ffmpeg()
     if not ffmpeg:
         return False
     tmp_path = wav_path + ".tmp.wav"

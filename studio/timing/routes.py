@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import shutil
 import subprocess
 import time
 import threading
@@ -17,6 +16,7 @@ from loguru import logger
 from werkzeug.utils import secure_filename
 
 from config import ALIGN_DIR, TRASH_DIR, BIN_DIR, generate_project_id
+from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import move_to_unique_path, safe_json_write
 
 timing_bp = Blueprint("timing", __name__)
@@ -50,13 +50,6 @@ def _load_alignment_model():
         if alignment_model is None:
             alignment_model = stable_whisper.load_model("tiny.en")
     return alignment_model
-
-
-def _find_ffmpeg():
-    local = os.path.join(BIN_DIR, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
-    return local if os.path.isfile(local) else shutil.which("ffmpeg")
-
-
 def _run_alignment(wav_path, prompt_text):
     try:
         model = _load_alignment_model()
@@ -164,7 +157,7 @@ def force_align():
     conv_path = None
     try:
         if ext != ".wav":
-            ffmpeg = _find_ffmpeg()
+            ffmpeg = find_ffmpeg()
             if not ffmpeg:
                 return jsonify({"error": "ffmpeg required for non-WAV files"}), 400
             conv_path = os.path.join(job_dir, os.path.splitext(original_name)[0] + "_conv.wav")
@@ -245,7 +238,7 @@ def align_and_segment():
     conv_path = None
     try:
         if ext != ".wav":
-            ffmpeg = _find_ffmpeg()
+            ffmpeg = find_ffmpeg()
             if not ffmpeg:
                 return jsonify({"error": "ffmpeg required for non-WAV files"}), 400
             conv_path = os.path.join(job_dir, os.path.splitext(original_name)[0] + "_conv.wav")

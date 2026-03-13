@@ -107,12 +107,13 @@ def serve_app_assets(filename):
 
 @app.route("/api/health")
 def health():
-    from studio.timing.routes import _check_alignment_available, _find_ffmpeg
+    from studio.ffmpeg_utils import find_ffmpeg
+    from studio.timing.routes import _check_alignment_available
     from studio.tts.routes import _model_files_present
     return jsonify({
         "status": "ok",
         "alignment": _check_alignment_available(),
-        "ffmpeg": _find_ffmpeg() is not None,
+        "ffmpeg": find_ffmpeg() is not None,
         "tts_model": _model_files_present(),
     })
 

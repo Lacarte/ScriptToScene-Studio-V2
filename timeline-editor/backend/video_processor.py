@@ -20,6 +20,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from studio.fonts import get_font_path as _custom_font_path
+from studio.ffmpeg_utils import find_ffmpeg, find_ffprobe
 
 # Check if ffmpeg-python is available, fallback to subprocess
 try:
@@ -28,25 +29,8 @@ try:
 except ImportError:
     USE_FFMPEG_PYTHON = False
     logger.warning("ffmpeg-python not installed, using subprocess fallback")
-
-
-def _find_ffmpeg():
-    """Locate ffmpeg binary: project bin/ first, then system PATH."""
-    from config import BIN_DIR
-    exe = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
-    local = os.path.join(BIN_DIR, exe)
-    if os.path.isfile(local):
-        logger.info("FFmpeg found in bin/: {}", local)
-        return local
-    found = shutil.which("ffmpeg")
-    if found:
-        logger.info("FFmpeg found on PATH: {}", found)
-        return found
-    logger.error("FFmpeg not found in bin/ or PATH")
-    return None
-
-
-FFMPEG_BIN = _find_ffmpeg() or "ffmpeg"
+FFMPEG_BIN = find_ffmpeg() or "ffmpeg"
+FFPROBE_BIN = find_ffprobe() or "ffprobe"
 
 
 # Font family mapping: frontend name -> system font paths by OS
@@ -412,7 +396,7 @@ class VideoProcessor:
         """Get duration of a video file in seconds via ffprobe."""
         try:
             r = subprocess.run(
-                [FFMPEG_BIN.replace('ffmpeg', 'ffprobe'), '-v', 'error',
+                [FFPROBE_BIN, '-v', 'error',
                  '-show_entries', 'format=duration',
                  '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
                 capture_output=True, text=True, timeout=10,
@@ -582,7 +566,7 @@ class VideoProcessor:
     def _apply_overlay(self, input_path, output_path, overlay_entry):
         """Composite an overlay PNG on top of the full video using ffmpeg.
 
-        overlay_entry can be a URL string (legacy) or a dict with
+        overlay_entry can be a URL string or a dict with
         {url, opacity, blend} keys.
         """
         if isinstance(overlay_entry, str):
@@ -1950,6 +1934,77 @@ class VideoProcessor:
         logger.success("Caption burn-in complete: {}", output_path)
         return output_path
 
+    def _render_scene_clips(self, scenes, temp_dir):
+        scene_clips = []
+        total_scenes = len(scenes)
+        for i, scene in enumerate(scenes):
+            progress = int((i / total_scenes) * 80)
+            scene_type = scene.get('media', {}).get('type', 'image')
+            scene_id = scene.get('id', i + 1)
+            logger.info("Processing scene {}/{} (id={} type={})",
+                        i + 1, total_scenes, scene_id, scene_type)
+            self._update_progress(progress, f"Processing scene {i + 1}/{total_scenes} ({scene_type})")
+
+            try:
+                clip_path = self._create_scene_clip(scene, temp_dir, i)
+                scene_clips.append(clip_path)
+                logger.info("Scene {}/{} done: {}", i + 1, total_scenes, os.path.basename(clip_path))
+            except Exception as error:
+                logger.error("Scene {}/{} FAILED: {}", i + 1, total_scenes, error)
+                raise
+        return scene_clips
+
+    def _build_post_process_plan(self):
+        has_captions = bool(self.export_data.get('captions', {}).get('entries'))
+        overlay_list = self.export_data.get('overlays') or []
+        if not overlay_list and self.export_data.get('overlay'):
+            overlay_list = [self.export_data['overlay']]
+        grain_cfg = self.export_data.get('grain_overlay') or self.export_data.get('grainOverlay') or {}
+        has_grain_cfg = bool(grain_cfg and grain_cfg.get('enabled'))
+        has_grain_overlay = has_grain_cfg or any(self._is_white_dot_grain_overlay(ov) for ov in overlay_list)
+        return {
+            'has_captions': has_captions,
+            'overlay_list': overlay_list,
+            'grain_cfg': grain_cfg,
+            'has_grain_cfg': has_grain_cfg,
+            'has_grain_overlay': has_grain_overlay,
+            'has_overlay': bool(overlay_list),
+            'needs_post': has_captions or bool(overlay_list) or has_grain_overlay,
+        }
+
+    def _apply_post_processing(self, concat_output, output_path, temp_dir, post_plan):
+        overlay_list = post_plan['overlay_list']
+        has_captions = post_plan['has_captions']
+        has_grain_overlay = post_plan['has_grain_overlay']
+        grain_cfg = post_plan['grain_cfg']
+
+        if post_plan['has_overlay']:
+            self._update_progress(85, f"Applying {len(overlay_list)} overlay(s)")
+            current_input = concat_output
+            for ov_idx, ov_entry in enumerate(overlay_list):
+                is_last_overlay = ov_idx == len(overlay_list) - 1
+                final_post_step = is_last_overlay and not has_captions and not has_grain_overlay
+                ov_output = output_path if final_post_step else os.path.join(temp_dir, f'overlay_{ov_idx}.mp4')
+                if self._is_white_dot_grain_overlay(ov_entry):
+                    self._apply_white_dot_grain_overlay(current_input, ov_output, grain_cfg)
+                else:
+                    self._apply_overlay(current_input, ov_output, ov_entry)
+                current_input = ov_output
+            concat_output = current_input
+
+        if post_plan['has_grain_cfg'] and not any(self._is_white_dot_grain_overlay(ov) for ov in overlay_list):
+            self._update_progress(88, "Applying grain overlay")
+            grain_output = os.path.join(temp_dir, 'grain_overlay.mp4') if has_captions else output_path
+            self._apply_white_dot_grain_overlay(concat_output, grain_output, grain_cfg)
+            concat_output = grain_output
+
+        if has_captions:
+            logger.info("Starting caption burn-in...")
+            self._update_progress(90, "Burning captions into video")
+            self._burn_captions(concat_output, output_path)
+
+        return concat_output
+
     def process(self, output_path):
         """Process all scenes into a final video"""
         scenes = self.export_data.get('scenes', [])
@@ -1966,46 +2021,32 @@ class VideoProcessor:
         logger.debug("Temp directory: {}", temp_dir)
 
         try:
-            scene_clips = []
-            total_scenes = len(scenes)
-
-            for i, scene in enumerate(scenes):
-                progress = int((i / total_scenes) * 80)
-                scene_type = scene.get('media', {}).get('type', 'image')
-                scene_id = scene.get('id', i + 1)
-                logger.info("Processing scene {}/{} (id={} type={})",
-                            i + 1, total_scenes, scene_id, scene_type)
-                self._update_progress(progress, f"Processing scene {i + 1}/{total_scenes} ({scene_type})")
-
-                try:
-                    clip_path = self._create_scene_clip(scene, temp_dir, i)
-                    scene_clips.append(clip_path)
-                    logger.info("Scene {}/{} done: {}", i + 1, total_scenes, os.path.basename(clip_path))
-                except Exception as e:
-                    logger.error("Scene {}/{} FAILED: {}", i + 1, total_scenes, e)
-                    raise
+            scene_clips = self._render_scene_clips(scenes, temp_dir)
 
             logger.info("All scenes rendered, concatenating {} clips...", len(scene_clips))
             self._update_progress(82, "Concatenating scenes and adding audio")
 
-            has_captions = bool(self.export_data.get('captions', {}).get('entries'))
-            # Support stacked overlays array or legacy single overlay string
-            overlay_list = self.export_data.get('overlays') or []
-            if not overlay_list and self.export_data.get('overlay'):
-                overlay_list = [self.export_data['overlay']]
-            grain_cfg = self.export_data.get('grain_overlay') or self.export_data.get('grainOverlay') or {}
-            has_grain_cfg = bool(grain_cfg and grain_cfg.get('enabled'))
-            has_grain_overlay = has_grain_cfg or any(self._is_white_dot_grain_overlay(ov) for ov in overlay_list)
-            has_overlay = bool(overlay_list)
-            needs_post = has_captions or has_overlay or has_grain_overlay
+            post_plan = self._build_post_process_plan()
+            has_captions = post_plan['has_captions']
+            overlay_list = post_plan['overlay_list']
+            grain_cfg = post_plan['grain_cfg']
+            has_grain_cfg = post_plan['has_grain_cfg']
+            has_grain_overlay = post_plan['has_grain_overlay']
+            has_overlay = post_plan['has_overlay']
 
-            if needs_post:
+            if post_plan['needs_post']:
                 concat_output = os.path.join(temp_dir, 'concat_output.mp4')
                 logger.debug("Post-processing needed (overlays={} captions={}) — concat to temp", len(overlay_list), has_captions)
             else:
                 concat_output = output_path
 
             self._concat_scenes(scene_clips, concat_output)
+
+            if post_plan['needs_post']:
+                self._apply_post_processing(concat_output, output_path, temp_dir, post_plan)
+                has_overlay = False
+                has_grain_cfg = False
+                has_captions = False
 
             # Apply global overlays sequentially (between scenes and captions)
             if has_overlay:

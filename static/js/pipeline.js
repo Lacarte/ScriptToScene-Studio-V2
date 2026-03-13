@@ -13,6 +13,7 @@ let _plSteps = [
 ];
 let _plStepStatus = {};
 let _plLog = [];
+let _pipelineJobs = [];
 
 const _plRunIcon = `
   <span class="pipeline-run-icon" aria-hidden="true">
@@ -251,11 +252,12 @@ async function pipelineLoadHistory() {
     const jobs = await api('/api/pipeline/jobs');
     const list = $('#pipeline-jobs');
     if (!jobs.length) {
+      _pipelineJobs = [];
       list.innerHTML = '<p style="text-align:center;padding:24px;font-size:12px;color:var(--text-muted)">No pipeline jobs yet</p>';
       return;
     }
     // Store jobs for click handler
-    window._pipelineJobs = jobs;
+    _pipelineJobs = jobs;
     const countEl = document.getElementById('pipeline-history-count');
     if (countEl) countEl.textContent = jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
     const plBadge = document.getElementById('badge-pipeline');
@@ -291,7 +293,7 @@ async function pipelineLoadHistory() {
 }
 
 function pipelineLoadFromHistory(index) {
-  const j = (window._pipelineJobs || [])[index];
+  const j = _pipelineJobs[index];
   if (!j) return;
   setModuleBadge('pipeline', j.project_id);
   if (j.text) $('#pipeline-text').value = j.text;

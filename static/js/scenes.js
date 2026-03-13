@@ -597,12 +597,12 @@ async function _scnLoadAudio() {
     return;
   }
   _scnAudio = new Audio(url);
-  _scnAudio.addEventListener('ended', () => _scnResetPlayback());
+  _scnAudio.onended = () => _scnResetPlayback();
   stsAudioRegister('Scenes', _scnAudio);
-  _scnAudio.addEventListener('error', () => {
+  _scnAudio.onerror = () => {
     const btn = $('#scn-play-btn');
     if (btn) btn.style.display = 'none';
-  });
+  };
 }
 
 function scnTogglePlay() {
@@ -639,14 +639,24 @@ function scnStopAudio() {
   if (_scnAudio) {
     _scnAudio.pause();
     _scnAudio.currentTime = 0;
+    _scnAudio.onended = null;
+    _scnAudio.onerror = null;
     _scnAudio = null;
   }
+  stsAudioUnregister('Scenes');
   if (_scnAnimFrame) { cancelAnimationFrame(_scnAnimFrame); _scnAnimFrame = null; }
   _scnSetPlayIcon(true);
   _scnClearHighlights();
   const playhead = $('#scn-playhead');
   if (playhead) playhead.style.opacity = '0';
   _scnActiveIdx = -1;
+}
+
+function _scnGetTotalDuration() {
+  if (_scnSegTimings.length) {
+    return _scnSegTimings[_scnSegTimings.length - 1].end;
+  }
+  return _scnAudio?.duration || 1;
 }
 
 function scnPlayBlock(idx) {
@@ -670,8 +680,7 @@ function scnSeekFromClick(e) {
   if (!bar) return;
   const rect = bar.getBoundingClientRect();
   const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  const totalDuration = _scnSegTimings.length ? _scnSegTimings[_scnSegTimings.length - 1].end : _scnAudio.duration || 1;
-  _scnAudio.currentTime = pct * totalDuration;
+  _scnAudio.currentTime = pct * _scnGetTotalDuration();
   _scnUpdatePlayhead();
   if (_scnAudio.paused) scnTogglePlay();
 }
@@ -685,7 +694,7 @@ function _scnTick() {
 function _scnUpdatePlayhead() {
   if (!_scnAudio) return;
   const t = _scnAudio.currentTime;
-  const totalDuration = _scnSegTimings.length ? _scnSegTimings[_scnSegTimings.length - 1].end : _scnAudio.duration || 1;
+  const totalDuration = _scnGetTotalDuration();
   const pct = (t / totalDuration * 100).toFixed(2);
 
   const playhead = $('#scn-playhead');
@@ -782,7 +791,7 @@ function downloadScenesJSON() {
   a.href = url;
   a.download = (STATE.scenesResult.project_id || 'scenes') + '.json';
   document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function sendToAssets() {

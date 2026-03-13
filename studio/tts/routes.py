@@ -9,7 +9,6 @@ import base64
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -28,13 +27,14 @@ from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR, generate_project_id
 from studio.io_utils import move_to_unique_path, safe_json_write
 from studio.security import safe_join, sanitize_project_id
 from studio.validation import validate_json
+from studio.ffmpeg_utils import find_ffmpeg
 from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
 from .normalize import (
     normalize_for_tts, clean_for_tts, tts_breathing_blocks,
     format_breathing_blocks, validate_brackets,
     _protect_kokoro, _restore_kokoro,
 )
-from .audio import pad_audio, concatenate_chunks, run_loudnorm, _find_ffmpeg
+from .audio import pad_audio, concatenate_chunks, run_loudnorm
 
 # ---------------------------------------------------------------------------
 # Blueprint
@@ -1049,7 +1049,7 @@ def convert_to_mp3(filename):
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
 
-    ffmpeg = _find_ffmpeg()
+    ffmpeg = find_ffmpeg()
     if not ffmpeg:
         return jsonify({"error": "ffmpeg not found. Place ffmpeg in bin/ or install it system-wide."}), 501
 
