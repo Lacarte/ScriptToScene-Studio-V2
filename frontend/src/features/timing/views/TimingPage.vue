@@ -262,7 +262,7 @@ onBeforeUnmount(() => {
 
     <!-- TTS Source -->
     <section class="card">
-      <label class="section-label">TTS Source</label>
+      <label class="section-label">From TTS</label>
       <div class="tts-source-row">
         <button class="action-btn action-btn-lg" @click="useTtsResult">Use Current Result</button>
         <button class="action-btn action-btn-lg" @click="openTtsPicker">Pick from History</button>
@@ -325,27 +325,29 @@ onBeforeUnmount(() => {
           <span class="file-size">{{ (audioFile.size / 1024).toFixed(0) }} KB</span>
         </div>
         <div v-else class="drop-prompt">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" class="drop-icon">
-            <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+          <svg width="28" height="28" fill="none" stroke="var(--text-muted)" stroke-width="1.5" viewBox="0 0 24 24" class="drop-icon">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
-          <span>Drop audio file here or click to browse</span>
-          <span class="drop-hint">WAV, MP3, FLAC, OGG</span>
+          <span>Drop a WAV/MP3 file here or click to browse</span>
         </div>
       </div>
     </section>
 
     <!-- Transcript -->
     <section class="card">
-      <div class="label-row">
-        <label class="section-label">Transcript</label>
-        <span class="word-count">{{ inputWordCount }} words</span>
-      </div>
+      <label class="section-label">Transcript</label>
       <textarea
         v-model="textInput"
         class="transcript-input"
-        placeholder="Enter the transcript text to align..."
+        placeholder="Paste the transcript text that matches the audio..."
         rows="5"
       />
+      <div class="transcript-meta">
+        <span>{{ inputWordCount }} words</span>
+        <span>English only</span>
+      </div>
     </section>
 
     <!-- Run Button -->
@@ -543,18 +545,6 @@ onBeforeUnmount(() => {
   margin-bottom: 12px;
 }
 
-.label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.word-count {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
 /* ---- TTS Source ---- */
 .tts-source-row {
   display: flex;
@@ -610,8 +600,8 @@ onBeforeUnmount(() => {
 /* ---- Drop Zone ---- */
 .drop-zone {
   border: 2px dashed var(--border);
-  border-radius: 12px;
-  padding: 28px 20px;
+  border-radius: 10px;
+  padding: 32px 16px;
   text-align: center;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s;
@@ -646,13 +636,7 @@ onBeforeUnmount(() => {
 }
 
 .drop-icon {
-  color: var(--text-muted);
-}
-
-.drop-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
+  margin: 0 auto 8px;
 }
 
 .file-info {
@@ -682,26 +666,31 @@ onBeforeUnmount(() => {
 /* ---- Transcript ---- */
 .transcript-input {
   width: 100%;
-  min-height: 100px;
-  padding: 12px;
-  font-family: var(--font-mono);
+  padding: 12px 14px;
+  font-family: inherit;
   font-size: 13px;
+  line-height: 1.7;
   color: var(--text);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
+  background: var(--bg-darkest);
+  border: 1.5px solid var(--border);
   border-radius: 8px;
   resize: vertical;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.2s;
   box-sizing: border-box;
-}
-
-.transcript-input::placeholder {
-  color: var(--text-muted);
 }
 
 .transcript-input:focus {
   border-color: var(--accent);
+}
+
+.transcript-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* ---- Gen Button ---- */
@@ -859,7 +848,7 @@ onBeforeUnmount(() => {
 .btn-icon:hover {
   color: var(--accent);
   border-color: var(--border);
-  background: var(--bg-input);
+  background: var(--bg-darkest);
 }
 
 .btn-icon--danger:hover {
