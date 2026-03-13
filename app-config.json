@@ -31,7 +31,7 @@
     "sts-sidebar"
   ],
   "user": {
-    "sts-tts-prompt": "",
+    "sts-tts-prompt": "The Buddhist concept of impermanence  anicca  teaches that suffering does not come from change itself, but from our resistance to it. Everything you love will change. Everyone you know will die. Every moment you experience has already passed by the time you recognize it. This is not meant to be depressing; it is meant to be liberating. If nothing is permanent, then pain is not permanent either. The wave that knocks you down is the same water that lifts you up. Letting go is not giving up — it is acknowledging that the river was never yours to hold.\n",
     "sts-sidebar": true,
     "sts-normalize": true,
     "sts-clean": true,
@@ -49,8 +49,8 @@
     "sts-tts-blendRatio": 50,
     "sts-tts-blendMethod": "slerp",
     "sts-tts-genMode": "generate",
-    "sts-tts-speed": "1.0",
-    "sts-tts-voiceOpen": "0",
+    "sts-tts-speed": "1",
+    "sts-tts-voiceOpen": "",
     "sts-auto-type": false,
     "sts-analysis-collapsed": true,
     "sts-scenes-webhook-enabled": true,
