@@ -501,24 +501,29 @@ function formatDate(ts) {
   justify-content: center;
   gap: 10px;
   width: 100%;
-  padding: 14px;
-  font-size: 15px;
-  font-weight: 600;
-  font-family: var(--font-display);
-  color: #000;
-  background: var(--accent);
+  padding: 14px 24px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  letter-spacing: 0.02em;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #3BA89F);
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
   border: none;
   border-radius: 12px;
   cursor: pointer;
-  transition: opacity 0.15s, filter 0.15s;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .gen-btn:hover:not(:disabled) {
-  filter: brightness(1.1);
+  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
+  transform: translateY(-1px);
 }
 
 .gen-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 

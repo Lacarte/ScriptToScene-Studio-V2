@@ -696,28 +696,32 @@ onBeforeUnmount(() => {
 .gen-btn {
   width: 100%;
   padding: 14px 24px;
-  font-family: 'JetBrains Mono', var(--font-mono);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
-  background: linear-gradient(135deg, #4ECDC4, #2FB8AE);
+  letter-spacing: 0.02em;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #3BA89F);
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
   border: none;
   border-radius: 12px;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .gen-btn:hover:not(:disabled) {
-  opacity: 0.92;
+  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
   transform: translateY(-1px);
 }
 
 .gen-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 

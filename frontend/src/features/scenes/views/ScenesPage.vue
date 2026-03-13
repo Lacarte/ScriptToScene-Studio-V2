@@ -694,15 +694,20 @@ function truncate(str, len = 45) {
 /* ---- Generate Button ---- */
 .gen-btn {
   width: 100%;
-  padding: 14px;
-  font-size: 15px;
+  padding: 14px 24px;
+  font-size: 14px;
   font-weight: 700;
-  color: #fff;
-  background: var(--accent);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  letter-spacing: 0.02em;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #3BA89F);
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
   border: none;
   border-radius: 12px;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.1s;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -710,7 +715,7 @@ function truncate(str, len = 45) {
 }
 
 .gen-btn:hover:not(:disabled) {
-  opacity: 0.9;
+  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
   transform: translateY(-1px);
 }
 

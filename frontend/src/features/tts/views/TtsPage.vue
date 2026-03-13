@@ -808,19 +808,24 @@ const genButtonLabel = computed(() => {
   justify-content: center;
   gap: 8px;
   padding: 14px 24px;
-  background: linear-gradient(135deg, #4ECDC4, #2FB8AE);
+  background: linear-gradient(135deg, var(--accent), #3BA89F);
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
   border: none;
   border-radius: 12px;
-  font-family: 'JetBrains Mono', var(--font-mono);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-weight: 700;
   font-size: 14px;
-  color: #0a0f14;
+  letter-spacing: 0.02em;
+  color: white;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.1s;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .gen-btn:hover:not(:disabled) {
-  opacity: 0.92;
+  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
+  transform: translateY(-1px);
 }
 
 .gen-btn:active:not(:disabled) {
