@@ -281,9 +281,9 @@ function truncate(str, len = 45) {
       <h3 class="card-heading">Segmentation Source</h3>
 
       <div class="source-buttons">
-        <button class="btn-secondary" @click="useCurrent">Use Current Result</button>
-        <button class="btn-secondary" @click="openSegPicker">Pick from History</button>
-        <label class="btn-secondary upload-label">
+        <button class="action-btn action-btn-lg" @click="useCurrent">Use Current Result</button>
+        <button class="action-btn action-btn-lg" @click="openSegPicker">Pick from History</button>
+        <label class="action-btn action-btn-lg upload-label">
           Upload JSON
           <input type="file" accept=".json" hidden @change="handleFileUpload" />
         </label>
@@ -474,10 +474,10 @@ function truncate(str, len = 45) {
 
       <!-- Action Buttons -->
       <div class="result-actions">
-        <button class="btn-secondary" @click="copyScenes">Copy JSON</button>
-        <button class="btn-secondary" @click="downloadScenes">Download</button>
-        <button class="btn-accent" @click="sendToAssets">Send to Assets</button>
-        <button class="btn-accent" @click="sendToEditor">Send to Editor</button>
+        <button class="action-btn" @click="copyScenes">Copy JSON</button>
+        <button class="action-btn" @click="downloadScenes">Download</button>
+        <button class="action-btn accent" @click="sendToAssets">Send to Assets</button>
+        <button class="action-btn accent" @click="sendToEditor">Send to Editor</button>
       </div>
     </section>
 
@@ -647,44 +647,29 @@ function truncate(str, len = 45) {
 }
 
 /* ---- Buttons ---- */
-.btn-secondary {
-  padding: 8px 16px;
-  font-size: 12px;
+.action-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
   font-weight: 600;
-  color: var(--text);
-  background: var(--bg-darkest);
+  font-family: 'JetBrains Mono', monospace;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 8px);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: all 0.2s;
 }
-
-.btn-secondary:hover {
-  border-color: var(--text-muted);
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
-
-.btn-accent {
-  padding: 8px 18px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
-  border: none;
-  border-radius: var(--radius-sm, 8px);
-  cursor: pointer;
-  transition: opacity 0.15s;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.action-btn-lg {
+  padding: 6px 14px;
+  font-size: 11px;
 }
-
-.btn-accent:hover {
-  opacity: 0.9;
-}
-
-.btn-accent:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.action-btn.accent {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .btn-ghost-sm {

@@ -293,18 +293,10 @@ onMounted(() => {
       <h3 class="card-heading">Source</h3>
       <div class="source-row">
         <div class="source-actions">
-          <button class="btn-primary" @click="loadCurrentScenes">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14,2 14,8 20,8" />
-            </svg>
+          <button class="action-btn action-btn-lg accent" @click="loadCurrentScenes">
             Load Current Scenes
           </button>
-          <button class="btn-secondary" @click="showHistory">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12,6 12,12 16,14" />
-            </svg>
+          <button class="action-btn action-btn-lg" @click="showHistory">
             Pick from History
           </button>
         </div>
@@ -468,7 +460,7 @@ onMounted(() => {
               </span>
             </div>
           </div>
-          <button class="btn-secondary btn-sm" @click="loadFromHistoryProject(project.project_id)">
+          <button class="action-btn" @click="loadFromHistoryProject(project.project_id)">
             Load
           </button>
         </div>
@@ -603,39 +595,29 @@ onMounted(() => {
   gap: 8px;
 }
 
-.btn-primary,
-.btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
+.action-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.btn-primary {
-  background: var(--accent);
-  color: #0d1117;
-}
-
-.btn-secondary {
-  background: var(--bg-deeper, #0a0a0a);
-  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
   border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
 }
-
-.btn-primary:hover,
-.btn-secondary:hover {
-  opacity: 0.9;
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
-
-.btn-sm {
-  font-size: 12px;
-  padding: 5px 12px;
+.action-btn-lg {
+  padding: 6px 14px;
+  font-size: 11px;
+}
+.action-btn.accent {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .scene-count-badge {

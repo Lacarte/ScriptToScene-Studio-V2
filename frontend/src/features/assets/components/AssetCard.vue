@@ -210,8 +210,8 @@ function isVideoFile(file) {
           rows="3"
         />
         <div class="edit-actions">
-          <button class="btn-sm btn-accent" @click="saveEdit">Save</button>
-          <button class="btn-sm btn-ghost" @click="cancelEdit">Cancel</button>
+          <button class="action-btn accent" @click="saveEdit">Save</button>
+          <button class="action-btn" @click="cancelEdit">Cancel</button>
         </div>
       </div>
     </div>
@@ -557,29 +557,25 @@ function isVideoFile(file) {
   justify-content: flex-end;
 }
 
-.btn-sm {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 12px;
+.action-btn {
+  padding: 4px 10px;
   border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.btn-accent {
-  background: var(--accent);
-  color: #0d1117;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
   border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
 }
-
-.btn-sm:hover {
-  opacity: 0.85;
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.action-btn.accent {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ---- Actions ---- */

@@ -723,18 +723,16 @@ const genButtonLabel = computed(() => {
 }
 
 .action-btn {
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  font-size: 9px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
   font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid var(--border);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 4px 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-family: inherit;
-  transition: all 0.15s;
+  transition: all 0.2s;
 }
 
 .action-btn:hover {

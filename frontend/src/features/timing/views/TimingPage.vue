@@ -264,8 +264,8 @@ onBeforeUnmount(() => {
     <section class="card">
       <label class="section-label">TTS Source</label>
       <div class="tts-source-row">
-        <button class="btn-secondary" @click="useTtsResult">Use Current Result</button>
-        <button class="btn-secondary" @click="openTtsPicker">Pick from History</button>
+        <button class="action-btn action-btn-lg" @click="useTtsResult">Use Current Result</button>
+        <button class="action-btn action-btn-lg" @click="openTtsPicker">Pick from History</button>
       </div>
       <div v-if="timing.sourceFile.value" class="source-info">
         <span class="source-tag">Source</span>
@@ -410,25 +410,25 @@ onBeforeUnmount(() => {
 
         <!-- Action Buttons -->
         <div class="actions-row">
-          <button class="btn-action" @click="showKaraoke = true" title="Fullscreen Karaoke">
+          <button class="action-btn" @click="showKaraoke = true" title="Fullscreen Karaoke">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
             </svg>
             Karaoke
           </button>
-          <button class="btn-action" @click="copyJson" title="Copy JSON">
+          <button class="action-btn" @click="copyJson" title="Copy JSON">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
             </svg>
             Copy JSON
           </button>
-          <button class="btn-action" @click="downloadJson" title="Download JSON">
+          <button class="action-btn" @click="downloadJson" title="Download JSON">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
             </svg>
             Download
           </button>
-          <button class="btn-action btn-action--danger" @click="deleteCurrentResult" title="Delete Result">
+          <button class="action-btn danger" @click="deleteCurrentResult" title="Delete Result">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
             </svg>
@@ -562,22 +562,25 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
 }
 
-.btn-secondary {
-  padding: 8px 16px;
-  font-size: 13px;
+.action-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
   font-weight: 600;
-  font-family: var(--font-mono);
-  color: var(--text);
-  background: var(--bg-input);
+  font-family: 'JetBrains Mono', monospace;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: all 0.2s;
 }
-
-.btn-secondary:hover {
+.action-btn:hover {
   border-color: var(--accent);
-  background: rgba(78, 205, 196, 0.05);
+  color: var(--accent);
+}
+.action-btn-lg {
+  padding: 6px 14px;
+  font-size: 11px;
 }
 
 .source-info {
@@ -777,30 +780,12 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border);
 }
 
-.btn-action {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+.action-btn.danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--coral, #ef4444);
 }
-
-.btn-action:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-.btn-action--danger:hover {
-  border-color: var(--coral);
-  color: var(--coral);
+.action-btn.danger:hover {
+  border-color: var(--coral, #ef4444);
 }
 
 /* ---- History ---- */

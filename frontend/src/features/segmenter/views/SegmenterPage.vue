@@ -168,8 +168,8 @@ function formatDate(ts) {
     <section class="card">
       <h3 class="card-heading">Alignment Source</h3>
       <div class="source-actions">
-        <button class="btn-secondary" @click="useCurrentResult">Use Current Result</button>
-        <button class="btn-secondary" @click="openPicker">Pick from History</button>
+        <button class="action-btn action-btn-lg" @click="useCurrentResult">Use Current Result</button>
+        <button class="action-btn action-btn-lg" @click="openPicker">Pick from History</button>
       </div>
       <p v-if="hasAlignment" class="source-info">
         <span class="source-label">Loaded:</span>
@@ -308,8 +308,8 @@ function formatDate(ts) {
 
       <!-- Action Buttons -->
       <div class="action-row">
-        <button class="btn-secondary" @click="onCopy">Copy JSON</button>
-        <button class="btn-secondary" @click="downloadJSON">Download</button>
+        <button class="action-btn" @click="onCopy">Copy JSON</button>
+        <button class="action-btn" @click="downloadJSON">Download</button>
       </div>
     </template>
 
@@ -586,22 +586,25 @@ function formatDate(ts) {
 }
 
 /* ---- Buttons ---- */
-.btn-secondary {
-  padding: 9px 18px;
-  font-size: 13px;
+.action-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
   font-weight: 600;
-  font-family: var(--font-display);
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
+  font-family: 'JetBrains Mono', monospace;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 8px);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: all 0.2s;
 }
-
-.btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.action-btn-lg {
+  padding: 6px 14px;
+  font-size: 11px;
 }
 
 /* ---- History ---- */
