@@ -1,0 +1,237 @@
+import { ref, readonly, computed } from 'vue'
+import { api } from '@/shared/api/client.js'
+
+/* ── Singleton state ── */
+const alignment = ref([])
+const transcript = ref('')
+const sourceFolder = ref('')
+const projectId = ref('')
+const style = ref('')
+const aspectRatio = ref('')
+const alignmentSource = ref('')   // label for UI
+
+const config = ref({
+  target_min: 1.5,
+  target_max: 3.0,
+  hard_max: 4.0,
+  gap_filler: 0.3,
+})
+
+const result = ref(null)          // { metadata, config, segments, stats }
+const isRunning = ref(false)
+const history = ref([])
+
+/* Audio playback */
+const audioUrl = ref('')
+const isPlaying = ref(false)
+const currentTime = ref(0)
+const duration = ref(0)
+const activeSegmentIdx = ref(-1)
+
+/* Timing history (for alignment picker) */
+const timingHistory = ref([])
+
+let historyLoaded = false
+
+export function useSegmenter() {
+  /* ── Alignment source ── */
+
+  function setAlignment(data) {
+    alignment.value = data.alignment || []
+    transcript.value = data.transcript || ''
+    sourceFolder.value = data.folder || ''
+    projectId.value = data.project_id || ''
+    style.value = data.style || ''
+    aspectRatio.value = data.aspect_ratio || ''
+    alignmentSource.value = data.source_file || data.folder || 'Current result'
+
+    if (data.folder && data.source_file) {
+      audioUrl.value = `/output/alignments/${data.folder}/${data.source_file}`
+    }
+  }
+
+  /* ── Config ── */
+
+  function updateConfig(key, value) {
+    config.value = { ...config.value, [key]: value }
+  }
+
+  function resetConfig() {
+    config.value = {
+      target_min: 1.5,
+      target_max: 3.0,
+      hard_max: 4.0,
+      gap_filler: 0.3,
+    }
+  }
+
+  /* ── Run ── */
+
+  async function runSegmenter() {
+    if (!alignment.value.length) {
+      throw new Error('No alignment data loaded')
+    }
+    isRunning.value = true
+    try {
+      const payload = {
+        alignment: alignment.value,
+        transcript: transcript.value,
+        source_folder: sourceFolder.value,
+        project_id: projectId.value,
+        style: style.value,
+        aspect_ratio: aspectRatio.value,
+        config: config.value,
+        save: true,
+      }
+      const data = await api.post('/api/segmenter/run', { body: payload })
+      result.value = data
+      return data
+    } finally {
+      isRunning.value = false
+    }
+  }
+
+  /* ── History ── */
+
+  async function loadHistory() {
+    try {
+      const data = await api.get('/api/segmenter/history')
+      history.value = Array.isArray(data) ? data : []
+      historyLoaded = true
+    } catch {
+      history.value = []
+    }
+  }
+
+  async function loadResult(folder) {
+    try {
+      const data = await api.get(`/api/segmenter/${folder}`)
+      result.value = data
+      if (data.metadata) {
+        sourceFolder.value = data.metadata.source_folder || folder
+        projectId.value = data.metadata.project_id || ''
+        alignmentSource.value = data.metadata.source_folder || folder
+      }
+      return data
+    } catch (err) {
+      throw err
+    }
+  }
+
+  /* ── Timing history (for alignment picker) ── */
+
+  async function loadTimingHistory() {
+    try {
+      const data = await api.get('/api/timing/history')
+      timingHistory.value = Array.isArray(data) ? data : []
+    } catch {
+      timingHistory.value = []
+    }
+  }
+
+  /* ── Audio helpers ── */
+
+  function updateActiveSegment(time) {
+    currentTime.value = time
+    const segs = result.value?.segments
+    if (!segs) {
+      activeSegmentIdx.value = -1
+      return
+    }
+    let idx = -1
+    for (let i = 0; i < segs.length; i++) {
+      if (time >= segs[i].start && time <= segs[i].end) {
+        idx = i
+        break
+      }
+    }
+    activeSegmentIdx.value = idx
+  }
+
+  function setPlaying(val) {
+    isPlaying.value = val
+  }
+
+  function setDuration(val) {
+    duration.value = val
+  }
+
+  /* ── Export ── */
+
+  function copyJSON() {
+    if (!result.value) return
+    const json = JSON.stringify(result.value, null, 2)
+    navigator.clipboard.writeText(json)
+  }
+
+  function downloadJSON() {
+    if (!result.value) return
+    const json = JSON.stringify(result.value, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `segments-${projectId.value || 'export'}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  /* ── Computed ── */
+
+  const segments = computed(() => result.value?.segments || [])
+  const stats = computed(() => result.value?.stats || null)
+  const totalDuration = computed(() => {
+    const segs = segments.value
+    if (!segs.length) return 0
+    return segs[segs.length - 1].end
+  })
+  const hasAlignment = computed(() => alignment.value.length > 0)
+  const hasResult = computed(() => result.value !== null)
+
+  // Auto-load history on first use
+  if (!historyLoaded) {
+    loadHistory()
+  }
+
+  return {
+    // State
+    alignment: readonly(alignment),
+    transcript: readonly(transcript),
+    sourceFolder: readonly(sourceFolder),
+    projectId: readonly(projectId),
+    alignmentSource: readonly(alignmentSource),
+    config,
+    result: readonly(result),
+    isRunning: readonly(isRunning),
+    history: readonly(history),
+    timingHistory: readonly(timingHistory),
+
+    // Audio
+    audioUrl,
+    isPlaying: readonly(isPlaying),
+    currentTime: readonly(currentTime),
+    duration: readonly(duration),
+    activeSegmentIdx: readonly(activeSegmentIdx),
+
+    // Computed
+    segments,
+    stats,
+    totalDuration,
+    hasAlignment,
+    hasResult,
+
+    // Actions
+    setAlignment,
+    updateConfig,
+    resetConfig,
+    runSegmenter,
+    loadHistory,
+    loadResult,
+    loadTimingHistory,
+    updateActiveSegment,
+    setPlaying,
+    setDuration,
+    copyJSON,
+    downloadJSON,
+  }
+}
