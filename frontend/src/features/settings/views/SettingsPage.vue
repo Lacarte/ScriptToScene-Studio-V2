@@ -155,17 +155,14 @@ function featureLabel(val) {
 .settings-page {
   max-width: 640px;
   margin: 0 auto;
-  padding: 0 20px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 32px 24px;
 }
 
 .page-title {
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 700;
-  margin-bottom: 4px;
+  margin: 0 0 4px;
 }
 
 /* ---- Card ---- */
@@ -174,6 +171,7 @@ function featureLabel(val) {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
+  margin-bottom: 16px;
 }
 
 .card-heading {

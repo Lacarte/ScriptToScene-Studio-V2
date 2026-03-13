@@ -223,8 +223,8 @@ onMounted(() => {
 
 <style scoped>
 .page {
-  padding: 28px 32px 48px;
-  max-width: 1440px;
+  padding: 32px 24px;
+  max-width: 1152px;
   margin: 0 auto;
 }
 
@@ -243,7 +243,7 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 4px;
+  margin: 0 0 4px;
 }
 
 .page-subtitle {

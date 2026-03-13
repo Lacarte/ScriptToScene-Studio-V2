@@ -30,7 +30,6 @@ const toggle = () => { collapsed.value = !collapsed.value }
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 32px 40px;
   margin-left: var(--sidebar-w);
   transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   min-height: 100vh;

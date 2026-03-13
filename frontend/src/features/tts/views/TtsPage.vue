@@ -441,7 +441,7 @@ const genButtonLabel = computed(() => {
 .tts-page {
   max-width: 780px;
   margin: 0 auto;
-  padding: 24px 32px 48px;
+  padding: 32px 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -456,7 +456,7 @@ const genButtonLabel = computed(() => {
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 700;
-  margin-bottom: 4px;
+  margin: 0 0 4px;
 }
 
 .page-subtitle {

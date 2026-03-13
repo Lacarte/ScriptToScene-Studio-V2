@@ -483,12 +483,9 @@ onMounted(() => {
 
 <style scoped>
 .assets-page {
-  max-width: 1100px;
+  max-width: 1024px;
   margin: 0 auto;
-  padding: 0 20px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 32px 24px;
 }
 
 /* ---- Header ---- */
@@ -502,6 +499,7 @@ onMounted(() => {
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 700;
+  margin: 0;
 }
 
 .project-badge {
@@ -526,6 +524,7 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
+  margin-bottom: 16px;
 }
 
 .card-heading {

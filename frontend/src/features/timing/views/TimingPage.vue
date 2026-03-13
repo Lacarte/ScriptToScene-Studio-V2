@@ -487,15 +487,12 @@ onBeforeUnmount(() => {
 .timing-page {
   max-width: 780px;
   margin: 0 auto;
-  padding: 0 20px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 32px 24px;
 }
 
 /* ---- Header ---- */
 .page-header {
-  margin-bottom: 4px;
+  margin-bottom: 24px;
 }
 
 .title-row {
@@ -508,6 +505,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 700;
+  margin: 0;
 }
 
 .project-badge {
@@ -532,6 +530,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
+  margin-bottom: 16px;
 }
 
 /* ---- Labels ---- */

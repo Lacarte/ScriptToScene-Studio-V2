@@ -563,10 +563,7 @@ function truncate(str, len = 45) {
 .scenes-page {
   max-width: 780px;
   margin: 0 auto;
-  padding: 0 20px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 32px 24px;
 }
 
 /* ---- Header ---- */
@@ -574,6 +571,7 @@ function truncate(str, len = 45) {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  margin-bottom: 24px;
 }
 
 .page-header-row {
@@ -586,6 +584,7 @@ function truncate(str, len = 45) {
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 700;
+  margin: 0;
 }
 
 .project-badge {
@@ -610,6 +609,7 @@ function truncate(str, len = 45) {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
+  margin-bottom: 16px;
 }
 
 .card-heading {

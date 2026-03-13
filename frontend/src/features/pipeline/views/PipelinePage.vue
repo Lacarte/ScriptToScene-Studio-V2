@@ -322,6 +322,7 @@ function esc(str) {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text);
+  margin: 0;
 }
 
 .page-subtitle {

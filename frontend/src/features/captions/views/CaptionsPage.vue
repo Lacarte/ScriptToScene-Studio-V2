@@ -14,7 +14,7 @@ defineOptions({ name: 'CaptionsPage' })
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 700;
-  margin-bottom: 12px;
+  margin: 0 0 12px;
 }
 .page-stub {
   color: var(--text-secondary);
