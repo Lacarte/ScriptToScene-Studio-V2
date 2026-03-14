@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import ExportCard from '../components/ExportCard.vue'
 import {
   useExportLibrary,
   formatBytes,
   formatDuration,
+  timeAgo,
 } from '../composables/useExportLibrary.js'
 
 defineOptions({ name: 'ExportLibraryPage' })
@@ -49,168 +50,215 @@ function clearFilters() {
   filterDuration.value = ''
 }
 
-const hasActiveFilters = () =>
+const hasActiveFilters = computed(() =>
   filterStyle.value || filterRatio.value || filterDuration.value
+)
 
 onMounted(() => {
   fetchLibrary()
+})
+
+// --- Duration format matching original (m:ss) ---
+function fmtDuration(sec) {
+  const s = Number(sec || 0)
+  if (!s || s <= 0) return '—'
+  const m = Math.floor(s / 60)
+  const ss = Math.floor(s % 60)
+  return m > 0 ? `${m}:${String(ss).padStart(2, '0')}` : `0:${String(ss).padStart(2, '0')}`
+}
+
+// --- Style helpers ---
+function styleLabel(id) {
+  if (!id) return ''
+  return id.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function styleColor(id) {
+  if (!id) return 'var(--text-muted)'
+  const map = {
+    cinematic_realistic: '#4ECDC4',
+    anime_manga: '#FF6B6B',
+    watercolor_dreamy: '#A78BFA',
+    pop_art_bold: '#FFB347',
+    minimalist_clean: '#56CCF2',
+  }
+  return map[id] || 'var(--text-muted)'
+}
+
+// --- Extended stats matching original ---
+const extendedStats = computed(() => {
+  const all = items.value
+  const now = Date.now()
+  const DAY = 86400000
+
+  const totalDur = all.reduce((s, i) => s + (i.duration || 0), 0)
+  const totalSize = all.reduce((s, i) => s + (i.size_bytes || 0), 0)
+  const today = all.filter(i => i.modified_at && (now - new Date(i.modified_at).getTime()) < DAY).length
+  const week = all.filter(i => i.modified_at && (now - new Date(i.modified_at).getTime()) < 7 * DAY).length
+  const month = all.filter(i => i.modified_at && (now - new Date(i.modified_at).getTime()) < 30 * DAY).length
+
+  // Top style
+  const styleCounts = {}
+  all.forEach(i => { if (i.style) styleCounts[i.style] = (styleCounts[i.style] || 0) + 1 })
+  const topStyle = Object.entries(styleCounts).sort((a, b) => b[1] - a[1])[0]
+
+  // Top ratio
+  const ratioCounts = {}
+  all.forEach(i => {
+    const r = i.video_ratio || i.ratio
+    if (r) ratioCounts[r] = (ratioCounts[r] || 0) + 1
+  })
+  const topRatio = Object.entries(ratioCounts).sort((a, b) => b[1] - a[1])[0]
+
+  // Avg per week
+  const dates = all.map(i => new Date(i.modified_at).getTime()).filter(Boolean)
+  const firstExport = dates.length ? Math.min(...dates) : now
+  const daysSinceFirst = Math.max(1, Math.ceil((now - firstExport) / DAY))
+  const avgPerWeek = all.length >= 2 ? (all.length / (daysSinceFirst / 7)).toFixed(1) : '—'
+
+  // Streak
+  const daySet = new Set()
+  all.forEach(i => {
+    if (i.modified_at) {
+      const d = new Date(i.modified_at)
+      daySet.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`)
+    }
+  })
+  let streak = 0
+  for (let d = 0; d < 365; d++) {
+    const dt = new Date(now - d * DAY)
+    const key = `${dt.getFullYear()}-${dt.getMonth()}-${dt.getDate()}`
+    if (daySet.has(key)) { streak++ } else if (d > 0) break
+  }
+
+  return {
+    total: all.length,
+    today,
+    week,
+    month,
+    avgPerWeek,
+    streak,
+    totalDur,
+    totalSize,
+    topStyle,
+    topRatio,
+  }
 })
 </script>
 
 <template>
   <div class="page">
-    <!-- ── Header ─────────────────────────────── -->
+    <!-- Header -->
     <div class="page-header">
       <div>
         <h2 class="page-title">Export Library</h2>
         <p class="page-subtitle">Browse all exported videos and download video or project ZIP</p>
       </div>
-      <button class="btn-refresh" :disabled="loading" @click="fetchLibrary">
-        <svg
-          :class="{ spinning: loading }"
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <polyline points="23 4 23 10 17 10" />
-          <polyline points="1 20 1 14 7 14" />
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
-          <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
-        </svg>
+      <button class="action-btn" style="padding:7px 14px;font-size:11px" :disabled="loading" @click="fetchLibrary">
         Refresh
       </button>
     </div>
 
-    <!-- ── Error ──────────────────────────────── -->
-    <div v-if="error" class="error-banner">
-      {{ error }}
-      <button class="error-retry" @click="fetchLibrary">Retry</button>
-    </div>
-
-    <!-- ── Info bar ───────────────────────────── -->
-    <div class="info-bar">
-      <div class="info-row">
-        <span class="info-source">Source: <code>output/exports</code></span>
-        <span class="info-count">{{ items.length }} videos</span>
+    <!-- Source info card -->
+    <section class="card card-pad">
+      <div class="source-row">
+        <span class="source-label">Source: output/exports</span>
+        <span class="source-count">{{ items.length }} video{{ items.length !== 1 ? 's' : '' }}</span>
       </div>
 
       <!-- Filter toolbar -->
       <div v-if="items.length > 0" class="filter-toolbar">
-        <div class="filter-controls">
-          <select v-model="sortBy" class="filter-select">
-            <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
-
-          <select v-model="filterStyle" class="filter-select">
-            <option value="">All styles</option>
-            <option v-for="s in styleOptions.filter(v => v)" :key="s" :value="s">
-              {{ s }}
-            </option>
-          </select>
-
-          <select v-model="filterRatio" class="filter-select">
-            <option value="">All ratios</option>
-            <option v-for="r in ratioOptions.filter(v => v)" :key="r" :value="r">
-              {{ r }}
-            </option>
-          </select>
-
-          <select v-model="filterDuration" class="filter-select">
-            <option v-for="d in DURATION_FILTERS" :key="d.value" :value="d.value">
-              {{ d.label }}
-            </option>
-          </select>
-
-          <button v-if="hasActiveFilters()" class="btn-clear-filters" @click="clearFilters">
-            Clear
-          </button>
-        </div>
-
+        <select v-model="sortBy" class="filter-select">
+          <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+        </select>
+        <select v-model="filterStyle" class="filter-select">
+          <option value="">All styles</option>
+          <option v-for="s in styleOptions.filter(v => v)" :key="s" :value="s">{{ styleLabel(s) }}</option>
+        </select>
+        <select v-model="filterRatio" class="filter-select">
+          <option value="">All ratios</option>
+          <option v-for="r in ratioOptions.filter(v => v)" :key="r" :value="r">{{ r }}</option>
+        </select>
+        <select v-model="filterDuration" class="filter-select">
+          <option v-for="d in DURATION_FILTERS" :key="d.value" :value="d.value">{{ d.label }}</option>
+        </select>
         <span class="filter-count">
-          {{ filteredItems.length }} of {{ items.length }} shown
+          <template v-if="filteredItems.length < items.length">Showing {{ filteredItems.length }} of {{ items.length }}</template>
         </span>
       </div>
-    </div>
+    </section>
 
-    <!-- ── Stats ──────────────────────────────── -->
-    <div v-if="items.length > 0" class="stats-section">
-      <div class="stat-card">
-        <span class="stat-value">{{ formatDuration(stats.totalDuration) }}</span>
-        <span class="stat-label">Total Duration</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-value">{{ formatBytes(stats.totalSize) }}</span>
-        <span class="stat-label">Total Size</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-value">{{ stats.today }}</span>
-        <span class="stat-label">Today</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-value">{{ stats.week }}</span>
-        <span class="stat-label">This Week</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-value">{{ stats.month }}</span>
-        <span class="stat-label">This Month</span>
-      </div>
-      <div v-if="stats.topStyles.length" class="stat-card stat-card-wide">
-        <span class="stat-label">Top Styles</span>
-        <div class="stat-tags">
-          <span v-for="[style, count] in stats.topStyles" :key="style" class="stat-tag">
-            {{ style }} <em>{{ count }}</em>
-          </span>
+    <!-- Stats -->
+    <section v-if="items.length > 0" class="card card-pad stats-card">
+      <div class="stats-row">
+        <div class="stat-item">
+          <span class="stat-value" style="color:#4ECDC4">{{ extendedStats.total }}</span>
+          <span class="stat-label">Total</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" :style="{ color: extendedStats.today > 0 ? '#26DE81' : 'var(--text-muted)' }">{{ extendedStats.today }}</span>
+          <span class="stat-label">Today</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" style="color:#FFB347">{{ extendedStats.week }}</span>
+          <span class="stat-label">This Week</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" style="color:var(--text-secondary)">{{ extendedStats.month }}</span>
+          <span class="stat-label">This Month</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" style="color:var(--text-secondary)">{{ extendedStats.avgPerWeek }}</span>
+          <span class="stat-label">Avg / Week</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" :style="{ color: extendedStats.streak > 0 ? '#FF6B6B' : 'var(--text-muted)' }">{{ extendedStats.streak > 0 ? extendedStats.streak + 'd' : '—' }}</span>
+          <span class="stat-label">Streak</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" style="color:#A78BFA">{{ fmtDuration(extendedStats.totalDur) }}</span>
+          <span class="stat-label">Duration</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" style="color:var(--text-secondary)">{{ formatBytes(extendedStats.totalSize) }}</span>
+          <span class="stat-label">Size</span>
+        </div>
+        <div v-if="extendedStats.topStyle" class="stat-item">
+          <span class="stat-value" :style="{ color: styleColor(extendedStats.topStyle[0]) }">{{ styleLabel(extendedStats.topStyle[0]) }}</span>
+          <span class="stat-label">Top Style</span>
+        </div>
+        <div v-if="extendedStats.topRatio" class="stat-item">
+          <span class="stat-value" style="color:#A78BFA">{{ extendedStats.topRatio[0] }}</span>
+          <span class="stat-label">Top Ratio</span>
         </div>
       </div>
-      <div v-if="stats.topRatios.length" class="stat-card stat-card-wide">
-        <span class="stat-label">Top Ratios</span>
-        <div class="stat-tags">
-          <span v-for="[ratio, count] in stats.topRatios" :key="ratio" class="stat-tag">
-            {{ ratio }} <em>{{ count }}</em>
-          </span>
-        </div>
-      </div>
-    </div>
+    </section>
 
-    <!-- ── Loading ────────────────────────────── -->
-    <div v-if="loading && items.length === 0" class="loading-state">
-      <div class="spinner" />
-      <span>Loading export library...</span>
-    </div>
+    <!-- Loading -->
+    <section v-if="loading && items.length === 0" class="card card-pad">
+      <p class="loading-text">Loading export library...</p>
+    </section>
 
-    <!-- ── Empty ──────────────────────────────── -->
-    <div v-else-if="!loading && items.length === 0 && !error" class="empty-state">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
-        <line x1="7" y1="2" x2="7" y2="22"/>
-        <line x1="17" y1="2" x2="17" y2="22"/>
-        <line x1="2" y1="12" x2="22" y2="12"/>
-        <line x1="2" y1="7" x2="7" y2="7"/>
-        <line x1="2" y1="17" x2="7" y2="17"/>
-        <line x1="17" y1="7" x2="22" y2="7"/>
-        <line x1="17" y1="17" x2="22" y2="17"/>
-      </svg>
-      <p>No exports found. Export a video from the Editor to see it here.</p>
-    </div>
+    <!-- Error -->
+    <section v-else-if="error" class="card card-pad error-card">
+      <p class="error-text">{{ error }}</p>
+    </section>
 
-    <!-- ── No filter results ──────────────────── -->
-    <div v-else-if="!loading && items.length > 0 && filteredItems.length === 0" class="empty-state">
-      <p>No exports match your current filters.</p>
-      <button class="btn-clear-filters" @click="clearFilters">Clear Filters</button>
-    </div>
+    <!-- Empty -->
+    <section v-else-if="!loading && items.length === 0" class="card card-pad-lg">
+      <p class="empty-text">No exported videos found yet.</p>
+    </section>
 
-    <!-- ── Grid ───────────────────────────────── -->
+    <!-- No filter results -->
+    <section v-else-if="items.length > 0 && filteredItems.length === 0" class="card card-pad-lg">
+      <p class="empty-text">No videos match the current filters.</p>
+    </section>
+
+    <!-- Grid -->
     <div v-else class="export-grid">
       <ExportCard
         v-for="(item, idx) in filteredItems"
-        :key="item.project_id + item.video_relpath"
+        :key="item.project_id + (item.video_relpath || idx)"
         :item="item"
         :ref="(el) => setCardRef(el, idx)"
         @play="handlePlay"
@@ -223,19 +271,17 @@ onMounted(() => {
 
 <style scoped>
 .page {
-  padding: 32px 24px;
   max-width: 1152px;
   margin: 0 auto;
+  padding: 32px 24px;
 }
 
-/* ── Header ─────────────────────────── */
-
+/* ---- Header ---- */
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .page-title {
@@ -243,7 +289,7 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 700;
   color: var(--text);
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 .page-subtitle {
@@ -252,135 +298,91 @@ onMounted(() => {
   margin-top: 4px;
 }
 
-.btn-refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 600;
+/* ---- Card ---- */
+.card {
   background: var(--bg-surface);
-  color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  flex-shrink: 0;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  transition: border-color 0.2s;
 }
 
-.btn-refresh:hover:not(:disabled) {
+.card:hover {
   border-color: var(--border-hover);
-  background: var(--bg-surface-hover);
 }
 
-.btn-refresh:disabled {
+.card-pad {
+  padding: 16px;
+}
+
+.card-pad-lg {
+  padding: 24px;
+}
+
+/* ---- Action button (shared) ---- */
+.action-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.spinning {
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* ── Error ───────────────────────────── */
-
-.error-banner {
+/* ---- Source info ---- */
+.source-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  margin-bottom: 20px;
-  background: rgba(255, 107, 107, 0.08);
-  border: 1px solid rgba(255, 107, 107, 0.25);
-  border-radius: 10px;
-  color: var(--accent-error);
-  font-size: 13px;
-}
-
-.error-retry {
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  background: transparent;
-  border: 1px solid var(--accent-error);
-  color: var(--accent-error);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.error-retry:hover {
-  background: rgba(255, 107, 107, 0.1);
-}
-
-/* ── Info bar ────────────────────────── */
-
-.info-bar {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 18px;
-  margin-bottom: 20px;
-}
-
-.info-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.info-source {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.info-source code {
-  font-family: var(--font-mono);
-  color: var(--text);
-  background: var(--bg-dark);
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.info-count {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--accent);
-  font-weight: 600;
-}
-
-/* ── Filter toolbar ──────────────────── */
-
-.filter-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.filter-controls {
+.source-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.source-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---- Filter toolbar ---- */
+.filter-toolbar {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .filter-select {
-  padding: 6px 10px;
-  font-size: 12px;
-  font-family: var(--font-body);
-  background: var(--bg-dark);
+  background: var(--bg-darkest);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
   cursor: pointer;
   outline: none;
   transition: border-color 0.15s;
@@ -391,120 +393,79 @@ onMounted(() => {
   border-color: var(--border-hover);
 }
 
-.btn-clear-filters {
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  background: transparent;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.btn-clear-filters:hover {
-  background: var(--accent-dim);
-}
-
 .filter-count {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 10px;
   color: var(--text-muted);
-  flex-shrink: 0;
+  margin-left: auto;
 }
 
-/* ── Stats ───────────────────────────── */
+/* ---- Stats ---- */
+.stats-card {
+  margin-bottom: 16px;
+}
 
-.stats-section {
+.stats-row {
   display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
+  align-items: center;
+  gap: 16px;
   flex-wrap: wrap;
+  justify-content: space-around;
+  font-family: 'JetBrains Mono', monospace;
 }
 
-.stat-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 110px;
-}
-
-.stat-card-wide {
-  min-width: 180px;
-  flex: 1;
-}
-
-.stat-value {
-  font-family: var(--font-mono);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.stat-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
-}
-
-.stat-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.stat-tag {
-  font-size: 11px;
-  color: var(--text-secondary);
-  background: var(--bg-dark);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-}
-
-.stat-tag em {
-  font-style: normal;
-  color: var(--accent);
-  margin-left: 3px;
-}
-
-/* ── Loading / Empty ─────────────────── */
-
-.loading-state,
-.empty-state {
+.stat-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 64px 20px;
+  gap: 2px;
+  min-width: 70px;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 9px;
   color: var(--text-muted);
-  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---- States ---- */
+.loading-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
   text-align: center;
+  margin: 0;
 }
 
-.spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+.error-card {
+  border-color: rgba(255, 107, 107, 0.35);
 }
 
-/* ── Grid ────────────────────────────── */
+.error-text {
+  font-size: 13px;
+  color: var(--coral);
+  text-align: center;
+  margin: 0;
+}
 
+.empty-text {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* ---- Grid ---- */
 .export-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
+  gap: 14px;
 }
 </style>

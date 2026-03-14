@@ -1,153 +1,182 @@
 <script setup>
 defineOptions({ name: 'SegmentCard' })
 
-defineProps({
+const props = defineProps({
   segment: { type: Object, required: true },
   index: { type: Number, required: true },
+  displayIndex: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['play'])
 
-function formatDuration(val) {
+function fmt(val) {
   return val != null ? val.toFixed(2) + 's' : '--'
+}
+
+const BREAK_COLORS = {
+  strong_break: '#4ECDC4',
+  natural_break: '#A78BFA',
+  hard_max: '#ef4444',
+  end_of_text: 'var(--text-muted)',
+  silence: 'var(--text-muted)',
+}
+
+function breakColor(reason) {
+  return BREAK_COLORS[reason] || 'var(--text-muted)'
 }
 </script>
 
 <template>
+  <!-- Filler / silence segments -->
   <div
-    class="segment-card"
-    :class="{ active: isActive, filler: segment.is_filler }"
+    v-if="segment.is_filler"
+    class="filler-card"
+    :class="{ active: isActive }"
     @click="emit('play', segment)"
   >
-    <div class="card-left">
-      <span class="index-badge">{{ segment.index }}</span>
-    </div>
-    <div class="card-body">
-      <p class="words-text" :class="{ 'filler-text': segment.is_filler }">
-        {{ segment.words || '(silence)' }}
-      </p>
-      <div class="card-meta">
-        <span class="meta-item duration">{{ formatDuration(segment.duration) }}</span>
-        <span v-if="segment.word_count != null" class="meta-item">{{ segment.word_count }} words</span>
-        <span class="type-badge" :class="segment.is_filler ? 'badge-filler' : 'badge-speech'">
-          {{ segment.is_filler ? 'filler' : 'speech' }}
-        </span>
-        <span v-if="segment.break_reason" class="meta-item reason">{{ segment.break_reason }}</span>
+    <span class="filler-label">silence</span>
+    <div class="filler-line"></div>
+    <span class="filler-duration">{{ fmt(segment.duration) }}</span>
+  </div>
+
+  <!-- Speech segments -->
+  <div
+    v-else
+    class="segment-card"
+    :class="{ active: isActive }"
+    :style="{ borderLeftColor: breakColor(segment.break_reason) }"
+    @click="emit('play', segment)"
+  >
+    <div class="seg-header">
+      <span class="seg-title" :style="{ color: breakColor(segment.break_reason) }">
+        Segment {{ displayIndex }} &middot; {{ fmt(segment.start) }} - {{ fmt(segment.end) }}
+      </span>
+      <div class="seg-badges">
+        <span class="seg-duration">{{ fmt(segment.duration) }}</span>
+        <span v-if="segment.break_reason" class="seg-break">{{ segment.break_reason }}</span>
       </div>
     </div>
+    <p class="seg-text">{{ segment.words }}</p>
+    <p v-if="segment.word_count != null" class="seg-words">{{ segment.word_count }} words</p>
   </div>
 </template>
 
 <style scoped>
+/* ---- Speech Card ---- */
 .segment-card {
-  display: flex;
-  gap: 14px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 10px;
+  border-left: 3px solid var(--accent);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  border-left: 3px solid transparent;
+  transition: all 0.2s;
 }
 
 .segment-card:hover {
-  border-color: var(--border-hover, rgba(255, 255, 255, 0.12));
   background: rgba(255, 255, 255, 0.02);
 }
 
 .segment-card.active {
-  border-left-color: var(--accent);
-  background: rgba(78, 205, 196, 0.04);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(78, 205, 196, 0.3);
 }
 
-.segment-card.filler {
-  opacity: 0.6;
-}
-
-.segment-card.filler:hover {
-  opacity: 0.8;
-}
-
-.card-left {
-  display: flex;
-  align-items: flex-start;
-  padding-top: 2px;
-}
-
-.index-badge {
+.seg-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.seg-title {
   font-family: var(--font-mono);
   font-size: 12px;
-  font-weight: 700;
-  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.seg-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
 
-.card-body {
-  flex: 1;
-  min-width: 0;
+.seg-duration {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: rgba(78, 205, 196, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
-.words-text {
-  font-size: 14px;
-  line-height: 1.5;
+.seg-break {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-darkest);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.seg-text {
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--text);
-  margin-bottom: 8px;
+  margin: 0;
   word-break: break-word;
 }
 
-.words-text.filler-text {
-  font-style: italic;
+.seg-words {
+  font-family: var(--font-mono);
+  font-size: 10px;
   color: var(--text-muted);
+  margin: 4px 0 0;
 }
 
-.card-meta {
+/* ---- Filler / Silence Card ---- */
+.filler-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--bg-darkest);
+  border: 1px dashed var(--border);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-.meta-item {
-  font-size: 12px;
-  color: var(--text-secondary);
+.filler-card:hover {
+  opacity: 0.8;
 }
 
-.meta-item.duration {
+.filler-card.active {
+  opacity: 1;
+}
+
+.filler-label {
   font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--accent);
-}
-
-.meta-item.reason {
-  font-style: italic;
-  color: var(--text-muted);
-}
-
-.type-badge {
   font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 2px 8px;
-  border-radius: 6px;
-}
-
-.badge-speech {
-  background: rgba(78, 205, 196, 0.12);
-  color: var(--accent);
-}
-
-.badge-filler {
-  background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted);
+  min-width: 40px;
+}
+
+.filler-line {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+  border-radius: 1px;
+}
+
+.filler-duration {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 </style>

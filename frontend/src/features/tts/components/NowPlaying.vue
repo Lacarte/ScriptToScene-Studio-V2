@@ -109,38 +109,35 @@ onBeforeUnmount(() => {
 
     <div class="np-header">
       <button class="play-btn" @click="togglePlayback" title="Play/Pause">
-        <svg v-if="!isPlaying" width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+        <svg v-if="!isPlaying" width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
           <path d="M8 5v14l11-7z" />
         </svg>
-        <svg v-else width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+        <svg v-else width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
           <path d="M6 4h4v16H6zM14 4h4v16h-4z" />
         </svg>
       </button>
 
       <div class="np-info">
-        <div class="np-text">{{ (metadata.prompt || '').slice(0, 80) }}{{ (metadata.prompt || '').length > 80 ? '...' : '' }}</div>
+        <p class="np-text">{{ (metadata.prompt || '').slice(0, 80) }}{{ (metadata.prompt || '').length > 80 ? '...' : '' }}</p>
         <div class="np-meta">
           <span class="np-voice">{{ metadata.voiceName || metadata.voice }}</span>
-          <span v-if="metadata.duration_seconds" class="np-duration">{{ metadata.duration_seconds.toFixed(1) }}s</span>
+          <span class="np-sep">/</span>
+          <span class="np-duration">{{ metadata.duration_seconds ? metadata.duration_seconds.toFixed(1) + 's' : fmtTime(duration) }}</span>
+          <span class="np-current">{{ fmtTime(currentTime) }}</span>
         </div>
       </div>
     </div>
 
-    <div class="seek-row">
-      <div class="seek-bar" @click="seekAudio">
-        <div class="seek-fill" :style="{ width: seekPercent + '%' }"></div>
-      </div>
-      <span class="time-display">{{ fmtTime(currentTime) }} / {{ fmtTime(duration) }}</span>
+    <div class="seek-bar" @click="seekAudio">
+      <div class="seek-fill" :style="{ width: seekPercent + '%' }"></div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .now-playing {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 20px;
+  margin-top: 16px;
+  padding: 16px;
 }
 
 .np-header {
@@ -151,9 +148,9 @@ onBeforeUnmount(() => {
 }
 
 .play-btn {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   border-radius: 10px;
   background: rgba(78, 205, 196, 0.12);
   border: none;
@@ -175,6 +172,7 @@ onBeforeUnmount(() => {
 }
 
 .np-text {
+  margin: 0;
   font-size: 12px;
   color: var(--text);
   line-height: 1.5;
@@ -193,18 +191,15 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
 }
 
-.np-duration {
-  opacity: 0.7;
+.np-sep {
+  opacity: 0.3;
 }
 
-.seek-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.np-current {
+  margin-left: auto;
 }
 
 .seek-bar {
-  flex: 1;
   height: 6px;
   background: var(--bg-darkest);
   border-radius: 3px;
@@ -217,14 +212,5 @@ onBeforeUnmount(() => {
   background: var(--accent);
   border-radius: 3px;
   transition: width 0.1s linear;
-}
-
-.time-display {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  min-width: 80px;
-  text-align: right;
 }
 </style>

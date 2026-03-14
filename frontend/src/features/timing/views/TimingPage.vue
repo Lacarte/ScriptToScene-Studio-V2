@@ -264,6 +264,11 @@ function formatDate(ts) {
   }
 }
 
+function truncateText(text, max = 60) {
+  if (!text) return ''
+  return text.length > max ? text.slice(0, max) + '...' : text
+}
+
 /* ── Lifecycle ── */
 onMounted(() => {
   timing.loadHistory()
@@ -437,7 +442,7 @@ onBeforeUnmount(() => {
         >
           <div class="history-row" @click="loadHistoryItem(item)">
             <div class="history-info">
-              <p class="history-name">{{ item.transcript || item.source_file || item.folder }}</p>
+              <p class="history-name">{{ truncateText(item.transcript || item.source_file || item.folder) }}</p>
               <div class="history-meta">
                 <span v-if="item.project_id">{{ item.project_id }}</span>
                 <span v-if="item.project_id" class="meta-sep">/</span>
@@ -483,7 +488,7 @@ onBeforeUnmount(() => {
 }
 
 .page-header {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .title-row {
@@ -545,7 +550,7 @@ onBeforeUnmount(() => {
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: 10px;
-  padding: 32px 16px;
+  padding: 18px 16px;
   text-align: center;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s;
@@ -616,7 +621,7 @@ onBeforeUnmount(() => {
 
 .transcript-input {
   width: 100%;
-  padding: 12px 14px;
+  padding: 6px 14px;
   font-family: inherit;
   font-size: 13px;
   line-height: 1.7;
@@ -711,7 +716,7 @@ onBeforeUnmount(() => {
 }
 
 .history-section {
-  margin-top: 28px;
+  margin-top: 16px;
 }
 
 .history-header {
@@ -725,7 +730,7 @@ onBeforeUnmount(() => {
 .history-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text);
 }
@@ -747,12 +752,16 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-radius: 8px;
-  transition: background 0.15s;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 6px;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .history-item:hover {
-  background: transparent;
+  border-color: var(--border-hover);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
 .history-item--active {

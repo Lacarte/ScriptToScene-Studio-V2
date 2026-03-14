@@ -111,6 +111,16 @@ function handlePlayHistory(item) {
   tts.playAudio(meta)
 }
 
+async function handleOpenFolder(item) {
+  try {
+    await fetch('/api/tts/open-generation-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: item.filename }),
+    })
+  } catch { /* ignore */ }
+}
+
 async function handleDeleteItem(item) {
   try {
     await tts.deleteItem(item.filename)
@@ -432,6 +442,7 @@ const genButtonLabel = computed(() => {
           :key="item.filename || i"
           :item="item"
           @play="handlePlayHistory"
+          @open-folder="handleOpenFolder"
           @delete="handleDeleteItem"
         />
       </div>
@@ -451,7 +462,7 @@ const genButtonLabel = computed(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .title-row {
@@ -838,7 +849,7 @@ const genButtonLabel = computed(() => {
 }
 
 .history-section {
-  margin-top: 28px;
+  margin-top: 16px;
 }
 
 .history-header {
@@ -851,7 +862,7 @@ const genButtonLabel = computed(() => {
 
 .history-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 700;
   font-family: var(--font-display);
   color: var(--text);

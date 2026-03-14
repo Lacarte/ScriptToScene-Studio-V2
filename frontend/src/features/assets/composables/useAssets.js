@@ -18,11 +18,11 @@ const TYPE_COLORS = {
 const scenes = ref([])
 const provider = ref('grok')
 const arguments_ = ref('')
-const aspectRatio = ref('16:9')
+const aspectRatio = ref('9:16')
 const providerOptions = ref({
-  grok_mode: 'default',
-  grok_quality: 'standard',
-  grok_duration: '5',
+  grok_mode: 'video',
+  grok_quality: '480p',
+  grok_duration: '6s',
   model: 'default',
   resolution: '1024x1024',
   output_format: 'png',

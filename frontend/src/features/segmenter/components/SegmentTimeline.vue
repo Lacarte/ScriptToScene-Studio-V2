@@ -8,9 +8,11 @@ const props = defineProps({
   activeIndex: { type: Number, default: -1 },
   totalDuration: { type: Number, required: true },
   currentTime: { type: Number, default: 0 },
+  isPlaying: { type: Boolean, default: false },
+  hasAudio: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['play-segment', 'seek'])
+const emit = defineEmits(['play-segment', 'seek', 'toggle-play'])
 
 const hoveredIdx = ref(-1)
 
@@ -20,122 +22,216 @@ const playheadLeft = computed(() => {
   return `${Math.min(100, Math.max(0, pct))}%`
 })
 
-function segmentStyle(seg) {
-  if (!props.totalDuration) return { flexBasis: '0%' }
-  const pct = (seg.duration / props.totalDuration) * 100
-  return { flexBasis: `${pct}%` }
+const playheadOpacity = computed(() => (
+  props.currentTime > 0 || props.isPlaying ? 1 : 0
+))
+
+const bottomOffsetStyle = computed(() => ({
+  marginLeft: props.hasAudio ? '38px' : '0',
+}))
+
+function formatTime(value) {
+  return Number.isFinite(value) ? `${value.toFixed(2)}s` : '0.00s'
+}
+
+function blockStyle(seg) {
+  if (!props.totalDuration) {
+    return {
+      left: '0%',
+      width: '0%',
+    }
+  }
+
+  const left = (seg.start / props.totalDuration) * 100
+  const width = Math.max((seg.duration / props.totalDuration) * 100, 0.3)
+  let background = 'hsla(210,20%,45%,0.7)'
+
+  if (seg.is_filler) {
+    background = 'rgba(255,255,255,0.04)'
+  } else if (seg.break_reason === 'hard_max') {
+    background = 'hsla(0,70%,60%,0.7)'
+  } else if (seg.break_reason === 'strong_break') {
+    background = 'hsla(174,58%,55%,0.7)'
+  } else if (seg.break_reason === 'natural_break') {
+    background = 'hsla(263,68%,65%,0.7)'
+  }
+
+  return {
+    left: `${left.toFixed(2)}%`,
+    width: `${width.toFixed(2)}%`,
+    background,
+  }
+}
+
+function blockLabel(seg) {
+  if (seg.is_filler || !seg.words) return ''
+  return seg.words.split(/\s+/).slice(0, 3).join(' ')
+}
+
+function blockTitle(seg) {
+  if (!seg.words) return formatTime(seg.duration)
+  return `${seg.words} (${formatTime(seg.duration)})`
 }
 
 function onSegmentClick(seg, idx) {
+  if (!props.hasAudio) return
   emit('play-segment', { segment: seg, index: idx })
 }
 
 function onBarClick(event) {
+  if (!props.totalDuration || !props.hasAudio) return
   const bar = event.currentTarget
   const rect = bar.getBoundingClientRect()
   const pct = (event.clientX - rect.left) / rect.width
-  const time = pct * props.totalDuration
-  emit('seek', time)
+  emit('seek', Math.max(0, Math.min(1, pct)) * props.totalDuration)
 }
 </script>
 
 <template>
-  <div class="timeline-wrap" @click="onBarClick">
-    <div class="timeline-bar">
-      <div
-        v-for="(seg, i) in segments"
-        :key="i"
-        class="timeline-segment"
-        :class="{
-          filler: seg.is_filler,
-          active: i === activeIndex,
-          hovered: i === hoveredIdx,
-        }"
-        :style="segmentStyle(seg)"
-        @mouseenter="hoveredIdx = i"
-        @mouseleave="hoveredIdx = -1"
-        @click.stop="onSegmentClick(seg, i)"
+  <div>
+    <div class="timeline-row">
+      <button
+        v-if="hasAudio"
+        type="button"
+        class="timeline-play-btn"
+        @click="emit('toggle-play')"
       >
-        <span v-if="seg.duration / totalDuration > 0.04" class="seg-label">
-          {{ seg.index }}
-        </span>
+        <svg v-if="!isPlaying" width="12" height="12" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+          <polygon points="5,3 19,12 5,21" />
+        </svg>
+        <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="white" aria-hidden="true">
+          <rect x="5" y="4" width="4" height="16" />
+          <rect x="15" y="4" width="4" height="16" />
+        </svg>
+      </button>
+
+      <div class="timeline-bar" @click="onBarClick">
+        <div
+          v-for="(seg, idx) in segments"
+          :key="`${seg.index ?? idx}-${seg.start ?? 0}`"
+          class="timeline-block"
+          :class="{
+            filler: seg.is_filler,
+            active: idx === activeIndex,
+            hovered: idx === hoveredIdx,
+          }"
+          :style="blockStyle(seg)"
+          :title="blockTitle(seg)"
+          @mouseenter="hoveredIdx = idx"
+          @mouseleave="hoveredIdx = -1"
+          @click.stop="onSegmentClick(seg, idx)"
+        >
+          <span v-if="blockLabel(seg)" class="timeline-label">{{ blockLabel(seg) }}</span>
+        </div>
+
+        <div class="playhead" :style="{ left: playheadLeft, opacity: playheadOpacity }" />
       </div>
+
+      <span class="time-display">{{ formatTime(currentTime) }}</span>
     </div>
-    <div class="playhead" :style="{ left: playheadLeft }" />
+
+    <div class="timeline-scale" :style="bottomOffsetStyle">
+      <span>0.00s</span>
+      <span>{{ formatTime(totalDuration) }}</span>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.timeline-wrap {
-  position: relative;
-  width: 100%;
-  padding: 8px 0 16px;
-  cursor: pointer;
-}
-
-.timeline-bar {
+.timeline-row {
   display: flex;
-  width: 100%;
-  height: 32px;
-  border-radius: 6px;
-  overflow: hidden;
-  gap: 2px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
 }
 
-.timeline-segment {
+.timeline-play-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 4px;
-  background: var(--accent);
-  opacity: 0.7;
-  transition: opacity 0.15s, filter 0.15s;
+  flex-shrink: 0;
   cursor: pointer;
-  border-radius: 3px;
+  transition: transform 0.15s, background 0.15s;
 }
 
-.timeline-segment:first-child {
-  border-radius: 6px 3px 3px 6px;
+.timeline-play-btn:hover {
+  transform: scale(1.1);
 }
 
-.timeline-segment:last-child {
-  border-radius: 3px 6px 6px 3px;
+.timeline-bar {
+  position: relative;
+  flex: 1;
+  height: 32px;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
 }
 
-.timeline-segment.filler {
-  background: rgba(255, 255, 255, 0.06);
+.timeline-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-right: 1px solid var(--bg-darkest);
+  cursor: pointer;
+  transition: opacity 0.15s;
 }
 
-.timeline-segment.active {
-  opacity: 1;
-  filter: brightness(1.2);
+.timeline-block.active,
+.timeline-block.hovered {
+  outline: 2px solid rgba(255, 255, 255, 0.92);
+  outline-offset: -2px;
 }
 
-.timeline-segment.hovered {
-  opacity: 1;
-}
-
-.seg-label {
+.timeline-label {
+  padding: 0 4px;
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.8);
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  color: rgba(0, 0, 0, 0.7);
-  user-select: none;
-}
-
-.timeline-segment.filler .seg-label {
-  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .playhead {
   position: absolute;
-  top: 4px;
+  top: 0;
   width: 2px;
-  height: 36px;
-  background: #fff;
-  border-radius: 1px;
+  height: 100%;
+  background: white;
+  z-index: 10;
   pointer-events: none;
-  transition: left 0.05s linear;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+  transition: left 0.05s linear, opacity 0.15s;
+}
+
+.time-display,
+.timeline-scale {
+  font-family: var(--font-mono);
+}
+
+.time-display {
+  min-width: 48px;
+  text-align: right;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.timeline-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-muted);
 }
 </style>

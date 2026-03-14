@@ -6,7 +6,7 @@ defineOptions({ name: 'GrabberControls' })
 const props = defineProps({
   provider: { type: String, default: 'grok' },
   arguments: { type: String, default: '' },
-  aspectRatio: { type: String, default: '16:9' },
+  aspectRatio: { type: String, default: '9:16' },
   providerOptions: { type: Object, default: () => ({}) },
   grabberRunning: { type: Boolean, default: false },
   progress: { type: Object, default: () => ({ total: 0, ready: 0, error: 0, pending: 0, percent: 0 }) },

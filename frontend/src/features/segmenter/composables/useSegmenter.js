@@ -44,10 +44,13 @@ export function useSegmenter() {
     style.value = data.style || ''
     aspectRatio.value = data.aspect_ratio || ''
     alignmentSource.value = data.source_file || data.folder || 'Current result'
-
-    if (data.folder && data.source_file) {
-      audioUrl.value = `/output/alignments/${data.folder}/${data.source_file}`
-    }
+    audioUrl.value = data.folder && data.source_file
+      ? `/output/alignments/${data.folder}/${data.source_file}`
+      : ''
+    isPlaying.value = false
+    currentTime.value = 0
+    duration.value = 0
+    activeSegmentIdx.value = -1
   }
 
   /* ── Config ── */
@@ -111,7 +114,14 @@ export function useSegmenter() {
         sourceFolder.value = data.metadata.source_folder || folder
         projectId.value = data.metadata.project_id || ''
         alignmentSource.value = data.metadata.source_folder || folder
+        if (data.metadata.source_folder && data.metadata.source_file) {
+          audioUrl.value = `/output/alignments/${data.metadata.source_folder}/${data.metadata.source_file}`
+        }
       }
+      isPlaying.value = false
+      currentTime.value = 0
+      duration.value = 0
+      activeSegmentIdx.value = -1
       return data
     } catch (err) {
       throw err
@@ -181,6 +191,8 @@ export function useSegmenter() {
   const segments = computed(() => result.value?.segments || [])
   const stats = computed(() => result.value?.stats || null)
   const totalDuration = computed(() => {
+    const metadataDuration = result.value?.metadata?.total_duration
+    if (metadataDuration && Number.isFinite(metadataDuration)) return metadataDuration
     const segs = segments.value
     if (!segs.length) return 0
     return segs[segs.length - 1].end

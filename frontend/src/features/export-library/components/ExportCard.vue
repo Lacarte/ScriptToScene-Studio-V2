@@ -1,6 +1,6 @@
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
-import { formatBytes, formatDuration, timeAgo, ratioLabel } from '../composables/useExportLibrary.js'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { formatBytes, timeAgo, ratioLabel } from '../composables/useExportLibrary.js'
 
 defineOptions({ name: 'ExportCard' })
 
@@ -11,308 +11,260 @@ const props = defineProps({
 const emit = defineEmits(['download-video', 'download-zip', 'play'])
 
 const videoEl = ref(null)
-const playing = ref(false)
-const hovered = ref(false)
+const loaded = ref(false)
+const downloading = ref({ video: false, zip: false })
 
-function handleMouseEnter() {
-  hovered.value = true
-  play()
-}
-
-function handleMouseLeave() {
-  hovered.value = false
-  pause()
-}
-
-function play() {
-  if (!videoEl.value) return
-  emit('play', videoEl.value)
-  videoEl.value.play().catch(() => {})
-  playing.value = true
-}
-
-function pause() {
-  if (!videoEl.value) return
-  videoEl.value.pause()
-  playing.value = false
-}
-
-/** Called from parent to stop playback when another card starts */
 function stopPlayback() {
-  pause()
+  if (videoEl.value && !videoEl.value.paused) {
+    videoEl.value.pause()
+    videoEl.value.currentTime = 0
+  }
 }
 
-onBeforeUnmount(() => {
-  pause()
-})
+function onPlay() {
+  emit('play', videoEl.value)
+}
+
+async function handleDownloadVideo() {
+  downloading.value.video = true
+  try {
+    await emit('download-video', props.item)
+  } finally {
+    downloading.value.video = false
+  }
+}
+
+async function handleDownloadZip() {
+  downloading.value.zip = true
+  try {
+    await emit('download-zip', props.item)
+  } finally {
+    downloading.value.zip = false
+  }
+}
+
+onBeforeUnmount(() => stopPlayback())
 
 defineExpose({ stopPlayback, videoEl })
+
+// --- Helpers ---
+
+function fmtDuration(sec) {
+  const s = Number(sec || 0)
+  if (!s || s <= 0) return ''
+  const m = Math.floor(s / 60)
+  const ss = Math.floor(s % 60)
+  return m > 0 ? `${m}:${String(ss).padStart(2, '0')}` : `0:${String(ss).padStart(2, '0')}`
+}
+
+function styleLabel(id) {
+  if (!id) return ''
+  return id.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function styleColor(id) {
+  if (!id) return 'var(--text-muted)'
+  // Common style colors
+  const map = {
+    cinematic_realistic: '#4ECDC4',
+    anime_manga: '#FF6B6B',
+    watercolor_dreamy: '#A78BFA',
+    pop_art_bold: '#FFB347',
+    minimalist_clean: '#56CCF2',
+  }
+  return map[id] || 'var(--text-muted)'
+}
+
+// Lazy load via IntersectionObserver
+const cardEl = ref(null)
+onMounted(() => {
+  if (!videoEl.value) return
+  const observer = new IntersectionObserver((entries, obs) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        videoEl.value.src = props.item.preview_url
+        videoEl.value.preload = 'metadata'
+        loaded.value = true
+        obs.unobserve(entry.target)
+      }
+    }
+  }, { rootMargin: '200px' })
+  observer.observe(videoEl.value)
+})
 </script>
 
 <template>
-  <div
-    class="export-card"
-    @mouseenter="handleMouseEnter"
-    @mouseleave="handleMouseLeave"
-  >
-    <!-- Video preview -->
-    <div class="card-preview">
+  <article class="card">
+    <div class="card-video-wrap">
       <video
         ref="videoEl"
-        :src="item.preview_url"
-        :poster="item.preview_url"
-        class="card-video"
-        preload="metadata"
-        muted
-        loop
+        controls
+        preload="none"
         playsinline
-        @click="playing ? pause() : play()"
+        class="card-video"
+        @play="onPlay"
       />
-      <div v-if="!playing" class="play-overlay">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M8 5v14l11-7z" />
-        </svg>
-      </div>
-      <span v-if="item.duration" class="duration-badge">
-        {{ formatDuration(item.duration) }}
-      </span>
     </div>
-
-    <!-- Card body -->
     <div class="card-body">
-      <div class="card-title-row">
-        <span class="card-title" :title="item.video_name">
-          {{ item.video_name || 'Untitled' }}
-        </span>
-        <span class="card-time">{{ timeAgo(item.modified_at) }}</span>
-      </div>
-
-      <div class="card-project-id" :title="item.project_id">
-        {{ item.project_id }}
-      </div>
-
+      <p class="card-title">{{ item.project_id || item.video_name }}</p>
+      <p class="card-filename" :title="item.video_name || ''">{{ item.video_name || '' }}</p>
       <div class="card-meta">
-        <span class="meta-item" v-if="item.size_bytes">
-          {{ formatBytes(item.size_bytes) }}
-        </span>
-        <span class="meta-item" v-if="item.video_ratio || item.ratio">
-          {{ ratioLabel(item.video_ratio || item.ratio) }}
-        </span>
-        <span class="meta-item" v-if="item.scene_count">
-          {{ item.scene_count }} scenes
-        </span>
-        <span class="style-badge" v-if="item.style">
-          {{ item.style }}
-        </span>
+        <template v-if="item.scene_count">
+          <span class="meta-scenes">{{ item.scene_count }} scene{{ item.scene_count !== 1 ? 's' : '' }}</span>
+          <span class="meta-sep">/</span>
+        </template>
+        <template v-if="fmtDuration(item.duration)">
+          <span class="meta-duration">{{ fmtDuration(item.duration) }}</span>
+          <span class="meta-sep">/</span>
+        </template>
+        <span class="meta-size">{{ formatBytes(item.size_bytes) }}</span>
+        <span class="meta-sep">/</span>
+        <span>{{ timeAgo(item.modified_at) }}</span>
+        <template v-if="ratioLabel(item.video_ratio || item.ratio)">
+          <span class="meta-sep">/</span>
+          <span class="meta-ratio">{{ ratioLabel(item.video_ratio || item.ratio) }}</span>
+        </template>
+        <template v-if="styleLabel(item.style)">
+          <span class="meta-sep">/</span>
+          <span class="meta-style">
+            <span class="meta-style-dot" :style="{ background: styleColor(item.style) }"></span>
+            <span :style="{ color: styleColor(item.style), fontWeight: 600 }">{{ styleLabel(item.style) }}</span>
+          </span>
+        </template>
       </div>
 
       <div class="card-actions">
-        <button class="btn-download btn-video" @click="emit('download-video', item)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          Video
-        </button>
         <button
-          class="btn-download btn-zip"
-          :disabled="!item.zip_download_url"
+          class="action-btn hover-accent"
+          @click="emit('download-video', item)"
+        >Download Video</button>
+        <button
+          v-if="item.zip_download_url"
+          class="action-btn hover-accent accent"
           @click="emit('download-zip', item)"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          ZIP
-        </button>
+        >Download Project ZIP</button>
+        <span v-else class="action-btn disabled">ZIP Not Available</span>
       </div>
     </div>
-  </div>
+  </article>
 </template>
 
 <style scoped>
-.export-card {
+.card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   transition: border-color 0.2s, box-shadow 0.2s;
-  display: flex;
-  flex-direction: column;
 }
 
-.export-card:hover {
+.card:hover {
   border-color: var(--border-hover);
-  box-shadow: var(--shadow-sm);
 }
 
-/* ── Preview ─────────────────────────── */
-
-.card-preview {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  background: var(--bg-dark);
-  cursor: pointer;
-  overflow: hidden;
+.card-video-wrap {
+  background: var(--bg-darkest);
+  border-bottom: 1px solid var(--border);
 }
 
 .card-video {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
   display: block;
+  aspect-ratio: 9 / 16;
+  max-height: 360px;
+  background: black;
 }
-
-.play-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  color: rgba(255, 255, 255, 0.85);
-  pointer-events: none;
-  transition: opacity 0.2s;
-}
-
-.export-card:hover .play-overlay {
-  opacity: 0;
-}
-
-.duration-badge {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 4px;
-  pointer-events: none;
-}
-
-/* ── Body ────────────────────────────── */
 
 .card-body {
-  padding: 14px 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-}
-
-.card-title-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  padding: 12px 12px 10px;
 }
 
 .card-title {
-  font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text);
-  white-space: nowrap;
+  font-weight: 600;
+  margin: 0 0 4px;
+  word-break: break-word;
+}
+
+.card-filename {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin: 0 0 2px;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.card-time {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.card-project-id {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-
-/* ── Meta ────────────────────────────── */
 
 .card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.meta-item {
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  background: var(--bg-dark);
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin: 4px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+  line-height: 1.8;
 }
 
-.style-badge {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-dim);
-  padding: 2px 8px;
-  border-radius: 10px;
-  white-space: nowrap;
+.meta-scenes { color: #4ECDC4; }
+.meta-duration { color: #FFB347; }
+.meta-size { color: var(--text-secondary); }
+.meta-ratio { color: #A78BFA; }
+
+.meta-sep {
+  opacity: 0.3;
+  margin: 0 3px;
 }
 
-/* ── Actions ─────────────────────────── */
+.meta-style {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.meta-style-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
 
 .card-actions {
   display: flex;
   gap: 8px;
-  margin-top: auto;
-  padding-top: 4px;
+  flex-wrap: wrap;
 }
 
-.btn-download {
-  flex: 1;
+.action-btn {
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 7px 0;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s, opacity 0.15s;
-  border: none;
 }
 
-.btn-video {
-  background: var(--accent);
-  color: var(--bg-darkest);
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
-.btn-video:hover {
-  background: var(--accent-hover);
+.action-btn.accent {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
-.btn-zip {
-  background: var(--bg-elevated);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
-.btn-zip:hover:not(:disabled) {
-  border-color: var(--border-hover);
-  background: var(--bg-surface-hover);
-}
-
-.btn-download:disabled {
-  opacity: 0.35;
+.action-btn.disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 </style>

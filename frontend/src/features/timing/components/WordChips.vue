@@ -49,19 +49,20 @@ function onChipClick(word, index) {
 .word-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  max-height: 200px;
+  gap: 3px 4px;
+  max-height: 300px;
   overflow-y: auto;
-  padding: 8px 0;
+  padding-right: 4px;
+  line-height: 2;
 }
 
 .chip {
-  padding: 3px 8px;
+  padding: 2px 6px;
   border-radius: 4px;
   font-size: 12px;
   font-family: var(--font-mono);
-  color: var(--text-secondary);
-  background: transparent;
+  color: var(--text);
+  background: var(--bg-darkest);
   transition: all 0.15s;
   user-select: none;
 }
@@ -72,13 +73,13 @@ function onChipClick(word, index) {
 
 .chip.clickable:hover {
   background: rgba(78, 205, 196, 0.08);
-  color: var(--text);
+  color: var(--accent);
 }
 
 .chip.active {
   background: rgba(78, 205, 196, 0.15);
   color: var(--accent);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .empty {

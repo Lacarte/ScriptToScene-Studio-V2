@@ -47,7 +47,7 @@ logger.add(os.path.join(LOG_DIR, "studio_{time:YYYY-MM-DD}.log"),
 # ---------------------------------------------------------------------------
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB max request body
-_cors_env = os.environ.get("STS_CORS_ORIGINS", "http://localhost:5050,http://127.0.0.1:5050")
+_cors_env = os.environ.get("STS_CORS_ORIGINS", "http://localhost:5050,http://127.0.0.1:5050,http://localhost:5174,http://localhost:5175")
 _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
 CORS(app, origins=_cors_origins or None)
 
@@ -78,6 +78,20 @@ app.register_blueprint(music_bp)
 @app.route("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.route("/vue")
+@app.route("/vue/")
+@app.route("/vue/<path:path>")
+def serve_vue(path="index.html"):
+    """Serve the Vue SPA build from static/dist/."""
+    dist_dir = os.path.join(STATIC_DIR, "dist")
+    # Try to serve the exact file (JS, CSS, etc.)
+    full_path = os.path.join(dist_dir, path)
+    if os.path.isfile(full_path):
+        return send_from_directory(dist_dir, path)
+    # For SPA client-side routes, serve index.html
+    return send_from_directory(dist_dir, "index.html")
 
 
 @app.route("/app-config.json")

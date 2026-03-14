@@ -6,7 +6,7 @@ const props = defineProps({
   item: { type: Object, required: true },
 })
 
-const emit = defineEmits(['play', 'delete'])
+const emit = defineEmits(['play', 'delete', 'open-folder'])
 
 const voiceMeta = computed(() => VOICE_META[props.item.voice] || {})
 const voiceName = computed(() => voiceMeta.value.name || props.item.voice)
@@ -31,7 +31,7 @@ const ago = computed(() => timeAgo(props.item.timestamp))
 </script>
 
 <template>
-  <div class="history-card" @click="emit('play', item)">
+  <div class="card history-card" @click="emit('play', item)">
     <button class="play-btn" @click.stop="emit('play', item)" title="Play">
       <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
         <path d="M8 5v14l11-7z" />
@@ -49,13 +49,20 @@ const ago = computed(() => timeAgo(props.item.timestamp))
       </div>
     </div>
 
-    <button class="delete-btn" @click.stop="emit('delete', item)" title="Delete">
+    <div style="display:flex;gap:4px;align-items:center">
+      <button class="icon-btn" @click.stop="emit('open-folder', item)" title="Open folder">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+        </svg>
+      </button>
+      <button class="delete-btn" @click.stop="emit('delete', item)" title="Delete">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
         <path d="M3 6h18" />
         <path d="M8 6V4h8v2" />
         <path d="M5 6v14a2 2 0 002 2h10a2 2 0 002-2V6" />
       </svg>
     </button>
+    </div>
   </div>
 </template>
 
@@ -65,15 +72,17 @@ const ago = computed(() => timeAgo(props.item.timestamp))
   align-items: flex-start;
   gap: 12px;
   padding: 12px;
+  margin-bottom: 6px;
+  cursor: pointer;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .history-card:hover {
-  border-color: var(--accent);
+  border-color: var(--border-hover);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
 .play-btn {
@@ -102,6 +111,7 @@ const ago = computed(() => timeAgo(props.item.timestamp))
 }
 
 .card-text {
+  margin: 0;
   font-size: 12px;
   color: var(--text);
   line-height: 1.5;
@@ -125,13 +135,25 @@ const ago = computed(() => timeAgo(props.item.timestamp))
   opacity: 0.3;
 }
 
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  transition: color 0.15s;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+}
+
 .delete-btn {
   background: none;
   border: none;
   cursor: pointer;
   color: var(--text-muted);
   padding: 4px;
-  margin-top: 2px;
   transition: color 0.15s;
 }
 

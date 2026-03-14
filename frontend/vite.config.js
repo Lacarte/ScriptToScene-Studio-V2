@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+const isProd = process.env.NODE_ENV === 'production'
+
 export default defineConfig({
   plugins: [vue()],
 
@@ -14,9 +16,11 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      '/api': 'http://localhost:5000',
+      '/api': 'http://localhost:5050',
     },
   },
+
+  base: isProd ? '/vue/' : '/',
 
   build: {
     outDir: resolve(__dirname, '..', 'static', 'dist'),

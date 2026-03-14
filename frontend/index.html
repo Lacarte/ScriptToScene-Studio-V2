@@ -1,10 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ScriptToScene Studio</title>
   <link rel="icon" type="image/svg+xml" href="/static/icons/favicon.svg" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            accent: { DEFAULT: '#4ECDC4', hover: '#5edfd6', glow: 'rgba(78,205,196,0.2)', dim: 'rgba(78,205,196,0.08)' },
+            coral: { DEFAULT: '#FF6B6B', dim: 'rgba(255,107,107,0.08)' },
+            surface: { darkest: '#0a0e13', dark: '#0f1520', DEFAULT: '#161d2a', hover: '#1c2536', border: '#1e2a3a' },
+          },
+          fontFamily: {
+            display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+            body: ['"DM Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+        }
+      }
+    }
+  </script>
 </head>
 <body>
   <div id="app"></div>

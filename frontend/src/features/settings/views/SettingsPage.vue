@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useSettings } from '../composables/useSettings.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { useWelcomeOverlay } from '@/shared/composables/useWelcomeOverlay.js'
 import SettingsToggle from '../components/SettingsToggle.vue'
 import ClearProjectsDialog from '../components/ClearProjectsDialog.vue'
 
@@ -9,6 +10,7 @@ defineOptions({ name: 'SettingsPage' })
 
 const { settings, loading, health, healthLoading, update, fetchHealth } = useSettings()
 const toast = useToast()
+const welcome = useWelcomeOverlay()
 const showClearDialog = ref(false)
 
 onMounted(() => {
@@ -21,6 +23,10 @@ async function onToggle(key, value) {
   } catch {
     toast.error(`Failed to update setting.`)
   }
+}
+
+function replayWelcome() {
+  welcome.replayWelcome()
 }
 
 function featureStatus(val) {
@@ -118,19 +124,19 @@ function featureLabel(val) {
       <div class="danger-row">
         <div class="danger-info">
           <span class="danger-label">Clear All Projects</span>
-          <span class="danger-desc">Permanently delete all generated project data, audio, and exports.</span>
+          <span class="danger-desc">Move all project data (TTS, alignments, scenes, assets, captions, music) to trash folders. This cannot be easily undone.</span>
         </div>
         <button class="btn-danger" @click="showClearDialog = true">Clear All</button>
       </div>
     </section>
 
     <!-- About -->
-    <section class="card">
-      <h3 class="card-heading">About</h3>
+    <section class="card about-card">
+      <label class="about-heading">About</label>
       <div class="about-grid">
         <div class="about-row">
-          <span class="about-label">App</span>
-          <span class="about-value">ScriptToScene Studio</span>
+          <span class="about-label">Application</span>
+          <span class="about-value mono">ScriptToScene Studio</span>
         </div>
         <div class="about-row">
           <span class="about-label">TTS Engine</span>
@@ -142,9 +148,10 @@ function featureLabel(val) {
         </div>
         <div class="about-row">
           <span class="about-label">Built by</span>
-          <span class="about-value">Mr. Lacarte</span>
+          <span class="about-value accent">Mr. Lacarte</span>
         </div>
       </div>
+      <button class="action-btn replay-btn" @click="replayWelcome">Replay Welcome</button>
     </section>
 
     <ClearProjectsDialog v-if="showClearDialog" @close="showClearDialog = false" />
@@ -246,75 +253,93 @@ function featureLabel(val) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.06);
 }
 
 .danger-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .danger-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text);
 }
 
 .danger-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
   line-height: 1.4;
 }
 
 .btn-danger {
   flex-shrink: 0;
-  padding: 8px 18px;
-  font-size: 13px;
+  margin-left: 12px;
+  padding: 7px 16px;
+  font-size: 12px;
   font-weight: 600;
-  color: #fff;
-  background: var(--coral);
-  border: none;
-  border-radius: var(--radius-sm);
+  color: #ef4444;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 8px;
   cursor: pointer;
   transition: opacity 0.15s;
 }
 
 .btn-danger:hover {
-  opacity: 0.9;
+  background: #ef4444;
+  color: #fff;
 }
 
 /* ---- About ---- */
+.about-heading {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
 .about-grid {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .about-row {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
-}
-
-.about-row:not(:last-child) {
-  border-bottom: 1px solid var(--border);
 }
 
 .about-label {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
 
 .about-value {
   font-size: 13px;
   color: var(--text);
-  font-weight: 500;
 }
 
 .about-value.mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+}
+
+.about-value.accent {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.replay-btn {
+  margin-top: 14px;
+  padding: 5px 12px;
+  font-size: 10px;
+  width: 100%;
 }
 </style>

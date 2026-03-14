@@ -20,13 +20,15 @@ function toggle() {
 <template>
   <div class="style-picker">
     <button class="style-picker-header" @click="toggle">
-      <span class="style-picker-title">Style Template</span>
-      <span v-if="selected" class="style-picker-badge">
-        <span
-          class="style-dot"
-          :style="{ background: templates.find(t => t.id === selected)?.color || 'var(--text-muted)' }"
-        ></span>
-        {{ templates.find(t => t.id === selected)?.name || selected }}
+      <span class="style-picker-left">
+        <span class="style-picker-title">Style Template</span>
+        <span v-if="selected" class="style-picker-badge">
+          <span
+            class="style-dot"
+            :style="{ background: templates.find(t => t.id === selected)?.color || 'var(--text-muted)' }"
+          ></span>
+          {{ templates.find(t => t.id === selected)?.name || selected }}
+        </span>
       </span>
       <svg
         class="style-picker-chevron"
@@ -72,35 +74,44 @@ function toggle() {
 .style-picker {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .style-picker-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
   gap: 8px;
-  background: none;
+  background: var(--bg-darkest);
   border: none;
   cursor: pointer;
-  padding: 0;
+  padding: 10px 14px;
   color: var(--text);
 }
 
 .style-picker-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-secondary);
+}
+
+.style-picker-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .style-picker-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary);
-  margin-left: auto;
-  margin-right: 4px;
+  color: var(--accent);
 }
 
 .style-picker-chevron {
@@ -115,8 +126,9 @@ function toggle() {
 
 .style-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
+  padding: 10px 14px 14px;
 }
 
 .style-card {

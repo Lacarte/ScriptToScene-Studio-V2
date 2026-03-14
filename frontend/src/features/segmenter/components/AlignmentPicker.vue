@@ -8,22 +8,32 @@ defineProps({
 
 const emit = defineEmits(['select', 'close'])
 
-function formatDate(ts) {
-  if (!ts) return '--'
-  const d = new Date(ts)
-  return d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
 function formatDuration(seconds) {
   if (seconds == null) return '--'
   const m = Math.floor(seconds / 60)
   const s = (seconds % 60).toFixed(1)
   return m > 0 ? `${m}m ${s}s` : `${s}s`
+}
+
+function relativeTime(ts) {
+  if (!ts) return ''
+  const diff = Date.now() - new Date(ts).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
+
+function formatDate(ts) {
+  return relativeTime(ts)
+}
+
+function truncate(str, max = 60) {
+  if (!str) return ''
+  return str.length > max ? str.slice(0, max) + '…' : str
 }
 </script>
 
@@ -47,16 +57,24 @@ function formatDuration(seconds) {
             class="picker-item"
             @click="emit('select', item)"
           >
-            <div class="item-top">
-              <span class="item-project">{{ item.project_id || item.folder }}</span>
-              <span class="item-date">{{ formatDate(item.timestamp || item.created_at) }}</span>
+            <div class="item-body">
+              <p v-if="item.transcript" class="item-transcript">{{ truncate(item.transcript) }}</p>
+              <div class="item-meta">
+                <span class="item-project">{{ item.project_id || item.folder }}</span>
+                <span class="meta-dot">&middot;</span>
+                <span v-if="item.word_count != null">{{ item.word_count }} words</span>
+                <span v-else-if="item.alignment">{{ item.alignment.length }} words</span>
+                <template v-if="item.duration != null">
+                  <span class="meta-dot">&middot;</span>
+                  <span>{{ formatDuration(item.duration) }}</span>
+                </template>
+                <template v-if="item.timestamp || item.created_at">
+                  <span class="meta-dot">&middot;</span>
+                  <span>{{ relativeTime(item.timestamp || item.created_at) }}</span>
+                </template>
+              </div>
             </div>
-            <div class="item-meta">
-              <span v-if="item.source_file" class="item-file">{{ item.source_file }}</span>
-              <span v-if="item.word_count != null" class="item-detail">{{ item.word_count }} words</span>
-              <span v-else-if="item.alignment" class="item-detail">{{ item.alignment.length }} words</span>
-              <span v-if="item.duration != null" class="item-detail">{{ formatDuration(item.duration) }}</span>
-            </div>
+            <span v-if="item.source_file" class="item-file-badge">{{ item.source_file }}</span>
           </button>
         </div>
       </div>
@@ -137,8 +155,9 @@ function formatDuration(seconds) {
 
 .picker-item {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
   text-align: left;
   padding: 14px 16px;
@@ -157,47 +176,50 @@ function formatDuration(seconds) {
   border-color: var(--border);
 }
 
-.item-top {
+.item-body {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
-.item-project {
-  font-family: var(--font-mono);
+.item-transcript {
   font-size: 13px;
-  font-weight: 600;
-  color: var(--accent);
+  color: var(--text);
+  margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.item-date {
-  font-size: 11px;
-  color: var(--text-muted);
-  flex-shrink: 0;
 }
 
 .item-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.item-file {
-  font-size: 12px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.item-detail {
+  gap: 6px;
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-muted);
+}
+
+.item-project {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.meta-dot {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.item-file-badge {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--bg-darkest);
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 </style>

@@ -272,21 +272,17 @@ function truncate(str, len = 45) {
         <span v-if="projectBadge" class="project-badge">{{ projectBadge }}</span>
       </div>
       <p class="page-subtitle">
-        Build AI scene scripts from segmented audio. Select a source, pick a style, and generate.
+        Transform word-level timestamps into AI-powered visual scene scripts
       </p>
     </div>
 
     <!-- Segmentation Source -->
     <section class="card">
-      <h3 class="card-heading">Segmentation Source</h3>
+      <label class="section-label">Segmentation Source</label>
 
       <div class="source-buttons">
         <button class="action-btn action-btn-lg" @click="useCurrent">Use Current Result</button>
         <button class="action-btn action-btn-lg" @click="openSegPicker">Pick from History</button>
-        <label class="action-btn action-btn-lg upload-label">
-          Upload JSON
-          <input type="file" accept=".json" hidden @change="handleFileUpload" />
-        </label>
       </div>
 
       <p v-if="sourceInfo" class="source-info accent">{{ sourceInfo }}</p>
@@ -312,7 +308,7 @@ function truncate(str, len = 45) {
 
     <!-- Generation Settings -->
     <section class="card">
-      <h3 class="card-heading">Generation Settings</h3>
+      <label class="section-label">Generation Settings</label>
 
       <StylePicker
         :templates="scenes.templates.value"
@@ -320,17 +316,18 @@ function truncate(str, len = 45) {
         @select="scenes.selectStyle"
       />
 
-      <div class="setting-row">
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="scenes.forkPerStyle.value" />
-          <span>Fork per style</span>
+      <!-- Fork per style -->
+      <div class="fork-row">
+        <input type="checkbox" id="scenes-fork-style" v-model="scenes.forkPerStyle.value" />
+        <label for="scenes-fork-style" class="fork-label">
+          New project per style <span class="fork-hint">— generate a separate project for each template so you can compare results</span>
         </label>
-        <span class="setting-hint">Create a new project ID instead of reusing the source</span>
       </div>
 
-      <div class="setting-row">
-        <div class="webhook-toggle-row">
-          <span class="setting-label">Webhook</span>
+      <!-- Webhook -->
+      <div class="webhook-section">
+        <div class="webhook-header">
+          <span class="webhook-label">Send to Webhook</span>
           <button
             class="toggle-track"
             :class="{ on: scenes.webhookEnabled.value }"
@@ -345,17 +342,12 @@ function truncate(str, len = 45) {
             type="text"
             class="webhook-url-input"
             :value="scenes.webhookUrl.value"
-            placeholder="n8n webhook URL"
+            placeholder="Webhook URL..."
             @input="scenes.saveWebhookUrl($event.target.value)"
           />
-          <button class="btn-ghost-sm" @click="scenes.resetWebhookUrl()" title="Reset to default">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="1 4 1 10 7 10" />
-              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-            </svg>
-          </button>
+          <button class="action-btn" style="padding:6px 10px;font-size:10px;white-space:nowrap" @click="scenes.resetWebhookUrl()">Reset</button>
         </div>
-        <p v-else class="setting-hint">Webhook disabled - will preview payload only</p>
+        <p v-else class="setting-hint" style="font-style:italic">Webhook disabled — will only preview the payload without sending</p>
       </div>
     </section>
 
@@ -370,37 +362,51 @@ function truncate(str, len = 45) {
     </button>
 
     <!-- Payload Preview Panel -->
-    <section v-if="payloadPreviewOpen" class="card payload-card">
-      <div class="payload-header">
-        <h3 class="card-heading">Payload Preview</h3>
-        <div class="payload-actions">
-          <button class="btn-ghost-sm" @click="copyPayload">Copy</button>
-          <button class="btn-ghost-sm" @click="payloadPreviewOpen = false">Close</button>
+    <div v-if="payloadPreviewOpen" class="payload-panel">
+      <div class="payload-panel-inner">
+        <!-- Header -->
+        <div class="payload-panel-header">
+          <span class="payload-panel-title">Webhook Payload Preview</span>
+          <div class="payload-panel-actions">
+            <button class="action-btn" @click="copyPayload">Copy</button>
+            <button class="payload-panel-close" @click="payloadPreviewOpen = false">&times;</button>
+          </div>
+        </div>
+        <!-- JSON Content -->
+        <pre class="payload-panel-content">{{ payloadJson }}</pre>
+        <!-- Webhook URL + Send -->
+        <div class="payload-panel-send">
+          <input
+            type="text"
+            class="webhook-url-input"
+            v-model="previewWebhookUrl"
+            placeholder="Webhook URL..."
+          />
+          <button
+            class="payload-send-btn"
+            :disabled="scenes.isGenerating.value"
+            @click="sendFromPreview"
+          >
+            <span v-if="scenes.isGenerating.value" class="spinner"></span>
+            <template v-else>
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px"><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+              Send
+            </template>
+          </button>
         </div>
       </div>
-      <pre class="payload-pre">{{ payloadJson }}</pre>
-
-      <div class="payload-send-row">
-        <input
-          type="text"
-          class="webhook-url-input"
-          v-model="previewWebhookUrl"
-          placeholder="Webhook URL"
-        />
-        <button
-          class="btn-accent"
-          :disabled="scenes.isGenerating.value"
-          @click="sendFromPreview"
-        >
-          <span v-if="scenes.isGenerating.value" class="spinner"></span>
-          {{ scenes.isGenerating.value ? 'Sending...' : 'Send to Webhook' }}
-        </button>
-      </div>
-    </section>
+    </div>
 
     <!-- Results -->
-    <section v-if="scenes.result.value" class="card results-card">
-      <h3 class="card-heading">Results</h3>
+    <div v-if="scenes.result.value" class="results-section">
+      <div class="results-header">
+        <label class="section-label" style="margin-bottom:0">Generated Scenes</label>
+        <div class="results-actions">
+          <button class="action-btn preview-btn" @click="scriptPreviewOpen = !scriptPreviewOpen">Preview Script</button>
+          <button class="action-btn" @click="downloadScenes">Download</button>
+          <button class="action-btn accent" @click="sendToAssets">Send to Assets</button>
+        </div>
+      </div>
 
       <!-- Stats -->
       <div v-if="resultStats" class="result-stats">
@@ -428,35 +434,29 @@ function truncate(str, len = 45) {
       </div>
 
       <!-- Timeline -->
-      <SceneTimeline
-        v-if="resultScenes.length"
-        :scenes="resultScenes"
-        :timings="scenes.segTimings.value"
-        :active-index="scenes.activeSceneIdx.value"
-        :total-duration="scenes.totalDuration.value"
-        :current-time="scenes.currentTime.value"
-        :is-playing="scenes.isPlaying.value"
-        :audio-loaded="!!scenes.audioUrl.value"
-        @play="scenes.playBlock"
-        @seek="scenes.seekTo"
-        @toggle-play="scenes.togglePlay"
-      />
+      <div class="timeline-wrap">
+        <SceneTimeline
+          v-if="resultScenes.length"
+          :scenes="resultScenes"
+          :timings="scenes.segTimings.value"
+          :active-index="scenes.activeSceneIdx.value"
+          :total-duration="scenes.totalDuration.value"
+          :current-time="scenes.currentTime.value"
+          :is-playing="scenes.isPlaying.value"
+          :audio-loaded="!!scenes.audioUrl.value"
+          @play="scenes.playBlock"
+          @seek="scenes.seekTo"
+          @toggle-play="scenes.togglePlay"
+        />
+      </div>
 
-      <!-- Script Preview -->
-      <div class="collapse-section">
-        <button class="collapse-toggle" @click="scriptPreviewOpen = !scriptPreviewOpen">
-          <span>{{ scriptPreviewOpen ? 'Hide Script' : 'Preview Script' }}</span>
-          <svg
-            class="collapse-chevron"
-            :class="{ open: scriptPreviewOpen }"
-            width="12" height="12" viewBox="0 0 24 24"
-            fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
-        <pre v-show="scriptPreviewOpen" class="payload-pre script-pre">{{ scriptPreviewText }}</pre>
+      <!-- Script Preview Panel -->
+      <div v-if="scriptPreviewOpen" class="script-preview-panel">
+        <div class="script-preview-header">
+          <span class="script-preview-title">Generated Scene Script</span>
+          <button class="script-preview-close" @click="scriptPreviewOpen = false">&times;</button>
+        </div>
+        <pre class="script-preview-content">{{ scriptPreviewText }}</pre>
       </div>
 
       <!-- Scene Cards -->
@@ -471,58 +471,61 @@ function truncate(str, len = 45) {
           @play="scenes.playBlock"
         />
       </div>
-
-      <!-- Action Buttons -->
-      <div class="result-actions">
-        <button class="action-btn" @click="copyScenes">Copy JSON</button>
-        <button class="action-btn" @click="downloadScenes">Download</button>
-        <button class="action-btn accent" @click="sendToAssets">Send to Assets</button>
-        <button class="action-btn accent" @click="sendToEditor">Send to Editor</button>
-      </div>
-    </section>
+    </div>
 
     <!-- History -->
-    <section class="card">
+    <div class="history-section">
       <div class="history-header">
-        <h3 class="card-heading">History</h3>
+        <h3 class="history-title">History</h3>
         <span class="history-count">{{ scenes.history.value.length }} project{{ scenes.history.value.length !== 1 ? 's' : '' }}</span>
       </div>
 
-      <div v-if="!scenes.history.value.length" class="history-empty">
+      <p v-if="!scenes.history.value.length" class="history-empty">
         No scene projects yet
-      </div>
+      </p>
 
       <div v-else class="history-list">
-        <div
+        <button
           v-for="item in scenes.history.value"
           :key="item.project_id"
           class="history-item"
           :class="{ active: item.project_id === scenes.result.value?.project_id }"
           @click="loadFromHistory(item.project_id)"
         >
-          <div class="history-item-inner">
-            <div class="history-item-info">
-              <div class="history-item-title-row">
-                <span class="history-item-id">{{ item.project_id }}</span>
-                <span v-if="item.parent_id" class="history-item-parent">from {{ item.parent_id }}</span>
-              </div>
-              <div class="history-item-meta">
-                <span class="history-scene-count">{{ item.scene_count }} scenes</span>
-                <span class="history-sep">/</span>
-                <span>{{ timeAgo(item.timestamp) }}</span>
-                <template v-if="scenes.styleLabel(item.style)">
-                  <span class="history-sep">/</span>
-                  <span class="history-style-badge">
-                    <span class="style-dot-sm" :style="{ background: scenes.styleColor(item.style) }"></span>
-                    <span :style="{ color: scenes.styleColor(item.style), fontWeight: 600 }">{{ scenes.styleLabel(item.style) }}</span>
-                  </span>
-                </template>
-              </div>
+          <div class="history-item-body">
+            <div class="history-item-title-row">
+              <span class="history-item-title">{{ item.project_id }}</span>
+              <span
+                v-if="item.project_id === scenes.result.value?.project_id"
+                class="history-active-badge font-mono"
+              >ACTIVE</span>
+              <span v-if="item.parent_id" class="history-item-parent">from {{ item.parent_id }}</span>
+            </div>
+
+            <div class="history-item-meta font-mono">
+              <span style="color: #4ECDC4">{{ item.scene_count }} scenes</span>
+              <span class="history-divider">/</span>
+              <span style="color: var(--text-secondary)">{{ timeAgo(item.timestamp) }}</span>
+              <template v-if="scenes.styleLabel(item.style)">
+                <span class="history-divider">/</span>
+                <span class="history-style-badge">
+                  <span class="style-dot-sm" :style="{ background: scenes.styleColor(item.style) }"></span>
+                  <span :style="{ color: scenes.styleColor(item.style), fontWeight: 600 }">{{ scenes.styleLabel(item.style) }}</span>
+                </span>
+              </template>
             </div>
           </div>
-        </div>
+
+          <span class="history-next-btn" @click.stop="sendToAssets">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+            </svg>
+            Assets
+          </span>
+        </button>
       </div>
-    </section>
+    </div>
 
     <!-- Segmenter Picker Modal -->
     <Teleport to="body">
@@ -571,7 +574,7 @@ function truncate(str, len = 45) {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .page-header-row {
@@ -775,58 +778,118 @@ function truncate(str, len = 45) {
   transform: rotate(180deg);
 }
 
-/* ---- Payload ---- */
+/* ---- Payload Preview (source section) ---- */
 .payload-pre {
   font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 10px;
   color: var(--text-secondary);
-  background: var(--bg-darkest);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px;
-  margin-top: 8px;
-  overflow-x: auto;
   white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 400px;
+  max-height: 250px;
   overflow-y: auto;
+  padding: 12px;
+  margin-top: 0;
 }
 
-.payload-card {
-  border-color: var(--accent);
+/* ---- Payload Panel (webhook preview) ---- */
+.payload-panel {
+  margin-top: 16px;
 }
 
-.payload-header {
+.payload-panel-inner {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-darkest);
+  overflow: hidden;
+}
+
+.payload-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
 }
 
-.payload-actions {
+.payload-panel-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.payload-panel-actions {
   display: flex;
   gap: 6px;
 }
 
-.payload-send-row {
+.payload-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.payload-panel-close:hover {
+  color: var(--text);
+}
+
+.payload-panel-content {
+  padding: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.payload-panel-send {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
-  margin-top: 12px;
   align-items: center;
 }
 
-/* ---- Settings ---- */
-.setting-row {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.payload-send-btn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  border: none;
+  cursor: pointer;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), #3BA89F);
+  box-shadow: 0 2px 12px rgba(78, 205, 196, 0.25);
+  transition: all 0.2s;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
 }
 
-.setting-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
+.payload-send-btn:hover {
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.35);
+}
+
+.payload-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- Settings ---- */
+.section-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
 }
 
 .setting-hint {
@@ -834,26 +897,50 @@ function truncate(str, len = 45) {
   color: var(--text-muted);
 }
 
-.checkbox-label {
+/* ---- Fork per style ---- */
+.fork-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  color: var(--text);
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+}
+
+.fork-row input[type="checkbox"] {
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
-.checkbox-label input[type="checkbox"] {
-  accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
+.fork-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 
-/* ---- Webhook Toggle ---- */
-.webhook-toggle-row {
+.fork-hint {
+  color: var(--text-muted);
+}
+
+/* ---- Webhook ---- */
+.webhook-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.webhook-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.webhook-label {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .toggle-track {
@@ -891,18 +978,18 @@ function truncate(str, len = 45) {
 
 .webhook-url-row {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
 }
 
 .webhook-url-input {
   flex: 1;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text);
   background: var(--bg-darkest);
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--border);
   border-radius: 8px;
   outline: none;
   transition: border-color 0.15s;
@@ -913,20 +1000,41 @@ function truncate(str, len = 45) {
 }
 
 /* ---- Results ---- */
-.results-card {
+.results-section {
+  margin-top: 20px;
+}
+
+.results-header {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.results-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.preview-btn {
+  border-color: #A78BFA;
+  color: #A78BFA;
+}
+
+.preview-btn:hover {
+  border-color: #c4b5fd;
+  color: #c4b5fd;
 }
 
 .result-stats {
-  font-size: 13px;
-  color: var(--text);
+  font-size: 11px;
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
   font-family: var(--font-mono);
+  margin-bottom: 10px;
 }
 
 .stat-project {
@@ -950,14 +1058,63 @@ function truncate(str, len = 45) {
 }
 
 .style-dot-sm {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   display: inline-block;
 }
 
-.script-pre {
+.timeline-wrap {
+  margin-bottom: 16px;
+}
+
+/* ---- Script Preview Panel ---- */
+.script-preview-panel {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-darkest);
+  overflow: hidden;
+}
+
+.script-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.script-preview-title {
+  font-family: var(--font-mono);
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+.script-preview-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.script-preview-close:hover {
+  color: var(--text);
+}
+
+.script-preview-content {
+  padding: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: 0;
+  max-height: 500px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .scene-list {
@@ -966,24 +1123,29 @@ function truncate(str, len = 45) {
   gap: 8px;
 }
 
-.result-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
+/* ---- History ---- */
+.history-section {
+  margin-top: 16px;
 }
 
-/* ---- History ---- */
 .history-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.history-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
 }
 
 .history-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -995,50 +1157,68 @@ function truncate(str, len = 45) {
 }
 
 .history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .history-item {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
+  margin-bottom: 6px;
+  color: var(--text);
   cursor: pointer;
-  transition: background 0.15s;
-  background: transparent;
-  border: 1px solid transparent;
+  text-align: left;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
 }
 
 .history-item:hover {
-  background: rgba(255, 255, 255, 0.02);
-  border-color: var(--border);
+  border-color: var(--border-hover);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
 .history-item.active {
-  border-color: var(--accent);
-  background: rgba(78, 205, 196, 0.05);
+  border-color: #ff9f43;
+  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
 }
 
-.history-item-inner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px 10px 14px;
-}
-
-.history-item-info {
+.history-item-body {
   flex: 1;
   min-width: 0;
+  padding: 10px 12px 10px 14px;
 }
 
 .history-item-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-bottom: 3px;
 }
 
-.history-item-id {
+.history-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   color: var(--text);
+}
+
+.history-item.active .history-item-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.history-active-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(78, 205, 196, 0.15);
+  color: var(--accent);
+  font-size: 8px;
+  letter-spacing: 0.05em;
 }
 
 .history-item-parent {
@@ -1047,21 +1227,16 @@ function truncate(str, len = 45) {
 }
 
 .history-item-meta {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-top: 2px;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
-.history-scene-count {
-  color: var(--accent);
-}
-
-.history-sep {
+.history-divider {
   opacity: 0.3;
 }
 
@@ -1069,6 +1244,31 @@ function truncate(str, len = 45) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+.history-next-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  margin-right: 12px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.history-next-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.history-item.active .history-next-btn {
+  color: var(--accent);
+  opacity: 0.8;
 }
 
 /* ---- Modal ---- */

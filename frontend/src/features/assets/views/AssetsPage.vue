@@ -500,6 +500,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-bottom: 16px;
 }
 
 .page-title {
@@ -762,14 +763,16 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  background: var(--bg-deeper, #0a0a0a);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  transition: border-color 0.15s;
+  border-radius: 10px;
+  margin-bottom: 6px;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .history-item:hover {
-  border-color: var(--text-secondary);
+  border-color: var(--border-hover);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
 .history-thumb {

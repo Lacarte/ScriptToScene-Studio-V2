@@ -67,7 +67,8 @@ async function init(containerEl) {
   if (typeof window.initEditor !== 'function') {
     // Try dynamic import — the editor entry point attaches to window
     try {
-      await import(/* @vite-ignore */ '/static/js/editor/video-editor.js')
+      const editorUrl = '/static/js/editor/video-editor.js'
+      await import(/* @vite-ignore */ editorUrl)
     } catch {
       console.warn('[useEditor] Could not load video-editor.js')
     }

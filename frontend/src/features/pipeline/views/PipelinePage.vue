@@ -313,7 +313,7 @@ function esc(str) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .page-title {
@@ -668,7 +668,7 @@ function esc(str) {
 
 /* ---- History ---- */
 .history-section {
-  margin-top: 28px;
+  margin-top: 16px;
 }
 
 .history-header {

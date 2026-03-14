@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useSegmenter } from '../composables/useSegmenter.js'
 import { useTiming } from '@/features/timing/composables/useTiming.js'
 import { useToast } from '@/shared/composables/useToast.js'
@@ -10,14 +10,35 @@ import AlignmentPicker from '../components/AlignmentPicker.vue'
 defineOptions({ name: 'SegmenterPage' })
 
 const {
-  alignment, alignmentSource, projectId, config, isRunning,
-  hasAlignment, hasResult, segments, stats, totalDuration,
-  audioUrl, isPlaying, currentTime, activeSegmentIdx,
-  history, timingHistory,
-  setAlignment, updateConfig, runSegmenter,
-  loadHistory, loadResult, loadTimingHistory,
-  updateActiveSegment, setPlaying, setDuration,
-  copyJSON, downloadJSON,
+  alignment,
+  alignmentSource,
+  sourceFolder,
+  projectId,
+  config,
+  result,
+  isRunning,
+  hasAlignment,
+  hasResult,
+  segments,
+  stats,
+  totalDuration,
+  audioUrl,
+  isPlaying,
+  currentTime,
+  activeSegmentIdx,
+  history,
+  timingHistory,
+  setAlignment,
+  updateConfig,
+  runSegmenter,
+  loadHistory,
+  loadResult,
+  loadTimingHistory,
+  updateActiveSegment,
+  setPlaying,
+  setDuration,
+  copyJSON,
+  downloadJSON,
 } = useSegmenter()
 
 const timing = useTiming()
@@ -26,18 +47,59 @@ const toast = useToast()
 const showPicker = ref(false)
 const audioRef = ref(null)
 
-onMounted(() => {
-  loadHistory()
-  loadTimingHistory()
+const sourceInfoText = computed(() => {
+  if (!hasAlignment.value) return 'No alignment selected'
+  const wordCount = alignment.value.length
+  const duration = wordCount ? alignment.value[wordCount - 1].end || 0 : 0
+  const label = sourceFolder.value || 'uploaded'
+  const pid = projectId.value ? `${projectId.value} · ` : ''
+  return `${pid}${wordCount} words · ${duration.toFixed(1)}s from ${label}`
 })
 
-/* ── Alignment source ── */
+const resultsSummary = computed(() => {
+  if (!stats.value) return ''
+  const parts = []
+  if (projectId.value) parts.push(projectId.value)
+  parts.push(`${stats.value.segment_count ?? segments.value.length} segments`)
+  parts.push(`${stats.value.filler_count ?? 0} fillers`)
+  parts.push(`avg ${formatDuration(stats.value.avg_duration)}`)
+  parts.push(`range ${formatDuration(stats.value.min_duration)} - ${formatDuration(stats.value.max_duration)}`)
+  return parts.join(' · ')
+})
+
+const historyCountLabel = computed(() => {
+  const count = history.value.length
+  return `${count} result${count === 1 ? '' : 's'}`
+})
+
+const activeHistoryFolder = computed(() => result.value?.output_folder || '')
+
+const displaySegments = computed(() => {
+  let speechIndex = 0
+  return segments.value.map((segment, arrayIndex) => {
+    const item = {
+      key: `${segment.index ?? arrayIndex}-${segment.start ?? 0}`,
+      segment,
+      arrayIndex,
+      displayIndex: speechIndex,
+    }
+    if (!segment.is_filler) {
+      speechIndex += 1
+    }
+    return item
+  })
+})
+
+onMounted(async () => {
+  await Promise.allSettled([loadHistory(), loadTimingHistory()])
+})
 
 function useCurrentResult() {
   if (!timing.alignment.value.length) {
     toast.error('No alignment result available. Run timing first.')
     return
   }
+
   setAlignment({
     alignment: timing.alignment.value,
     transcript: timing.transcript.value,
@@ -55,7 +117,7 @@ async function openPicker() {
 
 function onPickAlignment(item) {
   setAlignment({
-    alignment: item.alignment || [],
+    alignment: item.alignment || item.word_alignment || [],
     transcript: item.transcript || '',
     folder: item.folder || '',
     project_id: item.project_id || '',
@@ -64,8 +126,6 @@ function onPickAlignment(item) {
   showPicker.value = false
   toast.success('Alignment loaded from history.')
 }
-
-/* ── Run ── */
 
 async function onRun() {
   try {
@@ -77,19 +137,51 @@ async function onRun() {
   }
 }
 
-/* ── Audio playback ── */
+function getAudioElement() {
+  const audio = audioRef.value
+  if (!audio || !audioUrl.value) return null
+  return audio
+}
+
+function playAudio(audio) {
+  const playPromise = audio.play()
+  if (playPromise?.catch) {
+    playPromise.catch(() => {})
+  }
+}
+
+function togglePlayback() {
+  const audio = getAudioElement()
+  if (!audio) return
+
+  if (audio.paused) {
+    if (audio.duration && audio.currentTime >= audio.duration - 0.05) {
+      audio.currentTime = 0
+      updateActiveSegment(0)
+    }
+    playAudio(audio)
+    return
+  }
+
+  audio.pause()
+}
 
 function playFromSegment({ segment }) {
-  const audio = audioRef.value
-  if (!audio || !audioUrl.value) return
+  const audio = getAudioElement()
+  if (!audio) return
   audio.currentTime = segment.start
-  audio.play()
+  updateActiveSegment(segment.start)
+  playAudio(audio)
 }
 
 function seekTo(time) {
-  const audio = audioRef.value
-  if (!audio || !audioUrl.value) return
+  const audio = getAudioElement()
+  if (!audio) return
   audio.currentTime = time
+  updateActiveSegment(time)
+  if (audio.paused) {
+    playAudio(audio)
+  }
 }
 
 function onTimeUpdate() {
@@ -98,53 +190,82 @@ function onTimeUpdate() {
   updateActiveSegment(audio.currentTime)
 }
 
-function onPlay() { setPlaying(true) }
-function onPause() { setPlaying(false) }
+function onPlay() {
+  setPlaying(true)
+}
+
+function onPause() {
+  setPlaying(false)
+}
+
+function onEnded() {
+  const audio = audioRef.value
+  setPlaying(false)
+  if (audio) {
+    audio.currentTime = 0
+  }
+  updateActiveSegment(0)
+}
+
 function onLoadedMetadata() {
   const audio = audioRef.value
   if (audio) setDuration(audio.duration)
 }
 
-/* ── History ── */
-
 async function onHistoryClick(item) {
+  const folder = item.folder || item.source_folder
+  if (!folder) return
+
   try {
-    await loadResult(item.folder || item.source_folder)
+    if (!timingHistory.value.length) {
+      await loadTimingHistory()
+    }
+
+    const previousAudioUrl = sourceFolder.value === folder ? audioUrl.value : ''
+    await loadResult(folder)
+    const resolvedAudioUrl = audioUrl.value
+
+    const match = timingHistory.value.find((entry) => entry.folder === folder)
+    if (match?.source_file) {
+      audioUrl.value = `/output/alignments/${match.folder}/${match.source_file}`
+    } else {
+      audioUrl.value = resolvedAudioUrl || previousAudioUrl || ''
+    }
+
     toast.success('Loaded saved result.')
   } catch {
     toast.error('Failed to load result.')
   }
 }
 
-/* ── Export ── */
-
 function onCopy() {
   copyJSON()
   toast.success('JSON copied to clipboard.')
 }
 
-/* ── Helpers ── */
-
-function formatDuration(val) {
-  if (val == null) return '--'
-  return val.toFixed(2) + 's'
+function formatDuration(value) {
+  if (!Number.isFinite(value)) return '--'
+  return `${value.toFixed(2)}s`
 }
 
-function formatDate(ts) {
+function formatTotal(value) {
+  if (!Number.isFinite(value)) return '--'
+  return `${value.toFixed(1)}s total`
+}
+
+function relativeTime(ts) {
   if (!ts) return '--'
-  const d = new Date(ts)
-  return d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+
+  const diff = (Date.now() - new Date(ts).getTime()) / 1000
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
 }
 </script>
 
 <template>
-  <div class="segmenter-page">
-    <!-- Hidden audio element -->
+  <div class="segmenter-page mx-auto px-6 py-8" style="max-width: 780px">
     <audio
       v-if="audioUrl"
       ref="audioRef"
@@ -152,41 +273,44 @@ function formatDate(ts) {
       @timeupdate="onTimeUpdate"
       @play="onPlay"
       @pause="onPause"
+      @ended="onEnded"
       @loadedmetadata="onLoadedMetadata"
     />
 
-    <!-- Header -->
-    <div class="page-header">
-      <div class="title-row">
-        <h2 class="page-title">Segmenter</h2>
-        <span v-if="projectId" class="project-badge">{{ projectId }}</span>
+    <div style="margin-bottom: 16px">
+      <div style="display: flex; align-items: center; gap: 10px">
+        <h2 class="font-display text-2xl font-bold tracking-tight" style="color: var(--text)">Segmenter</h2>
+        <span v-if="projectId" class="module-project-badge visible">{{ projectId }}</span>
       </div>
-      <p class="page-subtitle">Split alignment into timed segments for scene generation</p>
+      <p class="text-sm mt-1" style="color: var(--text-secondary)">
+        Split alignment into timed segments for scene generation
+      </p>
     </div>
 
-    <!-- Alignment Source -->
-    <section class="card">
-      <h3 class="card-heading">Alignment Source</h3>
-      <div class="source-actions">
-        <button class="action-btn action-btn-lg" @click="useCurrentResult">Use Current Result</button>
-        <button class="action-btn action-btn-lg" @click="openPicker">Pick from History</button>
+    <section class="card p-5 mb-4">
+      <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2.5" style="color: var(--text-muted)">
+        Alignment Source
+      </label>
+      <div class="flex gap-3 mb-3 flex-wrap">
+        <button class="action-btn hover-accent" style="padding: 6px 14px; font-size: 11px" @click="useCurrentResult">
+          Use Current Result
+        </button>
+        <button class="action-btn hover-accent" style="padding: 6px 14px; font-size: 11px" @click="openPicker">
+          Pick from History
+        </button>
       </div>
-      <p v-if="hasAlignment" class="source-info">
-        <span class="source-label">Loaded:</span>
-        <span class="source-value">{{ alignmentSource }}</span>
-        <span class="source-detail">&middot; {{ alignment.length }} words</span>
-      </p>
-      <p v-else class="source-empty">No alignment loaded</p>
+      <div class="font-mono source-info" :class="{ empty: !hasAlignment }">{{ sourceInfoText }}</div>
     </section>
 
-    <!-- Segment Config -->
-    <section class="card">
-      <h3 class="card-heading">Segment Config</h3>
-      <div class="config-grid">
-        <div class="config-item">
-          <div class="config-label-row">
-            <span class="config-label">Target Min</span>
-            <span class="config-value">{{ config.target_min.toFixed(1) }}s</span>
+    <section class="card p-5 mb-4">
+      <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-3" style="color: var(--text-muted)">
+        Segment Config
+      </label>
+      <div class="grid grid-cols-2 gap-x-6 gap-y-3" style="max-width: 500px">
+        <div>
+          <div class="config-row">
+            <span>Target Min</span>
+            <span class="font-mono config-value">{{ config.target_min.toFixed(1) }}s</span>
           </div>
           <input
             type="range"
@@ -194,13 +318,14 @@ function formatDate(ts) {
             min="0.5"
             max="3.0"
             step="0.1"
+            class="config-range"
             @input="updateConfig('target_min', parseFloat($event.target.value))"
           />
         </div>
-        <div class="config-item">
-          <div class="config-label-row">
-            <span class="config-label">Target Max</span>
-            <span class="config-value">{{ config.target_max.toFixed(1) }}s</span>
+        <div>
+          <div class="config-row">
+            <span>Target Max</span>
+            <span class="font-mono config-value">{{ config.target_max.toFixed(1) }}s</span>
           </div>
           <input
             type="range"
@@ -208,13 +333,14 @@ function formatDate(ts) {
             min="2.0"
             max="6.0"
             step="0.1"
+            class="config-range"
             @input="updateConfig('target_max', parseFloat($event.target.value))"
           />
         </div>
-        <div class="config-item">
-          <div class="config-label-row">
-            <span class="config-label">Hard Max</span>
-            <span class="config-value">{{ config.hard_max.toFixed(1) }}s</span>
+        <div>
+          <div class="config-row">
+            <span>Hard Max</span>
+            <span class="font-mono config-value">{{ config.hard_max.toFixed(1) }}s</span>
           </div>
           <input
             type="range"
@@ -222,13 +348,14 @@ function formatDate(ts) {
             min="3.0"
             max="8.0"
             step="0.1"
+            class="config-range"
             @input="updateConfig('hard_max', parseFloat($event.target.value))"
           />
         </div>
-        <div class="config-item">
-          <div class="config-label-row">
-            <span class="config-label">Gap Filler</span>
-            <span class="config-value">{{ config.gap_filler.toFixed(2) }}s</span>
+        <div>
+          <div class="config-row">
+            <span>Gap Filler</span>
+            <span class="font-mono config-value">{{ config.gap_filler.toFixed(1) }}s</span>
           </div>
           <input
             type="range"
@@ -236,103 +363,123 @@ function formatDate(ts) {
             min="0.1"
             max="1.0"
             step="0.05"
+            class="config-range"
             @input="updateConfig('gap_filler', parseFloat($event.target.value))"
           />
         </div>
       </div>
     </section>
 
-    <!-- Run Button -->
     <button
-      class="gen-btn"
+      class="gen-btn w-full"
+      style="padding: 14px 24px; border-radius: 12px; font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono', 'Fira Code', monospace; letter-spacing: 0.02em; color: white; cursor: pointer; transition: all 0.3s cubic-bezier(0.16,1,0.3,1); border: none; position: relative; overflow: hidden"
       :disabled="!hasAlignment || isRunning"
       @click="onRun"
     >
-      <span v-if="isRunning" class="spinner" />
-      <span>{{ isRunning ? 'Running...' : 'Run Segmenter' }}</span>
+      <span v-if="isRunning" class="button-spinner" />
+      <span>{{ isRunning ? 'Segmenting...' : 'Run Segmenter' }}</span>
     </button>
 
-    <!-- Results -->
-    <template v-if="hasResult">
-      <!-- Stats Bar -->
-      <section class="card stats-card">
-        <h3 class="card-heading">Results</h3>
-        <div class="stats-bar" v-if="stats">
-          <div class="stat">
-            <span class="stat-value">{{ stats.segment_count ?? segments.length }}</span>
-            <span class="stat-label">Segments</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value">{{ stats.filler_count ?? 0 }}</span>
-            <span class="stat-label">Fillers</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value">{{ formatDuration(stats.avg_duration) }}</span>
-            <span class="stat-label">Avg</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value">{{ formatDuration(stats.min_duration) }}</span>
-            <span class="stat-label">Min</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value">{{ formatDuration(stats.max_duration) }}</span>
-            <span class="stat-label">Max</span>
+    <div v-if="hasResult" style="margin-top: 20px">
+      <section class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <label class="block text-[10px] font-bold uppercase tracking-[0.15em]" style="color: var(--text-muted)">
+            Results
+          </label>
+          <div style="display: flex; gap: 6px">
+            <button class="action-btn hover-accent" @click="onCopy">Copy JSON</button>
+            <button class="action-btn hover-accent" @click="downloadJSON">Download</button>
           </div>
         </div>
-      </section>
 
-      <!-- Timeline -->
-      <section class="card">
-        <h3 class="card-heading">Timeline</h3>
-        <SegmentTimeline
-          :segments="segments"
-          :active-index="activeSegmentIdx"
-          :total-duration="totalDuration"
-          :current-time="currentTime"
-          @play-segment="playFromSegment"
-          @seek="seekTo"
-        />
-      </section>
+        <div v-if="resultsSummary" class="font-mono" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px">
+          {{ resultsSummary }}
+        </div>
 
-      <!-- Segment List -->
-      <section class="segment-list">
-        <SegmentCard
-          v-for="(seg, i) in segments"
-          :key="i"
-          :segment="seg"
-          :index="i"
-          :is-active="i === activeSegmentIdx"
-          @play="playFromSegment({ segment: seg, index: i })"
-        />
-      </section>
+        <div style="margin-bottom: 16px">
+          <SegmentTimeline
+            :segments="segments"
+            :active-index="activeSegmentIdx"
+            :total-duration="totalDuration"
+            :current-time="currentTime"
+            :is-playing="isPlaying"
+            :has-audio="Boolean(audioUrl)"
+            @toggle-play="togglePlayback"
+            @play-segment="playFromSegment"
+            @seek="seekTo"
+          />
+        </div>
 
-      <!-- Action Buttons -->
-      <div class="action-row">
-        <button class="action-btn" @click="onCopy">Copy JSON</button>
-        <button class="action-btn" @click="downloadJSON">Download</button>
+        <div style="display: flex; flex-direction: column; gap: 6px; max-height: 600px; overflow-y: auto; padding-right: 4px">
+          <SegmentCard
+            v-for="item in displaySegments"
+            :key="item.key"
+            :segment="item.segment"
+            :index="item.arrayIndex"
+            :display-index="item.displayIndex"
+            :is-active="item.arrayIndex === activeSegmentIdx"
+            @play="playFromSegment({ segment: item.segment })"
+          />
+        </div>
+      </section>
+    </div>
+
+    <div style="margin-top: 16px">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-display text-lg font-bold" style="color: var(--text)">History</h3>
+        <span class="font-mono text-xs" style="color: var(--text-muted)">{{ historyCountLabel }}</span>
       </div>
-    </template>
 
-    <!-- History -->
-    <section class="card" v-if="history.length">
-      <h3 class="card-heading">History <span class="history-count">{{ history.length }}</span></h3>
-      <div class="history-list">
+      <div v-if="history.length" class="history-list">
         <button
           v-for="item in history"
           :key="item.folder || item.source_folder"
           class="history-item"
+          :class="{ active: activeHistoryFolder === (item.folder || item.source_folder) }"
           @click="onHistoryClick(item)"
         >
-          <span class="history-project">{{ item.project_id || item.folder || item.source_folder }}</span>
-          <span class="history-meta">
-            <span v-if="item.segment_count != null">{{ item.segment_count }} segs</span>
-            <span v-if="item.timestamp || item.created_at">{{ formatDate(item.timestamp || item.created_at) }}</span>
-          </span>
+          <div class="history-item-body">
+            <div class="history-item-title-row">
+              <span class="history-item-title">{{ item.project_id || item.source_folder || item.folder }}</span>
+              <span
+                v-if="activeHistoryFolder === (item.folder || item.source_folder)"
+                class="font-mono history-active-badge"
+              >
+                ACTIVE
+              </span>
+            </div>
+
+            <div class="font-mono history-item-meta">
+              <span style="color: #4ECDC4">{{ item.segment_count }} segments</span>
+              <span class="history-divider">/</span>
+              <span style="color: #FFB347">{{ item.filler_count }} fillers</span>
+              <span class="history-divider">/</span>
+              <span style="color: var(--text-secondary)">avg {{ formatDuration(item.avg_duration) }}</span>
+              <span class="history-divider">/</span>
+              <span style="color: var(--text-secondary)">{{ formatTotal(item.total_duration) }}</span>
+              <span class="history-divider">/</span>
+              <span>{{ relativeTime(item.segmented_at || item.timestamp || item.created_at) }}</span>
+            </div>
+          </div>
+
+          <svg
+            class="history-chevron"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            aria-hidden="true"
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
         </button>
       </div>
-    </section>
 
-    <!-- Alignment Picker Modal -->
+      <p v-else class="history-empty">No segmentations yet</p>
+    </div>
+
     <AlignmentPicker
       :show="showPicker"
       :items="timingHistory"
@@ -344,333 +491,147 @@ function formatDate(ts) {
 
 <style scoped>
 .segmenter-page {
-  max-width: 780px;
-  margin: 0 auto;
-  padding: 32px 24px;
-}
-
-/* ---- Header ---- */
-.page-header {
-  margin-bottom: 24px;
-}
-
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.page-title {
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-}
-
-.project-badge {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: 10px;
-  background: rgba(78, 205, 196, 0.12);
-  color: var(--accent);
-  letter-spacing: 0.02em;
-}
-
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
-/* ---- Card ---- */
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
-  transition: border-color 0.2s;
-}
-
-.card:hover {
-  border-color: var(--border-hover);
-}
-
-.card-heading {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-  margin: 0 0 12px;
-}
-
-/* ---- Alignment Source ---- */
-.source-actions {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
+  width: 100%;
 }
 
 .source-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.source-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
-}
-
-.source-value {
-  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--accent);
 }
 
-.source-detail {
-  font-size: 12px;
+.source-info.empty {
+  color: var(--text-muted);
+}
+
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 
-.source-empty {
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-/* ---- Config Grid ---- */
-.config-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px 24px;
-}
-
-.config-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.config-label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.config-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
-}
-
 .config-value {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 600;
   color: var(--accent);
 }
 
-.config-item input[type="range"] {
+.config-range {
   width: 100%;
-  height: 6px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 3px;
-  outline: none;
   accent-color: var(--accent);
 }
 
-.config-item input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
+.button-spinner {
+  display: inline-block;
   width: 16px;
   height: 16px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
   border-radius: 50%;
-  background: var(--accent);
-  cursor: pointer;
-  border: 2px solid var(--bg-surface);
-}
-
-/* ---- Run Button ---- */
-.gen-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  padding: 14px 24px;
-  font-size: 14px;
-  font-weight: 700;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  letter-spacing: 0.02em;
-  color: white;
-  background: linear-gradient(135deg, var(--accent), #3BA89F);
-  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.gen-btn:hover:not(:disabled) {
-  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
-  transform: translateY(-1px);
-}
-
-.gen-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(0, 0, 0, 0.2);
-  border-top-color: #000;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* ---- Stats ---- */
-.stats-card .card-heading {
-  margin-bottom: 16px;
-}
-
-.stats-bar {
-  display: flex;
-  gap: 4px;
-}
-
-.stat {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-}
-
-.stat-value {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.stat-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
-}
-
-/* ---- Segment List ---- */
-.segment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* ---- Action Row ---- */
-.action-row {
-  display: flex;
-  gap: 10px;
-}
-
-/* ---- Buttons ---- */
-.action-btn {
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.action-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.action-btn-lg {
-  padding: 6px 14px;
-  font-size: 11px;
-}
-
-/* ---- History ---- */
-.history-count {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-left: 6px;
+  animation: spin 0.6s linear infinite;
 }
 
 .history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 260px;
+  max-height: 400px;
   overflow-y: auto;
 }
 
 .history-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   width: 100%;
-  text-align: left;
-  padding: 10px 14px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 6px;
   color: var(--text);
-  font-family: inherit;
-  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .history-item:hover {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: var(--border);
+  border-color: var(--border-hover);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
-.history-project {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--accent);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.history-item.active {
+  border-color: #ff9f43;
+  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
 }
 
-.history-meta {
+.history-item-body {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 11px;
-  color: var(--text-muted);
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+}
+
+.history-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.history-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.history-item.active .history-item-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.history-active-badge {
   flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(78, 205, 196, 0.15);
+  color: var(--accent);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+}
+
+.history-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.history-divider {
+  opacity: 0.3;
+}
+
+.history-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.history-item.active .history-chevron {
+  color: #ff9f43;
+  opacity: 0.8;
+}
+
+.history-empty {
+  padding: 32px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

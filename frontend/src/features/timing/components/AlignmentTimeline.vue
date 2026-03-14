@@ -15,10 +15,8 @@ const progress = computed(() => {
 })
 
 function formatTime(seconds) {
-  if (!seconds || !isFinite(seconds)) return '0:00'
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
+  if (!seconds || !isFinite(seconds)) return '0.00s'
+  return `${seconds.toFixed(2)}s`
 }
 
 function onBarClick(e) {
@@ -31,24 +29,23 @@ function onBarClick(e) {
 <template>
   <div class="timeline">
     <button class="play-btn" @click="emit('toggle-play')" :title="isPlaying ? 'Pause' : 'Play'">
-      <svg v-if="!isPlaying" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <svg v-if="!isPlaying" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
         <polygon points="6,4 20,12 6,20" />
       </svg>
-      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-        <rect x="5" y="4" width="4" height="16" rx="1" />
-        <rect x="15" y="4" width="4" height="16" rx="1" />
+      <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16" rx="1" />
+        <rect x="14" y="4" width="4" height="16" rx="1" />
       </svg>
     </button>
 
     <div class="bar-wrapper" @click="onBarClick">
       <div class="bar-bg">
-        <div class="bar-fill" :style="{ width: progress + '%' }" />
+        <div class="bar-progress" :style="{ width: progress + '%' }" />
+        <div v-if="duration" class="bar-playhead" :style="{ left: progress + '%' }"></div>
       </div>
     </div>
 
-    <span class="time-display">
-      {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
-    </span>
+    <span class="time-display">{{ formatTime(currentTime) }}</span>
   </div>
 </template>
 
@@ -56,14 +53,14 @@ function onBarClick(e) {
 .timeline {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 0;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .play-btn {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   border: none;
   background: var(--accent);
@@ -82,30 +79,40 @@ function onBarClick(e) {
 .bar-wrapper {
   flex: 1;
   cursor: pointer;
-  padding: 4px 0;
 }
 
 .bar-bg {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
-  overflow: hidden;
   position: relative;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  overflow: hidden;
 }
 
-.bar-fill {
+.bar-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
   height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(90deg, var(--accent), #2FB8AE);
+  background: rgba(78, 205, 196, 0.15);
   transition: width 0.05s linear;
+}
+
+.bar-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: white;
+  transform: translateX(-1px);
 }
 
 .time-display {
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-  min-width: 90px;
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 52px;
   text-align: right;
 }
 </style>
