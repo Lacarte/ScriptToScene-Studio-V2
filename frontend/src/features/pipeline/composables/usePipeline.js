@@ -1,7 +1,7 @@
 import { ref, readonly } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
-import { RANDOM_STORIES } from '@/shared/data/stories.js'
+import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
 import { timeAgo } from '@/shared/utils/format.js'
 import { useDoneSound } from '@/shared/composables/useDoneSound.js'
 
@@ -41,7 +41,6 @@ const jobs = ref([])
 const lastCompletedProjectId = ref(null)
 
 let eventSource = null
-let lastStoryIdx = -1
 let initialized = false
 
 // ── Actions ──
@@ -150,13 +149,9 @@ function loadFromHistory(index) {
 
 function randomStory() {
   const toast = useToast()
-  if (!RANDOM_STORIES.length) return
-  let idx
-  do {
-    idx = Math.floor(Math.random() * RANDOM_STORIES.length)
-  } while (idx === lastStoryIdx && RANDOM_STORIES.length > 1)
-  lastStoryIdx = idx
-  text.value = RANDOM_STORIES[idx]
+  const story = pickRandomStory()
+  if (!story) return
+  text.value = story
   toast.success('Random story loaded')
 }
 

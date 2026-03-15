@@ -137,6 +137,27 @@ def serve_app_assets(filename):
     return send_from_directory(APP_ASSETS_DIR, filename)
 
 
+@app.route("/api/restart", methods=["POST"])
+def restart_server():
+    """Restart the Flask server process."""
+    import sys
+    import subprocess
+    import threading
+    def _restart():
+        import time as _t
+        _t.sleep(0.5)
+        env = os.environ.copy()
+        env["STS_NO_BROWSER"] = "1"  # Prevent auto-open on restart
+        subprocess.Popen(
+            [sys.executable] + sys.argv,
+            env=env,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
+        )
+        os._exit(0)
+    threading.Thread(target=_restart, daemon=True).start()
+    return jsonify({"status": "restarting"})
+
+
 @app.route("/api/health")
 def health():
     from studio.ffmpeg_utils import find_ffmpeg
@@ -298,6 +319,7 @@ if __name__ == "__main__":
     print(f"  \033[90m-\033[0m Asset webhook: {N8N_ASSET_WEBHOOK_URL}")
     print()
 
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    if not os.environ.get("STS_NO_BROWSER"):
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     bind_host = os.environ.get("STS_BIND_HOST", "127.0.0.1")
     app.run(host=bind_host, port=port, debug=False, threaded=True)

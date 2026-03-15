@@ -67,7 +67,7 @@ def segment_history():
         if not os.path.isfile(json_path):
             continue
         try:
-            with open(json_path, "r") as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             meta = data.get("metadata", {})
             stats = data.get("stats", {})
@@ -95,7 +95,7 @@ def get_segmenter_result(folder):
     if not os.path.isfile(json_path):
         return jsonify({"error": "Not found"}), 404
     try:
-        with open(json_path, "r") as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             return jsonify(json.load(f))
     except (json.JSONDecodeError, OSError) as e:
         return jsonify({"error": f"Failed to read segmenter data: {e}"}), 500

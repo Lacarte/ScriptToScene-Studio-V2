@@ -120,26 +120,40 @@ function formatTime(secs) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-// Scene loading
+// Scene loading — load the latest project directly
 async function loadCurrentScenes() {
   try {
     const data = await loadSceneHistory()
     if (data && data.length) {
-      scenePickerData.value = data
-      scenePickerOpen.value = true
+      const latest = data[0]
+      const sceneData = await api.get(`/api/scenes/${latest.project_id}`)
+      if (sceneData?.scenes) {
+        loadScenes(sceneData)
+        projectId.value = latest.project_id
+        toast.success(`Loaded ${sceneData.scenes.length} scenes from ${latest.project_id}`)
+      }
     } else {
       toast.warning('No scene history found.')
     }
-  } catch {
+  } catch (e) {
+    console.warn('[Assets] Failed to load current scenes:', e.message)
     toast.error('Failed to load scene history.')
   }
 }
 
-function pickScene(entry) {
-  loadScenes(entry)
-  projectId.value = entry.project_id || `project_${Date.now()}`
+async function pickSceneProject(entry) {
   scenePickerOpen.value = false
-  toast.success(`Loaded ${entry.scenes?.length || 0} scenes.`)
+  const pid = entry.project_id
+  try {
+    const data = await api.get(`/api/scenes/${pid}`)
+    if (data?.scenes) {
+      loadScenes(data)
+      projectId.value = pid
+      toast.success(`Loaded ${data.scenes.length} scenes from ${pid}`)
+    }
+  } catch {
+    toast.error(`Failed to load project ${pid}`)
+  }
 }
 
 async function loadFromHistoryProject(pid) {
@@ -272,12 +286,36 @@ async function showHistory() {
   historyVisible.value = true
 }
 
+async function pickFromSceneHistory() {
+  try {
+    const data = await loadSceneHistory()
+    if (data && data.length) {
+      scenePickerData.value = data
+      scenePickerOpen.value = true
+    } else {
+      toast.warning('No scene history found.')
+    }
+  } catch {
+    toast.error('Failed to load scene history.')
+  }
+}
+
+// Provider URLs for auto-open
+const PROVIDER_URLS = {
+  midjourney: 'https://www.midjourney.com/imagine',
+  grok: 'https://grok.com/imagine',
+  'meta-ai': 'https://www.meta.ai/media',
+}
+
 // Grabber actions
 async function onStart() {
   if (!projectId.value) projectId.value = `project_${Date.now()}`
   try {
     await startGrabber(projectId.value)
     toast.success('Grabber started.')
+    // Open the provider website
+    const url = PROVIDER_URLS[provider.value]
+    if (url) window.open(url, 'sts-provider-tab')
   } catch {
     toast.error('Failed to start grabber.')
   }
@@ -412,7 +450,7 @@ onMounted(async () => {
           <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="loadCurrentScenes">
             Use Current Result
           </button>
-          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="showHistory">
+          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="pickFromSceneHistory">
             Pick from History
           </button>
         </div>
@@ -459,12 +497,25 @@ onMounted(async () => {
             v-for="(entry, i) in scenePickerData"
             :key="i"
             class="picker-row"
-            @click="pickScene(entry)"
+            @click="pickSceneProject(entry)"
           >
-            <span class="picker-label">{{ entry.project_id || entry.title || `Set ${i + 1}` }}</span>
-            <span class="picker-count">{{ entry.scenes?.length || 0 }} scenes</span>
+            <div class="picker-info">
+              <span class="picker-label">{{ entry.project_id || `Set ${i + 1}` }}</span>
+              <div class="picker-meta font-mono">
+                <span style="color: var(--accent)">{{ entry.scene_count || entry.scenes?.length || 0 }} scenes</span>
+                <template v-if="entry.style">
+                  <span class="picker-sep">/</span>
+                  <span class="picker-style">{{ entry.style.replace(/_/g, ' ') }}</span>
+                </template>
+                <template v-if="entry.timestamp">
+                  <span class="picker-sep">/</span>
+                  <span>{{ timeAgo(entry.timestamp) }}</span>
+                </template>
+              </div>
+            </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" style="flex-shrink:0;opacity:0.4"><path d="M9 18l6-6-6-6"/></svg>
           </div>
-          <div v-if="!scenePickerData.length" class="picker-empty">No scene sets found.</div>
+          <div v-if="!scenePickerData.length" class="picker-empty">No scene projects found.</div>
         </div>
       </div>
     </div>
@@ -564,7 +615,7 @@ onMounted(async () => {
     </section>
 
     <!-- History -->
-    <section v-if="historyVisible" class="card history-card">
+    <section class="card history-card">
       <div class="history-header">
         <div class="history-header-left">
           <svg width="16" height="16" fill="none" stroke="var(--text-muted)" stroke-width="1.5" viewBox="0 0 24 24">
@@ -1234,33 +1285,52 @@ onMounted(async () => {
 .picker-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 12px 14px;
   border-radius: 8px;
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.15s;
 }
 
 .picker-row:hover {
-  background: rgba(78, 205, 196, 0.06);
+  background: var(--bg-darkest);
+  border-color: var(--border);
+}
+
+.picker-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .picker-label {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
+  margin-bottom: 3px;
 }
 
-.picker-count {
-  font-size: 12px;
+.picker-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.picker-sep {
+  opacity: 0.3;
+}
+
+.picker-style {
+  text-transform: capitalize;
   color: var(--text-secondary);
-  font-family: var(--font-mono);
 }
 
 .picker-empty {
   font-size: 13px;
-  color: var(--text-secondary);
-  padding: 20px;
+  color: var(--text-muted);
+  padding: 24px;
   text-align: center;
 }
 

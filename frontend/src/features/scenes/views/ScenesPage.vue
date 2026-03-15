@@ -99,14 +99,25 @@ onUnmounted(() => {
 })
 
 // ---- Source selection ----
-function useCurrent() {
-  // For cross-feature integration, we'd read from a shared store.
-  // For now, rely on segData already being set externally or via history.
-  if (!scenes.segData.value?.segments) {
-    toast.error('No segmenter result available. Run the segmenter first.')
+async function useCurrent() {
+  // If segData already loaded, use it
+  if (scenes.segData.value?.segments) {
+    toast.success('Segmentation loaded')
     return
   }
-  toast.success('Segmentation loaded')
+  // Otherwise load the latest from segmenter history
+  try {
+    await scenes.loadSegHistory()
+    const history = scenes.segHistory.value
+    if (history.length) {
+      await scenes.loadSegProject(history[0].folder)
+      toast.success(`Loaded latest segmentation: ${history[0].project_id || history[0].folder}`)
+    } else {
+      toast.error('No segmenter results. Run the segmenter first.')
+    }
+  } catch {
+    toast.error('Failed to load segmenter result.')
+  }
 }
 
 async function openSegPicker() {
@@ -401,9 +412,14 @@ function truncate(str, len = 45) {
       <div class="results-header">
         <label class="section-label" style="margin-bottom:0">Generated Scenes</label>
         <div class="results-actions">
-          <button class="action-btn preview-btn" @click="scriptPreviewOpen = !scriptPreviewOpen">Preview Script</button>
-          <button class="action-btn" @click="downloadScenes">Download</button>
-          <button class="action-btn accent" @click="sendToAssets">Send to Assets</button>
+          <button class="action-btn preview-btn" @click="scriptPreviewOpen = !scriptPreviewOpen">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:2px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            Preview Script
+          </button>
+          <button class="action-btn accent" @click="sendToAssets">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+            Send to Assets
+          </button>
         </div>
       </div>
 
@@ -527,7 +543,6 @@ function truncate(str, len = 45) {
     </div>
 
     <!-- Segmenter Picker Modal -->
-    <Teleport to="body">
       <div v-if="showSegPicker" class="modal-overlay" @click.self="showSegPicker = false">
         <div class="modal-panel">
           <div class="modal-header">
@@ -557,7 +572,6 @@ function truncate(str, len = 45) {
           </div>
         </div>
       </div>
-    </Teleport>
   </div>
 </template>
 

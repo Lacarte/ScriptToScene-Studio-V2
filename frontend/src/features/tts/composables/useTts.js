@@ -9,7 +9,7 @@ export {
   VOICE_META, TOP_PICKS, BLEND_PRESETS,
 } from '../data/voiceData.js'
 import { VOICE_META, LANG_ORDER, BLEND_PRESETS } from '../data/voiceData.js'
-import { RANDOM_STORIES } from '@/shared/data/stories.js'
+import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
 
 // ── Singleton state ──
 
@@ -44,7 +44,6 @@ let chunkEventSource = null
 let downloadEventSource = null
 let streamAbortController = null
 let streamAudioCtx = null
-let lastStoryIdx = -1
 
 // ── Computed ──
 
@@ -253,12 +252,9 @@ function copyPromptPlain() {
 }
 
 function randomStory() {
-  let idx
-  do {
-    idx = Math.floor(Math.random() * RANDOM_STORIES.length)
-  } while (idx === lastStoryIdx && RANDOM_STORIES.length > 1)
-  lastStoryIdx = idx
-  prompt.value = RANDOM_STORIES[idx]
+  const story = pickRandomStory()
+  if (!story) return ''
+  prompt.value = story
   persist('sts-tts-prompt', prompt.value)
   return prompt.value
 }

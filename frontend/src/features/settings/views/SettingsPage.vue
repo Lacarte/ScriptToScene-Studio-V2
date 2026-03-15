@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useSettings } from '../composables/useSettings.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useWelcomeOverlay } from '@/shared/composables/useWelcomeOverlay.js'
+import { api } from '@/shared/api/client.js'
 import SettingsToggle from '../components/SettingsToggle.vue'
 import ClearProjectsDialog from '../components/ClearProjectsDialog.vue'
 
@@ -12,6 +13,37 @@ const { settings, loading, health, healthLoading, update, fetchHealth } = useSet
 const toast = useToast()
 const welcome = useWelcomeOverlay()
 const showClearDialog = ref(false)
+const restarting = ref(false)
+
+async function restartServer() {
+  restarting.value = true
+  toast.info('Restarting server...')
+  try {
+    await api.post('/api/restart')
+  } catch {
+    // Expected — server shuts down before responding
+  }
+  // Wait for old server to die
+  await new Promise(r => setTimeout(r, 2000))
+  // Poll until new server is healthy
+  for (let i = 0; i < 20; i++) {
+    try {
+      await api.get('/api/health')
+      toast.success('Server restarted — refreshing...')
+      await new Promise(r => setTimeout(r, 500))
+      window.location.reload()
+      return
+    } catch {
+      await new Promise(r => setTimeout(r, 1000))
+    }
+  }
+  restarting.value = false
+  toast.error('Server did not come back. Check the terminal.')
+}
+
+function refreshFrontend() {
+  window.location.reload()
+}
 
 onMounted(() => {
   fetchHealth()
@@ -92,6 +124,25 @@ function featureLabel(val) {
         description="Play a sound when pipeline, export, or asset download completes"
         @update:model-value="onToggle('sts-sound-enabled', $event)"
       />
+    </section>
+
+    <!-- Server -->
+    <section class="card p-5 mb-4">
+      <label class="section-label">Server</label>
+      <div class="server-actions">
+        <button class="action-btn server-btn" :disabled="restarting" @click="restartServer">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px">
+            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+          {{ restarting ? 'Restarting...' : 'Restart Server' }}
+        </button>
+        <button class="action-btn server-btn" @click="refreshFrontend">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px">
+            <path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
+          </svg>
+          Refresh Frontend
+        </button>
+      </div>
     </section>
 
     <!-- Features -->
@@ -184,6 +235,25 @@ function featureLabel(val) {
 
 .p-5 { padding: 20px; }
 .mb-4 { margin-bottom: 16px; }
+
+/* ---- Server ---- */
+.server-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.server-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px !important;
+  font-size: 12px !important;
+}
+
+.server-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
 
 /* ---- Feature Status ---- */
 .status-loading {

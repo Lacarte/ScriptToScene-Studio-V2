@@ -759,8 +759,35 @@ def assemble_project_for_editor(project_id):
         "disabled_tracks": [],
     }
 
-    # Resolve captions
+    # Resolve captions — auto-generate from alignment if none exist
     _resolve_project_captions(editor_data, safe_id)
+    if not editor_data.get("captions") and source_folder:
+        try:
+            from studio.captions.routes import _group_words_into_captions, CAPTION_PRESETS
+            align_path = os.path.join(ALIGN_DIR, source_folder, "alignment.json")
+            if os.path.isfile(align_path):
+                alignment = safe_json_read(align_path)
+                if alignment:
+                    captions = _group_words_into_captions(alignment, words_per_group=3)
+                    if captions:
+                        style = dict(CAPTION_PRESETS.get("bold_popup", {}))
+                        style["preset"] = "bold_popup"
+                        captions_result = {
+                            "project_id": safe_id,
+                            "source_folder": source_folder,
+                            "captions": captions,
+                            "style": style,
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                        }
+                        # Save for future use
+                        cap_dir = os.path.join(CAPTIONS_DIR, safe_id)
+                        os.makedirs(cap_dir, exist_ok=True)
+                        safe_json_write(os.path.join(cap_dir, "captions.json"), captions_result, indent=2)
+                        editor_data["captions"] = captions_result
+                        editor_data["captionsEnabled"] = True
+                        logger.info("Auto-generated {} captions for {}", len(captions), safe_id)
+        except Exception as e:
+            logger.debug("Could not auto-generate captions for {}: {}", safe_id, e)
 
     # Save as initial.json in output/projects/{id}/
     editor_data["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S+00:00")
