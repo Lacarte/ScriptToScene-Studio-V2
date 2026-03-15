@@ -1,17 +1,16 @@
 <script setup>
-import { ref } from 'vue'
 import SidebarNav from '../SidebarNav.vue'
+import { useAppStore } from '@/shared/stores/appStore.js'
 
-const collapsed = ref(false)
-const toggle = () => { collapsed.value = !collapsed.value }
+const app = useAppStore()
 </script>
 
 <template>
-  <div class="layout" :class="{ collapsed }">
-    <SidebarNav :collapsed="collapsed" @toggle="toggle" />
+  <div class="layout" :class="{ collapsed: app.sidebarCollapsed }">
+    <SidebarNav :collapsed="app.sidebarCollapsed" @toggle="app.toggleSidebar" />
     <main class="content">
       <router-view v-slot="{ Component }">
-        <keep-alive :include="['PipelinePage']">
+        <keep-alive :include="['PipelinePage', 'TtsPage', 'ScenesPage']">
           <component :is="Component" />
         </keep-alive>
       </router-view>

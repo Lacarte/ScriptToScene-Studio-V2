@@ -355,9 +355,18 @@ const genButtonLabel = computed(() => {
       <div class="prompt-footer">
         <div class="prompt-actions">
           <p class="meta-text">{{ tts.wordCount.value }} words ~ {{ tts.tokenCount.value }} tokens</p>
-          <button class="action-btn compact-btn hover-accent" @click="handleNormalize">Format</button>
-          <button class="action-btn compact-btn hover-accent" @click="handleCopy">Copy</button>
-          <button class="action-btn compact-btn hover-accent" @click="handleRandom">Random</button>
+          <button class="action-btn compact-btn hover-accent" @click="handleNormalize">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-1px"><path d="M4 7h16M4 12h10M4 17h14"/></svg>
+            Format
+          </button>
+          <button class="action-btn compact-btn hover-accent" @click="handleCopy">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copy
+          </button>
+          <button class="action-btn compact-btn hover-accent" @click="handleRandom">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+            Random
+          </button>
         </div>
         <div class="shortcut-hint">
           <kbd>Ctrl</kbd>
@@ -472,18 +481,7 @@ const genButtonLabel = computed(() => {
 }
 
 .page-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--text);
-}
-
-.page-subtitle {
-  margin: 4px 0 0;
-  font-size: 14px;
-  color: var(--text-secondary);
 }
 
 .model-status {
@@ -525,15 +523,6 @@ const genButtonLabel = computed(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.section-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
 }
 
 .section-label--spaced {

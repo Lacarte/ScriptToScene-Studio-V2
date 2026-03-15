@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePipeline } from '../composables/usePipeline.js'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
+import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 
 defineOptions({ name: 'PipelinePage' })
 
@@ -11,7 +12,7 @@ const {
   STEPS, VOICES,
   text, voice, speed, style, autoScenes, templates,
   running, stepStatus, log, globalStatus,
-  jobs,
+  jobs, lastCompletedProjectId,
   start, loadFromHistory, randomStory, resetProgress,
   timeAgo,
 } = usePipeline()
@@ -20,6 +21,7 @@ const { styleLabel, styleColor } = useScenes()
 
 const logEl = ref(null)
 const activeProjectId = ref('')
+useProjectSync(activeProjectId)
 
 // Auto-scroll log
 watch(log, async () => {
@@ -28,6 +30,8 @@ watch(log, async () => {
     logEl.value.scrollTop = logEl.value.scrollHeight
   }
 })
+
+const canRun = computed(() => text.value.trim().length > 0 && !running.value)
 
 // Reset progress when form fields change
 watch([text, voice, speed, style], () => {
@@ -39,6 +43,15 @@ watch([text, voice, speed, style], () => {
 // Persist style to localStorage
 watch(style, (val) => {
   localStorage.setItem('sts-pipeline-style', val)
+})
+
+// Auto-navigate to Scenes when pipeline completes
+watch(globalStatus, (status) => {
+  if (status === 'done' && lastCompletedProjectId.value) {
+    setTimeout(() => {
+      router.push({ path: '/scenes', query: { project: lastCompletedProjectId.value } })
+    }, 1500)
+  }
 })
 
 const historyCount = computed(() => {
@@ -116,7 +129,7 @@ function onHistoryClick(index) {
 }
 
 function openInScenes(projectId) {
-  router.push('/scenes')
+  router.push({ path: '/scenes', query: { project: projectId } })
 }
 
 function esc(str) {
@@ -140,57 +153,61 @@ function esc(str) {
     <section class="card input-card">
       <div class="field-row">
         <label class="field-label">Story Text</label>
-        <button class="random-btn" title="Load a random story excerpt" @click="randomStory">&#x1F3B2; Random</button>
+        <div class="field-row-right">
+          <span v-if="text.trim()" class="word-count">{{ text.trim().split(/\s+/).length }} words</span>
+          <button class="random-btn" title="Load a random story excerpt" @click="randomStory">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="16" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+            Random
+          </button>
+        </div>
       </div>
       <textarea
         v-model="text"
         class="input-field textarea"
-        rows="6"
-        placeholder="Enter your story text..."
+        :class="{ 'textarea--empty': !text.trim() }"
+        rows="5"
+        placeholder="Paste your story, script, or narration text here..."
       ></textarea>
-      <div class="controls-row">
-        <div>
+
+      <!-- Controls strip -->
+      <div class="controls-strip">
+        <div class="control-group">
           <label class="control-label">Voice</label>
-          <select v-model="voice" class="input-field select-voice">
+          <select v-model="voice" class="input-field control-select">
             <option v-for="v in VOICES" :key="v.id" :value="v.id">{{ v.label }}</option>
           </select>
         </div>
-        <div>
+        <div class="control-group">
           <label class="control-label">Speed</label>
           <input
             v-model.number="speed"
             type="number"
-            class="input-field select-speed"
+            class="input-field control-number"
             min="0.5"
             max="2.0"
             step="0.1"
           >
         </div>
-        <div>
+        <div class="control-group">
           <label class="control-label">Style</label>
-          <select v-model="style" class="input-field select-style">
+          <select v-model="style" class="input-field control-select">
             <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </div>
+        <div class="control-group control-group--auto">
+          <label class="auto-toggle" for="pipeline-auto-scenes">
+            <input id="pipeline-auto-scenes" v-model="autoScenes" type="checkbox" class="auto-check">
+            <span class="auto-text">Auto-scenes</span>
+          </label>
+        </div>
       </div>
-      <div class="auto-scenes-row">
-        <input
-          id="pipeline-auto-scenes"
-          v-model="autoScenes"
-          type="checkbox"
-          class="auto-scenes-check"
-        >
-        <label for="pipeline-auto-scenes" class="auto-scenes-label">
-          Auto-generate scenes <span class="auto-scenes-note">&mdash; run scene generation with the selected style after pipeline completes</span>
-        </label>
-      </div>
-      <div class="run-row">
-        <button class="run-btn" :disabled="running" @click="start">
+
+      <!-- Action row -->
+      <div class="action-row">
+        <button class="run-btn" :class="{ 'run-btn--disabled': !canRun }" :disabled="!canRun" @click="start">
           <span class="run-icon" aria-hidden="true">
             <svg v-if="!running" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="6" cy="12" r="1.75" fill="currentColor" stroke="none"></circle>
-              <path d="M9 12h8"></path>
-              <path d="M13.5 7.5L18 12l-4.5 4.5"></path>
+              <path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>
             </svg>
             <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner-svg">
               <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
@@ -198,6 +215,7 @@ function esc(str) {
           </span>
           <span class="run-label">{{ running ? 'Running...' : 'Run Pipeline' }}</span>
         </button>
+        <span v-if="!text.trim() && !running" class="run-hint">Paste text or click Random to get started</span>
       </div>
     </section>
 
@@ -317,40 +335,19 @@ function esc(str) {
 }
 
 .page-title {
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--text);
-  margin: 0;
-}
-
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: 4px;
 }
 
 /* ---- Card ---- */
 .card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.card:hover {
-  border-color: var(--border-hover);
+  padding: 24px;
 }
 
 .input-card {
   margin-bottom: 16px;
 }
 
-.progress-card {
-  margin-bottom: 16px;
-}
-
+.progress-card,
 .log-card {
   margin-bottom: 16px;
 }
@@ -366,22 +363,23 @@ function esc(str) {
 
 .control-label {
   display: block;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 
 /* ---- Input Field ---- */
 .input-field {
   background: var(--bg-darkest);
-  border: 1.5px solid var(--border);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   padding: 8px 12px;
   outline: none;
+  transition: border-color 0.15s;
 }
 
 .input-field:focus {
@@ -393,22 +391,12 @@ function esc(str) {
   resize: vertical;
   font-family: inherit;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
+  min-height: 120px;
 }
 
-.select-voice {
-  width: 140px;
-  font-size: 12px;
-}
-
-.select-speed {
-  width: 80px;
-  font-size: 12px;
-}
-
-.select-style {
-  width: 140px;
-  font-size: 12px;
+.textarea--empty {
+  color: var(--text-muted);
 }
 
 /* ---- Field Row ---- */
@@ -416,92 +404,147 @@ function esc(str) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+.field-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.word-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* ---- Random Button ---- */
 .random-btn {
-  padding: 2px 8px;
-  border-radius: 5px;
-  font-size: 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
 .random-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+  background: rgba(78, 205, 196, 0.06);
 }
 
-/* ---- Controls Row ---- */
-.controls-row {
+/* ---- Controls Strip ---- */
+.controls-strip {
   display: flex;
-  gap: 12px;
-  margin-top: 12px;
+  align-items: flex-end;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
-/* ---- Auto-scenes ---- */
-.auto-scenes-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--bg-darkest);
-  border: 1px solid var(--border);
+.control-group {
+  flex-shrink: 0;
 }
 
-.auto-scenes-check {
+.control-group--auto {
+  margin-left: auto;
+}
+
+.control-select {
+  width: 150px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.control-number {
+  width: 72px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+/* ---- Auto-scenes ---- */
+.auto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  transition: all 0.15s;
+}
+
+.auto-toggle:hover {
+  border-color: var(--border-hover);
+}
+
+.auto-check {
   accent-color: var(--accent);
   cursor: pointer;
 }
 
-.auto-scenes-label {
+.auto-text {
   font-size: 11px;
   color: var(--text-secondary);
-  cursor: pointer;
+  white-space: nowrap;
 }
 
-.auto-scenes-note {
+/* ---- Action Row ---- */
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.run-hint {
+  font-size: 11px;
   color: var(--text-muted);
+  font-family: var(--font-mono);
+  opacity: 0.7;
 }
 
 /* ---- Run Button ---- */
-.run-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-}
-
 .run-btn {
   position: relative;
   border: 1px solid rgba(255, 163, 77, 0.45);
   background:
     radial-gradient(circle at top left, rgba(255, 226, 150, 0.22), transparent 42%),
-    linear-gradient(135deg, #ff7a18 0%, #ff9f43 52%, #ffd166 100%);
+    linear-gradient(135deg, #ff7a18 0%, var(--accent-active) 52%, #ffd166 100%);
   color: #1f1307;
   box-shadow:
     0 10px 26px rgba(255, 122, 24, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.28);
   overflow: hidden;
-  padding: 0 24px;
-  height: 44px;
+  padding: 0 28px;
+  height: 42px;
   font-size: 13px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  transition: transform 0.15s, box-shadow 0.15s;
 }
 
 .run-btn::before {
@@ -509,7 +552,7 @@ function esc(str) {
   position: absolute;
   inset: 1px;
   border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 55%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 55%);
   pointer-events: none;
 }
 
@@ -527,32 +570,42 @@ function esc(str) {
   justify-content: center;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .run-btn .run-label {
   letter-spacing: 0.02em;
 }
 
-.run-btn:hover:not(:disabled) {
-  color: #120b04;
-  border-color: rgba(255, 209, 102, 0.9);
+.run-btn:hover:not(:disabled):not(.run-btn--disabled) {
+  transform: translateY(-1px);
   box-shadow:
     0 14px 34px rgba(255, 138, 61, 0.38),
     inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  transform: translateY(-1px);
 }
 
-.run-btn:active:not(:disabled) {
+.run-btn:active:not(:disabled):not(.run-btn--disabled) {
   transform: translateY(0);
-  box-shadow:
-    0 8px 18px rgba(255, 122, 24, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 
 .run-btn:disabled {
-  opacity: 0.9;
   cursor: wait;
+}
+
+.run-btn--disabled {
+  background: var(--bg-darkest) !important;
+  border-color: var(--border) !important;
+  color: var(--text-muted) !important;
+  box-shadow: none !important;
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.run-btn--disabled::before {
+  display: none;
+}
+
+.run-btn--disabled .run-icon {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .spinner-svg {
@@ -692,8 +745,12 @@ function esc(str) {
 }
 
 .history-list {
-  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 500px;
   overflow-y: auto;
+  padding: 2px;
 }
 
 .history-empty {
@@ -707,7 +764,6 @@ function esc(str) {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  margin-bottom: 6px;
   cursor: pointer;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
@@ -718,15 +774,15 @@ function esc(str) {
 }
 
 .hist-item.active {
-  border-color: #ff9f43;
-  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
+  border-color: var(--accent-active);
+  box-shadow: inset 3px 0 0 var(--accent-active), 0 0 12px rgba(255, 159, 67, 0.15);
 }
 
 .hist-inner {
   display: flex;
-  align-items: start;
-  gap: 10px;
-  padding: 10px 12px 10px 14px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
 }
 
 .hist-dot {
@@ -734,7 +790,6 @@ function esc(str) {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 5px;
 }
 
 .hist-content {
@@ -743,19 +798,20 @@ function esc(str) {
 }
 
 .hist-excerpt {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text);
   line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-bottom: 4px;
 }
 
 .hist-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
   font-size: 10px;
   color: var(--text-muted);
   font-family: 'JetBrains Mono', monospace;

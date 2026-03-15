@@ -3,7 +3,7 @@ defineOptions({ name: 'CaptionsPage' })
 </script>
 
 <template>
-  <div class="page">
+  <div class="captions-page">
     <h2 class="page-title">Captions</h2>
     <p class="page-stub">This feature will be migrated from the vanilla JS implementation.</p>
   </div>

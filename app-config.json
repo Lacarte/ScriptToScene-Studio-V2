@@ -52,7 +52,7 @@
     "sts-tts-speed": "1.0",
     "sts-tts-voiceOpen": "",
     "sts-auto-type": false,
-    "sts-analysis-collapsed": true,
+    "sts-analysis-collapsed": false,
     "sts-scenes-webhook-enabled": true,
     "sts-vol-voice": 1,
     "sts-vol-music": 0.3,

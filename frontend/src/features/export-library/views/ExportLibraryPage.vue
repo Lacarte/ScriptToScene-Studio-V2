@@ -1,12 +1,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import ExportCard from '../components/ExportCard.vue'
-import {
-  useExportLibrary,
-  formatBytes,
-  formatDuration,
-  timeAgo,
-} from '../composables/useExportLibrary.js'
+import { useExportLibrary } from '../composables/useExportLibrary.js'
+import { formatBytes, timeAgo, fmtDuration } from '@/shared/utils/format.js'
 
 defineOptions({ name: 'ExportLibraryPage' })
 
@@ -58,14 +54,6 @@ onMounted(() => {
   fetchLibrary()
 })
 
-// --- Duration format matching original (m:ss) ---
-function fmtDuration(sec) {
-  const s = Number(sec || 0)
-  if (!s || s <= 0) return '—'
-  const m = Math.floor(s / 60)
-  const ss = Math.floor(s % 60)
-  return m > 0 ? `${m}:${String(ss).padStart(2, '0')}` : `0:${String(ss).padStart(2, '0')}`
-}
 
 // --- Style helpers ---
 function styleLabel(id) {
@@ -147,7 +135,7 @@ const extendedStats = computed(() => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="export-page">
     <!-- Header -->
     <div class="page-header">
       <div>
@@ -192,7 +180,7 @@ const extendedStats = computed(() => {
     <section v-if="items.length > 0" class="card card-pad stats-card">
       <div class="stats-row">
         <div class="stat-item">
-          <span class="stat-value" style="color:#4ECDC4">{{ extendedStats.total }}</span>
+          <span class="stat-value" style="color: var(--accent)">{{ extendedStats.total }}</span>
           <span class="stat-label">Total</span>
         </div>
         <div class="stat-item">
@@ -200,7 +188,7 @@ const extendedStats = computed(() => {
           <span class="stat-label">Today</span>
         </div>
         <div class="stat-item">
-          <span class="stat-value" style="color:#FFB347">{{ extendedStats.week }}</span>
+          <span class="stat-value" style="color: var(--accent-warning)">{{ extendedStats.week }}</span>
           <span class="stat-label">This Week</span>
         </div>
         <div class="stat-item">
@@ -216,7 +204,7 @@ const extendedStats = computed(() => {
           <span class="stat-label">Streak</span>
         </div>
         <div class="stat-item">
-          <span class="stat-value" style="color:#A78BFA">{{ fmtDuration(extendedStats.totalDur) }}</span>
+          <span class="stat-value" style="color: var(--accent-secondary)">{{ fmtDuration(extendedStats.totalDur) }}</span>
           <span class="stat-label">Duration</span>
         </div>
         <div class="stat-item">
@@ -228,7 +216,7 @@ const extendedStats = computed(() => {
           <span class="stat-label">Top Style</span>
         </div>
         <div v-if="extendedStats.topRatio" class="stat-item">
-          <span class="stat-value" style="color:#A78BFA">{{ extendedStats.topRatio[0] }}</span>
+          <span class="stat-value" style="color: var(--accent-secondary)">{{ extendedStats.topRatio[0] }}</span>
           <span class="stat-label">Top Ratio</span>
         </div>
       </div>
@@ -270,7 +258,7 @@ const extendedStats = computed(() => {
 </template>
 
 <style scoped>
-.page {
+.export-page {
   max-width: 1152px;
   margin: 0 auto;
   padding: 32px 24px;
@@ -282,33 +270,6 @@ const extendedStats = computed(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
-}
-
-.page-title {
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0;
-}
-
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
-/* ---- Card ---- */
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  margin-bottom: 16px;
-  transition: border-color 0.2s;
-}
-
-.card:hover {
-  border-color: var(--border-hover);
 }
 
 .card-pad {

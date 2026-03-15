@@ -23,7 +23,8 @@ export function useSettings() {
       const data = await api.get('/api/settings')
       settings.value = { ...DEFAULTS, ...data }
       loaded = true
-    } catch {
+    } catch (e) {
+      console.warn('[Settings] Failed to load settings:', e.message)
       settings.value = { ...DEFAULTS }
     } finally {
       loading.value = false
@@ -55,7 +56,8 @@ export function useSettings() {
     healthLoading.value = true
     try {
       health.value = await api.get('/api/health')
-    } catch {
+    } catch (e) {
+      console.warn('[Settings] Health check failed:', e.message)
       health.value = null
     } finally {
       healthLoading.value = false

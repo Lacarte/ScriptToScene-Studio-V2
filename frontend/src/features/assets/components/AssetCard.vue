@@ -97,6 +97,7 @@ function onOpenLightbox(file) {
 
 function fileSrc(file) {
   if (file.startsWith('http')) return file
+  if (file.startsWith('/')) return file
   return `/output/assets/${file}`
 }
 
@@ -149,8 +150,8 @@ function isVideoFile(file) {
         <span>No preview</span>
       </div>
 
-      <!-- Status badge -->
-      <span class="status-badge" :class="statusClass">{{ statusLabel }}</span>
+      <!-- Status badge (hide when ready) -->
+      <span v-if="status?.status && status.status !== 'ready'" class="status-badge" :class="statusClass">{{ statusLabel }}</span>
 
       <!-- Checkbox -->
       <label class="select-check" @click.stop>
@@ -162,19 +163,20 @@ function isVideoFile(file) {
       </label>
 
       <!-- File count -->
-      <span v-if="files.length" class="file-count">{{ files.length }}</span>
+      <span v-if="files.length" class="file-count">{{ files.length }} file{{ files.length !== 1 ? 's' : '' }}</span>
     </div>
 
     <!-- Header -->
     <div class="card-header">
       <div class="scene-title">
-        <span class="scene-number">{{ sceneIndex + 1 }}</span>
+        <span class="scene-number">#{{ sceneIndex }}</span>
         <span class="scene-name">{{ scene.title || `Scene ${sceneIndex + 1}` }}</span>
       </div>
       <div class="card-meta">
         <span class="type-badge" :style="{ background: typeColor + '22', color: typeColor }">
-          {{ scene.type || 'image' }}
+          {{ (scene.type || 'image').toUpperCase() }}
         </span>
+        <span v-if="scene.narrative_role" class="role-badge">{{ scene.narrative_role }}</span>
         <span v-if="scene.duration" class="duration">{{ scene.duration }}s</span>
       </div>
     </div>
@@ -228,13 +230,12 @@ function isVideoFile(file) {
           <polyline points="7,10 12,15 17,10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        Download
+        Download{{ files.length ? ` (${files.length})` : '' }}
       </button>
-      <button class="btn-action" @click="onOpenFolder">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button class="btn-icon-action" @click="onOpenFolder" title="Open folder">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
         </svg>
-        Folder
       </button>
     </div>
   </div>
@@ -452,12 +453,23 @@ function isVideoFile(file) {
 }
 
 .type-badge {
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: 8px;
   font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.05em;
+}
+
+.role-badge {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-darkest);
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
 }
 
 .duration {
@@ -586,18 +598,16 @@ function isVideoFile(file) {
 }
 
 .btn-action {
-  flex: 1;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--bg-deeper, #0a0a0a);
+  color: var(--text-muted);
+  background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 5px 10px;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
 }
@@ -610,5 +620,21 @@ function isVideoFile(file) {
 .btn-action:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.btn-icon-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.btn-icon-action:hover {
+  color: var(--accent);
 }
 </style>

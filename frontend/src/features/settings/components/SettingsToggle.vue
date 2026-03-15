@@ -21,7 +21,7 @@ function toggle() {
   <div class="toggle-row" :class="{ disabled }" @click="toggle">
     <div class="toggle-info">
       <span class="toggle-label">{{ label }}</span>
-      <span v-if="description" class="toggle-desc">{{ description }}</span>
+      <p v-if="description" class="toggle-desc">{{ description }}</p>
     </div>
     <button
       type="button"
@@ -43,14 +43,16 @@ function toggle() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-darkest);
+  margin-bottom: 6px;
   cursor: pointer;
   user-select: none;
 }
 
-.toggle-row:not(:last-child) {
-  border-bottom: 1px solid var(--border);
+.toggle-row:last-child {
+  margin-bottom: 0;
 }
 
 .toggle-row.disabled {
@@ -59,27 +61,27 @@ function toggle() {
 }
 
 .toggle-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex: 1;
   min-width: 0;
 }
 
 .toggle-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text);
 }
 
 .toggle-desc {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
+  margin-top: 2px;
   line-height: 1.4;
 }
 
 .toggle-switch {
   position: relative;
   flex-shrink: 0;
+  margin-left: 12px;
   width: 38px;
   height: 20px;
   background: var(--bg-elevated);

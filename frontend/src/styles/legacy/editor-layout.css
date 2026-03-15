@@ -644,7 +644,6 @@
     width: 110px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     cursor: pointer;
     transition: all 0.15s ease;
     display: flex;
@@ -659,10 +658,10 @@
     top: 0;
     left: 0;
     right: 0;
-    height: 2px;
-    background: var(--scene-color, #666);
-    opacity: 0.6;
-    transition: opacity 0.15s;
+    /* height: 2px; */
+    /* background: var(--scene-color, #666); */
+    /* opacity: 0.6; */
+    /* transition: opacity 0.15s; */
 }
 
 .timeline-block:hover {

@@ -1,4 +1,5 @@
 <script setup>
+import { timeAgo } from '@/shared/utils/format.js'
 defineOptions({ name: 'AlignmentPicker' })
 
 defineProps({
@@ -15,21 +16,7 @@ function formatDuration(seconds) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`
 }
 
-function relativeTime(ts) {
-  if (!ts) return ''
-  const diff = Date.now() - new Date(ts).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
-}
-
-function formatDate(ts) {
-  return relativeTime(ts)
-}
+const relativeTime = timeAgo
 
 function truncate(str, max = 60) {
   if (!str) return ''

@@ -74,12 +74,11 @@ function blockTitle(seg) {
 }
 
 function onSegmentClick(seg, idx) {
-  if (!props.hasAudio) return
   emit('play-segment', { segment: seg, index: idx })
 }
 
 function onBarClick(event) {
-  if (!props.totalDuration || !props.hasAudio) return
+  if (!props.totalDuration) return
   const bar = event.currentTarget
   const rect = bar.getBoundingClientRect()
   const pct = (event.clientX - rect.left) / rect.width
@@ -91,7 +90,6 @@ function onBarClick(event) {
   <div>
     <div class="timeline-row">
       <button
-        v-if="hasAudio"
         type="button"
         class="timeline-play-btn"
         @click="emit('toggle-play')"
@@ -170,7 +168,7 @@ function onBarClick(event) {
   height: 32px;
   background: var(--bg-darkest);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
   cursor: pointer;
 }
@@ -190,8 +188,7 @@ function onBarClick(event) {
 
 .timeline-block.active,
 .timeline-block.hovered {
-  outline: 2px solid rgba(255, 255, 255, 0.92);
-  outline-offset: -2px;
+  box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.92), inset -2px 0 0 rgba(255, 255, 255, 0.92);
 }
 
 .timeline-label {
@@ -212,7 +209,8 @@ function onBarClick(event) {
   background: white;
   z-index: 10;
   pointer-events: none;
-  transition: left 0.05s linear, opacity 0.15s;
+  transition: left 0.15s linear, opacity 0.15s;
+  will-change: left;
 }
 
 .time-display,

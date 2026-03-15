@@ -184,12 +184,12 @@ body {
   margin-left: var(--sidebar-collapsed);
 }
 
-/* ---- Page Toggle ---- */
-.page {
+/* ---- Page Toggle (legacy SPA only — scoped to #main-content) ---- */
+#main-content > .page {
   display: none;
 }
 
-.page.active {
+#main-content > .page.active {
   display: block;
 }
 

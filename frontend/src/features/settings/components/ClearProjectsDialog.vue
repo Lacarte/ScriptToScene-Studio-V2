@@ -57,8 +57,13 @@ async function confirmDelete() {
         ? ` (${result.exports_deleted} export item${result.exports_deleted !== 1 ? 's' : ''} deleted)`
         : ''
       toast.success(`Cleared ${result.count ?? 0} project item${(result.count ?? 0) !== 1 ? 's' : ''}${exportsMsg}`)
-      localStorage.clear()
-      sessionStorage.clear()
+      // Only clear STS keys, not all localStorage
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('sts-')) localStorage.removeItem(key)
+      }
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.startsWith('sts-')) sessionStorage.removeItem(key)
+      }
       emit('close')
       setTimeout(() => window.location.reload(), 600)
     } else {

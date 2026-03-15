@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { VOICE_META } from '../composables/useTts.js'
+import { timeAgo } from '@/shared/utils/format.js'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -17,15 +18,6 @@ const excerpt = computed(() => {
 const durationLabel = computed(() => {
   return props.item.duration_seconds ? `${props.item.duration_seconds.toFixed(1)}s` : ''
 })
-
-function timeAgo(ts) {
-  if (!ts) return ''
-  const diff = (Date.now() - new Date(ts).getTime()) / 1000
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
 
 const ago = computed(() => timeAgo(props.item.timestamp))
 </script>

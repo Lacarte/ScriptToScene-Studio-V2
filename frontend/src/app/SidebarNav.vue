@@ -1,18 +1,48 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
+import { usePipeline } from '@/features/pipeline/composables/usePipeline.js'
 
 const props = defineProps({ collapsed: Boolean })
 const emit = defineEmits(['toggle'])
 const route = useRoute()
-const audioPlaying = ref(false)
+const { playingSource, stopAll } = useAudioRegistry()
+const { stepStatus, globalStatus } = usePipeline()
+
+const audioPlaying = computed(() => !!playingSource.value)
+
+const STEP_MAP = { tts: '/tts', timing: '/timing', segment: '/segmenter', scenes: '/scenes' }
+const PATH_TO_STEP = { '/tts': 'tts', '/timing': 'timing', '/segmenter': 'segment', '/scenes': 'scenes' }
 
 function isActive(path) {
   return route.path === path
 }
 
+// Reactive pipeline class map — recomputes whenever stepStatus or globalStatus changes
+const pipelineClasses = computed(() => {
+  const classes = {}
+  const status = globalStatus.value
+  const steps = stepStatus.value
+
+  for (const [path, step] of Object.entries(PATH_TO_STEP)) {
+    if (status === 'done') {
+      if (path === '/scenes') { classes[path] = 'pipeline-done'; continue }
+      if (steps[step] === 'done') { classes[path] = 'pipeline-step-done'; continue }
+    }
+    if (status === 'running') {
+      if (steps[step] === 'running') { classes[path] = 'pipeline-running'; continue }
+      if (steps[step] === 'done') { classes[path] = 'pipeline-step-done'; continue }
+    }
+    classes[path] = ''
+  }
+  return classes
+})
+
 function toggleAudio() {
-  // Will be wired to global audio state later
+  if (playingSource.value) {
+    stopAll()
+  }
 }
 </script>
 
@@ -45,24 +75,24 @@ function toggleAudio() {
 
       <!-- TTS / Alignment / Segmenter group -->
       <div class="nav-group">
-        <router-link to="/tts" class="nav-item" :class="{ active: isActive('/tts') }" title="Text to Speech">
+        <router-link to="/tts" class="nav-item" :class="[{ active: isActive('/tts') }, pipelineClasses['/tts']]" title="Text to Speech">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           <span v-show="!collapsed" class="nav-label">TTS</span>
         </router-link>
 
-        <router-link to="/timing" class="nav-item" :class="{ active: isActive('/timing') }" title="Force Alignment">
+        <router-link to="/timing" class="nav-item" :class="[{ active: isActive('/timing') }, pipelineClasses['/timing']]" title="Force Alignment">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="19" cy="17" r="2"/></svg>
           <span v-show="!collapsed" class="nav-label">ALIGNMENT</span>
         </router-link>
 
-        <router-link to="/segmenter" class="nav-item" :class="{ active: isActive('/segmenter') }" title="Scene Segmenter">
+        <router-link to="/segmenter" class="nav-item" :class="[{ active: isActive('/segmenter') }, pipelineClasses['/segmenter']]" title="Scene Segmenter">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
           <span v-show="!collapsed" class="nav-label">SEGMENTER</span>
         </router-link>
       </div>
 
       <!-- Scenes -->
-      <router-link to="/scenes" class="nav-item" :class="{ active: isActive('/scenes') }" title="Scene Generator">
+      <router-link to="/scenes" class="nav-item" :class="[{ active: isActive('/scenes') }, pipelineClasses['/scenes']]" title="Scene Generator">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><path d="M4 11V7a2 2 0 012-2h12a2 2 0 012 2v4"/><path d="M4 11h16"/><path d="M7 5l3 6"/><path d="M11 5l3 6"/><path d="M15 5l3 6"/></svg>
         <span v-show="!collapsed" class="nav-label">SCENES</span>
       </router-link>
@@ -88,14 +118,14 @@ function toggleAudio() {
 
     <!-- Bottom -->
     <div class="nav-bottom">
-      <button class="nav-item audio-btn" :class="{ 'audio-playing': audioPlaying }" :title="audioPlaying ? 'Audio playing' : 'No audio playing'" @click="toggleAudio">
+      <button class="nav-item audio-btn" :class="{ 'audio-playing': audioPlaying }" :title="audioPlaying ? `Playing: ${playingSource} — click to stop` : 'No audio playing'" @click="toggleAudio">
         <svg class="nav-icon audio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="10" width="3" height="4" rx="1.5" fill="currentColor" stroke="none"/>
           <rect x="8" y="7" width="3" height="10" rx="1.5" fill="currentColor" stroke="none"/>
           <rect x="13" y="4" width="3" height="16" rx="1.5" fill="currentColor" stroke="none"/>
           <rect x="18" y="8" width="3" height="8" rx="1.5" fill="currentColor" stroke="none"/>
         </svg>
-        <span v-show="!collapsed" class="nav-label">AUDIO</span>
+        <span v-show="!collapsed" class="nav-label">AUDIO <span v-if="playingSource" class="audio-source-label">{{ playingSource }}</span></span>
       </button>
       <router-link to="/settings" class="nav-item" :class="{ active: isActive('/settings') }" title="Settings">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -297,11 +327,46 @@ function toggleAudio() {
   100% { transform: scale(1.15); }
 }
 
+.audio-source-label {
+  font-size: 0.7em;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
 .collapse-icon {
   transition: transform 0.3s;
 }
 
 .collapse-icon.flipped {
   transform: rotate(180deg);
+}
+
+/* ---- Pipeline step highlighting ---- */
+@keyframes pipeline-pulse {
+  0%, 100% { background: rgba(78, 205, 196, 0.05); }
+  50% { background: rgba(78, 205, 196, 0.25); }
+}
+
+@keyframes pipeline-done-pulse {
+  0%, 100% { background: rgba(255, 215, 0, 0.05); }
+  50% { background: rgba(255, 215, 0, 0.25); }
+}
+
+.nav-item.pipeline-running {
+  color: var(--accent) !important;
+  animation: pipeline-pulse 1.5s ease-in-out infinite;
+  box-shadow: inset 0 0 0 1px rgba(78, 205, 196, 0.3);
+}
+
+.nav-item.pipeline-step-done {
+  color: var(--accent) !important;
+  background: rgba(78, 205, 196, 0.08);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.nav-item.pipeline-done {
+  color: #FFD700 !important;
+  animation: pipeline-done-pulse 1.5s ease-in-out infinite;
+  box-shadow: inset 0 0 0 1px rgba(255, 215, 0, 0.3);
 }
 </style>

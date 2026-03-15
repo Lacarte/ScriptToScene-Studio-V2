@@ -101,7 +101,8 @@ export function useSegmenter() {
       const data = await api.get('/api/segmenter/history')
       history.value = Array.isArray(data) ? data : []
       historyLoaded = true
-    } catch {
+    } catch (e) {
+      console.warn('[Segmenter] Failed to load history:', e.message)
       history.value = []
     }
   }
@@ -134,12 +135,105 @@ export function useSegmenter() {
     try {
       const data = await api.get('/api/timing/history')
       timingHistory.value = Array.isArray(data) ? data : []
-    } catch {
+    } catch (e) {
+      console.warn('[Segmenter] Failed to load timing history:', e.message)
       timingHistory.value = []
     }
   }
 
-  /* ── Audio helpers ── */
+  /* ── Audio ── */
+
+  let _audioEl = null
+  let _rafId = null
+
+  async function loadAudio() {
+    stopAudio()
+    const sf = sourceFolder.value || result.value?.metadata?.source_folder
+    if (!sf) { audioUrl.value = ''; return }
+    try {
+      const res = await api.get(`/api/scenes/audio/${encodeURIComponent(sf)}`)
+      if (res?.url) {
+        audioUrl.value = res.url
+        _audioEl = new Audio(res.url)
+        _audioEl.onended = () => {
+          isPlaying.value = false
+          currentTime.value = 0
+          activeSegmentIdx.value = -1
+          _stopRaf()
+        }
+        _audioEl.onerror = () => { audioUrl.value = '' }
+        _audioEl.onloadedmetadata = () => { duration.value = _audioEl.duration }
+      }
+    } catch {
+      audioUrl.value = ''
+    }
+  }
+
+  function _startRaf() {
+    _stopRaf()
+    const tick = () => {
+      if (_audioEl) {
+        currentTime.value = _audioEl.currentTime
+        updateActiveSegment(_audioEl.currentTime)
+      }
+      _rafId = requestAnimationFrame(tick)
+    }
+    _rafId = requestAnimationFrame(tick)
+  }
+
+  function _stopRaf() {
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
+  }
+
+  function togglePlay() {
+    if (!_audioEl) return
+    if (_audioEl.paused) {
+      if (_audioEl.duration && _audioEl.currentTime >= _audioEl.duration - 0.05) {
+        _audioEl.currentTime = 0
+        updateActiveSegment(0)
+      }
+      _audioEl.play().catch(() => {})
+      isPlaying.value = true
+      _startRaf()
+    } else {
+      _audioEl.pause()
+      isPlaying.value = false
+      _stopRaf()
+    }
+  }
+
+  function playSegment(seg) {
+    if (!_audioEl) return
+    _audioEl.currentTime = seg.start
+    updateActiveSegment(seg.start)
+    _audioEl.play().catch(() => {})
+    isPlaying.value = true
+    _startRaf()
+  }
+
+  function seekTo(time) {
+    if (!_audioEl) return
+    _audioEl.currentTime = time
+    updateActiveSegment(time)
+    if (_audioEl.paused) {
+      _audioEl.play().catch(() => {})
+      isPlaying.value = true
+      _startRaf()
+    }
+  }
+
+  function stopAudio() {
+    if (_audioEl) {
+      _audioEl.pause()
+      _audioEl.src = ''
+      _audioEl = null
+    }
+    _stopRaf()
+    audioUrl.value = ''
+    isPlaying.value = false
+    currentTime.value = 0
+    activeSegmentIdx.value = -1
+  }
 
   function updateActiveSegment(time) {
     currentTime.value = time
@@ -212,14 +306,14 @@ export function useSegmenter() {
     sourceFolder: readonly(sourceFolder),
     projectId: readonly(projectId),
     alignmentSource: readonly(alignmentSource),
-    config,
+    config: readonly(config),
     result: readonly(result),
     isRunning: readonly(isRunning),
     history: readonly(history),
     timingHistory: readonly(timingHistory),
 
     // Audio
-    audioUrl,
+    audioUrl: readonly(audioUrl),
     isPlaying: readonly(isPlaying),
     currentTime: readonly(currentTime),
     duration: readonly(duration),
@@ -240,6 +334,11 @@ export function useSegmenter() {
     loadHistory,
     loadResult,
     loadTimingHistory,
+    loadAudio,
+    togglePlay,
+    playSegment,
+    seekTo,
+    stopAudio,
     updateActiveSegment,
     setPlaying,
     setDuration,

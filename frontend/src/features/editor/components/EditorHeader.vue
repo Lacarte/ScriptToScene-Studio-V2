@@ -8,7 +8,7 @@ const router = useRouter()
 const { projectName, saveStatus, canUndo, canRedo } = useEditor()
 
 function goBack() {
-  router.push('/scenes')
+  router.push({ path: '/scenes', query: projectName.value ? { project: projectName.value } : {} })
 }
 
 function undo() {

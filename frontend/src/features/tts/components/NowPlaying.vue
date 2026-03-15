@@ -1,5 +1,7 @@
 <script setup>
 import { ref, watch, onBeforeUnmount } from 'vue'
+import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
+import { fmtTime } from '@/shared/utils/format.js'
 
 const props = defineProps({
   metadata: { type: Object, default: null },
@@ -8,15 +10,14 @@ const props = defineProps({
 
 const emit = defineEmits(['ended'])
 
+const { register: audioRegister } = useAudioRegistry()
+
 const audioEl = ref(null)
 const isPlaying = ref(false)
+
+watch(audioEl, (el) => { if (el) audioRegister('TTS', el) })
 const currentTime = ref(0)
 const duration = ref(0)
-
-function fmtTime(s) {
-  if (!s || isNaN(s)) return '0:00'
-  return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0')
-}
 
 function togglePlayback() {
   const el = audioEl.value
@@ -85,7 +86,7 @@ watch(() => props.audioSrc, (src) => {
     currentTime.value = 0
     duration.value = 0
   }
-})
+}, { immediate: true, flush: 'post' })
 
 onBeforeUnmount(() => {
   const el = audioEl.value

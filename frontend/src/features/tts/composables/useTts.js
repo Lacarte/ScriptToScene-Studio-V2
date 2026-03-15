@@ -1,129 +1,15 @@
 import { ref, readonly, computed } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { timeAgo, fmtTime } from '@/shared/utils/format.js'
 
-// ── Constants ──
-
-export const LANG_NAMES = {
-  'en-us': 'American English', 'en-gb': 'British English', 'ja': 'Japanese',
-  'zh': 'Chinese', 'es': 'Spanish', 'fr': 'French', 'hi': 'Hindi',
-  'it': 'Italian', 'pt-br': 'Portuguese',
-}
-
-export const LANG_SHORT = {
-  'en-us': 'English US', 'en-gb': 'English UK', 'ja': 'Japanese',
-  'zh': 'Chinese', 'es': 'Spanish', 'fr': 'French', 'hi': 'Hindi',
-  'it': 'Italian', 'pt-br': 'Portuguese',
-}
-
-export const LANG_SHORT_COMPACT = {
-  'en-us': 'US', 'en-gb': 'UK', 'ja': 'JA', 'zh': 'ZH', 'es': 'ES',
-  'fr': 'FR', 'hi': 'HI', 'it': 'IT', 'pt-br': 'PT',
-}
-
-export const LANG_ORDER = ['en-us', 'en-gb', 'ja', 'zh', 'es', 'fr', 'hi', 'it', 'pt-br']
-
-export const VOICE_META = {
-  // American Female — coral/pink
-  af_alloy:   { g: 'f', hue: '#FF9B9B', lang: 'en-us', name: 'Alloy',   desc: 'Neutral, versatile' },
-  af_aoede:   { g: 'f', hue: '#FFB5B5', lang: 'en-us', name: 'Aoede',   desc: 'Soft, melodic' },
-  af_bella:   { g: 'f', hue: '#FF8A8A', lang: 'en-us', name: 'Bella',   desc: 'Energetic, engaging' },
-  af_heart:   { g: 'f', hue: '#FF7070', lang: 'en-us', name: 'Heart',   desc: 'Warm, friendly, natural' },
-  af_jessica: { g: 'f', hue: '#FFA5A5', lang: 'en-us', name: 'Jessica', desc: 'Bright, conversational' },
-  af_kore:    { g: 'f', hue: '#FFCECE', lang: 'en-us', name: 'Kore',    desc: 'Gentle, soothing' },
-  af_nicole:  { g: 'f', hue: '#FF8080', lang: 'en-us', name: 'Nicole',  desc: 'Clear, professional' },
-  af_nova:    { g: 'f', hue: '#FFD0D0', lang: 'en-us', name: 'Nova',    desc: 'Bright, modern' },
-  af_river:   { g: 'f', hue: '#FFB0B0', lang: 'en-us', name: 'River',   desc: 'Calm, flowing' },
-  af_sarah:   { g: 'f', hue: '#FF9595', lang: 'en-us', name: 'Sarah',   desc: 'Smooth, balanced' },
-  af_sky:     { g: 'f', hue: '#FFBABA', lang: 'en-us', name: 'Sky',     desc: 'Light, airy' },
-  // American Male — teal
-  am_adam:    { g: 'm', hue: '#6FE3DA', lang: 'en-us', name: 'Adam',    desc: 'Warm, approachable' },
-  am_echo:    { g: 'm', hue: '#5ED5CC', lang: 'en-us', name: 'Echo',    desc: 'Resonant, clear' },
-  am_eric:    { g: 'm', hue: '#7EEFEA', lang: 'en-us', name: 'Eric',    desc: 'Confident, steady' },
-  am_fenrir:  { g: 'm', hue: '#4ECDC4', lang: 'en-us', name: 'Fenrir',  desc: 'Bold, dynamic' },
-  am_liam:    { g: 'm', hue: '#6DE0D8', lang: 'en-us', name: 'Liam',    desc: 'Friendly, casual' },
-  am_michael: { g: 'm', hue: '#8AF0E8', lang: 'en-us', name: 'Michael', desc: 'Deep, authoritative' },
-  am_onyx:    { g: 'm', hue: '#5CD8D0', lang: 'en-us', name: 'Onyx',    desc: 'Rich, powerful' },
-  am_puck:    { g: 'm', hue: '#7AE8E0', lang: 'en-us', name: 'Puck',    desc: 'Playful, expressive' },
-  // British Female — purple/lavender
-  bf_alice:    { g: 'f', hue: '#C4B5FD', lang: 'en-gb', name: 'Alice',    desc: 'Refined, poised' },
-  bf_emma:     { g: 'f', hue: '#D4C5FF', lang: 'en-gb', name: 'Emma',     desc: 'Elegant, articulate' },
-  bf_isabella: { g: 'f', hue: '#B4A5ED', lang: 'en-gb', name: 'Isabella', desc: 'Graceful, warm' },
-  bf_lily:     { g: 'f', hue: '#E4D5FF', lang: 'en-gb', name: 'Lily',     desc: 'Soft, gentle' },
-  // British Male — steel blue
-  bm_daniel: { g: 'm', hue: '#7B90A9', lang: 'en-gb', name: 'Daniel', desc: 'Composed, clear' },
-  bm_fable:  { g: 'm', hue: '#8BA0B9', lang: 'en-gb', name: 'Fable',  desc: 'Storytelling, warm' },
-  bm_george: { g: 'm', hue: '#6B80A0', lang: 'en-gb', name: 'George', desc: 'Classic narrator' },
-  bm_lewis:  { g: 'm', hue: '#9BB0C9', lang: 'en-gb', name: 'Lewis',  desc: 'Thoughtful, measured' },
-  // Japanese — sakura pink / muted blue
-  jf_alpha:      { g: 'f', hue: '#FFB7C5', lang: 'ja', name: 'Alpha',      desc: 'Clear, natural' },
-  jf_gongitsune: { g: 'f', hue: '#FFC7D5', lang: 'ja', name: 'Gongitsune', desc: 'Gentle, expressive' },
-  jf_nezumi:     { g: 'f', hue: '#FFD7E5', lang: 'ja', name: 'Nezumi',     desc: 'Soft, delicate' },
-  jf_tebukuro:   { g: 'f', hue: '#FFA7B5', lang: 'ja', name: 'Tebukuro',   desc: 'Warm, friendly' },
-  jm_kumo:       { g: 'm', hue: '#A0B4C8', lang: 'ja', name: 'Kumo',       desc: 'Calm, steady' },
-  // Chinese — gold
-  zf_xiaobei:  { g: 'f', hue: '#FFD700', lang: 'zh', name: 'Xiaobei',  desc: 'Bright, cheerful' },
-  zf_xiaoni:   { g: 'f', hue: '#FFE740', lang: 'zh', name: 'Xiaoni',   desc: 'Warm, gentle' },
-  zf_xiaoxuan: { g: 'f', hue: '#FFC800', lang: 'zh', name: 'Xiaoxuan', desc: 'Clear, professional' },
-  zf_xiaoyi:   { g: 'f', hue: '#FFF060', lang: 'zh', name: 'Xiaoyi',   desc: 'Soft, soothing' },
-  zm_yunjian:  { g: 'm', hue: '#E8B800', lang: 'zh', name: 'Yunjian',  desc: 'Strong, commanding' },
-  zm_yunxi:    { g: 'm', hue: '#D8A800', lang: 'zh', name: 'Yunxi',    desc: 'Warm, rich' },
-  zm_yunxia:   { g: 'm', hue: '#C89800', lang: 'zh', name: 'Yunxia',   desc: 'Smooth, mellow' },
-  zm_yunyang:  { g: 'm', hue: '#F0C000', lang: 'zh', name: 'Yunyang',  desc: 'Energetic, bright' },
-  // Spanish — warm orange
-  ef_dora:  { g: 'f', hue: '#FFB074', lang: 'es', name: 'Dora',  desc: 'Warm, expressive' },
-  em_alex:  { g: 'm', hue: '#FFA060', lang: 'es', name: 'Alex',  desc: 'Clear, confident' },
-  em_santa: { g: 'm', hue: '#FF9050', lang: 'es', name: 'Santa', desc: 'Rich, resonant' },
-  // French — soft mauve
-  ff_siwis: { g: 'f', hue: '#D4A0D0', lang: 'fr', name: 'Siwis', desc: 'Elegant, smooth' },
-  // Hindi — saffron
-  hf_alpha: { g: 'f', hue: '#FFB347', lang: 'hi', name: 'Alpha', desc: 'Clear, natural' },
-  hf_beta:  { g: 'f', hue: '#FFC370', lang: 'hi', name: 'Beta',  desc: 'Warm, gentle' },
-  hm_omega: { g: 'm', hue: '#E0A030', lang: 'hi', name: 'Omega', desc: 'Deep, steady' },
-  hm_psi:   { g: 'm', hue: '#D09020', lang: 'hi', name: 'Psi',   desc: 'Rich, expressive' },
-  // Italian — warm green
-  if_sara:   { g: 'f', hue: '#90D890', lang: 'it', name: 'Sara',   desc: 'Warm, melodic' },
-  im_nicola: { g: 'm', hue: '#70C870', lang: 'it', name: 'Nicola', desc: 'Clear, engaging' },
-  // Portuguese — ocean blue
-  pf_dora:  { g: 'f', hue: '#70B0E0', lang: 'pt-br', name: 'Dora',  desc: 'Bright, friendly' },
-  pm_alex:  { g: 'm', hue: '#60A0D0', lang: 'pt-br', name: 'Alex',  desc: 'Warm, clear' },
-  pm_santa: { g: 'm', hue: '#5090C0', lang: 'pt-br', name: 'Santa', desc: 'Deep, resonant' },
-}
-
-export const TOP_PICKS = [
-  { voice: 'af_heart',   badge: '#1 Narration',  bestFor: 'Audiobooks, narration, general purpose' },
-  { voice: 'af_bella',   badge: 'Dynamic',       bestFor: 'Dynamic narration, marketing' },
-  { voice: 'af_nicole',  badge: 'Professional',  bestFor: 'Non-fiction, tutorials, professional' },
-  { voice: 'af_sarah',   badge: 'Versatile',     bestFor: 'General audiobooks, balanced delivery' },
-  { voice: 'am_adam',    badge: 'Male Lead',     bestFor: 'Male narration, approachable tone' },
-  { voice: 'am_michael', badge: 'Authoritative', bestFor: 'Deep narration, documentary' },
-  { voice: 'bf_emma',    badge: 'British',       bestFor: 'British female, elegant narration' },
-  { voice: 'bm_george',  badge: 'Classic',       bestFor: 'British male, classic narrator' },
-]
-
-export const BLEND_PRESETS = [
-  { name: 'Narrator',    a: 'af_heart',  b: 'am_michael', ratio: 35, desc: 'Warm + authoritative' },
-  { name: 'Podcast',     a: 'af_bella',  b: 'am_adam',    ratio: 50, desc: 'Energetic duo' },
-  { name: 'Storyteller', a: 'bf_emma',   b: 'bm_fable',   ratio: 40, desc: 'British elegance' },
-  { name: 'Newscast',    a: 'af_nicole', b: 'am_eric',    ratio: 30, desc: 'Clear + confident' },
-  { name: 'Gentle',      a: 'af_kore',   b: 'af_river',   ratio: 50, desc: 'Soothing blend' },
-  { name: 'Bold',        a: 'am_fenrir', b: 'am_onyx',    ratio: 50, desc: 'Dynamic power' },
-  { name: 'Velvet',      a: 'af_bella',  b: 'am_adam',    ratio: 80, desc: 'Bella-forward warmth' },
-]
-
-export const RANDOM_STORIES = [
-  `The old lighthouse keeper climbed the spiral staircase one final time. Seventy-three steps \u2014 he'd counted them every night for forty years. Tonight the light would go automatic, and the sea would lose its last human guardian. He pressed his palm against the cold glass and watched the beam sweep across black water. Somewhere out there, a fishing boat adjusted course. They'd never know it was his last turn of the lens.`,
-  `She found the letter tucked inside a library book, dated nineteen fifty-two. "If you're reading this," it began, "then the maples outside must be enormous by now." She glanced out the window. The maples were enormous. She kept reading. "I buried something beneath the tallest one. Something that mattered to me once. I hope it matters to you too." She closed the book, grabbed her coat, and walked outside with a borrowed shovel.`,
-  `The robot had been designed to sort mail, but somewhere between firmware update seven and firmware update eight, it developed a fondness for poetry. It would pause at each envelope, scanning the handwritten addresses with what its engineers could only describe as admiration. "Beautiful ligatures," it murmured one Tuesday, holding a birthday card up to the fluorescent light. The engineers exchanged nervous glances.`,
-  `Rain hammered the tin roof of the roadside diner. A truck driver sat at the counter, stirring coffee he'd never drink. Across from him, a woman in a red coat studied a road atlas, tracing routes with her fingertip. Neither spoke. The waitress refilled his cup anyway. Outside, lightning split the sky and for one bright instant, every puddle in the parking lot turned to silver. The woman folded her map and smiled.`,
-  `The astronaut floated by the observation window, watching Earth turn below. Continents drifted past like slow clouds. She pressed record on her personal log. "Day two hundred and fourteen. I can see a hurricane forming over the Atlantic. From up here it looks like a pinwheel. Beautiful and terrible. I think about my daughter learning to ride her bike in the backyard. I wonder if she looks up at the stars and knows which one is me."`,
-  `The violin had been silent for twenty years, sealed in its velvet-lined case in the attic. When the old man's granddaughter found it, she lifted the bow and drew it across the strings. The sound was thin and ghostly at first, but the wood remembered. By the third note, the kitchen below fell quiet. By the seventh, her grandfather had risen from his chair, tears tracking down weathered cheeks. The violin remembered everything.`,
-  `The detective stared at the chessboard. The suspect sat across from him, calm as still water. "You left one clue," the detective said, moving a pawn. "Just one. But it was enough." The suspect tilted his head. "Enlighten me." The detective placed a photograph on the table \u2014 a reflection in a window, barely visible, showing a figure in a doorway. "You forgot about the glass." The suspect's smile faded by exactly one degree.`,
-  `The last bookshop on Elm Street had a cat named Tolstoy and a policy of lending books on the honor system. No cards, no due dates. Just a handwritten note on the door: "Take what you need. Return when you're ready." Most people returned their books. Some left new ones. By December, the shelves held twice as many titles as they had in spring. The owner didn't question it. She just made more tea and added another shelf.`,
-  `The ship's captain spoke into the radio one final time. "This is the Aurora, signing off after thirty years of service. She's carried cargo to fourteen countries, weathered nine storms, and never once let her crew down." He paused, running his hand along the bridge console. "They'll scrap her hull and melt her steel. But steel doesn't forget the shape of a ship. Somewhere in a bridge or a building, she'll keep standing."`,
-  `The garden had been abandoned for decades, but it refused to die. Roses climbed the iron gate, their thorns locking it shut. Ivy covered the stone walls like a second skin. And at the center, where a fountain had once stood, a single apple tree grew crooked and wild, its branches heavy with fruit that no one picked. Birds came and went. Seasons turned. The garden kept its own time, answering to no one.`,
-  `The pianist's hands trembled above the keys. The concert hall held two thousand people, and every one of them was silent. She closed her eyes and thought of her teacher \u2014 a quiet woman who smelled of lavender and never raised her voice. "Don't play for them," the teacher had said. "Play for the version of yourself who needed music most." Her fingers found the first chord. The trembling stopped. The music began.`,
-]
+// ── Constants (extracted to tts/data/voiceData.js) ──
+export {
+  LANG_NAMES, LANG_SHORT, LANG_SHORT_COMPACT, LANG_ORDER,
+  VOICE_META, TOP_PICKS, BLEND_PRESETS,
+} from '../data/voiceData.js'
+import { VOICE_META, LANG_ORDER, BLEND_PRESETS } from '../data/voiceData.js'
+import { RANDOM_STORIES } from '@/shared/data/stories.js'
 
 // ── Singleton state ──
 
@@ -140,6 +26,7 @@ const genMode = ref(localStorage.getItem('sts-tts-genMode') || 'generate')
 const speed = ref(parseFloat(localStorage.getItem('sts-tts-speed') || '1.0'))
 const prompt = ref(localStorage.getItem('sts-tts-prompt') || '')
 
+const initializing = ref(false)
 const isGenerating = ref(false)
 const currentJobId = ref(null)
 const progressText = ref('')
@@ -202,20 +89,6 @@ function sortedLangs(groups) {
   })
 }
 
-function timeAgo(ts) {
-  if (!ts) return ''
-  const diff = (Date.now() - new Date(ts).getTime()) / 1000
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
-
-function fmtTime(s) {
-  if (!s || isNaN(s)) return '0:00'
-  return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0')
-}
-
 function persist(key, value) {
   localStorage.setItem(key, String(value))
 }
@@ -226,7 +99,8 @@ async function checkModel() {
   try {
     const d = await api.get('/api/tts/model-status/kokoro')
     modelReady.value = d.cached
-  } catch {
+  } catch (e) {
+    console.warn('[TTS] Model status check failed:', e.message)
     // server not ready
   }
 }
@@ -267,7 +141,8 @@ async function loadVoices() {
   try {
     const data = await api.get('/api/tts/voices')
     voices.value = data
-  } catch {
+  } catch (e) {
+    console.warn('[TTS] Failed to load voices:', e.message)
     // use defaults from VOICE_META
   }
 }
@@ -413,6 +288,8 @@ function buildPayload() {
 async function generate() {
   const text = prompt.value.trim()
   if (!text) throw new Error('Enter some text first')
+  if (text.length > 50000) throw new Error('Text is too long (max 50,000 characters)')
+  if (speed.value < 0.5 || speed.value > 2.0) throw new Error('Speed must be between 0.5 and 2.0')
   if (isGenerating.value) return
 
   isGenerating.value = true
@@ -430,7 +307,8 @@ async function generate() {
       progressText.value = 'Normalizing text...'
       const nd = await api.post('/api/tts/normalize', { body: { text } })
       if (nd.normalized) genPrompt = nd.normalized
-    } catch {
+    } catch (e) {
+      console.warn('[TTS] Normalization failed, using original:', e.message)
       // use original
     }
 
@@ -581,7 +459,8 @@ async function abort() {
   if (currentJobId.value) {
     try {
       await fetch(`/api/tts/generate-abort/${currentJobId.value}`, { method: 'POST' })
-    } catch {
+    } catch (e) {
+      console.warn('[TTS] Abort request failed:', e.message)
       // best effort
     }
   }
@@ -631,7 +510,8 @@ async function loadHistory() {
   try {
     const data = await api.get('/api/tts/generation')
     history.value = data
-  } catch {
+  } catch (e) {
+    console.warn('[TTS] Failed to load history:', e.message)
     // no-op
   }
 }
@@ -754,13 +634,14 @@ let initialized = false
 export function useTts() {
   if (!initialized) {
     initialized = true
-    checkModel()
-    loadVoices()
-    loadHistory()
+    initializing.value = true
+    Promise.all([checkModel(), loadVoices(), loadHistory()])
+      .finally(() => { initializing.value = false })
   }
 
   return {
     // State (readonly)
+    initializing: readonly(initializing),
     modelReady: readonly(modelReady),
     voices: readonly(voices),
     selectedVoice: readonly(selectedVoice),
@@ -827,5 +708,8 @@ export function useTts() {
     sortedLangs,
     timeAgo,
     fmtTime,
+
+    // Cleanup
+    dispose() { abort() },
   }
 }

@@ -4,98 +4,107 @@ description: Phased plan to merge timeline editor into main app then migrate ent
 type: project
 ---
 
-## Phase 1 — Merge Timeline Editor into Main App
+## Phase 1 — Merge Timeline Editor into Main App ✅ COMPLETE
 
-**1.1 Eliminate the iframe boundary.** Move `timeline-editor/frontend/` content (HTML, JS, CSS) into the main `static/` tree. The editor becomes just another page section (`page-editor`) rendered inline instead of inside an iframe.
-
-**1.2 Replace postMessage bridge with direct function calls.** Currently `static/js/editor.js` sends data via `postMessage` and the editor listens in `app.js`. Convert these to direct imports — the editor JS modules (`state.js`, `timeline.js`, `preview.js`, etc.) get loaded as ES6 modules from the main app.
-
-**1.3 Merge the editor's reactive state (`state.js`) into the main app's data flow.** Remove sessionStorage/localStorage shuttling (`sts-staged-timeline`, `sts-editor-boot-project`, `sts-editor-captions`). Data passes directly from pipeline/scenes/segmenter into the editor state.
-
-**1.4 Consolidate duplicate CSS.** Merge `timeline-editor/frontend/css/editor.css` and `styles.css` into the main stylesheet, keeping `shared-theme.css` as the single source of design tokens. Remove the duplicated copy.
-
-**1.5 Absorb the editor's standalone export backend** (`timeline-editor/backend/server.py`, `video_processor.py`) into the existing `studio/editor/` blueprint — it already has 71KB of routes, so the export endpoints fold in naturally.
-
-**1.6 Delete `timeline-editor/` directory.** Everything now lives under `static/` and `studio/`.
+**1.1** ✅ Eliminated iframe boundary — editor inline in main app
+**1.2** ✅ Replaced postMessage with direct function calls
+**1.3** ✅ Merged editor state into main app data flow → Pinia `useStagingStore`
+**1.4** ✅ Consolidated duplicate CSS → `shared.css` + `theme.css` design tokens
+**1.5** ✅ Absorbed editor export backend into `studio/editor/` blueprint
+**1.6** ✅ Deleted `timeline-editor/` directory
 
 ---
 
-## Phase 2 — Set Up Vue 3 + Vite Scaffold
+## Phase 2 — Set Up Vue 3 + Vite Scaffold ✅ COMPLETE
 
-**2.1 Initialize Vite + Vue 3 project** inside a new `frontend/` directory at project root. Install Vue 3, Vue Router, Pinia, and Vite.
-
-**2.2 Configure Vite to output built assets to `static/dist/`.** Flask serves them from the same `/static/` path — zero backend changes needed.
-
-**2.3 Set up the folder structure** using feature-based architecture:
+**2.1** ✅ Vite + Vue 3 + Vue Router + Pinia initialized in `frontend/`
+**2.2** ✅ Vite outputs to `static/dist/`, Flask serves unchanged
+**2.3** ✅ Feature-based folder structure established:
 
 ```
 frontend/src/
-├── app/                    # App shell (layout, sidebar, router)
-│   ├── App.vue
-│   ├── router.ts
-│   └── layouts/
-│       └── MainLayout.vue  # Sidebar + content area
-├── features/               # One folder per domain
-│   ├── pipeline/
-│   │   ├── views/PipelinePage.vue
-│   │   ├── composables/usePipeline.ts
-│   │   └── components/
-│   ├── tts/
-│   ├── timing/
-│   ├── segmenter/
-│   ├── scenes/
-│   ├── assets/
-│   ├── captions/
-│   ├── editor/             # The merged timeline editor
-│   │   ├── views/EditorPage.vue
-│   │   ├── composables/useEditorState.ts
-│   │   ├── composables/useTimeline.ts
-│   │   ├── composables/usePreview.ts
-│   │   ├── components/
-│   │   │   ├── Timeline.vue
-│   │   │   ├── SceneEditor.vue
-│   │   │   ├── VideoPreview.vue
-│   │   │   └── ExportDialog.vue
-│   │   └── stores/editorStore.ts
-│   ├── export-library/
-│   └── settings/
-├── shared/                 # Cross-feature utilities
-│   ├── api/                # Typed API client (wraps fetch)
-│   ├── composables/        # useToast, useConfirm, useProject
-│   ├── components/         # Toast, ConfirmDialog, Modal
-│   └── stores/             # appStore (current project, nav state)
+├── app/                    # App shell, router, layout
+├── features/               # 9 feature modules migrated
+│   ├── pipeline/           ✅
+│   ├── tts/                ✅
+│   ├── timing/             ✅
+│   ├── segmenter/          ✅
+│   ├── scenes/             ✅
+│   ├── assets/             ✅
+│   ├── captions/           ✅ (stub)
+│   ├── editor/             🔶 Phase 3.5 in progress
+│   ├── export-library/     ✅
+│   └── settings/           ✅
+├── shared/
+│   ├── api/client.js       ✅ Typed fetch wrapper
+│   ├── composables/        ✅ useToast, useAudioRegistry, useProjectSync
+│   ├── components/         ✅ ToastContainer, WelcomeOverlay, PageLayout, HistorySection
+│   ├── stores/             ✅ appStore (Pinia), stagingStore (Pinia)
+│   ├── data/stories.js     ✅ Shared constants
+│   └── utils/format.js     ✅ timeAgo, formatBytes, fmtTime, etc.
 └── styles/
-    └── theme.css           # Design tokens (from shared-theme.css)
+    ├── theme.css           ✅ Design tokens + semantic color vars
+    ├── shared.css          ✅ .card, .page-title, .section-label, .action-btn, .gen-btn
+    └── legacy/             ✅ Scoped to #main-content for old SPA compat
 ```
 
 ---
 
 ## Phase 3 — Migrate Feature by Feature
 
-**3.1 Start with the app shell.** Port sidebar navigation, toast system, confirm dialogs, and welcome overlay into `App.vue` / `MainLayout.vue`. Vue Router replaces the manual `showPage()` function.
+**3.1** ✅ App shell — sidebar, toast, router, MainLayout (Pinia-backed)
+**3.2** ✅ Settings + Export Library — migrated, shared components built
+**3.3** ✅ TTS, Segmenter, Scenes, Timing, Assets — all migrated with composables
+**3.4** ✅ Pipeline — migrated, SSE cleanup, cross-feature routing
+**3.5** 🔶 Editor — **IN PROGRESS**:
 
-**3.2 Migrate the simplest pages first** — Settings, Export Library — to validate the pattern and build shared components (API client, toast composable).
+### Editor Migration Sub-Phases
 
-**3.3 Migrate data-producing pages next** — TTS, Segmenter, Scenes, Timing, Assets — each becomes a feature folder with its own Pinia store. The store replaces the per-module state that currently lives in vanilla JS closures.
+| Sub-Phase | Status | Details |
+|-----------|--------|---------|
+| Phase 0: Foundation | ✅ | CSS extracted (5,962→115 lines), `useEditorBus`, dialog bridge |
+| Phase 1: Dialogs | ✅ | 8 Vue components: ResetConfirm, ExportJson, ExportProgress, MusicPicker, Share, NoData, AssetPicker, TTSPicker |
+| Phase 1b: Inline scripts | ✅ | Updated to use Vue dialog bridge, staging store, removed direct DOM show/hide |
+| Phase 2: Sidebar tabs | ⬜ | 8 tab components: Media, Effects, Transitions, Overlays, Text, Caption, Adjustment, TabBar |
+| Phase 3: Preview panel | ⬜ | PreviewPanel, PlayerControls, AspectRatioDropdown |
+| Phase 4: Properties + toolbar | ⬜ | PropertiesPanel, TimelineToolbar, PanelResizeHandle |
+| Phase 5: Timeline tracks | ⬜ | TimelinePanel, VideoTrack, TextTrack, CaptionTrack, AudioTrack, TimeRuler, Playhead, SceneClip |
+| Phase 6: EditorState → Pinia | ⬜ | Replace mutable EditorState singleton with Pinia store |
+| Phase 7: video-editor.js decomposition | ⬜ | Split 10,266-line file into usePlayback, useTimeline, useSceneEditor, etc. |
 
-**3.4 Migrate Pipeline page** — it orchestrates the other features, so it comes after them. It uses the other stores rather than having its own heavy state.
-
-**3.5 Migrate the Editor last** — it's the most complex. The editor's existing `state.js` (subscribe/update reactive pattern) maps cleanly onto a Pinia store. Canvas rendering (`preview.js`, `video-editor.js`) stays imperative inside composables that hook into Vue's lifecycle (`onMounted`, `watchEffect`).
-
-**3.6 Each feature migrates behind the existing route.** During migration, unmigrated pages can still render as raw HTML inside a wrapper component, so the app stays functional at every step.
+**3.6** ✅ Incremental migration working — legacy pages render in wrapper
 
 ---
 
 ## Phase 4 — Clean Up
 
-**4.1 Remove all vanilla JS files** from `static/js/` once every feature is ported.
+**4.1** ✅ Removed 10 vanilla JS files from `static/js/` (405KB total: app, pipeline, tts, scenes, assets, segmenter, timing, captions, export-library, editor.js). Only `static/js/editor/` remains (video-editor.js + modules — still needed by Vue editor wrapper).
 
-**4.2 Remove the monolithic `index.html`** — Vue's `index.html` is now the entry point, served by Flask's catch-all route.
+**4.2** ✅ Root route `/` now redirects to `/vue/`. Old app accessible at `/legacy` for reference. Old version archived in `_dev/old_version/`.
 
-**4.3 Type the API layer.** Add TypeScript interfaces matching the Pydantic schemas in each blueprint's `schemas.py` — single source of truth stays in Python, but the frontend gets type safety.
-
-**4.4 Add Vitest for component/store tests** on critical paths (editor state, pipeline orchestration).
+**4.3** ⬜ TypeScript interfaces matching Pydantic schemas
+**4.4** ⬜ Vitest component/store tests
 
 ---
 
-**Why this architecture:** Feature-based folders keep each domain self-contained (editor code doesn't bleed into scenes code). Pinia stores replace both the vanilla JS module state and the editor's reactive `state.js`. Composables wrap imperative logic (canvas, FFmpeg preview) so Vue components stay declarative. Vue Router gives deep-linkable pages for free. Vite gives HMR during development while Flask serves the production build unchanged.
+## Quality Audit (completed alongside migration)
+
+All items from `VUE-MIGRATION-AUDIT.md` resolved:
+- **F-01–F-04**: SSE cleanup, audio leak, cross-feature coupling, localStorage.clear
+- **A-01–A-03**: Editor CSS extracted, Pinia wired, readonly consistency
+- **L-01–L-03**: Window globals bridged, staging store, legacy CSS scoped
+- **R-01–R-04**: Shared utils, shared.css, PageLayout, HistorySection
+- **S-01–S-02**: appStore, useProjectSync
+- **V-01–V-03**: 20 catch blocks logged, validation, loading refs
+- **P-01–P-03**: Editor CSS file, keep-alive, useTts split
+- **D-01, D-03**: Legacy CSS scoped, 30+ colors → CSS vars
+
+---
+
+**Current file stats:**
+- `EditorPage.vue`: 115 lines (was 5,962)
+- `editor-shell-html.js`: 1,356 lines (was 1,679 — dialogs removed)
+- `editor-inline-scripts.js`: ~490 lines (updated to use Vue bridge)
+- `editor/styles/editor.css`: 5,907 lines (extracted, dedicated)
+- `editor/components/`: 8 dialog Vue components
+- `editor/composables/`: useEditor, useEditorBus

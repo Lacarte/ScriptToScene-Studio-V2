@@ -66,7 +66,8 @@ export function useTiming() {
     try {
       const data = await api.get('/api/timing/history')
       history.value = Array.isArray(data) ? data : []
-    } catch {
+    } catch (e) {
+      console.warn('[Timing] Failed to load history:', e.message)
       history.value = []
     }
   }
@@ -86,8 +87,8 @@ export function useTiming() {
           audioUrl.value = `/output/alignments/${item.folder}/${item.source_file}`
         }
       }
-    } catch {
-      /* silent */
+    } catch (e) {
+      console.warn('[Timing] Failed to load result:', e.message)
     }
   }
 
@@ -114,7 +115,8 @@ export function useTiming() {
     try {
       const data = await api.get('/api/tts/generation')
       ttsHistory.value = Array.isArray(data) ? data : []
-    } catch {
+    } catch (e) {
+      console.warn('[Timing] Failed to load TTS history:', e.message)
       ttsHistory.value = []
     }
   }

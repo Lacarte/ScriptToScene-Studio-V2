@@ -1349,13 +1349,15 @@ def _process_video(job_id, export_data, output_path):
 
         # Try to read style from the scenes project
         _style = ""
-        try:
+        project_id = export_data.get("project_id", "")
+        if project_id:
             _scenes_json = os.path.join(SCENES_DIR, project_id, "scenes.json")
-            if os.path.isfile(_scenes_json):
-                _sdata = safe_json_read(_scenes_json)
-                _style = _sdata.get("style", "")
-        except Exception as error:
-            logger.debug("Could not read style metadata from {}: {}", _scenes_json, error)
+            try:
+                if os.path.isfile(_scenes_json):
+                    _sdata = safe_json_read(_scenes_json)
+                    _style = _sdata.get("style", "")
+            except Exception as error:
+                logger.debug("Could not read style metadata from {}: {}", _scenes_json, error)
 
         # Probe exported video for duration and dimensions
         _probe = _ffprobe_video(output_path)

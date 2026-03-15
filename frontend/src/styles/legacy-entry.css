@@ -1,4 +1,5 @@
 @import './theme.css';
+@import './shared.css';
 @import './legacy/styles.css';
 @import './legacy/editor-layout.css';
 @import './legacy/editor.css';

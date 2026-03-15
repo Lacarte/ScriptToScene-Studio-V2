@@ -10,7 +10,7 @@ const props = defineProps({
 
 const emit = defineEmits(['select'])
 
-const open = ref(true)
+const open = ref(false)
 
 function toggle() {
   open.value = !open.value

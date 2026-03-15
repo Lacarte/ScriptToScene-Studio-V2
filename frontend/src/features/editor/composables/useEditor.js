@@ -1,4 +1,5 @@
 import { ref, readonly, shallowRef } from 'vue'
+import { useStagingStore } from '@/shared/stores/stagingStore.js'
 
 /* ------------------------------------------------------------------ */
 /*  useEditor — singleton composable                                   */
@@ -22,6 +23,14 @@ let _destroyed = false
 /* ---------- Storage helpers --------- */
 
 function getStoredBootProject() {
+  // Try Pinia staging store first
+  try {
+    const staging = useStagingStore()
+    const staged = staging.load()
+    if (staged?.scenes?.length) return staged
+  } catch { /* Pinia may not be available yet */ }
+
+  // Fallback to direct localStorage read (legacy compatibility)
   const candidates = [
     sessionStorage.getItem('sts-staged-timeline'),
     localStorage.getItem('sts-editor-boot-project'),
@@ -67,7 +76,7 @@ async function init(containerEl) {
   if (typeof window.initEditor !== 'function') {
     // Try dynamic import — the editor entry point attaches to window
     try {
-      const editorUrl = '/static/js/editor/video-editor.js'
+      const editorUrl = '/js/editor/video-editor.js'
       await import(/* @vite-ignore */ editorUrl)
     } catch {
       console.warn('[useEditor] Could not load video-editor.js')
@@ -123,8 +132,11 @@ function loadProject(projectData) {
 function destroy() {
   _destroyed = true
   _containerEl = null
-  // The imperative editor doesn't expose a destroy — it lives until page unload.
-  // We just mark ourselves as destroyed so re-init is blocked until a fresh composable.
+  initialized.value = false
+  // Reset the imperative editor module state so it can re-init on next visit
+  if (typeof window.resetEditor === 'function') {
+    window.resetEditor()
+  }
 }
 
 /**

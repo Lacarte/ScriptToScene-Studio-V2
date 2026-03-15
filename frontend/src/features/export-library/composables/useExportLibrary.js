@@ -1,40 +1,10 @@
-import { ref, computed, watch } from 'vue'
+import { ref, readonly, computed, watch } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
 
-/* ── Helpers ───────────────────────────────────────── */
+/* ── Helpers (re-exported from shared) ─────────────── */
 
-export function formatBytes(bytes) {
-  if (bytes == null || bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  const val = bytes / Math.pow(1024, i)
-  return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
-
-export function formatDuration(seconds) {
-  if (seconds == null || seconds <= 0) return '0s'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.round(seconds % 60)
-  if (h > 0) return `${h}h ${m}m ${s}s`
-  if (m > 0) return `${m}m ${s}s`
-  return `${s}s`
-}
-
-export function timeAgo(timestamp) {
-  if (!timestamp) return ''
-  const now = Date.now()
-  const date = new Date(timestamp)
-  const diff = Math.max(0, now - date.getTime()) / 1000
-
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`
-  if (diff < 2592000) return `${Math.floor(diff / 604800)}w ago`
-  return date.toLocaleDateString()
-}
+export { formatBytes, formatDuration, timeAgo } from '@/shared/utils/format.js'
 
 export function ratioLabel(ratio) {
   if (!ratio) return ''
@@ -253,9 +223,9 @@ export function useExportLibrary() {
 
   return {
     // State
-    items,
-    loading,
-    error,
+    items: readonly(items),
+    loading: readonly(loading),
+    error: readonly(error),
 
     // Filters
     sortBy,

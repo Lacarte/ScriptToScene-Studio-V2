@@ -35,6 +35,11 @@
   --accent-error:     #FF6B6B;
   --accent-success:   #4ECDC4;
   --accent-info:      #56CCF2;
+  --accent-ready:     #26DE81;
+  --accent-active:    #ff9f43;
+  --accent-gold:      #F7DC6F;
+  --accent-sky:       #45B7D1;
+  --accent-muted:     #8B8B8B;
 
   /* ---- Coral / Danger ---- */
   --coral: #FF6B6B;

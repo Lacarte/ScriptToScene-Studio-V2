@@ -72,7 +72,6 @@ function onBlockClick(idx, e) {
   <div class="scene-timeline">
     <div class="timeline-controls">
       <button
-        v-if="audioLoaded"
         class="timeline-play-btn"
         @click="emit('toggle-play')"
       >

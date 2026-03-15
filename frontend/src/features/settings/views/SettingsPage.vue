@@ -44,56 +44,59 @@ function featureLabel(val) {
 
 <template>
   <div class="settings-page">
-    <h2 class="page-title">Settings</h2>
+    <div style="margin-bottom:32px">
+      <h2 class="page-title">Settings</h2>
+      <p class="page-subtitle">Configure generation parameters</p>
+    </div>
 
     <!-- Text Processing -->
-    <section class="card">
-      <h3 class="card-heading">Text Processing</h3>
+    <section class="card p-5 mb-4">
+      <label class="section-label">Text Processing</label>
       <SettingsToggle
         :model-value="settings['sts-normalize'] ?? true"
-        label="Normalize"
-        description="Convert numbers, symbols, abbreviations to spoken words"
+        label="Text Normalization"
+        description="Convert numbers, symbols, abbreviations to spoken words before TTS"
         @update:model-value="onToggle('sts-normalize', $event)"
       />
       <SettingsToggle
         :model-value="settings['sts-clean'] ?? true"
-        label="Markdown cleanup"
-        description="Strip markdown, URLs, brackets before generation"
+        label="Markdown Cleanup"
+        description="Strip markdown formatting, URLs, and brackets before generation"
         @update:model-value="onToggle('sts-clean', $event)"
       />
     </section>
 
     <!-- Storage -->
-    <section class="card">
-      <h3 class="card-heading">Storage</h3>
+    <section class="card p-5 mb-4">
+      <label class="section-label">Storage</label>
       <SettingsToggle
         :model-value="settings['sts-editor-storage'] ?? true"
         label="Local Storage"
-        description="Save edits, history, zoom, preferences"
+        description="Save edits, history, zoom, and preferences across sessions"
         @update:model-value="onToggle('sts-editor-storage', $event)"
       />
       <SettingsToggle
         :model-value="settings['sts-editor-session-storage'] ?? true"
         label="Session Storage"
-        description="Keep staged timeline data between pages"
+        description="Keep staged timeline data when navigating between pages"
         @update:model-value="onToggle('sts-editor-session-storage', $event)"
       />
     </section>
 
     <!-- Notifications -->
-    <section class="card">
-      <h3 class="card-heading">Notifications</h3>
+    <section class="card p-5 mb-4">
+      <label class="section-label">Notifications</label>
       <SettingsToggle
         :model-value="settings['sts-sound-enabled'] ?? true"
         label="Sound Notifications"
-        description="Play sound on pipeline/export/asset completion"
+        description="Play a sound when pipeline, export, or asset download completes"
         @update:model-value="onToggle('sts-sound-enabled', $event)"
       />
     </section>
 
-    <!-- Feature Status -->
-    <section class="card">
-      <h3 class="card-heading">Feature Status</h3>
+    <!-- Features -->
+    <section class="card p-5 mb-4">
+      <label class="section-label">Features</label>
       <div v-if="healthLoading" class="status-loading">Checking features...</div>
       <div v-else-if="!health" class="status-loading">Unable to reach server.</div>
       <div v-else class="status-grid">
@@ -119,8 +122,8 @@ function featureLabel(val) {
     </section>
 
     <!-- Danger Zone -->
-    <section class="card danger-card">
-      <h3 class="card-heading danger-heading">Danger Zone</h3>
+    <section class="card p-5 mb-4 danger-card">
+      <label class="danger-zone-label">Danger Zone</label>
       <div class="danger-row">
         <div class="danger-info">
           <span class="danger-label">Clear All Projects</span>
@@ -131,7 +134,7 @@ function featureLabel(val) {
     </section>
 
     <!-- About -->
-    <section class="card about-card">
+    <section class="card p-5 mb-4 about-card">
       <label class="about-heading">About</label>
       <div class="about-grid">
         <div class="about-row">
@@ -166,33 +169,21 @@ function featureLabel(val) {
 }
 
 .page-title {
-  font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
-  margin: 0 0 4px;
-}
-
-/* ---- Card ---- */
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
-  transition: border-color 0.2s;
-}
-
-.card:hover {
-  border-color: var(--border-hover);
-}
-
-.card-heading {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--text);
-  margin: 0 0 8px;
+  margin: 0;
 }
+
+.page-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.p-5 { padding: 20px; }
+.mb-4 { margin-bottom: 16px; }
 
 /* ---- Feature Status ---- */
 .status-loading {
@@ -245,8 +236,14 @@ function featureLabel(val) {
   border-color: rgba(239, 68, 68, 0.25);
 }
 
-.danger-heading {
-  color: var(--coral);
+.danger-zone-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: #ef4444;
+  margin-bottom: 12px;
 }
 
 .danger-row {
@@ -264,6 +261,7 @@ function featureLabel(val) {
 }
 
 .danger-label {
+  display: block;
   font-size: 13px;
   font-weight: 500;
   color: var(--text);

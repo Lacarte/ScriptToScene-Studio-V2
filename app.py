@@ -77,6 +77,14 @@ app.register_blueprint(music_bp)
 
 @app.route("/")
 def index():
+    """Redirect root to Vue SPA."""
+    from flask import redirect
+    return redirect("/vue/")
+
+
+@app.route("/legacy")
+def legacy_index():
+    """Serve the old vanilla JS app (archived, accessible for reference)."""
     return send_from_directory(STATIC_DIR, "index.html")
 
 
@@ -111,6 +119,16 @@ def serve_css(filename):
 @app.route("/js/<path:filename>")
 def serve_js(filename):
     return send_from_directory(os.path.join(STATIC_DIR, "js"), filename)
+
+
+@app.route("/static/<path:filename>")
+def serve_static(filename):
+    return send_from_directory(STATIC_DIR, filename)
+
+
+@app.route("/sounds/<path:filename>")
+def serve_sounds(filename):
+    return send_from_directory(os.path.join(STATIC_DIR, "sounds"), filename)
 
 
 @app.route("/assets/<path:filename>")

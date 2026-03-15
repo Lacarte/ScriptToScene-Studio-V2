@@ -75,7 +75,11 @@ export function useAssets() {
   // ---- Load scenes from scene generator result ----
   function loadScenes(data) {
     if (!data || !Array.isArray(data.scenes)) return
-    scenes.value = data.scenes.map((s, i) => ({ ...s, index: s.index ?? i }))
+    scenes.value = data.scenes.map((s, i) => ({
+      ...s,
+      index: s.index ?? i,
+      type: s.type_of_scene || s.type || 'video',
+    }))
     analysisData.value = data.analysis ?? null
     audioUrl.value = data.audio_url ?? null
     sceneStatuses.value = {}
@@ -153,7 +157,8 @@ export function useAssets() {
         grabberRunning.value = false
         stopPolling()
       }
-    } catch {
+    } catch (e) {
+      console.warn('[Assets] Poll error, retrying:', e.message)
       // keep polling on transient errors
     }
   }
@@ -166,7 +171,8 @@ export function useAssets() {
   async function loadHistory() {
     try {
       history.value = await api.get('/api/assets/history')
-    } catch {
+    } catch (e) {
+      console.warn('[Assets] Failed to load history:', e.message)
       history.value = []
     }
   }
@@ -174,13 +180,40 @@ export function useAssets() {
   async function loadFromHistory(projectId) {
     try {
       const data = await api.get(`/api/assets/project/${projectId}`)
-      if (data.scenes) {
-        scenes.value = data.scenes
-        sceneStatuses.value = data.scene_statuses || {}
-        analysisData.value = data.analysis || null
-        audioUrl.value = data.audio_url || null
-        selectedScenes.value = new Set()
+      sceneStatuses.value = data.scene_statuses || {}
+      analysisData.value = data.analysis || null
+      audioUrl.value = data.audio_url || null
+      selectedScenes.value = new Set()
+
+      // Load scene metadata (titles, prompts, types) from scene generator
+      try {
+        const sceneData = await api.get(`/api/scenes/${projectId}`)
+        if (sceneData?.scenes && Array.isArray(sceneData.scenes)) {
+          // Remap to sequential indices (0,1,2,...) to match asset status keys
+          scenes.value = sceneData.scenes.map((s, i) => ({
+            ...s,
+            index: i,
+            type: s.type_of_scene || s.type || 'video',
+          }))
+          if (sceneData.analysis) analysisData.value = sceneData.analysis
+          if (sceneData.audio_url) audioUrl.value = sceneData.audio_url
+        }
+      } catch (e) {
+        console.warn('[Assets] No scene data for project, using fallback:', e.message)
+        // No scene generator data — build minimal scene list from asset data
+        if (data.scenes && typeof data.scenes === 'object' && !Array.isArray(data.scenes)) {
+          scenes.value = Object.entries(data.scenes)
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .map(([idx, info]) => ({
+              index: Number(idx),
+              title: `Scene ${idx}`,
+              image_prompt: '',
+              type: 'video',
+              ...info,
+            }))
+        }
       }
+
       return data
     } catch (err) {
       throw err
@@ -315,18 +348,18 @@ export function useAssets() {
     providerOptions,
     grabberRunning: readonly(grabberRunning),
     grabberJobId: readonly(grabberJobId),
-    sceneStatuses,
-    selectedScenes,
+    sceneStatuses: readonly(sceneStatuses),
+    selectedScenes: readonly(selectedScenes),
     history: readonly(history),
     analysisData: readonly(analysisData),
 
     // Audio
     audioUrl: readonly(audioUrl),
-    isPlaying,
-    currentTime,
+    isPlaying: readonly(isPlaying),
+    currentTime: readonly(currentTime),
 
     // Lightbox
-    lightboxOpen,
+    lightboxOpen: readonly(lightboxOpen),
     lightboxScene: readonly(lightboxScene),
     lightboxFile: readonly(lightboxFile),
 

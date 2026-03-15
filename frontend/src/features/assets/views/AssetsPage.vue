@@ -1,14 +1,23 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { api } from '@/shared/api/client.js'
 import { useAssets } from '../composables/useAssets.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { useStagingStore } from '@/shared/stores/stagingStore.js'
+import { timeAgo } from '@/shared/utils/format.js'
+import { useProjectSync } from '@/shared/composables/useProjectSync.js'
+import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
 import AssetCard from '../components/AssetCard.vue'
 import AssetLightbox from '../components/AssetLightbox.vue'
 import GrabberControls from '../components/GrabberControls.vue'
 
 defineOptions({ name: 'AssetsPage' })
 
+const route = useRoute()
+const router = useRouter()
 const toast = useToast()
+const staging = useStagingStore()
 const {
   scenes,
   provider,
@@ -58,11 +67,17 @@ const {
 } = useAssets()
 
 const projectId = ref(null)
-const analysisOpen = ref(false)
-const historyVisible = ref(false)
+useProjectSync(projectId)
+const analysisOpen = ref(true)
+const historyVisible = ref(true)
 const scenePickerOpen = ref(false)
 const scenePickerData = ref([])
 const audioRef = ref(null)
+const assemblingProject = ref(null)
+const buildSteps = ref([])
+const buildVisible = ref(false)
+const { register: audioRegister } = useAudioRegistry()
+watch(audioRef, (el) => { if (el) audioRegister('Assets', el) })
 
 // Audio
 function toggleAudio() {
@@ -138,6 +153,120 @@ async function loadFromHistoryProject(pid) {
   }
 }
 
+function setStep(label, status) {
+  const existing = buildSteps.value.find(s => s.label === label)
+  if (existing) {
+    existing.status = status
+  } else {
+    buildSteps.value.push({ label, status })
+  }
+}
+
+const STEP_DELAY = 400
+
+async function assembleAndEdit(project) {
+  const pid = project.project_id
+  assemblingProject.value = pid
+  buildSteps.value = []
+  buildVisible.value = true
+  const forceParam = project.has_build ? '?force=1' : ''
+  let hasErrors = false
+
+  try {
+    setStep('Assembling project', 'running')
+    const data = await api.post(`/api/projects/${pid}/assemble${forceParam}`)
+
+    if (!data || data.error) {
+      setStep('Assembling project', 'error')
+      hasErrors = true
+      return
+    }
+    setStep('Assembling project', 'done')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    // Report warnings from the API
+    if (data.warnings?.length) {
+      for (const w of data.warnings) {
+        setStep(w, 'error')
+        hasErrors = true
+        await new Promise(r => setTimeout(r, STEP_DELAY))
+      }
+    }
+
+    const mediaCount = (data.scenes || []).filter(s => s.mediaUrl || s.image_url).length
+    const sceneTotal = data.scene_count || 0
+    const missingMedia = sceneTotal - mediaCount
+    setStep(`Scenes: ${sceneTotal} total, ${mediaCount} with media`, mediaCount > 0 ? 'done' : 'error')
+    if (mediaCount <= 0) hasErrors = true
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    if (missingMedia > 0) {
+      setStep(`${missingMedia} scene${missingMedia !== 1 ? 's' : ''} missing media`, 'error')
+      hasErrors = true
+      await new Promise(r => setTimeout(r, STEP_DELAY))
+    }
+
+    const totalDur = data.total_duration ? data.total_duration.toFixed(1) + 's' : '0s'
+    setStep(`Timeline: ${totalDur} total duration`, data.total_duration > 0 ? 'done' : 'error')
+    if (!data.total_duration) hasErrors = true
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    const hasAudio = data.audio_tracks && data.audio_tracks.length > 0
+    setStep('Audio track', hasAudio ? 'done' : 'skip')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    const hasCaps = data.captions?.captions?.length > 0
+    setStep(`Captions${hasCaps ? ` (${data.captions.captions.length})` : ''}`, hasCaps ? 'done' : 'skip')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    setStep(`Saved to projects/${pid}/`, 'done')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    if (hasErrors) {
+      setStep('Build completed with issues', 'error')
+      await new Promise(r => setTimeout(r, 5000))
+      buildVisible.value = false
+      return
+    }
+
+    setStep('Launching editor', 'running')
+
+    const bootData = {
+      project_id: data.project_id,
+      project_name: data.project_name || data.project_id,
+      source_folder: data.source_folder || '',
+      style: data.style || '',
+      total_duration: data.total_duration || 0,
+      scene_count: data.scene_count || 0,
+      staged_at: data.saved_at || new Date().toISOString(),
+      scenes: data.scenes || [],
+      audio_tracks: data.audio_tracks || [],
+      grain_overlay: data.grain_overlay || {},
+      captionsEnabled: data.captionsEnabled || false,
+      edit_history: data.edit_history || [],
+      history_index: data.history_index ?? -1,
+      disabled_tracks: data.disabled_tracks || [],
+      ...(data.audio ? { audio: data.audio } : {}),
+      ...(data.captions ? { captions: data.captions, captionsEnabled: true } : {}),
+    }
+
+    staging.stage(bootData)
+
+    setStep('Launching editor', 'done')
+    await new Promise(r => setTimeout(r, 600))
+
+    buildVisible.value = false
+    router.push({ path: '/editor', query: { project: pid } })
+  } catch (e) {
+    setStep('Error: ' + (e.message || 'Unknown error'), 'error')
+    hasErrors = true
+    await new Promise(r => setTimeout(r, 5000))
+    buildVisible.value = false
+  } finally {
+    assemblingProject.value = null
+  }
+}
+
 async function showHistory() {
   await loadHistory()
   historyVisible.value = true
@@ -206,13 +335,12 @@ const analysisChips = computed(() => {
   if (!analysisData.value) return []
   const data = analysisData.value
   const chips = []
-  if (data.mood) chips.push({ label: 'Mood', value: data.mood, color: '#A78BFA' })
-  if (data.environment) chips.push({ label: 'Environment', value: data.environment, color: '#4ECDC4' })
-  if (data.style) chips.push({ label: 'Style', value: data.style, color: '#FFB347' })
-  if (data.time_of_day) chips.push({ label: 'Time', value: data.time_of_day, color: '#F472B6' })
-  if (data.color_palette) chips.push({ label: 'Palette', value: data.color_palette, color: '#60A5FA' })
-  if (data.genre) chips.push({ label: 'Genre', value: data.genre, color: '#34D399' })
-  if (data.theme) chips.push({ label: 'Theme', value: data.theme, color: '#FBBF24' })
+  if (data.core_theme || data.theme) chips.push({ label: 'Theme', value: data.core_theme || data.theme, color: '#F7DC6F' })
+  if (data.mood) chips.push({ label: 'Mood', value: data.mood, color: '#FF6B6B' })
+  if (data.environment) chips.push({ label: 'Env', value: data.environment, color: '#4ECDC4' })
+  if (data.color_palette) chips.push({ label: 'Palette', value: data.color_palette, color: '#A78BFA' })
+  if (data.tone) chips.push({ label: 'Tone', value: data.tone, color: '#FFB347' })
+  if (data.visual_style || data.style) chips.push({ label: 'Style', value: data.visual_style || data.style, color: '#45B7D1' })
   return chips
 })
 
@@ -229,21 +357,31 @@ const lightboxInitialIndex = computed(() => {
   return idx >= 0 ? idx : 0
 })
 
-// History counts
-function historyStatusCounts(project) {
-  const counts = { ready: 0, error: 0, pending: 0 }
-  if (project.scene_statuses) {
-    for (const st of Object.values(project.scene_statuses)) {
-      if (st.status === 'ready') counts.ready++
-      else if (st.status === 'error') counts.error++
-      else counts.pending++
-    }
-  }
-  return counts
+const STATUS_COLORS = { done: '#4ECDC4', downloading: '#FFB347', error: '#FF6B6B', waiting: '#8B8B8B', grabbing: '#A78BFA' }
+function statusColor(status) {
+  return STATUS_COLORS[status] || '#8B8B8B'
 }
 
-onMounted(() => {
-  loadHistory()
+onMounted(async () => {
+  await loadHistory()
+  const projectParam = route.query.project
+  if (projectParam) {
+    // Try loading from asset history first, fallback to scenes data
+    try {
+      await loadFromHistory(projectParam)
+      projectId.value = projectParam
+    } catch {
+      try {
+        const data = await api.get(`/api/scenes/${projectParam}`)
+        if (data?.scenes) {
+          loadScenes(data)
+          projectId.value = projectParam
+        }
+      } catch {
+        toast.error(`Project ${projectParam} not found`)
+      }
+    }
+  }
 })
 </script>
 
@@ -255,38 +393,6 @@ onMounted(() => {
       <span v-if="projectId" class="project-badge">{{ projectId }}</span>
     </div>
     <p class="page-subtitle">Generate and manage visual assets for each scene</p>
-
-    <!-- AI Analysis Bar -->
-    <section
-      v-if="analysisChips.length"
-      class="card analysis-card"
-    >
-      <button class="analysis-toggle" @click="analysisOpen = !analysisOpen">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 16v-4M12 8h.01" />
-        </svg>
-        <span>AI Analysis</span>
-        <svg
-          class="chevron"
-          :class="{ open: analysisOpen }"
-          width="14" height="14" viewBox="0 0 24 24"
-          fill="none" stroke="currentColor" stroke-width="2"
-        >
-          <polyline points="6,9 12,15 18,9" />
-        </svg>
-      </button>
-      <div v-if="analysisOpen" class="analysis-chips">
-        <span
-          v-for="chip in analysisChips"
-          :key="chip.label"
-          class="analysis-chip"
-          :style="{ background: chip.color + '15', color: chip.color }"
-        >
-          <strong>{{ chip.label }}:</strong> {{ chip.value }}
-        </span>
-      </div>
-    </section>
 
     <!-- Source Info -->
     <section class="card source-card">
@@ -310,6 +416,30 @@ onMounted(() => {
             Pick from History
           </button>
         </div>
+      </div>
+    </section>
+
+    <!-- Analysis Bar -->
+    <section
+      v-if="analysisChips.length"
+      class="card analysis-card"
+    >
+      <div class="analysis-header">
+        <span class="analysis-toggle-label" @click="analysisOpen = !analysisOpen">
+          <span class="analysis-arrow" :class="{ open: analysisOpen }">▼</span> ANALYSIS
+        </span>
+      </div>
+      <div v-if="analysisOpen" class="analysis-chips">
+        <template v-for="(chip, i) in analysisChips" :key="chip.label">
+          <div class="analysis-item" :class="{ 'has-border': i > 0 }">
+            <span class="analysis-label" :style="{ color: chip.color }">{{ chip.label }}</span>
+            <span class="analysis-value">{{ chip.value }}</span>
+          </div>
+        </template>
+      </div>
+      <div v-if="analysisOpen && analysisData?.script" class="analysis-script">
+        <span class="analysis-script-label">Script</span>
+        <p class="analysis-script-text">{{ analysisData.script }}</p>
       </div>
     </section>
 
@@ -380,6 +510,7 @@ onMounted(() => {
 
     <!-- Controls -->
     <GrabberControls
+      v-if="sceneCount"
       :provider="provider"
       :arguments="args"
       :aspect-ratio="aspectRatio"
@@ -422,7 +553,7 @@ onMounted(() => {
     </section>
 
     <!-- Empty State -->
-    <section v-else class="card empty-state">
+    <section v-else class="empty-state">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="empty-icon">
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <circle cx="8.5" cy="8.5" r="1.5" />
@@ -433,47 +564,87 @@ onMounted(() => {
     </section>
 
     <!-- History -->
-    <section v-if="historyVisible" class="card">
-      <h3 class="card-heading">Project History</h3>
-      <div v-if="history.length" class="history-list">
+    <section v-if="historyVisible" class="card history-card">
+      <div class="history-header">
+        <div class="history-header-left">
+          <svg width="16" height="16" fill="none" stroke="var(--text-muted)" stroke-width="1.5" viewBox="0 0 24 24">
+            <path d="M12 8v4l3 3" />
+            <circle cx="12" cy="12" r="10" />
+          </svg>
+          <span class="history-title">History</span>
+        </div>
+        <button class="action-btn history-refresh-btn" title="Refresh" @click="loadHistory">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:-1px">
+            <path d="M23 4v6h-6" />
+            <path d="M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+          </svg>
+        </button>
+      </div>
+
+      <p v-if="!history.length" class="history-empty">No project history found.</p>
+
+      <div v-else class="history-list">
         <div
           v-for="project in history"
           :key="project.project_id"
-          class="history-item"
+          class="hist-item"
+          :class="{ active: project.project_id === projectId }"
+          @click="loadFromHistoryProject(project.project_id)"
         >
-          <div class="history-thumb">
-            <img
-              v-if="project.thumbnail"
-              :src="'/output/assets/' + project.thumbnail"
-              alt=""
-            />
-            <div v-else class="history-thumb-placeholder">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <div class="hist-inner">
+            <!-- Preview thumbnail -->
+            <div class="hist-thumb" :class="{ 'hist-thumb--active': project.project_id === projectId }">
+              <img v-if="project.preview" :src="project.preview" alt="" />
+              <svg v-else width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
               </svg>
             </div>
-          </div>
-          <div class="history-info">
-            <span class="history-name">{{ project.project_id }}</span>
-            <div class="history-counts">
-              <span v-if="historyStatusCounts(project).ready" class="count-ready">
-                {{ historyStatusCounts(project).ready }} ready
-              </span>
-              <span v-if="historyStatusCounts(project).error" class="count-error">
-                {{ historyStatusCounts(project).error }} error
-              </span>
-              <span v-if="historyStatusCounts(project).pending" class="count-pending">
-                {{ historyStatusCounts(project).pending }} pending
-              </span>
+
+            <!-- Info -->
+            <div class="hist-content">
+              <div class="hist-title-row">
+                <span class="hist-name">{{ project.project_id }}</span>
+                <span
+                  v-if="project.project_id === projectId"
+                  class="hist-active-badge font-mono"
+                >ACTIVE</span>
+                <span class="hist-dot" :style="{ background: statusColor(project.status) }"></span>
+                <span class="hist-status font-mono" :style="{ color: statusColor(project.status) }">{{ project.status || 'unknown' }}</span>
+              </div>
+              <div class="hist-meta font-mono">
+                <span style="color: var(--accent)">{{ project.scene_count || 0 }} scene{{ (project.scene_count || 0) !== 1 ? 's' : '' }}</span>
+                <template v-if="project.ready_count">
+                  <span class="hist-sep">/</span>
+                  <span style="color: var(--accent-ready)">{{ project.ready_count }} ready</span>
+                </template>
+                <template v-if="project.disk_files">
+                  <span class="hist-sep">/</span>
+                  <span style="color: var(--text-secondary)">{{ project.disk_files }} files</span>
+                </template>
+                <span class="hist-sep">/</span>
+                <span style="color: var(--text-muted)">{{ timeAgo(project.created_at || project.timestamp) }}</span>
+                <template v-if="project.provider">
+                  <span class="hist-sep">/</span>
+                  <span class="hist-provider-badge">{{ project.provider }}</span>
+                </template>
+              </div>
             </div>
+
+            <!-- Action -->
+            <button
+              v-if="project.ready_count"
+              class="hist-action-btn"
+              :disabled="assemblingProject === project.project_id"
+              @click.stop="assembleAndEdit(project)"
+            >{{ assemblingProject === project.project_id ? 'Building...' : (project.has_build ? 'Rebuild, Assemble &amp; Edit' : 'Build, Assemble &amp; Edit') }}</button>
+            <svg v-else width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" class="hist-chevron">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
           </div>
-          <button class="action-btn" @click="loadFromHistoryProject(project.project_id)">
-            Load
-          </button>
         </div>
-      </div>
-      <div v-else class="history-empty">
-        No project history found.
       </div>
     </section>
 
@@ -485,6 +656,38 @@ onMounted(() => {
       :initial-index="lightboxInitialIndex"
       @close="closeLightbox"
     />
+
+    <!-- Build Progress Overlay -->
+    <Teleport to="body">
+      <div v-if="buildVisible" class="build-overlay">
+        <div class="build-modal">
+          <div class="build-title">
+            <svg width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+            <span>{{ assemblingProject }}</span>
+          </div>
+          <div class="build-steps">
+            <div
+              v-for="step in buildSteps"
+              :key="step.label"
+              class="build-step"
+            >
+              <span class="build-step-icon">
+                <span v-if="step.status === 'running'" class="build-spinner" />
+                <span v-else-if="step.status === 'done'" style="color: var(--accent)">&#10003;</span>
+                <span v-else-if="step.status === 'error'" style="color: var(--coral)">&#10007;</span>
+                <span v-else style="opacity: 0.3">&#8212;</span>
+              </span>
+              <span
+                class="build-step-label"
+                :style="{ color: step.status === 'error' ? 'var(--coral)' : step.status === 'done' ? 'var(--accent)' : step.status === 'skip' ? 'var(--text-muted)' : 'var(--text)' }"
+              >{{ step.label }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -503,13 +706,6 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
-.page-title {
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-}
-
 .project-badge {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -520,77 +716,98 @@ onMounted(() => {
   border-radius: 8px;
 }
 
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
 /* ---- Card base ---- */
 .card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
   padding: 20px;
-  margin-bottom: 16px;
-  transition: border-color 0.2s;
-}
-
-.card:hover {
-  border-color: var(--border-hover);
-}
-
-.card-heading {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-  margin: 0 0 12px;
 }
 
 /* ---- Analysis ---- */
 .analysis-card {
-  padding: 14px 20px;
+  padding: 12px 16px;
+  overflow: hidden;
 }
 
-.analysis-toggle {
+.analysis-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: none;
-  border: none;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
+}
+
+.analysis-toggle-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--accent);
   cursor: pointer;
-  width: 100%;
 }
 
-.chevron {
-  margin-left: auto;
+.analysis-arrow {
+  display: inline-block;
+  font-size: 8px;
   transition: transform 0.2s;
+  transform: rotate(-90deg);
 }
 
-.chevron.open {
-  transform: rotate(180deg);
+.analysis-arrow.open {
+  transform: rotate(0deg);
 }
 
 .analysis-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 8px 16px;
+  align-items: center;
+  margin-top: 10px;
 }
 
-.analysis-chip {
-  font-size: 12px;
-  padding: 4px 12px;
-  border-radius: 20px;
+.analysis-item {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.analysis-item.has-border {
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.analysis-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   white-space: nowrap;
 }
 
-.analysis-chip strong {
+.analysis-value {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.analysis-script {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+}
+
+.analysis-script-label {
+  font-size: 9px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.analysis-script-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
 }
 
 /* ---- Source ---- */
@@ -752,94 +969,206 @@ onMounted(() => {
 }
 
 /* ---- History ---- */
-.history-list {
+.history-card {
+  margin-top: 16px;
+  overflow: hidden;
+  padding: 0;
+}
+
+.history-header {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-header-left {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
-.history-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+.history-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.history-refresh-btn {
+  font-size: 10px;
+  padding: 4px 10px;
+  color: var(--text-muted);
+}
+
+.history-empty {
+  text-align: center;
+  padding: 32px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.history-list {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.hist-item {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-bottom: 6px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.15s;
 }
 
-.history-item:hover {
+.hist-item:hover {
   border-color: var(--border-hover);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+  background: var(--bg-darkest);
 }
 
-.history-thumb {
+.hist-item.active {
+  border-color: var(--accent-active);
+  box-shadow: inset 3px 0 0 var(--accent-active), 0 0 12px rgba(255, 159, 67, 0.15);
+}
+
+.hist-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.hist-thumb {
   width: 48px;
-  height: 36px;
+  height: 48px;
   border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
-  background: var(--bg-surface);
+  background: var(--bg-darkest);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  color: var(--text-muted);
 }
 
-.history-thumb img {
+.hist-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.history-thumb-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
+.hist-thumb svg {
   opacity: 0.4;
 }
 
-.history-info {
+.hist-thumb--active {
+  border-color: var(--accent-active);
+}
+
+.hist-thumb--active svg {
+  stroke: var(--accent-active);
+  opacity: 0.8;
+}
+
+.hist-content {
   flex: 1;
   min-width: 0;
 }
 
-.history-name {
-  font-size: 13px;
+.hist-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.hist-name {
+  font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  display: block;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.history-counts {
+.hist-item.active .hist-name {
+  color: var(--accent-active);
+}
+
+.hist-active-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 159, 67, 0.15);
+  color: var(--accent-active);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+}
+
+.hist-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hist-status {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.hist-meta {
   display: flex;
-  gap: 8px;
-  margin-top: 2px;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 10px;
 }
 
-.count-ready {
-  font-size: 11px;
-  color: #22C55E;
+.hist-sep {
+  opacity: 0.3;
 }
 
-.count-error {
-  font-size: 11px;
-  color: #EF4444;
+.hist-provider-badge {
+  font-size: 8px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(167, 139, 250, 0.1);
+  color: #A78BFA;
 }
 
-.count-pending {
-  font-size: 11px;
-  color: #9CA3AF;
+.hist-action-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  background: var(--accent);
+  color: var(--bg-darkest);
+  border: none;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s, box-shadow 0.3s;
 }
 
-.history-empty {
-  font-size: 13px;
-  color: var(--text-secondary);
-  padding: 12px 0;
+.hist-action-btn:hover {
+  opacity: 0.85;
+}
+
+.hist-chevron {
+  flex-shrink: 0;
+  opacity: 0.4;
+  color: var(--text-muted);
+}
+
+.hist-item.active .hist-chevron {
+  stroke: var(--accent-active);
+  opacity: 0.8;
 }
 
 /* ---- Scene Picker Modal ---- */
@@ -933,5 +1262,77 @@ onMounted(() => {
   color: var(--text-secondary);
   padding: 20px;
   text-align: center;
+}
+
+/* ---- Build Progress Overlay ---- */
+.build-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.build-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px 28px;
+  min-width: 360px;
+  max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.build-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 18px;
+  font-family: var(--font-mono);
+}
+
+.build-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.build-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.build-step-icon {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.build-step-label {
+  font-weight: 500;
+}
+
+.build-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.08);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: build-spin 0.6s linear infinite;
+}
+
+@keyframes build-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

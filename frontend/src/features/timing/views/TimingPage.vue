@@ -1,7 +1,10 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useTiming } from '../composables/useTiming.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { timeAgo } from '@/shared/utils/format.js'
+import { useProjectSync } from '@/shared/composables/useProjectSync.js'
+import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
 import AlignmentTimeline from '../components/AlignmentTimeline.vue'
 import WordChips from '../components/WordChips.vue'
 import KaraokeOverlay from '../components/KaraokeOverlay.vue'
@@ -10,16 +13,20 @@ defineOptions({ name: 'TimingPage' })
 
 const timing = useTiming()
 const toast = useToast()
+useProjectSync(timing.projectId)
 
 /* ── Local state ── */
 const audioFile = ref(null)
 const textInput = ref('')
 const audioEl = ref(null)
 const audioLoaded = ref(false)
+const { register: audioRegister } = useAudioRegistry()
+watch(audioEl, (el) => { if (el) audioRegister('Alignment', el) })
 const dragging = ref(false)
 const showKaraoke = ref(false)
 const showTtsPicker = ref(false)
 const fileInputRef = ref(null)
+const resultsRef = ref(null)
 
 let rafId = null
 
@@ -235,6 +242,10 @@ function loadHistoryItem(item) {
   textInput.value = item.transcript || ''
   audioLoaded.value = false
   toast.info('Loaded alignment result')
+  // Scroll results into view after Vue renders
+  nextTick(() => {
+    resultsRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 }
 
 async function deleteHistoryItem(folder) {
@@ -251,18 +262,8 @@ function formatDuration(secs) {
   return secs.toFixed(1) + 's'
 }
 
-function formatDate(ts) {
-  if (!ts) return ''
-  try {
-    const diff = (Date.now() - new Date(ts).getTime()) / 1000
-    if (diff < 60) return 'just now'
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-    return `${Math.floor(diff / 86400)}d ago`
-  } catch {
-    return ts
-  }
-}
+// formatDate replaced by shared timeAgo
+const formatDate = timeAgo
 
 function truncateText(text, max = 60) {
   if (!text) return ''
@@ -395,7 +396,7 @@ onBeforeUnmount(() => {
     />
 
     <template v-if="hasResults">
-      <section class="card legacy-card results-card">
+      <section ref="resultsRef" class="card legacy-card results-card">
         <div class="results-header">
           <label class="section-label section-label--inline">Results</label>
           <div class="results-actions">
@@ -497,32 +498,9 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.page-title {
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-}
-
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
 .legacy-card {
   padding: 20px;
   margin-bottom: 16px;
-}
-
-.section-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  color: var(--text-muted);
-  margin-bottom: 12px;
 }
 
 .section-label--inline {
@@ -751,7 +729,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 4px 12px 4px 14px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -765,8 +743,8 @@ onBeforeUnmount(() => {
 }
 
 .history-item--active {
-  border-color: #ff9f43;
-  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
+  border-color: var(--accent-active);
+  box-shadow: inset 3px 0 0 var(--accent-active), 0 0 12px rgba(255, 159, 67, 0.15);
 }
 
 .history-row {

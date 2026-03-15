@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { formatBytes, timeAgo, ratioLabel } from '../composables/useExportLibrary.js'
+import { ratioLabel } from '../composables/useExportLibrary.js'
+import { formatBytes, timeAgo, fmtDuration } from '@/shared/utils/format.js'
 
 defineOptions({ name: 'ExportCard' })
 
@@ -49,14 +50,6 @@ defineExpose({ stopPlayback, videoEl })
 
 // --- Helpers ---
 
-function fmtDuration(sec) {
-  const s = Number(sec || 0)
-  if (!s || s <= 0) return ''
-  const m = Math.floor(s / 60)
-  const ss = Math.floor(s % 60)
-  return m > 0 ? `${m}:${String(ss).padStart(2, '0')}` : `0:${String(ss).padStart(2, '0')}`
-}
-
 function styleLabel(id) {
   if (!id) return ''
   return id.replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
@@ -78,28 +71,28 @@ function styleColor(id) {
 // Lazy load via IntersectionObserver
 const cardEl = ref(null)
 onMounted(() => {
-  if (!videoEl.value) return
+  if (!cardEl.value) return
   const observer = new IntersectionObserver((entries, obs) => {
     for (const entry of entries) {
       if (entry.isIntersecting) {
-        videoEl.value.src = props.item.preview_url
-        videoEl.value.preload = 'metadata'
         loaded.value = true
         obs.unobserve(entry.target)
       }
     }
   }, { rootMargin: '200px' })
-  observer.observe(videoEl.value)
+  observer.observe(cardEl.value)
 })
 </script>
 
 <template>
   <article class="card">
-    <div class="card-video-wrap">
+    <div ref="cardEl" class="card-video-wrap">
       <video
+        v-if="loaded"
         ref="videoEl"
+        :src="item.preview_url"
         controls
-        preload="none"
+        preload="metadata"
         playsinline
         class="card-video"
         @play="onPlay"
@@ -120,9 +113,13 @@ onMounted(() => {
         <span class="meta-size">{{ formatBytes(item.size_bytes) }}</span>
         <span class="meta-sep">/</span>
         <span>{{ timeAgo(item.modified_at) }}</span>
-        <template v-if="ratioLabel(item.video_ratio || item.ratio)">
+        <template v-if="item.video_ratio">
           <span class="meta-sep">/</span>
-          <span class="meta-ratio">{{ ratioLabel(item.video_ratio || item.ratio) }}</span>
+          <span class="meta-ratio">{{ item.video_ratio.replace(':', 'x') }}</span>
+        </template>
+        <template v-if="ratioLabel(item.ratio)">
+          <span class="meta-sep">/</span>
+          <span class="meta-ratio">{{ ratioLabel(item.ratio) }}</span>
         </template>
         <template v-if="styleLabel(item.style)">
           <span class="meta-sep">/</span>
@@ -168,9 +165,6 @@ onMounted(() => {
 }
 
 .card-video {
-  width: 100%;
-  display: block;
-  aspect-ratio: 9 / 16;
   max-height: 360px;
   background: black;
 }

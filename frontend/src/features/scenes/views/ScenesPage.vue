@@ -1,15 +1,22 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useScenes } from '../composables/useScenes.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { useStagingStore } from '@/shared/stores/stagingStore.js'
+import { timeAgo } from '@/shared/utils/format.js'
+import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import StylePicker from '../components/StylePicker.vue'
 import SceneCard from '../components/SceneCard.vue'
 import SceneTimeline from '../components/SceneTimeline.vue'
 
 defineOptions({ name: 'ScenesPage' })
 
+const route = useRoute()
+const router = useRouter()
 const scenes = useScenes()
 const toast = useToast()
+const staging = useStagingStore()
 
 // UI state
 const sourceExpanded = ref(false)
@@ -23,6 +30,7 @@ const historyExpanded = ref(true)
 const projectBadge = computed(() => {
   return scenes.result.value?.project_id || scenes.segData.value?.metadata?.project_id || ''
 })
+useProjectSync(projectBadge)
 
 const sourceInfo = computed(() => {
   const d = scenes.segData.value
@@ -74,7 +82,16 @@ const btnLabel = computed(() => {
 
 // ---- Lifecycle ----
 onMounted(async () => {
-  scenes.loadHistory()
+  await scenes.loadHistory()
+  const projectParam = route.query.project
+  if (projectParam) {
+    try {
+      await scenes.loadProject(projectParam)
+      toast.success(`Loaded project ${projectParam}`)
+    } catch {
+      toast.error(`Failed to load project ${projectParam}`)
+    }
+  }
 })
 
 onUnmounted(() => {
@@ -196,29 +213,22 @@ function downloadScenes() {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+function openInAssets(projectId) {
+  router.push({ path: '/assets', query: { project: projectId } })
+}
+
 function sendToAssets() {
   const r = scenes.result.value
   if (!r?.scenes) { toast.error('No scenes to send'); return }
-  // Store for cross-feature navigation
-  try { sessionStorage.setItem('sts-staged-timeline', JSON.stringify(r)) } catch {}
-  localStorage.setItem('sts-editor-boot-project', JSON.stringify(r))
-  localStorage.setItem('sts-editor-scenes', JSON.stringify(r))
-  toast.info('Scenes staged for Assets')
+  staging.stage(r)
+  router.push({ path: '/assets', query: { project: r.project_id } })
 }
 
 function sendToEditor() {
   const r = scenes.result.value
   if (!r) { toast.error('No scenes to send'); return }
-  try { sessionStorage.setItem('sts-staged-timeline', JSON.stringify(r)) } catch {}
-  localStorage.setItem('sts-editor-boot-project', JSON.stringify(r))
-  localStorage.setItem('sts-editor-scenes', JSON.stringify(r))
-  if (r.source_folder) {
-    localStorage.setItem('sts-editor-source-folder', r.source_folder)
-  } else {
-    localStorage.removeItem('sts-editor-source-folder')
-  }
-  localStorage.removeItem('sts-editor-captions')
-  toast.info('Scenes sent to editor')
+  staging.stage(r)
+  router.push({ path: '/editor', query: { project: r.project_id } })
 }
 
 // ---- History ----
@@ -244,18 +254,6 @@ const scriptPreviewText = computed(() => {
     return header + '\n' + body
   }).join('\n')
 })
-
-function timeAgo(ts) {
-  if (!ts) return ''
-  const diff = Date.now() - new Date(ts).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
-}
 
 function truncate(str, len = 45) {
   if (!str) return ''
@@ -316,14 +314,6 @@ function truncate(str, len = 45) {
         @select="scenes.selectStyle"
       />
 
-      <!-- Fork per style -->
-      <div class="fork-row">
-        <input type="checkbox" id="scenes-fork-style" v-model="scenes.forkPerStyle.value" />
-        <label for="scenes-fork-style" class="fork-label">
-          New project per style <span class="fork-hint">— generate a separate project for each template so you can compare results</span>
-        </label>
-      </div>
-
       <!-- Webhook -->
       <div class="webhook-section">
         <div class="webhook-header">
@@ -352,14 +342,23 @@ function truncate(str, len = 45) {
     </section>
 
     <!-- Generate Button -->
-    <button
-      class="gen-btn"
-      :disabled="scenes.isGenerating.value || !scenes.segData.value?.segments"
-      @click="handleGenerate"
-    >
-      <span v-if="scenes.isGenerating.value" class="spinner"></span>
-      {{ btnLabel }}
-    </button>
+    <div class="generate-row">
+      <button
+        class="gen-btn generate-btn"
+        :class="{ 'gen-btn--disabled': !scenes.segData.value?.segments }"
+        :disabled="scenes.isGenerating.value || !scenes.segData.value?.segments"
+        @click="handleGenerate"
+      >
+        <svg v-if="!scenes.isGenerating.value" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <span v-else class="spinner"></span>
+        {{ btnLabel }}
+      </button>
+      <label class="fork-toggle" for="scenes-fork-style">
+        <input id="scenes-fork-style" v-model="scenes.forkPerStyle.value" type="checkbox" class="fork-check">
+        <span class="fork-text">New project per style</span>
+      </label>
+      <span v-if="!scenes.segData.value?.segments && !scenes.isGenerating.value" class="gen-hint">Load a segmentation source first</span>
+    </div>
 
     <!-- Payload Preview Panel -->
     <div v-if="payloadPreviewOpen" class="payload-panel">
@@ -503,7 +502,7 @@ function truncate(str, len = 45) {
             </div>
 
             <div class="history-item-meta font-mono">
-              <span style="color: #4ECDC4">{{ item.scene_count }} scenes</span>
+              <span style="color: var(--accent)">{{ item.scene_count }} scenes</span>
               <span class="history-divider">/</span>
               <span style="color: var(--text-secondary)">{{ timeAgo(item.timestamp) }}</span>
               <template v-if="scenes.styleLabel(item.style)">
@@ -516,7 +515,7 @@ function truncate(str, len = 45) {
             </div>
           </div>
 
-          <span class="history-next-btn" @click.stop="sendToAssets">
+          <span class="history-next-btn" @click.stop="openInAssets(item.project_id)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
               <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
               <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
@@ -583,13 +582,6 @@ function truncate(str, len = 45) {
   gap: 10px;
 }
 
-.page-title {
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-}
-
 .project-badge {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -600,31 +592,18 @@ function truncate(str, len = 45) {
   border-radius: 10px;
 }
 
-.page-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
 /* ---- Card ---- */
 .card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
-  transition: border-color 0.2s;
-}
-
-.card:hover {
-  border-color: var(--border-hover);
+  padding: 24px;
 }
 
 .card-heading {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
   margin: 0 0 12px;
 }
 
@@ -700,37 +679,62 @@ function truncate(str, len = 45) {
 }
 
 /* ---- Generate Button ---- */
-.gen-btn {
-  width: 100%;
-  padding: 14px 24px;
-  font-size: 14px;
-  font-weight: 700;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  letter-spacing: 0.02em;
-  color: white;
-  background: linear-gradient(135deg, var(--accent), #3BA89F);
-  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.25);
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+.generate-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
-.gen-btn:hover:not(:disabled) {
-  box-shadow: 0 6px 24px rgba(78, 205, 196, 0.35);
+.generate-btn {
+  padding: 0 28px;
+  height: 44px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  color: #1f1307;
+  background:
+    radial-gradient(circle at top left, rgba(255, 226, 150, 0.22), transparent 42%),
+    linear-gradient(135deg, #ff7a18 0%, var(--accent-active) 52%, #ffd166 100%);
+  border: 1px solid rgba(255, 163, 77, 0.45);
+  box-shadow:
+    0 10px 26px rgba(255, 122, 24, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  border-radius: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.generate-btn:hover:not(:disabled):not(.gen-btn--disabled) {
   transform: translateY(-1px);
+  box-shadow:
+    0 14px 34px rgba(255, 138, 61, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
 }
 
-.gen-btn:disabled {
-  opacity: 0.5;
+.generate-btn:active:not(:disabled):not(.gen-btn--disabled) {
+  transform: translateY(0);
+}
+
+.gen-btn--disabled {
+  background: var(--bg-darkest) !important;
+  border-color: var(--border) !important;
+  color: var(--text-muted) !important;
+  box-shadow: none !important;
   cursor: not-allowed;
-  transform: none;
+  opacity: 0.5;
+}
+
+.gen-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  opacity: 0.7;
 }
 
 .spinner {
@@ -898,30 +902,34 @@ function truncate(str, len = 45) {
 }
 
 /* ---- Fork per style ---- */
-.fork-row {
-  display: flex;
+.fork-toggle {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  cursor: pointer;
+  padding: 8px 14px;
   border-radius: 8px;
-  background: var(--bg-darkest);
   border: 1px solid var(--border);
+  background: var(--bg-surface);
+  transition: border-color 0.15s;
+  flex-shrink: 0;
 }
 
-.fork-row input[type="checkbox"] {
+.fork-toggle:hover {
+  border-color: var(--accent);
+}
+
+.fork-check {
   accent-color: var(--accent);
   cursor: pointer;
+  width: 14px;
+  height: 14px;
 }
 
-.fork-label {
+.fork-text {
   font-size: 11px;
   color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.fork-hint {
-  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 /* ---- Webhook ---- */
@@ -1001,14 +1009,16 @@ function truncate(str, len = 45) {
 
 /* ---- Results ---- */
 .results-section {
-  margin-top: 20px;
+  margin-top: 8px;
 }
 
 .results-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .results-actions {
@@ -1181,14 +1191,14 @@ function truncate(str, len = 45) {
 }
 
 .history-item.active {
-  border-color: #ff9f43;
-  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
+  border-color: var(--accent-active);
+  box-shadow: inset 3px 0 0 var(--accent-active), 0 0 12px rgba(255, 159, 67, 0.15);
 }
 
 .history-item-body {
   flex: 1;
   min-width: 0;
-  padding: 10px 12px 10px 14px;
+  padding: 4px 12px 4px 14px;
 }
 
 .history-item-title-row {
@@ -1319,7 +1329,7 @@ function truncate(str, len = 45) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px 10px 14px;
+  padding: 4px 12px 4px 14px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s;

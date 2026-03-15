@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useSegmenter } from '../composables/useSegmenter.js'
 import { useTiming } from '@/features/timing/composables/useTiming.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { timeAgo } from '@/shared/utils/format.js'
+import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import SegmentTimeline from '../components/SegmentTimeline.vue'
 import SegmentCard from '../components/SegmentCard.vue'
 import AlignmentPicker from '../components/AlignmentPicker.vue'
@@ -34,6 +36,11 @@ const {
   loadHistory,
   loadResult,
   loadTimingHistory,
+  loadAudio,
+  togglePlay,
+  playSegment,
+  seekTo,
+  stopAudio,
   updateActiveSegment,
   setPlaying,
   setDuration,
@@ -45,7 +52,7 @@ const timing = useTiming()
 const toast = useToast()
 
 const showPicker = ref(false)
-const audioRef = ref(null)
+useProjectSync(projectId)
 
 const sourceInfoText = computed(() => {
   if (!hasAlignment.value) return 'No alignment selected'
@@ -92,9 +99,13 @@ const displaySegments = computed(() => {
 
 onMounted(async () => {
   await Promise.allSettled([loadHistory(), loadTimingHistory()])
+  // Load audio if we already have alignment data
+  if (sourceFolder.value) {
+    await loadAudio()
+  }
 })
 
-function useCurrentResult() {
+async function useCurrentResult() {
   if (!timing.alignment.value.length) {
     toast.error('No alignment result available. Run timing first.')
     return
@@ -107,6 +118,7 @@ function useCurrentResult() {
     project_id: timing.projectId.value,
     source_file: timing.sourceFile.value,
   })
+  await loadAudio()
   toast.success('Alignment loaded from current result.')
 }
 
@@ -115,7 +127,7 @@ async function openPicker() {
   showPicker.value = true
 }
 
-function onPickAlignment(item) {
+async function onPickAlignment(item) {
   setAlignment({
     alignment: item.alignment || item.word_alignment || [],
     transcript: item.transcript || '',
@@ -124,6 +136,7 @@ function onPickAlignment(item) {
     source_file: item.source_file || '',
   })
   showPicker.value = false
+  await loadAudio()
   toast.success('Alignment loaded from history.')
 }
 
@@ -131,85 +144,23 @@ async function onRun() {
   try {
     await runSegmenter()
     await loadHistory()
+    await loadAudio()
     toast.success('Segmentation complete.')
   } catch (err) {
     toast.error(err.message || 'Segmenter failed.')
   }
 }
 
-function getAudioElement() {
-  const audio = audioRef.value
-  if (!audio || !audioUrl.value) return null
-  return audio
-}
-
-function playAudio(audio) {
-  const playPromise = audio.play()
-  if (playPromise?.catch) {
-    playPromise.catch(() => {})
-  }
-}
-
 function togglePlayback() {
-  const audio = getAudioElement()
-  if (!audio) return
-
-  if (audio.paused) {
-    if (audio.duration && audio.currentTime >= audio.duration - 0.05) {
-      audio.currentTime = 0
-      updateActiveSegment(0)
-    }
-    playAudio(audio)
-    return
-  }
-
-  audio.pause()
+  togglePlay()
 }
 
 function playFromSegment({ segment }) {
-  const audio = getAudioElement()
-  if (!audio) return
-  audio.currentTime = segment.start
-  updateActiveSegment(segment.start)
-  playAudio(audio)
+  playSegment(segment)
 }
 
-function seekTo(time) {
-  const audio = getAudioElement()
-  if (!audio) return
-  audio.currentTime = time
-  updateActiveSegment(time)
-  if (audio.paused) {
-    playAudio(audio)
-  }
-}
-
-function onTimeUpdate() {
-  const audio = audioRef.value
-  if (!audio) return
-  updateActiveSegment(audio.currentTime)
-}
-
-function onPlay() {
-  setPlaying(true)
-}
-
-function onPause() {
-  setPlaying(false)
-}
-
-function onEnded() {
-  const audio = audioRef.value
-  setPlaying(false)
-  if (audio) {
-    audio.currentTime = 0
-  }
-  updateActiveSegment(0)
-}
-
-function onLoadedMetadata() {
-  const audio = audioRef.value
-  if (audio) setDuration(audio.duration)
+function handleSeek(time) {
+  seekTo(time)
 }
 
 async function onHistoryClick(item) {
@@ -217,21 +168,8 @@ async function onHistoryClick(item) {
   if (!folder) return
 
   try {
-    if (!timingHistory.value.length) {
-      await loadTimingHistory()
-    }
-
-    const previousAudioUrl = sourceFolder.value === folder ? audioUrl.value : ''
     await loadResult(folder)
-    const resolvedAudioUrl = audioUrl.value
-
-    const match = timingHistory.value.find((entry) => entry.folder === folder)
-    if (match?.source_file) {
-      audioUrl.value = `/output/alignments/${match.folder}/${match.source_file}`
-    } else {
-      audioUrl.value = resolvedAudioUrl || previousAudioUrl || ''
-    }
-
+    await loadAudio()
     toast.success('Loaded saved result.')
   } catch {
     toast.error('Failed to load result.')
@@ -253,29 +191,11 @@ function formatTotal(value) {
   return `${value.toFixed(1)}s total`
 }
 
-function relativeTime(ts) {
-  if (!ts) return '--'
-
-  const diff = (Date.now() - new Date(ts).getTime()) / 1000
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
+const relativeTime = timeAgo
 </script>
 
 <template>
   <div class="segmenter-page mx-auto px-6 py-8" style="max-width: 780px">
-    <audio
-      v-if="audioUrl"
-      ref="audioRef"
-      :src="audioUrl"
-      @timeupdate="onTimeUpdate"
-      @play="onPlay"
-      @pause="onPause"
-      @ended="onEnded"
-      @loadedmetadata="onLoadedMetadata"
-    />
 
     <div style="margin-bottom: 16px">
       <div style="display: flex; align-items: center; gap: 10px">
@@ -392,8 +312,16 @@ function relativeTime(ts) {
           </div>
         </div>
 
-        <div v-if="resultsSummary" class="font-mono" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px">
-          {{ resultsSummary }}
+        <div v-if="hasResult && stats" class="font-mono results-summary">
+          <span v-if="projectId" class="rs-project">{{ projectId }}</span>
+          <span v-if="projectId" class="rs-dot"> · </span>
+          <span class="rs-segments">{{ stats.segment_count ?? segments.length }} segments</span>
+          <span class="rs-dot"> · </span>
+          <span class="rs-fillers">{{ stats.filler_count ?? 0 }} fillers</span>
+          <span class="rs-dot"> · </span>
+          <span class="rs-avg">avg {{ formatDuration(stats.avg_duration) }}</span>
+          <span class="rs-dot"> · </span>
+          <span class="rs-range">range {{ formatDuration(stats.min_duration) }} – {{ formatDuration(stats.max_duration) }}</span>
         </div>
 
         <div style="margin-bottom: 16px">
@@ -426,7 +354,7 @@ function relativeTime(ts) {
 
     <div style="margin-top: 16px">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="font-display text-lg font-bold" style="color: var(--text)">History</h3>
+        <h3 class="history-title">History</h3>
         <span class="font-mono text-xs" style="color: var(--text-muted)">{{ historyCountLabel }}</span>
       </div>
 
@@ -450,9 +378,9 @@ function relativeTime(ts) {
             </div>
 
             <div class="font-mono history-item-meta">
-              <span style="color: #4ECDC4">{{ item.segment_count }} segments</span>
+              <span style="color: var(--accent)">{{ item.segment_count }} segments</span>
               <span class="history-divider">/</span>
-              <span style="color: #FFB347">{{ item.filler_count }} fillers</span>
+              <span style="color: var(--accent-warning)">{{ item.filler_count }} fillers</span>
               <span class="history-divider">/</span>
               <span style="color: var(--text-secondary)">avg {{ formatDuration(item.avg_duration) }}</span>
               <span class="history-divider">/</span>
@@ -532,6 +460,44 @@ function relativeTime(ts) {
   animation: spin 0.6s linear infinite;
 }
 
+.results-summary {
+  font-size: 11px;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+}
+
+.rs-project {
+  color: var(--accent);
+}
+
+.rs-segments {
+  color: #4ECDC4;
+}
+
+.rs-fillers {
+  color: #FFB347;
+}
+
+.rs-avg {
+  color: #A78BFA;
+}
+
+.rs-range {
+  color: #7DD3FC;
+}
+
+.rs-dot {
+  opacity: 0.3;
+}
+
+.history-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
 .history-list {
   max-height: 400px;
   overflow-y: auto;
@@ -555,15 +521,15 @@ function relativeTime(ts) {
 }
 
 .history-item.active {
-  border-color: #ff9f43;
-  box-shadow: inset 3px 0 0 #ff9f43, 0 0 12px rgba(255, 159, 67, 0.15);
+  border-color: var(--accent-active);
+  box-shadow: inset 3px 0 0 var(--accent-active), 0 0 12px rgba(255, 159, 67, 0.15);
 }
 
 .history-item-body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px 10px 14px;
+  padding: 4px 12px 4px 14px;
 }
 
 .history-item-title-row {
@@ -618,7 +584,7 @@ function relativeTime(ts) {
 }
 
 .history-item.active .history-chevron {
-  color: #ff9f43;
+  color: var(--accent-active);
   opacity: 0.8;
 }
 

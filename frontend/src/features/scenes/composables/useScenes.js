@@ -1,5 +1,8 @@
 import { ref, readonly, computed } from 'vue'
 import { api } from '@/shared/api/client.js'
+import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
+
+const { register: audioRegister, unregister: audioUnregister } = useAudioRegistry()
 
 // ---- Singleton state ----
 const segData = ref(null)
@@ -27,6 +30,7 @@ const segHistory = ref([])
 
 let templatesLoaded = false
 let webhookLoaded = false
+const initializing = ref(false)
 
 // Computed timings from segmenter data
 const segTimings = computed(() => {
@@ -81,7 +85,8 @@ export function useScenes() {
   async function loadTemplates() {
     try {
       templates.value = await api.get('/api/scenes/templates')
-    } catch {
+    } catch (e) {
+      console.warn('[Scenes] Failed to load templates:', e.message)
       templates.value = [
         { id: 'cinematic', name: 'Cinematic', description: 'Default', color: '#4ECDC4', style_prompt: '' },
       ]
@@ -101,7 +106,8 @@ export function useScenes() {
     try {
       const data = await api.get('/api/scenes/webhook-url')
       defaultWebhookUrl.value = data.url || ''
-    } catch {
+    } catch (e) {
+      console.warn('[Scenes] Failed to load webhook URL:', e.message)
       defaultWebhookUrl.value = ''
     }
     // Restore from localStorage, fall back to server default
@@ -210,7 +216,8 @@ export function useScenes() {
   async function loadHistory() {
     try {
       history.value = await api.get('/api/scenes/history')
-    } catch {
+    } catch (e) {
+      console.warn('[Scenes] Failed to load history:', e.message)
       history.value = []
     }
   }
@@ -227,7 +234,10 @@ export function useScenes() {
         if (match) {
           segData.value = await api.get(`/api/segmenter/${encodeURIComponent(match.folder)}`)
         }
-      } catch { /* segment text won't show */ }
+      } catch (e) {
+        console.warn('[Scenes] Failed to load segmenter data:', e.message)
+        /* segment text won't show */
+      }
     }
 
     // Sync style
@@ -250,7 +260,8 @@ export function useScenes() {
   async function loadSegHistory() {
     try {
       segHistory.value = await api.get('/api/segmenter/history')
-    } catch {
+    } catch (e) {
+      console.warn('[Scenes] Failed to load seg history:', e.message)
       segHistory.value = []
     }
     return segHistory.value
@@ -278,8 +289,10 @@ export function useScenes() {
         audio.onended = () => resetPlayback()
         audio.onerror = () => { audioUrl.value = null }
         audioEl.value = audio
+        audioRegister('Scenes', audio)
       }
-    } catch {
+    } catch (e) {
+      console.warn('[Scenes] Failed to load audio:', e.message)
       audioUrl.value = null
     }
   }
@@ -329,6 +342,7 @@ export function useScenes() {
       audio.onended = null
       audio.onerror = null
     }
+    audioUnregister('Scenes')
     audioEl.value = null
     audioUrl.value = null
     isPlaying.value = false
@@ -383,17 +397,21 @@ export function useScenes() {
   }
 
   // ---- Init ----
-  if (!templatesLoaded) loadTemplates()
-  initWebhook()
+  if (!templatesLoaded) {
+    initializing.value = true
+    Promise.all([loadTemplates(), initWebhook()])
+      .finally(() => { initializing.value = false })
+  }
 
   return {
+    initializing: readonly(initializing),
     // State
     segData: readonly(segData),
     templates: readonly(templates),
     selectedStyle: readonly(selectedStyle),
-    selectedTemplate,
+    selectedTemplate: readonly(selectedTemplate),
     webhookEnabled: readonly(webhookEnabled),
-    webhookUrl,
+    webhookUrl: readonly(webhookUrl),
     payload: readonly(payload),
     result: readonly(result),
     isGenerating: readonly(isGenerating),
@@ -406,7 +424,7 @@ export function useScenes() {
     isPlaying: readonly(isPlaying),
     currentTime: readonly(currentTime),
     activeSceneIdx: readonly(activeSceneIdx),
-    segTimings,
+    segTimings: readonly(segTimings),
     totalDuration,
 
     // Functions

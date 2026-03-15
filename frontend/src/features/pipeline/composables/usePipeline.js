@@ -1,7 +1,9 @@
 import { ref, readonly } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
-import { RANDOM_STORIES } from '@/features/tts/composables/useTts.js'
+import { RANDOM_STORIES } from '@/shared/data/stories.js'
+import { timeAgo } from '@/shared/utils/format.js'
+import { useDoneSound } from '@/shared/composables/useDoneSound.js'
 
 // ── Constants ──
 
@@ -36,21 +38,11 @@ const log = ref([])
 const globalStatus = ref('')
 
 const jobs = ref([])
+const lastCompletedProjectId = ref(null)
 
 let eventSource = null
 let lastStoryIdx = -1
 let initialized = false
-
-// ── Helpers ──
-
-function timeAgo(ts) {
-  if (!ts) return ''
-  const diff = (Date.now() - new Date(ts).getTime()) / 1000
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
 
 // ── Actions ──
 
@@ -59,6 +51,10 @@ async function start() {
   const t = text.value.trim()
   if (!t) {
     toast.error('Enter story text')
+    return
+  }
+  if (speed.value < 0.5 || speed.value > 2.0) {
+    toast.error('Speed must be between 0.5 and 2.0')
     return
   }
 
@@ -106,6 +102,8 @@ function startSSE(id) {
       eventSource.close()
       eventSource = null
       running.value = false
+      lastCompletedProjectId.value = event.summary?.scenes?.project_id || null
+      useDoneSound().play()
       setTimeout(() => loadHistory(), 500)
       return
     }
@@ -132,7 +130,8 @@ async function loadHistory() {
   try {
     const data = await api.get('/api/pipeline/jobs')
     jobs.value = data
-  } catch {
+  } catch (e) {
+    console.warn('[Pipeline] Failed to load history:', e.message)
     jobs.value = []
   }
 }
@@ -167,11 +166,20 @@ function resetProgress() {
   globalStatus.value = ''
 }
 
+function dispose() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  running.value = false
+}
+
 async function init() {
   try {
     const data = await api.get('/api/scenes/templates')
     templates.value = data
-  } catch {
+  } catch (e) {
+    console.warn('[Pipeline] Failed to load templates:', e.message)
     templates.value = [{ id: 'cinematic', name: 'Cinematic', color: '#4ECDC4' }]
   }
 
@@ -212,6 +220,7 @@ export function usePipeline() {
     globalStatus: readonly(globalStatus),
 
     jobs: readonly(jobs),
+    lastCompletedProjectId: readonly(lastCompletedProjectId),
 
     // Actions
     start,
@@ -223,5 +232,8 @@ export function usePipeline() {
 
     // Helpers
     timeAgo,
+
+    // Cleanup
+    dispose,
   }
 }
