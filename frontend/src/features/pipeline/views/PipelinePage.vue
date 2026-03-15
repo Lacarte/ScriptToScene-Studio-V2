@@ -10,7 +10,7 @@ defineOptions({ name: 'PipelinePage' })
 const router = useRouter()
 const {
   STEPS, VOICES,
-  text, voice, speed, style, autoScenes, templates,
+  text, voice, speed, style, autoScenes, stopAfter, templates,
   running, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId,
   start, loadFromHistory, randomStory, resetProgress,
@@ -194,9 +194,18 @@ function esc(str) {
             <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </div>
+        <div class="control-group">
+          <label class="control-label">Run Until</label>
+          <select v-model="stopAfter" class="input-field control-select control-select--sm">
+            <option value="">All steps</option>
+            <option value="tts">TTS only</option>
+            <option value="timing">TTS + Timing</option>
+            <option value="segment">TTS + Timing + Segment</option>
+          </select>
+        </div>
         <div class="control-group control-group--auto">
-          <label class="auto-toggle" for="pipeline-auto-scenes">
-            <input id="pipeline-auto-scenes" v-model="autoScenes" type="checkbox" class="auto-check">
+          <label class="auto-toggle" for="pipeline-auto-scenes" :class="{ disabled: stopAfter }">
+            <input id="pipeline-auto-scenes" v-model="autoScenes" type="checkbox" class="auto-check" :disabled="!!stopAfter">
             <span class="auto-text">Auto-scenes</span>
           </label>
         </div>
@@ -469,6 +478,11 @@ function esc(str) {
   cursor: pointer;
 }
 
+.control-select--sm {
+  width: 170px;
+  font-size: 11px;
+}
+
 .control-number {
   width: 72px;
   font-size: 12px;
@@ -491,6 +505,12 @@ function esc(str) {
 
 .auto-toggle:hover {
   border-color: var(--border-hover);
+}
+
+.auto-toggle.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .auto-check {

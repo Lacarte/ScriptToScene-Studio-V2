@@ -29,6 +29,7 @@ const voice = ref('af_heart')
 const speed = ref(1.0)
 const style = ref('cinematic')
 const autoScenes = ref(true)
+const stopAfter = ref('')  // '', 'tts', 'timing', 'segment'
 const templates = ref([])
 
 const running = ref(false)
@@ -67,6 +68,7 @@ async function start() {
     speed: speed.value,
     style: style.value,
     auto_scenes: autoScenes.value,
+    stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
   }
 
@@ -206,6 +208,7 @@ export function usePipeline() {
     speed,
     style,
     autoScenes,
+    stopAfter,
     templates: readonly(templates),
 
     running: readonly(running),

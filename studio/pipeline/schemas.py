@@ -14,5 +14,6 @@ class PipelineRunRequest(BaseModel):
     webhook_url: Optional[str] = None
     style_prompt: Optional[str] = None
     auto_scenes: bool = True
+    stop_after: Optional[str] = None  # tts, timing, segment, or None (run all)
 
     model_config = {"extra": "allow"}

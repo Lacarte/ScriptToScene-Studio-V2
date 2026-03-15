@@ -84,6 +84,7 @@ def run_pipeline(data: PipelineRunRequest):
         "segment_config": data.segment_config,
         "webhook_url": data.webhook_url,
         "auto_scenes": data.auto_scenes,
+        "stop_after": data.stop_after,
         "project_id": project_id,
     }
 
@@ -203,12 +204,37 @@ def list_jobs():
 # Pipeline runner (background thread)
 # ===================================================================
 
+def _emit_done(job_id, project_id, results):
+    """Emit the 'done' event and mark the job as complete."""
+    _emit(job_id, {
+        "step": "done", "status": "done",
+        "message": "Pipeline complete",
+        "project_id": project_id,
+        "summary": {
+            "tts": {k: v for k, v in results.get("tts", {}).items() if k != "wav_path"} if "tts" in results else None,
+            "timing": {
+                "word_count": results["timing"]["word_count"],
+                "inference_time": results["timing"]["inference_time"],
+                "folder": results["timing"]["folder"],
+            } if "timing" in results else None,
+            "segment": results.get("segment"),
+            "scenes": results.get("scenes"),
+        },
+    })
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job:
+            job["status"] = "done"
+
+
 def _run_pipeline(job_id):
     with _jobs_lock:
         job = _jobs[job_id]
         config = job["config"]
     project_id = config["project_id"]
     results = job["results"]
+
+    stop_after = config.get("stop_after")  # tts, timing, segment, or None
 
     try:
         # ── Step 1: TTS ─────────────────────────────────────────────
@@ -222,6 +248,9 @@ def _run_pipeline(job_id):
                        f"{tts_result['words']} words",
             "data": {k: v for k, v in tts_result.items() if k != "wav_path"},
         })
+        if stop_after == "tts":
+            _emit_done(job_id, project_id, results)
+            return
 
         # ── Step 2: Force Alignment ─────────────────────────────────
         _emit(job_id, {"step": "timing", "status": "running",
@@ -233,6 +262,9 @@ def _run_pipeline(job_id):
             "message": f"{timing_result['word_count']} words aligned "
                        f"in {timing_result['inference_time']:.2f}s",
         })
+        if stop_after == "timing":
+            _emit_done(job_id, project_id, results)
+            return
 
         # ── Step 3: Segmentation ────────────────────────────────────
         _emit(job_id, {"step": "segment", "status": "running",
@@ -245,6 +277,9 @@ def _run_pipeline(job_id):
             "message": f"{stats.get('segment_count', 0)} scenes, "
                        f"avg {stats.get('avg_duration', 0):.1f}s",
         })
+        if stop_after == "segment":
+            _emit_done(job_id, project_id, results)
+            return
 
         # ── Step 4: Scene Generation (webhook) — optional ────────────
         if config.get("auto_scenes", True):
@@ -265,22 +300,7 @@ def _run_pipeline(job_id):
             })
 
         # ── Done ────────────────────────────────────────────────────
-        _emit(job_id, {
-            "step": "done", "status": "done",
-            "message": "Pipeline complete",
-            "project_id": project_id,
-            "summary": {
-                "tts": {k: v for k, v in results["tts"].items()
-                        if k != "wav_path"},
-                "timing": {
-                    "word_count": results["timing"]["word_count"],
-                    "inference_time": results["timing"]["inference_time"],
-                    "folder": results["timing"]["folder"],
-                },
-                "segment": results["segment"],
-                "scenes": results.get("scenes"),
-            },
-        })
+        _emit_done(job_id, project_id, results)
 
         with _jobs_lock:
             job["status"] = "done"
