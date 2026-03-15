@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 import platform
 from loguru import logger
 
+from config import ROOT_DIR
 from studio.fonts import get_font_path as _custom_font_path
 from studio.ffmpeg_utils import find_ffmpeg, find_ffprobe
 
@@ -148,10 +149,10 @@ class VideoProcessor:
         # Base path for media files (relative to backend folder)
         self.media_base_path = export_data.get('media_base_path', '')
 
-        # Get the backend directory and project root
+        # Resolve media relative to the repo root where app.py/output/assets live.
         self.backend_dir = os.path.dirname(os.path.abspath(__file__))
-        self.project_root = os.path.dirname(self.backend_dir)
-        self.frontend_dir = os.path.join(self.project_root, 'frontend')
+        self.project_root = ROOT_DIR
+        self.frontend_dir = os.path.join(ROOT_DIR, 'frontend')
 
         logger.info("VideoProcessor init: {}x{} {}fps crf={} codec={} preset={}",
                      self.width, self.height, self.fps, self.crf, self.codec, self.preset)
@@ -169,17 +170,28 @@ class VideoProcessor:
             logger.warning("Empty media path provided")
             return None
 
-        if os.path.isabs(relative_path):
-            if os.path.exists(relative_path):
-                return relative_path
-            logger.error("Absolute media path does not exist: {}", relative_path)
+        raw_path = str(relative_path).strip()
+        drive, _ = os.path.splitdrive(raw_path)
+        is_url_style_path = raw_path.startswith(('/', '\\')) and not drive and not raw_path.startswith(('//', '\\\\'))
+        candidate_path = raw_path.lstrip('/\\') if is_url_style_path else raw_path
+
+        if os.path.isabs(raw_path) and not is_url_style_path:
+            if os.path.exists(raw_path):
+                return raw_path
+            logger.error("Absolute media path does not exist: {}", raw_path)
             raise FileNotFoundError(f"Media file not found: {relative_path}")
 
-        # Try paths relative to frontend folder
+        # Strip leading slash for URL-style paths (e.g. /output/assets/...)
+        cleaned = candidate_path.lstrip('/\\')
+
+        # Try paths relative to project root and frontend folder
         paths_to_try = [
-            os.path.join(self.frontend_dir, relative_path),
-            os.path.join(self.project_root, relative_path),
-            relative_path
+            os.path.join(self.project_root, cleaned),
+            os.path.join(self.frontend_dir, cleaned),
+            os.path.join(self.project_root, raw_path),
+            os.path.join(self.frontend_dir, raw_path),
+            cleaned,
+            raw_path,
         ]
 
         for path in paths_to_try:
@@ -572,9 +584,8 @@ class VideoProcessor:
             opacity = max(0.0, min(1.0, float(overlay_entry.get('opacity', 1.0))))
             blend = overlay_entry.get('blend', 'normal') or 'normal'
 
-        app_root = os.path.dirname(os.path.dirname(self.project_root))
         rel = overlay_url.lstrip('/')
-        overlay_path = os.path.join(app_root, rel)
+        overlay_path = os.path.join(self.project_root, rel)
         if not os.path.exists(overlay_path):
             logger.warning("Overlay not found: {} (resolved: {})", overlay_url, overlay_path)
             shutil.copy2(input_path, output_path)

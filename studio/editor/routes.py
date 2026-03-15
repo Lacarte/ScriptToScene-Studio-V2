@@ -58,6 +58,56 @@ def _initial_path(project_id: str) -> str:
     return os.path.join(_project_dir(project_id), INITIAL_FILENAME)
 
 
+def _load_asset_metadata(project_id: str) -> dict:
+    """Read per-scene asset metadata for a project if it exists."""
+    meta_path = os.path.join(ASSETS_DIR, project_id, "metadata.json")
+    try:
+        data = safe_json_read(meta_path)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return data.get("scenes", {}) if isinstance(data, dict) else {}
+
+
+def _pick_scene_asset(project_id: str, *scene_keys: str) -> tuple[str, str]:
+    """Return the best asset URL and resolved type for the given scene keys."""
+    video_exts = (".mp4", ".webm", ".mov")
+    media_exts = video_exts + (".jpg", ".jpeg", ".png", ".webp")
+    metadata = _load_asset_metadata(project_id)
+    deduped_keys = tuple(dict.fromkeys(str(key) for key in scene_keys if key is not None))
+
+    for scene_key in deduped_keys:
+        meta_scene = metadata.get(scene_key, {}) or {}
+        local_files = [
+            path for path in meta_scene.get("local_files", [])
+            if isinstance(path, str) and path.lower().endswith(media_exts)
+        ]
+        if local_files:
+            media_url = local_files[-1]
+            media_type = "video" if media_url.lower().endswith(video_exts) else "image"
+            return media_url, media_type
+
+    for scene_key in deduped_keys:
+        asset_dir = os.path.join(ASSETS_DIR, project_id, scene_key)
+        if not os.path.isdir(asset_dir):
+            continue
+
+        files = []
+        for fname in os.listdir(asset_dir):
+            fpath = os.path.join(asset_dir, fname)
+            if os.path.isfile(fpath) and fname.lower().endswith(media_exts):
+                files.append((os.path.getmtime(fpath), fname))
+
+        if not files:
+            continue
+
+        _, fname = max(files)
+        media_url = f"/output/assets/{project_id}/{scene_key}/{fname}"
+        media_type = "video" if fname.lower().endswith(video_exts) else "image"
+        return media_url, media_type
+
+    return "", ""
+
+
 
 def _read_app_config():
     """Read the full app-config.json file."""
@@ -649,23 +699,12 @@ def assemble_project_for_editor(project_id):
         scene_index = s.get("index", i)
         scene_type = s.get("type_of_scene", s.get("type", "image"))
         duration = s.get("duration", 3)
-        media_url = ""
+        media_url, media_type = _pick_scene_asset(safe_id, i, scene_index)
+        if scene_type != "text" and media_type:
+            scene_type = media_type
 
         # Find media asset — asset dirs use sequential position (i), not scene_index
         # because the grabber saves files by array position, not by scene.index
-        for asset_key in (str(i), str(scene_index)):
-            asset_dir = os.path.join(ASSETS_DIR, safe_id, asset_key)
-            if os.path.isdir(asset_dir):
-                for fname in os.listdir(asset_dir):
-                    if fname.endswith((".mp4", ".webm", ".mov", ".jpg", ".jpeg", ".png", ".webp")):
-                        media_url = f"/output/assets/{safe_id}/{asset_key}/{fname}"
-                        ext = fname.rsplit(".", 1)[-1].lower()
-                        if ext in ("mp4", "webm", "mov"):
-                            scene_type = "video"
-                        break
-            if media_url:
-                break
-
         is_video = scene_type == "video" or media_url.endswith((".mp4", ".webm", ".mov"))
 
         editor_scenes.append({
@@ -766,7 +805,14 @@ def assemble_project_for_editor(project_id):
             from studio.captions.routes import _group_words_into_captions, CAPTION_PRESETS
             align_path = os.path.join(ALIGN_DIR, source_folder, "alignment.json")
             if os.path.isfile(align_path):
-                alignment = safe_json_read(align_path)
+                alignment_raw = safe_json_read(align_path)
+                # alignment.json may be a dict with word_alignment key or a plain list
+                if isinstance(alignment_raw, dict):
+                    alignment = alignment_raw.get("word_alignment") or alignment_raw.get("alignment") or []
+                elif isinstance(alignment_raw, list):
+                    alignment = alignment_raw
+                else:
+                    alignment = []
                 if alignment:
                     captions = _group_words_into_captions(alignment, words_per_group=3)
                     if captions:

@@ -9,13 +9,20 @@ defineOptions({ name: 'PipelinePage' })
 
 const router = useRouter()
 const {
-  STEPS, VOICES,
+  ALL_STEPS, VOICES,
   text, voice, speed, style, autoScenes, stopAfter, templates,
   running, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId,
   start, loadFromHistory, randomStory, resetProgress,
   timeAgo,
 } = usePipeline()
+
+const STEPS = computed(() => {
+  const stop = stopAfter.value
+  if (!stop) return ALL_STEPS
+  const idx = ALL_STEPS.findIndex(s => s.id === stop)
+  return idx >= 0 ? ALL_STEPS.slice(0, idx + 1) : ALL_STEPS
+})
 
 const { styleLabel, styleColor } = useScenes()
 
@@ -109,9 +116,10 @@ function dotAnimating(stepId) {
 }
 
 function connectorColor(idx) {
-  if (idx >= STEPS.length - 1) return 'var(--border)'
-  const thisStatus = stepStatus.value[STEPS[idx].id] || 'pending'
-  const nextStatus = stepStatus.value[STEPS[idx + 1]?.id] || 'pending'
+  const steps = STEPS.value
+  if (idx >= steps.length - 1) return 'var(--border)'
+  const thisStatus = stepStatus.value[steps[idx].id] || 'pending'
+  const nextStatus = stepStatus.value[steps[idx + 1]?.id] || 'pending'
   return (nextStatus === 'done' || thisStatus === 'done') ? '#26DE81' : 'var(--border)'
 }
 
@@ -246,7 +254,10 @@ function esc(str) {
 
     <!-- Progress -->
     <section v-if="showProgress" class="card progress-card">
-      <label class="field-label progress-label">Progress</label>
+      <div class="progress-header">
+        <label class="field-label progress-label">Progress</label>
+        <span v-if="activeProjectId" class="progress-project font-mono">{{ activeProjectId }}</span>
+      </div>
       <div class="steps-row">
         <template v-for="(step, i) in STEPS" :key="step.id">
           <div class="step-col">
@@ -476,19 +487,22 @@ function esc(str) {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
-  flex-wrap: wrap;
 }
 
 .control-group {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .control-group--auto {
   margin-left: auto;
+  flex-shrink: 0;
+  align-self: flex-end;
 }
 
 .control-select {
-  width: 150px;
+  width: 100%;
+  min-width: 100px;
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
@@ -512,10 +526,12 @@ function esc(str) {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  padding: 7px 12px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  height: 34px;
+  box-sizing: border-box;
+  border-radius: 8px;
   border: 1px solid var(--border);
-  background: transparent;
+  background: var(--bg-darkest);
   transition: all 0.15s;
 }
 
@@ -649,9 +665,20 @@ function esc(str) {
 }
 
 /* ---- Progress ---- */
-.progress-label {
-  display: block;
+.progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 16px;
+}
+
+.progress-label {
+  margin: 0;
+}
+
+.progress-project {
+  font-size: 11px;
+  color: var(--accent);
 }
 
 .steps-row {

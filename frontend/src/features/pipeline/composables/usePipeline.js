@@ -1,4 +1,4 @@
-import { ref, readonly, computed } from 'vue'
+import { ref, readonly } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
@@ -80,6 +80,14 @@ async function start() {
     auto_type: true,
   }
 
+  // Pre-open a named tab on user click if pipeline will reach assets step
+  // (browsers block popups from async/SSE handlers, so we open now and navigate later via SSE open_url)
+  const stopVal = config.stop_after
+  const reachesAssets = !stopVal || ['assets', 'assemble', 'export'].includes(stopVal)
+  if (reachesAssets) {
+    try { window.open('about:blank', 'sts-provider-tab') } catch {}
+  }
+
   try {
     const res = await api.post('/api/pipeline/run', { body: config })
     jobId.value = res.job_id
@@ -105,6 +113,11 @@ function startSSE(id) {
 
     const step = event.step
     const status = event.status
+
+    // Open provider URL if the backend requests it
+    if (event.open_url) {
+      try { window.open(event.open_url, 'sts-provider-tab') } catch {}
+    }
 
     if (step === 'done') {
       globalStatus.value = 'done'
@@ -205,17 +218,8 @@ export function usePipeline() {
     init()
   }
 
-  // Compute visible steps based on stopAfter
-  const activeSteps = computed(() => {
-    const stop = stopAfter.value
-    if (!stop) return ALL_STEPS
-    const idx = ALL_STEPS.findIndex(s => s.id === stop)
-    return idx >= 0 ? ALL_STEPS.slice(0, idx + 1) : ALL_STEPS
-  })
-
   return {
     // Constants
-    STEPS: activeSteps,
     ALL_STEPS,
     VOICES,
 

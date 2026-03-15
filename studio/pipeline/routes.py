@@ -265,120 +265,170 @@ def _run_pipeline(job_id):
     project_id = config["project_id"]
     results = job["results"]
 
-    stop_after = config.get("stop_after")  # tts, timing, segment, or None
+    stop_after = config.get("stop_after")
+    step_seq = job.get("step_sequence", [])
+    provider = config.get("provider", "grok")
+
+    logger.info("[{}] Pipeline started | steps={} stop_after={} provider={} voice={} speed={} style={}",
+                project_id, step_seq, stop_after, provider, config.get("voice"), config.get("speed"), config.get("style"))
 
     try:
         # ── Step 1: TTS ─────────────────────────────────────────────
+        logger.info("[{}] Step 1/7: TTS starting", project_id)
         _emit(job_id, {"step": "tts", "status": "running",
-                       "message": "Generating audio..."})
+                       "message": f"[{project_id}] Generating audio..."})
         tts_result = _step_tts(config, project_id)
         results["tts"] = tts_result
+        logger.success("[{}] Step 1/7: TTS done — {:.1f}s audio, {} words",
+                       project_id, tts_result["duration_seconds"], tts_result["words"])
         _emit(job_id, {
             "step": "tts", "status": "done",
-            "message": f"{tts_result['duration_seconds']:.1f}s audio, "
+            "message": f"[{project_id}] {tts_result['duration_seconds']:.1f}s audio, "
                        f"{tts_result['words']} words",
             "data": {k: v for k, v in tts_result.items() if k != "wav_path"},
         })
         if stop_after == "tts":
+            logger.info("[{}] Pipeline stopped after TTS (stop_after=tts)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 2: Force Alignment ─────────────────────────────────
+        logger.info("[{}] Step 2/7: Timing starting", project_id)
         _emit(job_id, {"step": "timing", "status": "running",
-                       "message": "Aligning words..."})
+                       "message": f"[{project_id}] Aligning words..."})
         timing_result = _step_timing(tts_result, config, project_id)
         results["timing"] = timing_result
+        logger.success("[{}] Step 2/7: Timing done — {} words in {:.2f}s",
+                       project_id, timing_result["word_count"], timing_result["inference_time"])
         _emit(job_id, {
             "step": "timing", "status": "done",
-            "message": f"{timing_result['word_count']} words aligned "
+            "message": f"[{project_id}] {timing_result['word_count']} words aligned "
                        f"in {timing_result['inference_time']:.2f}s",
         })
         if stop_after == "timing":
+            logger.info("[{}] Pipeline stopped after Timing (stop_after=timing)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 3: Segmentation ────────────────────────────────────
+        logger.info("[{}] Step 3/7: Segment starting", project_id)
         _emit(job_id, {"step": "segment", "status": "running",
-                       "message": "Splitting into scenes..."})
+                       "message": f"[{project_id}] Splitting into scenes..."})
         segment_result = _step_segment(timing_result, config, project_id)
         results["segment"] = segment_result
         stats = segment_result.get("stats", {})
+        logger.success("[{}] Step 3/7: Segment done — {} scenes, avg {:.1f}s",
+                       project_id, stats.get("segment_count", 0), stats.get("avg_duration", 0))
         _emit(job_id, {
             "step": "segment", "status": "done",
-            "message": f"{stats.get('segment_count', 0)} scenes, "
+            "message": f"[{project_id}] {stats.get('segment_count', 0)} scenes, "
                        f"avg {stats.get('avg_duration', 0):.1f}s",
         })
         if stop_after == "segment":
+            logger.info("[{}] Pipeline stopped after Segment (stop_after=segment)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 4: Scene Generation (webhook) — optional ────────────
         if config.get("auto_scenes", True):
+            logger.info("[{}] Step 4/7: Scenes starting (webhook)", project_id)
             _emit(job_id, {"step": "scenes", "status": "running",
-                           "message": "Generating scene scripts..."})
+                           "message": f"[{project_id}] Generating scene scripts..."})
             scenes_result = _step_scenes(segment_result, config, project_id, job_id)
             results["scenes"] = scenes_result
             scene_count = len(scenes_result.get("scenes", []))
+            logger.success("[{}] Step 4/7: Scenes done — {} scenes generated",
+                           project_id, scene_count)
             _emit(job_id, {
                 "step": "scenes", "status": "done",
-                "message": f"{scene_count} scenes generated",
+                "message": f"[{project_id}] {scene_count} scenes generated",
                 "data": scenes_result,
             })
         else:
+            logger.info("[{}] Step 4/7: Scenes skipped (auto_scenes=false)", project_id)
             _emit(job_id, {
                 "step": "scenes", "status": "skipped",
-                "message": "Scene generation skipped",
+                "message": f"[{project_id}] Scene generation skipped",
             })
 
         if stop_after == "scenes":
+            logger.info("[{}] Pipeline stopped after Scenes (stop_after=scenes)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 5: Asset Grabber ─────────────────────────────────
-        _emit(job_id, {"step": "assets", "status": "running",
-                       "message": "Starting asset grabber..."})
+        provider_urls = {
+            "grok": "https://grok.com/imagine",
+            "midjourney": "https://www.midjourney.com/imagine",
+            "meta-ai": "https://www.meta.ai/",
+        }
+        logger.info("[{}] Step 5/7: Assets starting | provider={}", project_id, provider)
+        _emit(job_id, {
+            "step": "assets", "status": "running",
+            "message": f"[{project_id}] Starting asset grabber ({provider})...",
+            "open_url": provider_urls.get(provider, ""),
+        })
         assets_result = _step_assets(results.get("scenes", {}), config, project_id, job_id)
         results["assets"] = assets_result
+        logger.success("[{}] Step 5/7: Assets done — {}/{} ready, {} errors",
+                       project_id, assets_result.get("ready", 0),
+                       assets_result.get("total", 0), assets_result.get("errors", 0))
         _emit(job_id, {
             "step": "assets", "status": "done",
-            "message": f"{assets_result.get('ready', 0)}/{assets_result.get('total', 0)} assets ready",
+            "message": f"[{project_id}] {assets_result.get('ready', 0)}/{assets_result.get('total', 0)} assets ready",
         })
         if stop_after == "assets":
+            logger.info("[{}] Pipeline stopped after Assets (stop_after=assets)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 6: Assemble Project ──────────────────────────────
+        logger.info("[{}] Step 6/7: Assemble starting", project_id)
         _emit(job_id, {"step": "assemble", "status": "running",
-                       "message": "Assembling project..."})
+                       "message": f"[{project_id}] Assembling project..."})
         assemble_result = _step_assemble(project_id)
         results["assemble"] = assemble_result
+        logger.success("[{}] Step 6/7: Assemble done — {} scenes, {:.1f}s, audio={}, captions={}",
+                       project_id, assemble_result.get("scene_count", 0),
+                       assemble_result.get("total_duration", 0),
+                       assemble_result.get("has_audio", False),
+                       assemble_result.get("has_captions", False))
         _emit(job_id, {
             "step": "assemble", "status": "done",
-            "message": f"{assemble_result.get('scene_count', 0)} scenes assembled",
+            "message": f"[{project_id}] {assemble_result.get('scene_count', 0)} scenes assembled",
         })
         if stop_after == "assemble":
+            logger.info("[{}] Pipeline stopped after Assemble (stop_after=assemble)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 7: Export Video ──────────────────────────────────
+        logger.info("[{}] Step 7/7: Export starting", project_id)
         _emit(job_id, {"step": "export", "status": "running",
-                       "message": "Exporting video..."})
+                       "message": f"[{project_id}] Exporting video..."})
         export_result = _step_export(assemble_result, project_id, job_id)
         results["export"] = export_result
+        logger.success("[{}] Step 7/7: Export done — {} ({})",
+                       project_id, export_result.get("filename", "?"),
+                       export_result.get("resolution", "?"))
         _emit(job_id, {
             "step": "export", "status": "done",
-            "message": f"Exported {export_result.get('filename', 'video')}",
+            "message": f"[{project_id}] Exported {export_result.get('filename', 'video')}",
         })
 
         # ── Done ────────────────────────────────────────────────────
+        logger.success("[{}] Pipeline COMPLETE — all {} steps finished", project_id, len(step_seq))
         _emit_done(job_id, project_id, results)
 
         with _jobs_lock:
             job["status"] = "done"
 
     except Exception as e:
-        logger.exception("Pipeline failed")
-        _emit(job_id, {"step": "error", "status": "error", "message": str(e)})
+        logger.error("[{}] Pipeline FAILED at step '{}': {}", project_id,
+                     job.get("step_statuses", {}).keys() or "unknown", e)
+        logger.exception("Pipeline traceback")
+        _emit(job_id, {"step": "error", "status": "error",
+                       "message": f"[{project_id}] {e}"})
         with _jobs_lock:
             job["status"] = "error"
 
@@ -658,7 +708,7 @@ def _step_assets(scenes_result, config, project_id, job_id):
 
     # Open provider URL
     provider_urls = {
-        "grok": "https://grok.com/",
+        "grok": "https://grok.com/imagine",
         "midjourney": "https://www.midjourney.com/imagine",
         "meta-ai": "https://www.meta.ai/",
     }
@@ -685,7 +735,7 @@ def _step_assets(scenes_result, config, project_id, job_id):
 
             _emit(job_id, {
                 "step": "assets", "status": "running",
-                "message": f"Waiting for assets... {ready}/{total} ready"
+                "message": f"Waiting for assets ({project_id})... {ready}/{total} ready"
                            + (f", {errors} errors" if errors else ""),
             })
 
@@ -720,7 +770,7 @@ def _step_assemble(project_id):
         "scene_count": data.get("scene_count", 0),
         "total_duration": data.get("total_duration", 0),
         "has_audio": bool(data.get("audio_tracks")),
-        "has_captions": bool(data.get("captions", {}).get("captions")),
+        "has_captions": bool((data.get("captions") or {}).get("captions")),
         "assembled_data": data,
     }
 
@@ -750,20 +800,48 @@ def _step_export(assemble_result, project_id, job_id):
     res = PROFILES.get(profile, PROFILES["yt_shorts"])
 
     assembled = assemble_result.get("assembled_data", {})
-    scenes = assembled.get("scenes", [])
-    if not scenes:
+    raw_scenes = assembled.get("scenes", [])
+    if not raw_scenes:
         raise RuntimeError("No scenes to export")
+
+    # Transform assembled scenes to export format (media.path, media.type)
+    export_scenes = []
+    for s in raw_scenes:
+        media_path = s.get("mediaUrl") or s.get("image_url") or ""
+        is_video = s.get("isVideo", False) or media_path.endswith((".mp4", ".webm", ".mov"))
+        export_scene = {
+            "id": s.get("id", s.get("scene_id", 0)),
+            "duration": s.get("duration", 3),
+            "media": {
+                "path": media_path,
+                "type": "video" if is_video else "image",
+            },
+            "effect": s.get("effect", {"type": "none"}),
+            "transition": s.get("transition", {"type": "none", "duration": 0}),
+            "text_overlay": {
+                "content": s.get("text_content") or "",
+                "duration": s.get("text_overlay_duration", s.get("duration", 3)),
+            } if s.get("text_content") and s.get("type") == "text" else None,
+        }
+        export_scenes.append(export_scene)
+        logger.debug("  Export scene {}: media={} type={}",
+                      export_scene["id"], media_path[:60] if media_path else "NONE",
+                      export_scene["media"]["type"])
 
     export_payload = {
         "project_id": project_id,
-        "scenes": scenes,
+        "scenes": export_scenes,
         "output": {
             "resolution": {"width": res["width"], "height": res["height"]},
             "fps": 30,
             "quality": "high",
         },
         "captions": assembled.get("captions") if captions_enabled else None,
-        "audio": assembled.get("audio"),
+        "audio": assembled.get("audio") or (
+            {"path": assembled["audio_tracks"][0].get("url", ""),
+             "volume": assembled["audio_tracks"][0].get("volume", 1.0)}
+            if assembled.get("audio_tracks") else None
+        ),
         "grain_overlay": assembled.get("grain_overlay") if grain_enabled else None,
     }
 
@@ -796,7 +874,7 @@ def _step_export(assemble_result, project_id, job_id):
             message = status.get("message", "")
             _emit(job_id, {
                 "step": "export", "status": "running",
-                "message": f"Exporting... {progress}% — {message}",
+                "message": f"[{project_id}] Exporting... {progress}% — {message}",
             })
 
             if status.get("status") == "done":

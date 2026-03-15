@@ -70,16 +70,17 @@ function toggleAudio() {
 
     <!-- Nav items -->
     <div class="nav-list">
-      <!-- Pipeline -->
+      <!-- Group 1: Pipeline -->
       <router-link to="/pipeline" class="nav-item" :class="{ active: isActive('/pipeline') }" title="Pipeline Dashboard">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
         <span v-show="!collapsed" class="nav-label">PIPELINE</span>
       </router-link>
 
-      <div class="divider" />
+      <div class="nav-divider" />
 
-      <!-- TTS / Alignment / Segmenter group -->
+      <!-- Group 2: Audio Processing -->
       <div class="nav-group">
+        <span v-show="!collapsed" class="nav-group-label">AUDIO</span>
         <router-link to="/tts" class="nav-item" :class="[{ active: isActive('/tts') }, pipelineClasses['/tts']]" title="Text to Speech">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           <span v-show="!collapsed" class="nav-label">TTS</span>
@@ -96,25 +97,30 @@ function toggleAudio() {
         </router-link>
       </div>
 
-      <!-- Scenes -->
-      <router-link to="/scenes" class="nav-item" :class="[{ active: isActive('/scenes') }, pipelineClasses['/scenes']]" title="Scene Generator">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><path d="M4 11V7a2 2 0 012-2h12a2 2 0 012 2v4"/><path d="M4 11h16"/><path d="M7 5l3 6"/><path d="M11 5l3 6"/><path d="M15 5l3 6"/></svg>
-        <span v-show="!collapsed" class="nav-label">SCENES</span>
-      </router-link>
+      <div class="nav-divider" />
 
-      <!-- Assets -->
-      <router-link to="/assets" class="nav-item" :class="[{ active: isActive('/assets') }, pipelineClasses['/assets']]" title="Asset Manager">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-        <span v-show="!collapsed" class="nav-label">ASSETS</span>
-      </router-link>
+      <!-- Group 3: Visual Production -->
+      <div class="nav-group">
+        <span v-show="!collapsed" class="nav-group-label">VISUAL</span>
+        <router-link to="/scenes" class="nav-item" :class="[{ active: isActive('/scenes') }, pipelineClasses['/scenes']]" title="Scene Generator">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><path d="M4 11V7a2 2 0 012-2h12a2 2 0 012 2v4"/><path d="M4 11h16"/></svg>
+          <span v-show="!collapsed" class="nav-label">SCENES</span>
+        </router-link>
 
-      <!-- Editor -->
-      <router-link to="/editor" class="nav-item" :class="[{ active: isActive('/editor') }, pipelineClasses['/editor']]" title="Timeline Editor">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 17h5"/><path d="M17 7h5"/></svg>
-        <span v-show="!collapsed" class="nav-label">EDITOR</span>
-      </router-link>
+        <router-link to="/assets" class="nav-item" :class="[{ active: isActive('/assets') }, pipelineClasses['/assets']]" title="Asset Manager">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          <span v-show="!collapsed" class="nav-label">ASSETS</span>
+        </router-link>
 
-      <!-- Exports -->
+        <router-link to="/editor" class="nav-item" :class="[{ active: isActive('/editor') }, pipelineClasses['/editor']]" title="Timeline Editor">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/></svg>
+          <span v-show="!collapsed" class="nav-label">EDITOR</span>
+        </router-link>
+      </div>
+
+      <div class="nav-divider" />
+
+      <!-- Group 4: Output -->
       <router-link to="/export-library" class="nav-item" :class="[{ active: isActive('/export-library') }, pipelineClasses['/export-library']]" title="Export Library">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/></svg>
         <span v-show="!collapsed" class="nav-label">EXPORTS</span>
@@ -233,14 +239,20 @@ function toggleAudio() {
 .nav-group {
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 10px;
-  margin: 4px 8px;
-  padding: 4px 0;
+}
+
+.nav-group-label {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  padding: 4px 20px 2px;
+  opacity: 0.5;
 }
 
 .nav-group .nav-item {
-  margin: 2px 0;
+  margin: 0;
   width: 100%;
 }
 
@@ -292,10 +304,11 @@ function toggleAudio() {
   height: 20px;
 }
 
-.divider {
+.nav-divider {
   height: 1px;
   background: var(--border);
-  margin: 8px 16px;
+  margin: 6px 16px;
+  opacity: 0.5;
 }
 
 .nav-bottom {
@@ -367,6 +380,7 @@ function toggleAudio() {
   color: var(--accent) !important;
   background: rgba(78, 205, 196, 0.08);
   box-shadow: inset 3px 0 0 var(--accent);
+  margin: 0.15rem 0;
 }
 
 @keyframes pipeline-waiting-pulse {
