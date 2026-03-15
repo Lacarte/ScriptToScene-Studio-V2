@@ -23,10 +23,10 @@ from flask import Blueprint, Response, jsonify, request
 from loguru import logger
 
 from config import (
-    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR,
+    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ASSETS_DIR, EXPORT_DIR,
     N8N_WEBHOOK_URL, generate_project_id,
 )
-from studio.io_utils import safe_json_write
+from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
 from studio.pipeline.schemas import PipelineRunRequest
 
@@ -44,6 +44,11 @@ def _emit(job_id, event):
         job = _jobs.get(job_id)
     if job:
         job["queue"].put(event)
+        # Track per-step status for history
+        step = event.get("step")
+        status = event.get("status")
+        if step and step != "done" and status in ("running", "done", "skipped", "error"):
+            job.setdefault("step_statuses", {})[step] = status
 
 
 def _cleanup_old_jobs(max_age_s=600):
@@ -76,6 +81,10 @@ def run_pipeline(data: PipelineRunRequest):
     project_id = generate_project_id(prefix="pp")
     job_id = uuid.uuid4().hex[:12]
 
+    # Store the server port for internal API calls from background thread
+    server_port = request.host.split(":")[-1] if ":" in request.host else "5050"
+    os.environ["STS_PORT"] = server_port
+
     config = {
         "text": data.text.strip(),
         "voice": data.voice,
@@ -86,7 +95,22 @@ def run_pipeline(data: PipelineRunRequest):
         "auto_scenes": data.auto_scenes,
         "stop_after": data.stop_after,
         "project_id": project_id,
+        # Asset grabber options
+        "provider": data.provider,
+        "aspect_ratio": data.aspect_ratio,
+        "auto_type": data.auto_type,
+        "grok_mode": data.grok_mode,
+        "grok_quality": data.grok_quality,
+        "grok_duration": data.grok_duration,
     }
+
+    # Compute which steps will run
+    all_steps = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+    stop = config.get("stop_after")
+    if stop and stop in all_steps:
+        step_sequence = all_steps[:all_steps.index(stop) + 1]
+    else:
+        step_sequence = all_steps
 
     with _jobs_lock:
         _jobs[job_id] = {
@@ -95,6 +119,8 @@ def run_pipeline(data: PipelineRunRequest):
             "project_id": project_id,
             "config": config,
             "results": {},
+            "step_sequence": step_sequence,
+            "step_statuses": {},
             "created": time.time(),
         }
 
@@ -188,14 +214,16 @@ def list_jobs():
     # Also include in-progress jobs from memory
     with _jobs_lock:
         for jid, j in _jobs.items():
-            if j.get("status") == "running":
-                items.append({
-                    "project_id": j.get("project_id", jid),
-                    "label": "Running...",
-                    "scene_count": 0,
-                    "status": "running",
-                    "created": j.get("created", 0),
-                })
+            pid = j.get("project_id", jid)
+            items.append({
+                "project_id": pid,
+                "label": "Running..." if j.get("status") == "running" else pid,
+                "scene_count": 0,
+                "status": j.get("status", "unknown"),
+                "created": j.get("created", 0),
+                "step_sequence": j.get("step_sequence", []),
+                "step_statuses": j.get("step_statuses", {}),
+            })
     items.sort(key=lambda x: x.get("created", 0), reverse=True)
     return jsonify(items)
 
@@ -219,6 +247,9 @@ def _emit_done(job_id, project_id, results):
             } if "timing" in results else None,
             "segment": results.get("segment"),
             "scenes": results.get("scenes"),
+            "assets": results.get("assets"),
+            "assemble": results.get("assemble"),
+            "export": results.get("export"),
         },
     })
     with _jobs_lock:
@@ -298,6 +329,46 @@ def _run_pipeline(job_id):
                 "step": "scenes", "status": "skipped",
                 "message": "Scene generation skipped",
             })
+
+        if stop_after == "scenes":
+            _emit_done(job_id, project_id, results)
+            return
+
+        # ── Step 5: Asset Grabber ─────────────────────────────────
+        _emit(job_id, {"step": "assets", "status": "running",
+                       "message": "Starting asset grabber..."})
+        assets_result = _step_assets(results.get("scenes", {}), config, project_id, job_id)
+        results["assets"] = assets_result
+        _emit(job_id, {
+            "step": "assets", "status": "done",
+            "message": f"{assets_result.get('ready', 0)}/{assets_result.get('total', 0)} assets ready",
+        })
+        if stop_after == "assets":
+            _emit_done(job_id, project_id, results)
+            return
+
+        # ── Step 6: Assemble Project ──────────────────────────────
+        _emit(job_id, {"step": "assemble", "status": "running",
+                       "message": "Assembling project..."})
+        assemble_result = _step_assemble(project_id)
+        results["assemble"] = assemble_result
+        _emit(job_id, {
+            "step": "assemble", "status": "done",
+            "message": f"{assemble_result.get('scene_count', 0)} scenes assembled",
+        })
+        if stop_after == "assemble":
+            _emit_done(job_id, project_id, results)
+            return
+
+        # ── Step 7: Export Video ──────────────────────────────────
+        _emit(job_id, {"step": "export", "status": "running",
+                       "message": "Exporting video..."})
+        export_result = _step_export(assemble_result, project_id, job_id)
+        results["export"] = export_result
+        _emit(job_id, {
+            "step": "export", "status": "done",
+            "message": f"Exported {export_result.get('filename', 'video')}",
+        })
 
         # ── Done ────────────────────────────────────────────────────
         _emit_done(job_id, project_id, results)
@@ -544,3 +615,199 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     logger.success("Pipeline Scenes: {} scenes",
                    len(result.get("scenes", [])))
     return result
+
+
+def _step_assets(scenes_result, config, project_id, job_id):
+    """Step 5: Start asset grabber and poll until all scenes are ready."""
+    from studio.assets.routes import grabber_start, _get_job, _set_job
+    from studio.assets.schemas import GrabberStartRequest
+
+    scenes = scenes_result.get("scenes", [])
+    if not scenes:
+        raise RuntimeError("No scenes to grab assets for")
+
+    # Build grabber payload
+    provider = config.get("provider", "grok")
+    aspect_ratio = config.get("aspect_ratio", "9:16")
+    auto_type = config.get("auto_type", True)
+
+    payload = {
+        "project_id": project_id,
+        "provider": provider,
+        "arguments": config.get("arguments", ""),
+        "aspect_ratio": aspect_ratio,
+        "auto_type": auto_type,
+        "scenes": [
+            {"prompt": s.get("image_prompt", ""), "scene": i}
+            for i, s in enumerate(scenes)
+        ],
+    }
+    # Add provider-specific options
+    if provider == "grok":
+        payload["grok_mode"] = config.get("grok_mode", "video")
+        payload["grok_quality"] = config.get("grok_quality", "480p")
+        payload["grok_duration"] = config.get("grok_duration", "6s")
+
+    # Start grabber via internal API call
+    base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
+    resp = http_requests.post(f"{base_url}/api/assets/grabber/start",
+                              json=payload, timeout=30)
+    resp.raise_for_status()
+    grab_data = resp.json()
+    logger.info("Pipeline Assets: grabber started for {}", project_id)
+
+    # Open provider URL
+    provider_urls = {
+        "grok": "https://grok.com/",
+        "midjourney": "https://www.midjourney.com/imagine",
+        "meta-ai": "https://www.meta.ai/",
+    }
+
+    # Poll until all scenes are ready (timeout 30 min)
+    max_wait = 30 * 60  # 30 minutes
+    poll_interval = 10  # seconds
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        time.sleep(poll_interval)
+        try:
+            status_resp = http_requests.get(
+                f"{base_url}/api/assets/grabber/status/{project_id}", timeout=10)
+            if status_resp.status_code != 200:
+                continue
+            status_data = status_resp.json()
+
+            scene_statuses = status_data.get("scene_statuses", {})
+            total = len(scene_statuses)
+            ready = sum(1 for s in scene_statuses.values() if s.get("status") == "ready")
+            errors = sum(1 for s in scene_statuses.values() if s.get("status") == "error")
+            pending = total - ready - errors
+
+            _emit(job_id, {
+                "step": "assets", "status": "running",
+                "message": f"Waiting for assets... {ready}/{total} ready"
+                           + (f", {errors} errors" if errors else ""),
+            })
+
+            if status_data.get("status") in ("done", "completed") or pending == 0:
+                logger.success("Pipeline Assets: {}/{} ready, {} errors",
+                               ready, total, errors)
+                return {
+                    "total": total, "ready": ready, "errors": errors,
+                    "provider": provider,
+                    "provider_url": provider_urls.get(provider, ""),
+                }
+        except Exception as e:
+            logger.debug("Pipeline Assets poll error: {}", e)
+
+    raise RuntimeError(f"Asset grabber timed out after {max_wait // 60} minutes")
+
+
+def _step_assemble(project_id):
+    """Step 6: Assemble project for the editor."""
+    base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
+    resp = http_requests.post(
+        f"{base_url}/api/projects/{project_id}/assemble?force=1",
+        timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("error"):
+        raise RuntimeError(data["error"])
+    logger.success("Pipeline Assemble: {} scenes, {}s duration",
+                   data.get("scene_count", 0),
+                   data.get("total_duration", 0))
+    return {
+        "scene_count": data.get("scene_count", 0),
+        "total_duration": data.get("total_duration", 0),
+        "has_audio": bool(data.get("audio_tracks")),
+        "has_captions": bool(data.get("captions", {}).get("captions")),
+        "assembled_data": data,
+    }
+
+
+def _step_export(assemble_result, project_id, job_id):
+    """Step 7: Export video with default profile."""
+    # Read export profile from settings
+    from config import APP_CONFIG_PATH
+    settings = {}
+    if os.path.isfile(APP_CONFIG_PATH):
+        try:
+            settings = safe_json_read(APP_CONFIG_PATH) or {}
+        except Exception:
+            pass
+
+    profile = settings.get("sts-export-profile", "yt_shorts")
+    captions_enabled = settings.get("sts-export-captions", True)
+    grain_enabled = settings.get("sts-export-grain", False)
+
+    PROFILES = {
+        "yt_shorts": {"width": 1080, "height": 1920, "ratio": "9:16"},
+        "tiktok":    {"width": 1080, "height": 1920, "ratio": "9:16"},
+        "reels":     {"width": 1080, "height": 1920, "ratio": "9:16"},
+        "yt_landscape": {"width": 1920, "height": 1080, "ratio": "16:9"},
+        "square":    {"width": 1080, "height": 1080, "ratio": "1:1"},
+    }
+    res = PROFILES.get(profile, PROFILES["yt_shorts"])
+
+    assembled = assemble_result.get("assembled_data", {})
+    scenes = assembled.get("scenes", [])
+    if not scenes:
+        raise RuntimeError("No scenes to export")
+
+    export_payload = {
+        "project_id": project_id,
+        "scenes": scenes,
+        "output": {
+            "resolution": {"width": res["width"], "height": res["height"]},
+            "fps": 30,
+            "quality": "high",
+        },
+        "captions": assembled.get("captions") if captions_enabled else None,
+        "audio": assembled.get("audio"),
+        "grain_overlay": assembled.get("grain_overlay") if grain_enabled else None,
+    }
+
+    base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
+
+    # Start export
+    resp = http_requests.post(f"{base_url}/api/export",
+                              json=export_payload, timeout=30)
+    resp.raise_for_status()
+    export_data = resp.json()
+    export_job_id = export_data.get("job_id", "")
+
+    if not export_job_id:
+        raise RuntimeError("Export did not return a job ID")
+
+    # Poll export progress
+    max_wait = 15 * 60  # 15 minutes
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        time.sleep(3)
+        try:
+            status_resp = http_requests.get(
+                f"{base_url}/api/export/{export_job_id}/status", timeout=10)
+            if status_resp.status_code != 200:
+                continue
+            status = status_resp.json()
+
+            progress = status.get("progress", 0)
+            message = status.get("message", "")
+            _emit(job_id, {
+                "step": "export", "status": "running",
+                "message": f"Exporting... {progress}% — {message}",
+            })
+
+            if status.get("status") == "done":
+                return {
+                    "filename": status.get("output_filename", ""),
+                    "profile": profile,
+                    "resolution": f"{res['width']}x{res['height']}",
+                }
+            if status.get("status") == "failed":
+                raise RuntimeError(status.get("error", "Export failed"))
+        except http_requests.RequestException as e:
+            logger.debug("Pipeline Export poll error: {}", e)
+
+    raise RuntimeError("Export timed out")

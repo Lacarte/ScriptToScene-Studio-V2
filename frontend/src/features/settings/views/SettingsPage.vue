@@ -126,6 +126,39 @@ function featureLabel(val) {
       />
     </section>
 
+    <!-- Export Defaults -->
+    <section class="card p-5 mb-4">
+      <label class="section-label">Export Defaults</label>
+      <div class="export-defaults">
+        <div class="export-default-row">
+          <label class="export-label">Profile</label>
+          <select
+            class="input-field export-select"
+            :value="settings['sts-export-profile'] ?? 'yt_shorts'"
+            @change="onToggle('sts-export-profile', $event.target.value)"
+          >
+            <option value="yt_shorts">YouTube Shorts (9:16)</option>
+            <option value="tiktok">TikTok (9:16)</option>
+            <option value="reels">Reels (9:16)</option>
+            <option value="yt_landscape">YouTube (16:9)</option>
+            <option value="square">Square (1:1)</option>
+          </select>
+        </div>
+        <SettingsToggle
+          :model-value="settings['sts-export-captions'] ?? true"
+          label="Captions"
+          description="Include captions in exported videos by default"
+          @update:model-value="onToggle('sts-export-captions', $event)"
+        />
+        <SettingsToggle
+          :model-value="settings['sts-export-grain'] ?? false"
+          label="Film Grain"
+          description="Apply grain overlay texture to exports"
+          @update:model-value="onToggle('sts-export-grain', $event)"
+        />
+      </div>
+    </section>
+
     <!-- Server -->
     <section class="card p-5 mb-4">
       <label class="section-label">Server</label>
@@ -235,6 +268,44 @@ function featureLabel(val) {
 
 .p-5 { padding: 20px; }
 .mb-4 { margin-bottom: 16px; }
+
+/* ---- Export Defaults ---- */
+.export-defaults {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.export-default-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.export-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.export-select {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.export-select:focus {
+  border-color: var(--accent);
+}
 
 /* ---- Server ---- */
 .server-actions {

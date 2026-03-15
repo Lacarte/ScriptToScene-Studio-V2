@@ -14,6 +14,13 @@ class PipelineRunRequest(BaseModel):
     webhook_url: Optional[str] = None
     style_prompt: Optional[str] = None
     auto_scenes: bool = True
-    stop_after: Optional[str] = None  # tts, timing, segment, or None (run all)
+    stop_after: Optional[str] = None  # tts, timing, segment, scenes, assets, assemble, export, or None (all)
+    # Asset grabber options (used when pipeline reaches assets step)
+    provider: str = "grok"
+    aspect_ratio: str = "9:16"
+    auto_type: bool = True
+    grok_mode: str = "video"
+    grok_quality: str = "480p"
+    grok_duration: str = "6s"
 
     model_config = {"extra": "allow"}

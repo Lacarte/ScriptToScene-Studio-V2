@@ -45,11 +45,23 @@ watch(style, (val) => {
   localStorage.setItem('sts-pipeline-style', val)
 })
 
-// Auto-navigate to Scenes when pipeline completes
+// Auto-navigate when pipeline completes — destination depends on stop_after
 watch(globalStatus, (status) => {
   if (status === 'done' && lastCompletedProjectId.value) {
+    const stop = stopAfter.value
+    const pid = lastCompletedProjectId.value
+    // Map stop_after to the appropriate page
+    const destinations = {
+      tts: '/tts',
+      timing: '/timing',
+      segment: '/segmenter',
+      scenes: '/scenes',
+      assets: '/assets',
+      assemble: '/editor',
+    }
+    const dest = destinations[stop] || '/export-library'
     setTimeout(() => {
-      router.push({ path: '/scenes', query: { project: lastCompletedProjectId.value } })
+      router.push({ path: dest, query: { project: pid } })
     }, 1500)
   }
 })
@@ -197,10 +209,14 @@ function esc(str) {
         <div class="control-group">
           <label class="control-label">Run Until</label>
           <select v-model="stopAfter" class="input-field control-select control-select--sm">
-            <option value="">All steps</option>
+            <option value="">All steps (→ Export)</option>
             <option value="tts">TTS only</option>
-            <option value="timing">TTS + Timing</option>
-            <option value="segment">TTS + Timing + Segment</option>
+            <option value="timing">→ Timing</option>
+            <option value="segment">→ Segment</option>
+            <option value="scenes">→ Scenes</option>
+            <option value="assets">→ Assets</option>
+            <option value="assemble">→ Assemble</option>
+            <option value="export">→ Export</option>
           </select>
         </div>
         <div class="control-group control-group--auto">

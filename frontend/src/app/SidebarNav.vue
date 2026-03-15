@@ -12,8 +12,10 @@ const { stepStatus, globalStatus } = usePipeline()
 
 const audioPlaying = computed(() => !!playingSource.value)
 
-const STEP_MAP = { tts: '/tts', timing: '/timing', segment: '/segmenter', scenes: '/scenes' }
-const PATH_TO_STEP = { '/tts': 'tts', '/timing': 'timing', '/segmenter': 'segment', '/scenes': 'scenes' }
+const PATH_TO_STEP = {
+  '/tts': 'tts', '/timing': 'timing', '/segmenter': 'segment', '/scenes': 'scenes',
+  '/assets': 'assets', '/editor': 'assemble', '/export-library': 'export',
+}
 
 function isActive(path) {
   return route.path === path
@@ -27,11 +29,14 @@ const pipelineClasses = computed(() => {
 
   for (const [path, step] of Object.entries(PATH_TO_STEP)) {
     if (status === 'done') {
-      if (path === '/scenes') { classes[path] = 'pipeline-done'; continue }
+      if (path === '/export-library') { classes[path] = 'pipeline-done'; continue }
       if (steps[step] === 'done') { classes[path] = 'pipeline-step-done'; continue }
     }
     if (status === 'running') {
-      if (steps[step] === 'running') { classes[path] = 'pipeline-running'; continue }
+      if (steps[step] === 'running') {
+        classes[path] = step === 'assets' ? 'pipeline-waiting' : 'pipeline-running'
+        continue
+      }
       if (steps[step] === 'done') { classes[path] = 'pipeline-step-done'; continue }
     }
     classes[path] = ''
@@ -98,19 +103,19 @@ function toggleAudio() {
       </router-link>
 
       <!-- Assets -->
-      <router-link to="/assets" class="nav-item" :class="{ active: isActive('/assets') }" title="Asset Manager">
+      <router-link to="/assets" class="nav-item" :class="[{ active: isActive('/assets') }, pipelineClasses['/assets']]" title="Asset Manager">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
         <span v-show="!collapsed" class="nav-label">ASSETS</span>
       </router-link>
 
       <!-- Editor -->
-      <router-link to="/editor" class="nav-item" :class="{ active: isActive('/editor') }" title="Timeline Editor">
+      <router-link to="/editor" class="nav-item" :class="[{ active: isActive('/editor') }, pipelineClasses['/editor']]" title="Timeline Editor">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/><path d="M2 7h5"/><path d="M2 17h5"/><path d="M17 17h5"/><path d="M17 7h5"/></svg>
         <span v-show="!collapsed" class="nav-label">EDITOR</span>
       </router-link>
 
       <!-- Exports -->
-      <router-link to="/export-library" class="nav-item" :class="{ active: isActive('/export-library') }" title="Export Library">
+      <router-link to="/export-library" class="nav-item" :class="[{ active: isActive('/export-library') }, pipelineClasses['/export-library']]" title="Export Library">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/></svg>
         <span v-show="!collapsed" class="nav-label">EXPORTS</span>
       </router-link>
@@ -362,6 +367,17 @@ function toggleAudio() {
   color: var(--accent) !important;
   background: rgba(78, 205, 196, 0.08);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+@keyframes pipeline-waiting-pulse {
+  0%, 100% { background: rgba(255, 179, 71, 0.05); }
+  50% { background: rgba(255, 179, 71, 0.25); }
+}
+
+.nav-item.pipeline-waiting {
+  color: var(--accent-warning) !important;
+  animation: pipeline-waiting-pulse 2s ease-in-out infinite;
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 71, 0.3);
 }
 
 .nav-item.pipeline-done {

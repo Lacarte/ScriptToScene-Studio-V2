@@ -1,4 +1,4 @@
-import { ref, readonly } from 'vue'
+import { ref, readonly, computed } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
@@ -7,12 +7,17 @@ import { useDoneSound } from '@/shared/composables/useDoneSound.js'
 
 // ── Constants ──
 
-const STEPS = [
+const ALL_STEPS = [
   { id: 'tts', label: 'TTS', icon: '\uD83C\uDFA4' },
   { id: 'timing', label: 'Timing', icon: '\u23F1' },
   { id: 'segment', label: 'Segment', icon: '\u2702' },
   { id: 'scenes', label: 'Scenes', icon: '\uD83C\uDFAC' },
+  { id: 'assets', label: 'Assets', icon: '\uD83D\uDDBC' },
+  { id: 'assemble', label: 'Build', icon: '\uD83D\uDD27' },
+  { id: 'export', label: 'Export', icon: '\uD83D\uDCE4' },
 ]
+
+// STEPS is now a computed exposed from the composable (see activeSteps below)
 
 const VOICES = [
   { id: 'af_heart', label: 'af_heart' },
@@ -70,6 +75,9 @@ async function start() {
     auto_scenes: autoScenes.value,
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
+    // Asset grabber options
+    provider: localStorage.getItem('sts-asset-provider') || 'grok',
+    auto_type: true,
   }
 
   try {
@@ -197,9 +205,18 @@ export function usePipeline() {
     init()
   }
 
+  // Compute visible steps based on stopAfter
+  const activeSteps = computed(() => {
+    const stop = stopAfter.value
+    if (!stop) return ALL_STEPS
+    const idx = ALL_STEPS.findIndex(s => s.id === stop)
+    return idx >= 0 ? ALL_STEPS.slice(0, idx + 1) : ALL_STEPS
+  })
+
   return {
     // Constants
-    STEPS,
+    STEPS: activeSteps,
+    ALL_STEPS,
     VOICES,
 
     // State
