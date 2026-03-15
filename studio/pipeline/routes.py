@@ -775,6 +775,60 @@ def _step_assemble(project_id):
     }
 
 
+def _normalize_export_audio(assembled):
+    """Normalize assembled editor audio data into export audio config."""
+    audio = assembled.get("audio")
+    if isinstance(audio, dict):
+        audio_path = audio.get("path") or audio.get("url") or ""
+        if audio_path:
+            normalized = dict(audio)
+            normalized["path"] = audio_path
+            return normalized
+
+    disabled_tracks = set(assembled.get("disabled_tracks") or [])
+    for track in assembled.get("audio_tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        if track.get("muted"):
+            continue
+        track_id = track.get("id")
+        if track_id and track_id in disabled_tracks:
+            continue
+
+        track_path = track.get("path") or track.get("url") or ""
+        if not track_path:
+            continue
+
+        return {
+            "path": track_path,
+            "volume": track.get("volume", 1.0),
+            "start_offset": track.get("startOffset", track.get("start_offset", 0)),
+            "timeline_offset": track.get("timelineOffset", track.get("timeline_offset", 0)),
+            "trimmed_duration": track.get("trimmedDuration", track.get("trimmed_duration")),
+            "fade_in": track.get("fadeIn", track.get("fade_in", 0)),
+            "fade_out": track.get("fadeOut", track.get("fade_out", 0.5)),
+        }
+
+    return None
+
+
+def _normalize_export_captions(assembled):
+    """Normalize editor caption payload into export caption payload."""
+    captions = assembled.get("captions")
+    if not isinstance(captions, dict):
+        return None
+
+    entries = captions.get("entries")
+    if not isinstance(entries, list):
+        entries = captions.get("captions")
+    if not isinstance(entries, list) or not entries:
+        return None
+
+    normalized = dict(captions)
+    normalized["entries"] = entries
+    return normalized
+
+
 def _step_export(assemble_result, project_id, job_id):
     """Step 7: Export video with default profile."""
     # Read export profile from settings
@@ -828,6 +882,9 @@ def _step_export(assemble_result, project_id, job_id):
                       export_scene["id"], media_path[:60] if media_path else "NONE",
                       export_scene["media"]["type"])
 
+    total_duration = assembled.get("total_duration") or assemble_result.get("total_duration") or sum(
+        float(s.get("duration", 0) or 0) for s in raw_scenes
+    )
     export_payload = {
         "project_id": project_id,
         "scenes": export_scenes,
@@ -836,12 +893,9 @@ def _step_export(assemble_result, project_id, job_id):
             "fps": 30,
             "quality": "high",
         },
-        "captions": assembled.get("captions") if captions_enabled else None,
-        "audio": assembled.get("audio") or (
-            {"path": assembled["audio_tracks"][0].get("url", ""),
-             "volume": assembled["audio_tracks"][0].get("volume", 1.0)}
-            if assembled.get("audio_tracks") else None
-        ),
+        "timeline": {"total_duration": total_duration},
+        "captions": _normalize_export_captions(assembled) if captions_enabled else None,
+        "audio": _normalize_export_audio(assembled),
         "grain_overlay": assembled.get("grain_overlay") if grain_enabled else None,
     }
 
@@ -872,18 +926,19 @@ def _step_export(assemble_result, project_id, job_id):
 
             progress = status.get("progress", 0)
             message = status.get("message", "")
+            export_status = str(status.get("status", "")).lower()
             _emit(job_id, {
                 "step": "export", "status": "running",
                 "message": f"[{project_id}] Exporting... {progress}% — {message}",
             })
 
-            if status.get("status") == "done":
+            if export_status in ("done", "completed"):
                 return {
                     "filename": status.get("output_filename", ""),
                     "profile": profile,
                     "resolution": f"{res['width']}x{res['height']}",
                 }
-            if status.get("status") == "failed":
+            if export_status in ("failed", "error", "cancelled"):
                 raise RuntimeError(status.get("error", "Export failed"))
         except http_requests.RequestException as e:
             logger.debug("Pipeline Export poll error: {}", e)

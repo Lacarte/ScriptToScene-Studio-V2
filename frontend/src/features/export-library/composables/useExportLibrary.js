@@ -16,6 +16,23 @@ export function ratioLabel(ratio) {
   return map[ratio] || ratio
 }
 
+/**
+ * Convert pixel dimensions string (e.g. "1920:1080") to simplified aspect ratio (e.g. "16:9").
+ * Returns '' if input is invalid.
+ */
+export function aspectRatioFromDimensions(dimStr) {
+  if (!dimStr) return ''
+  const parts = dimStr.split(':')
+  if (parts.length !== 2) return ''
+  let w = parseInt(parts[0], 10)
+  let h = parseInt(parts[1], 10)
+  if (!w || !h) return ''
+  // GCD to simplify
+  let a = w, b = h
+  while (b) { [a, b] = [b, a % b] }
+  return `${w / a}:${h / a}`
+}
+
 /* ── Duration filter buckets ───────────────────────── */
 
 const DURATION_FILTERS = [
@@ -221,6 +238,24 @@ export function useExportLibrary() {
     downloadFile(url, name)
   }
 
+  async function trashVideo(item) {
+    if (!item.video_relpath) {
+      toast.error('Cannot identify file to delete')
+      return false
+    }
+    try {
+      await api.post('/api/export/library/trash', { body: { video_relpath: item.video_relpath } })
+      // Remove from local list
+      const idx = items.value.findIndex(i => i.video_relpath === item.video_relpath)
+      if (idx !== -1) items.value.splice(idx, 1)
+      toast.success(`Moved "${item.video_name}" to trash`)
+      return true
+    } catch (e) {
+      toast.error(`Failed to trash: ${e.message}`)
+      return false
+    }
+  }
+
   return {
     // State
     items: readonly(items),
@@ -247,5 +282,6 @@ export function useExportLibrary() {
     fetchLibrary,
     downloadVideo,
     downloadZip,
+    trashVideo,
   }
 }

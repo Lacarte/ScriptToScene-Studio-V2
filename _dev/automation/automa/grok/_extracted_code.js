@@ -1519,6 +1519,18 @@ function collectAllVideoUrls(seenUrls) {
   return urls;
 }
 
+
+function isVideoModeJob() {
+  return (S.grokMode || '').toLowerCase() === 'video';
+}
+
+
+function isVideoAssetUrl(url) {
+  var clean = String(url || '').replace(/\?.*$/, '').toLowerCase();
+  return clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.mov') || clean.includes('/generated_video');
+}
+
+
 // previousSrc: the video src from the previous generation (to distinguish old from new)
 async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
   timeoutMs = timeoutMs || 300000;
@@ -1630,6 +1642,11 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
       var latestImg = imgs.length > 0 ? imgs[imgs.length - 1] : null;
       var iSrc = latestImg ? (latestImg.src || latestImg.getAttribute('src') || '') : '';
       if (iSrc && !seenUrls.has(iSrc.replace(/\?.*$/, '')) && iSrc.includes('assets.grok.com')) {
+        if (isVideoModeJob()) {
+          console.warn('Ignoring image fallback while waiting for video:', iSrc.split('/').pop());
+          await sleep(pollInterval);
+          continue;
+        }
         console.log('NEW image ready:', iSrc.split('/').pop());
         return { primary: iSrc, allUrls: [iSrc] };
       }
@@ -1972,7 +1989,23 @@ async function sendResults(num, urls) {
   const sc = S.scenes[num];
   if (sc) sc.status = 'uploading';
   render();
-  console.log('Fetching', urls.length, 'images for scene', num, 'as blobs...');
+
+  if (isVideoModeJob()) {
+    const filteredUrls = (urls || []).filter(isVideoAssetUrl);
+    if (filteredUrls.length !== (urls || []).length) {
+      console.warn('Scene', num, '- ignoring', (urls || []).length - filteredUrls.length, 'non-video URL(s) in video mode');
+    }
+    urls = filteredUrls;
+  }
+
+  if (!urls || !urls.length) {
+    console.error('Scene', num, '- no valid assets to upload for current mode:', S.grokMode);
+    if (sc) sc.status = 'error';
+    render();
+    return;
+  }
+
+  console.log('Fetching', urls.length, isVideoModeJob() ? 'video assets' : 'images', 'for scene', num, 'as blobs...');
 
   async function fetchBlob(url) {
     const strategies = [
@@ -2010,8 +2043,16 @@ async function sendResults(num, urls) {
       const ct = blob.type || '';
       let ext = '.png';
       if (ct.includes('webp') || url.includes('.webp')) ext = '.webp';
+      else if (ct.includes('webm') || url.includes('.webm')) ext = '.webm';
+      else if (ct.includes('quicktime') || url.includes('.mov')) ext = '.mov';
       else if (ct.includes('mp4') || url.includes('.mp4')) ext = '.mp4';
       else if (ct.includes('jpeg') || ct.includes('jpg')) ext = '.jpg';
+
+      if (isVideoModeJob() && ['.mp4', '.webm', '.mov'].indexOf(ext) === -1) {
+        console.warn('Scene', num, '- rejecting non-video blob in video mode:', url);
+        continue;
+      }
+
       // Extract UUID from URL for dedup-safe filename: generated/{uuid}/generated_video.mp4
       var urlUuidMatch = url.match(/generated\/([a-f0-9-]+)\//);
       var urlUuid = urlUuidMatch ? urlUuidMatch[1] : '';

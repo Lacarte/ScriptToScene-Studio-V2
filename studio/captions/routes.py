@@ -8,8 +8,8 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 from loguru import logger
 
-from config import APP_ASSETS_DIR, CAPTIONS_DIR, generate_project_id
-from studio.io_utils import safe_json_write
+from config import APP_ASSETS_DIR, APP_CONFIG_PATH, CAPTIONS_DIR, generate_project_id
+from studio.io_utils import safe_json_read, safe_json_write
 from studio.security import sanitize_folder_name, sanitize_project_id
 from studio.validation import validate_json
 from studio.captions.schemas import CaptionGenerateRequest, CaptionSaveRequest
@@ -152,6 +152,21 @@ def _load_external_presets():
 CAPTION_PRESETS.update(_load_external_presets())
 
 
+def _get_default_caption_preset_id():
+    """Resolve the user-configured default caption preset with validation."""
+    default_preset = "bold_popup"
+    try:
+        if os.path.isfile(APP_CONFIG_PATH):
+            cfg = safe_json_read(APP_CONFIG_PATH) or {}
+            user = cfg.get("user", {}) if isinstance(cfg, dict) else {}
+            configured = str(user.get("sts-caption-default-preset", "") or "").strip()
+            if configured in CAPTION_PRESETS:
+                return configured
+    except Exception as exc:
+        logger.debug("Could not read caption preset setting: {}", exc)
+    return default_preset
+
+
 # ---------------------------------------------------------------------------
 # Grouping algorithm
 # ---------------------------------------------------------------------------
@@ -221,7 +236,7 @@ def generate_captions(data: CaptionGenerateRequest):
     JSON body:
       - alignment: [{word, begin, end}, ...] (required)
       - words_per_group: int (default 3)
-      - preset: style preset id (default bold_popup)
+      - preset: style preset id (default comes from app settings)
       - project_id: optional existing project id
       - source_folder: optional source alignment folder
     """
@@ -233,7 +248,7 @@ def generate_captions(data: CaptionGenerateRequest):
         blueprint_caption.get("max_words_per_line")
         or data.words_per_group
     )))
-    preset_id = blueprint_caption.get("style_preset") or data.preset
+    preset_id = blueprint_caption.get("style_preset") or data.preset or _get_default_caption_preset_id()
     style = dict(CAPTION_PRESETS.get(preset_id, CAPTION_PRESETS["bold_popup"]))
     style["preset"] = preset_id
 

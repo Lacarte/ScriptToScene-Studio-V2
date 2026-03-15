@@ -45,6 +45,7 @@ const globalStatus = ref('')
 
 const jobs = ref([])
 const lastCompletedProjectId = ref(null)
+const lastCompletedExportFilename = ref(null)
 
 let eventSource = null
 let initialized = false
@@ -120,11 +121,13 @@ function startSSE(id) {
     }
 
     if (step === 'done') {
+      const summary = event.summary || {}
       globalStatus.value = 'done'
       eventSource.close()
       eventSource = null
       running.value = false
-      lastCompletedProjectId.value = event.summary?.scenes?.project_id || null
+      lastCompletedProjectId.value = summary.scenes?.project_id || event.project_id || null
+      lastCompletedExportFilename.value = summary.export?.filename || null
       useDoneSound().play()
       setTimeout(() => loadHistory(), 500)
       return
@@ -182,6 +185,8 @@ function resetProgress() {
   stepStatus.value = {}
   log.value = []
   globalStatus.value = ''
+  lastCompletedProjectId.value = null
+  lastCompletedExportFilename.value = null
 }
 
 function dispose() {
@@ -240,6 +245,7 @@ export function usePipeline() {
 
     jobs: readonly(jobs),
     lastCompletedProjectId: readonly(lastCompletedProjectId),
+    lastCompletedExportFilename: readonly(lastCompletedExportFilename),
 
     // Actions
     start,

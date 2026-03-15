@@ -164,6 +164,41 @@ class VideoProcessor:
         """Update progress callback"""
         self.progress_callback(progress, message)
 
+    def _get_total_duration(self):
+        """Resolve timeline duration from export payload, falling back to scene sum."""
+        timeline = self.export_data.get('timeline', {}) or {}
+        total_duration = timeline.get('total_duration')
+        if total_duration:
+            try:
+                return float(total_duration)
+            except (TypeError, ValueError):
+                logger.debug("Invalid timeline total_duration: {}", total_duration)
+
+        scene_total = 0.0
+        for scene in self.export_data.get('scenes', []) or []:
+            try:
+                scene_total += float(scene.get('duration', 0) or 0)
+            except (AttributeError, TypeError, ValueError):
+                continue
+
+        return scene_total if scene_total > 0 else 60.0
+
+    def _get_caption_entries(self):
+        """Accept both export-style captions.entries and editor-style captions.captions."""
+        captions = self.export_data.get('captions')
+        if not isinstance(captions, dict):
+            return []
+
+        entries = captions.get('entries')
+        if isinstance(entries, list) and entries:
+            return entries
+
+        legacy_entries = captions.get('captions')
+        if isinstance(legacy_entries, list):
+            return legacy_entries
+
+        return []
+
     def _get_media_path(self, relative_path):
         """Resolve media path from working-assets folder"""
         if not relative_path:
@@ -1092,7 +1127,7 @@ class VideoProcessor:
                     audio = audio.filter('adelay', delays=f'{delay_ms}|{delay_ms}')
 
                 fade_out = audio_config.get('fade_out', 0.5)
-                total_duration = self.export_data.get('timeline', {}).get('total_duration', 60)
+                total_duration = self._get_total_duration()
                 audio = audio.filter('afade', type='out', start_time=total_duration - fade_out, duration=fade_out)
                 # Pad audio with silence so it never ends before the video
                 audio = audio.filter('apad', whole_dur=total_duration)
@@ -1230,7 +1265,7 @@ class VideoProcessor:
     def _concat_subprocess(self, concat_list_path, output_path, audio_config):
         """Concatenate using subprocess with optional bgMusic mixing."""
         bg_music = self.export_data.get('bgMusic')
-        total_duration = self.export_data.get('timeline', {}).get('total_duration', 60)
+        total_duration = self._get_total_duration()
 
         narration_path = None
         if audio_config and audio_config.get('path'):
@@ -1443,7 +1478,7 @@ class VideoProcessor:
             logger.debug("No captions to burn")
             return video_path
 
-        entries = captions.get('entries', [])
+        entries = self._get_caption_entries()
         if not entries:
             logger.debug("Captions present but no entries")
             return video_path
@@ -1960,7 +1995,7 @@ class VideoProcessor:
         return scene_clips
 
     def _build_post_process_plan(self):
-        has_captions = bool(self.export_data.get('captions', {}).get('entries'))
+        has_captions = bool(self._get_caption_entries())
         overlay_list = self.export_data.get('overlays') or []
         if not overlay_list and self.export_data.get('overlay'):
             overlay_list = [self.export_data['overlay']]

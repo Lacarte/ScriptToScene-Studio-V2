@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.ffmpeg_utils import find_ffprobe
@@ -802,7 +802,11 @@ def assemble_project_for_editor(project_id):
     _resolve_project_captions(editor_data, safe_id)
     if not editor_data.get("captions") and source_folder:
         try:
-            from studio.captions.routes import _group_words_into_captions, CAPTION_PRESETS
+            from studio.captions.routes import (
+                _get_default_caption_preset_id,
+                _group_words_into_captions,
+                CAPTION_PRESETS,
+            )
             align_path = os.path.join(ALIGN_DIR, source_folder, "alignment.json")
             if os.path.isfile(align_path):
                 alignment_raw = safe_json_read(align_path)
@@ -816,8 +820,9 @@ def assemble_project_for_editor(project_id):
                 if alignment:
                     captions = _group_words_into_captions(alignment, words_per_group=3)
                     if captions:
-                        style = dict(CAPTION_PRESETS.get("bold_popup", {}))
-                        style["preset"] = "bold_popup"
+                        preset_id = _get_default_caption_preset_id()
+                        style = dict(CAPTION_PRESETS.get(preset_id, CAPTION_PRESETS.get("bold_popup", {})))
+                        style["preset"] = preset_id
                         captions_result = {
                             "project_id": safe_id,
                             "source_folder": source_folder,
@@ -1699,6 +1704,45 @@ def export_library_list():
 
     items.sort(key=lambda it: it.get("modified_at", ""), reverse=True)
     return jsonify({"items": items, "count": len(items)})
+
+
+@editor_bp.route("/api/export/library/trash", methods=["POST"])
+def export_library_trash():
+    """Move an exported video (and its sidecar .json / .zip) to output/TRASH."""
+    data = request.get_json(silent=True) or {}
+    rel_path = (data.get("video_relpath") or "").replace("\\", "/").strip("/")
+    if not rel_path:
+        return jsonify({"error": "Missing video_relpath"}), 400
+
+    try:
+        abs_video = _resolve_export_relpath(rel_path)
+    except ValueError:
+        return jsonify({"error": "Invalid path"}), 400
+
+    if not os.path.isfile(abs_video):
+        return jsonify({"error": "File not found"}), 404
+
+    # Collect related files (sidecar .json and .zip with same base name)
+    base_no_ext = os.path.splitext(abs_video)[0]
+    files_to_move = [abs_video]
+    for ext in (".json", ".zip"):
+        sidecar = base_no_ext + ext
+        if os.path.isfile(sidecar):
+            files_to_move.append(sidecar)
+
+    moved = []
+    for fpath in files_to_move:
+        fname = os.path.basename(fpath)
+        dest = os.path.join(TRASH_DIR, fname)
+        # Avoid overwriting: append timestamp if name collision
+        if os.path.exists(dest):
+            name, ext = os.path.splitext(fname)
+            dest = os.path.join(TRASH_DIR, f"{name}_{int(time.time())}{ext}")
+        shutil.move(fpath, dest)
+        moved.append(os.path.basename(dest))
+        logger.info("Trashed export file: {} → {}", fpath, dest)
+
+    return jsonify({"status": "trashed", "moved": moved})
 
 
 @editor_bp.route("/api/export/library/preview/<path:rel_path>", methods=["GET"])

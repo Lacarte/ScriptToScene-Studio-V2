@@ -14,6 +14,13 @@ const toast = useToast()
 const welcome = useWelcomeOverlay()
 const showClearDialog = ref(false)
 const restarting = ref(false)
+const captionPresets = ref([
+  { id: 'bold_popup', name: 'Bold Pop-up' },
+  { id: 'subtitle_bar', name: 'Subtitle Bar' },
+  { id: 'karaoke', name: 'Karaoke Highlight' },
+  { id: 'minimal', name: 'Minimal' },
+  { id: 'single_line', name: 'Single Line' },
+])
 
 async function restartServer() {
   restarting.value = true
@@ -45,8 +52,20 @@ function refreshFrontend() {
   window.location.reload()
 }
 
+async function loadCaptionPresets() {
+  try {
+    const presets = await api.get('/api/captions/presets')
+    if (Array.isArray(presets) && presets.length) {
+      captionPresets.value = presets
+    }
+  } catch (e) {
+    console.warn('[Settings] Failed to load caption presets:', e.message)
+  }
+}
+
 onMounted(() => {
   fetchHealth()
+  loadCaptionPresets()
 })
 
 async function onToggle(key, value) {
@@ -150,6 +169,25 @@ function featureLabel(val) {
           description="Include captions in exported videos by default"
           @update:model-value="onToggle('sts-export-captions', $event)"
         />
+        <div class="export-default-row">
+          <div class="export-copy">
+            <label class="export-label">Caption Preset</label>
+            <p class="export-help">Applied when captions are auto-generated for new projects</p>
+          </div>
+          <select
+            class="input-field export-select"
+            :value="settings['sts-caption-default-preset'] ?? 'bold_popup'"
+            @change="onToggle('sts-caption-default-preset', $event.target.value)"
+          >
+            <option
+              v-for="preset in captionPresets"
+              :key="preset.id"
+              :value="preset.id"
+            >
+              {{ preset.name || preset.id }}
+            </option>
+          </select>
+        </div>
         <SettingsToggle
           :model-value="settings['sts-export-grain'] ?? false"
           label="Film Grain"
@@ -280,16 +318,28 @@ function featureLabel(val) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 10px 14px;
   background: var(--bg-darkest);
   border: 1px solid var(--border);
   border-radius: 10px;
 }
 
+.export-copy {
+  min-width: 0;
+}
+
 .export-label {
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
+}
+
+.export-help {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.35;
 }
 
 .export-select {

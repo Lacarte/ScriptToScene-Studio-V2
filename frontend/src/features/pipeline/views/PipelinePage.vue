@@ -12,7 +12,7 @@ const {
   ALL_STEPS, VOICES,
   text, voice, speed, style, autoScenes, stopAfter, templates,
   running, stepStatus, log, globalStatus,
-  jobs, lastCompletedProjectId,
+  jobs, lastCompletedProjectId, lastCompletedExportFilename,
   start, loadFromHistory, randomStory, resetProgress,
   timeAgo,
 } = usePipeline()
@@ -67,8 +67,12 @@ watch(globalStatus, (status) => {
       assemble: '/editor',
     }
     const dest = destinations[stop] || '/export-library'
+    const query = { project: pid }
+    if (dest === '/export-library' && lastCompletedExportFilename.value) {
+      query.export = lastCompletedExportFilename.value
+    }
     setTimeout(() => {
-      router.push({ path: dest, query: { project: pid } })
+      router.push({ path: dest, query })
     }, 1500)
   }
 })

@@ -25,6 +25,37 @@ BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 VIDEO_EXTS = (".mp4", ".webm", ".mov")
 
 
+def _job_requires_video_assets(job) -> bool:
+    """Return True when the grabber job is expected to produce videos only."""
+    if not isinstance(job, dict):
+        return False
+    payload = job.get("payload", {}) or {}
+    return str(payload.get("grok_mode", "")).lower() == "video"
+
+
+def _looks_like_video_asset(value: str) -> bool:
+    """Best-effort check for video URLs / filenames coming back from Automa."""
+    clean = str(value or "").split("?", 1)[0].lower()
+    return clean.endswith(VIDEO_EXTS) or "/generated_video" in clean
+
+
+def _filter_video_urls(urls):
+    """Keep only video asset URLs."""
+    return [url for url in (urls or []) if _looks_like_video_asset(url)]
+
+
+def _filter_video_images(images):
+    """Keep only base64 upload entries that point to video assets."""
+    filtered = []
+    for image in images or []:
+        ext = str(image.get("ext", "")).lower()
+        source_url = image.get("source_url", "")
+        filename = image.get("filename", "")
+        if ext in VIDEO_EXTS or _looks_like_video_asset(source_url) or _looks_like_video_asset(filename):
+            filtered.append(image)
+    return filtered
+
+
 def _video_thumbnail(video_path):
     """Extract a thumbnail jpg from a video file. Returns thumbnail path or None."""
     thumb_path = video_path.rsplit(".", 1)[0] + "_thumb.jpg"
@@ -313,10 +344,20 @@ def grabber_results():
         def _download_all(pid, job_ref, scene_list):
             for scene_entry in scene_list:
                 scene_num = str(scene_entry.get("scene", ""))
-                urls = scene_entry.get("url", [])
+                raw_urls = scene_entry.get("url", []) or scene_entry.get("urls", [])
+                urls = _filter_video_urls(raw_urls) if _job_requires_video_assets(job_ref) else raw_urls
                 if not urls:
-                    logger.warning("Scene {} has no URLs, skipping", scene_num)
+                    if _job_requires_video_assets(job_ref) and raw_urls:
+                        logger.error("Scene {} rejected non-video asset URLs for video job: {}", scene_num, raw_urls)
+                        if scene_num in job_ref["scene_statuses"]:
+                            job_ref["scene_statuses"][scene_num]["status"] = "error"
+                        _save_job(job_ref)
+                    else:
+                        logger.warning("Scene {} has no URLs, skipping", scene_num)
                     continue
+
+                if len(urls) != len(raw_urls):
+                    logger.warning("Scene {} filtered {} non-video URL(s) from grabber payload", scene_num, len(raw_urls) - len(urls))
 
                 if scene_num in job_ref["scene_statuses"]:
                     job_ref["scene_statuses"][scene_num]["status"] = "downloading"
@@ -398,9 +439,18 @@ def grabber_upload():
     def _save_all(pid, job_ref, scene_list):
         for scene_entry in scene_list:
             scene_num = str(scene_entry.get("scene", ""))
-            images = scene_entry.get("images", [])
+            raw_images = scene_entry.get("images", [])
+            images = _filter_video_images(raw_images) if _job_requires_video_assets(job_ref) else raw_images
             if not images:
+                if _job_requires_video_assets(job_ref) and raw_images:
+                    logger.error("Scene {} rejected non-video upload(s) for video job", scene_num)
+                    if job_ref and scene_num in job_ref["scene_statuses"]:
+                        job_ref["scene_statuses"][scene_num]["status"] = "error"
+                        _save_job(job_ref)
                 continue
+
+            if len(images) != len(raw_images):
+                logger.warning("Scene {} filtered {} non-video upload(s) from Automa", scene_num, len(raw_images) - len(images))
 
             if job_ref and scene_num in job_ref["scene_statuses"]:
                 job_ref["scene_statuses"][scene_num]["status"] = "downloading"

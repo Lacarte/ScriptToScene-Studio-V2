@@ -16,7 +16,7 @@ class AlignmentWord(BaseModel):
 class CaptionGenerateRequest(BaseModel):
     alignment: list[AlignmentWord] = Field(min_length=1)
     words_per_group: int = Field(default=3, ge=2, le=5)
-    preset: str = "bold_popup"
+    preset: str = ""
     project_id: Optional[str] = None
     source_folder: Optional[str] = None
     blueprint_caption: Optional[dict] = None
