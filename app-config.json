@@ -56,6 +56,7 @@
     "sts-scenes-webhook-enabled": true,
     "sts-vol-voice": 1,
     "sts-vol-music": 0.3,
-    "sts-vol-sfx": 0.7
+    "sts-vol-sfx": 0.7,
+    "sts-caption-default-preset": "single_line"
   }
 }

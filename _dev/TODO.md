@@ -28,3 +28,41 @@ FIX SPECIAL CHARACTER AND FOREIGN THE NAME PRONUNCIACION IN THE TTS
  multiple prompts for taste 
 
  define editing presets
+
+ batch export multiple projects at once
+
+ auto-detect scene transitions from audio energy peaks
+
+ drag and drop reorder scenes in the timeline
+
+ background music volume ducking during speech
+
+ watermark overlay option for exports
+
+ undo/redo history panel with visual diff
+
+ auto-save editor state every 30s
+
+ keyboard shortcuts cheat sheet overlay (? key)
+
+ split scene at playhead position
+
+ duplicate scene with one click
+
+ theme/color grading presets per project style
+
+ waveform visualization on audio track
+
+ export progress notification via webhook (Discord, Slack)
+
+ caption style templates (subtitle, karaoke, word-by-word)
+
+ multi-language TTS support with voice preview
+
+ project templates (short-form, long-form, ad, tutorial)
+
+ asset library search and filter by tags
+
+ collaborative editing session via shared link
+
+ AI-powered script rewrite suggestions
