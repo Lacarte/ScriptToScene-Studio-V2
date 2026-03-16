@@ -82,19 +82,12 @@ def index():
     return redirect("/vue/")
 
 
-@app.route("/legacy")
-def legacy_index():
-    """Serve the old vanilla JS app (archived, accessible for reference)."""
-    return send_from_directory(STATIC_DIR, "index.html")
-
-
 @app.route("/vue")
 @app.route("/vue/")
 @app.route("/vue/<path:path>")
 def serve_vue(path="index.html"):
     """Serve the Vue SPA build from static/dist/."""
     dist_dir = os.path.join(STATIC_DIR, "dist")
-    # Try to serve the exact file (JS, CSS, etc.)
     full_path = os.path.join(dist_dir, path)
     if os.path.isfile(full_path):
         return send_from_directory(dist_dir, path)
@@ -109,26 +102,6 @@ def serve_app_config():
         os.path.dirname(os.path.abspath(__file__)), "app-config.json",
         max_age=0,
     )
-
-
-@app.route("/css/<path:filename>")
-def serve_css(filename):
-    return send_from_directory(os.path.join(STATIC_DIR, "css"), filename)
-
-
-@app.route("/js/<path:filename>")
-def serve_js(filename):
-    return send_from_directory(os.path.join(STATIC_DIR, "js"), filename)
-
-
-@app.route("/static/<path:filename>")
-def serve_static(filename):
-    return send_from_directory(STATIC_DIR, filename)
-
-
-@app.route("/sounds/<path:filename>")
-def serve_sounds(filename):
-    return send_from_directory(os.path.join(STATIC_DIR, "sounds"), filename)
 
 
 @app.route("/assets/<path:filename>")

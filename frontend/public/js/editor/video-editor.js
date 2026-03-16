@@ -2912,6 +2912,7 @@ function _resetEditorForNewProject() {
 
     // Clear preview
     if (EditorState.preview) {
+        EditorState.preview.disabledTracks = new Set();
         EditorState.preview.setCaptions(null, null);
         EditorState.preview.setOverlay([]);
     }
@@ -3161,6 +3162,7 @@ function _restoreSavedEditorState() {
 
 function buildBootProjectData(raw) {
     if (!raw?.scenes?.length) return null;
+    const captions = raw.captions?.captions?.length ? raw.captions : null;
 
     let runningTimestamp = 0;
     const scenes = raw.scenes.map((scene, index) => {
@@ -3217,6 +3219,10 @@ function buildBootProjectData(raw) {
         scene_count: raw.scene_count || scenes.length,
         staged_at: raw.staged_at || raw.saved_at || new Date().toISOString(),
         scenes,
+        ...(captions ? {
+            captions,
+            captionsEnabled: raw.captionsEnabled ?? true
+        } : {}),
         ...(raw.audio ? (() => {
             const audio = normalizeVoiceAudioConfig(raw.audio);
             return audio?.url ? { audio } : {};
@@ -3497,6 +3503,11 @@ function persistBootProjectData(raw, options = {}) {
                 localStorage.setItem('sts-editor-last-saved-project-id', bootData.project_id);
             }
         }
+        if (bootData.captions?.captions?.length) {
+            localStorage.setItem('sts-editor-captions', JSON.stringify(bootData.captions));
+        } else {
+            localStorage.removeItem('sts-editor-captions');
+        }
     } catch (_) { /* ignore */ }
 
     return bootData;
@@ -3522,17 +3533,20 @@ async function init() {
     // One-shot signal from Studio shell.
     sessionStorage.removeItem('sts-editor-entry-source');
 
+    // When opened from the sidebar menu, always show the asset import list first.
+    if (editorEntrySource === 'menu') {
+        showNoDataOverlay(true);
+        return;
+    }
+
     // Prefer the staged timeline bridge, but survive refreshes with the localStorage bridge.
     const data = getBootProjectData();
     if (!data) {
-        const lastSavedProjectId = editorEntrySource !== 'menu'
-            ? localStorage.getItem('sts-editor-last-saved-project-id')
-            : '';
+        const lastSavedProjectId = localStorage.getItem('sts-editor-last-saved-project-id');
         if (lastSavedProjectId) {
             await loadProjectFromServer(lastSavedProjectId);
             return;
         }
-        // Show project import list only when editor was opened directly from the menu.
         showNoDataOverlay(true);
         return;
     }
@@ -3597,9 +3611,9 @@ async function loadProjectData(data) {
 
     EditorState.scenes = data.scenes.map(scene => ({
         ...scene,
-        id: scene.id || scene.scene_id,
+        id: scene.id ?? scene.scene_id,
         mediaLoaded: !!scene.image_url,
-        mediaUrl: scene.image_url || null,
+        mediaUrl: scene.image_url || scene.mediaUrl || null,
         isVideo: scene.isVideo || isVideoFile(scene.image_url || scene.mediaUrl)
     }));
     persistBootProjectData({
@@ -3653,7 +3667,7 @@ async function loadProjectData(data) {
 
                         if (track.element.paused) {
                             track.element.currentTime = getTrackPlaybackTime(track, time);
-                            applyTrackVolumeLive(track, track.volume);
+                            applyTrackVolumeLive(track, track.volume, { resumeContext: true });
                             track.element.play().catch(() => {});
                         }
                     }
@@ -3735,6 +3749,25 @@ async function loadProjectData(data) {
     renderTimeRuler();
     updateTimeScrubber();
     updatePlayhead();
+
+    if (data.captions?.captions?.length) {
+        _receiveCaptionData(data.captions);
+        if (data.captionsEnabled === false) {
+            EditorState.captionsEnabled = false;
+            const toggle = document.getElementById('caption-enabled-toggle');
+            if (toggle) {
+                toggle.checked = false;
+                const lbl = toggle.parentElement?.querySelector('.cap-card-toggle-label');
+                if (lbl) lbl.textContent = 'Off';
+            }
+            if (elements.captionTrackRow) {
+                elements.captionTrackRow.style.display = 'none';
+            }
+            if (EditorState.preview) {
+                EditorState.preview.setCaptions(null, null);
+            }
+        }
+    }
 
     // Load audio — use staged alignment URL when available
     EditorState.voiceLoadPromise = loadDefaultAudio(data);
@@ -4035,15 +4068,21 @@ function hideLoadingOverlay(bootId = null) {
  */
 function showNoDataOverlay(showProjects = true) {
     setEditorBootState('ready');
-    elements.noDataOverlay?.classList.remove('hidden');
-    if (showProjects) {
-        _loadNoDataProjects();
-        return;
-    }
-    const listContainer = document.getElementById('no-data-asset-list');
-    const emptyEl = document.getElementById('no-data-empty');
-    if (listContainer) listContainer.style.display = 'none';
-    if (emptyEl) emptyEl.style.display = '';
+    // Tell Vue to render the overlay first
+    if (typeof window._vueShowNoData === 'function') window._vueShowNoData();
+    // Wait a frame for Vue to mount the DOM, then manipulate elements
+    requestAnimationFrame(() => {
+        elements.noDataOverlay = document.getElementById('no-data-overlay');
+        elements.noDataOverlay?.classList.remove('hidden');
+        if (showProjects) {
+            _loadNoDataProjects();
+            return;
+        }
+        const listContainer = document.getElementById('no-data-asset-list');
+        const emptyEl = document.getElementById('no-data-empty');
+        if (listContainer) listContainer.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = '';
+    });
 }
 
 function _loadNoDataProjects() {
@@ -4146,6 +4185,7 @@ function _loadNoDataProjects() {
  */
 function hideNoDataOverlay() {
     elements.noDataOverlay?.classList.add('hidden');
+    if (typeof window._vueHideNoData === 'function') window._vueHideNoData();
 }
 
 // Old loading functions removed - replaced by sequential loading system
@@ -8407,6 +8447,8 @@ function syncAudioPlayback() {
     const voiceTrack = getVoiceTrack();
 
     if (EditorState.isPlaying) {
+        ensureAudioContextReady();
+
         // Play all audio tracks
         for (const track of EditorState.audioTracks) {
             if (!track.element || !track.file) continue;
@@ -8434,7 +8476,7 @@ function syncAudioPlayback() {
             }
 
             // Apply ducking on music tracks when voice is playing
-            applyTrackVolumeLive(track, track.volume);
+            applyTrackVolumeLive(track, track.volume, { resumeContext: true });
 
             track.element.play().catch(() => {});
         }

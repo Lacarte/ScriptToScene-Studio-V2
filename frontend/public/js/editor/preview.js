@@ -1251,6 +1251,8 @@ export class CanvasPreview {
     setCaptions(captions, style) {
         this.captions = captions || [];
         this.captionStyle = style || {};
+        // Re-render so captions appear immediately (even when paused)
+        this.render();
     }
 
     /**

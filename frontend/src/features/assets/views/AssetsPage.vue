@@ -265,6 +265,7 @@ async function assembleAndEdit(project) {
     }
 
     staging.stage(bootData)
+    sessionStorage.setItem('sts-editor-entry-source', 'internal')
 
     setStep('Launching editor', 'done')
     await new Promise(r => setTimeout(r, 600))
@@ -686,7 +687,7 @@ onMounted(async () => {
 
             <!-- Action -->
             <button
-              v-if="project.ready_count"
+              v-if="project.status === 'done' && project.ready_count"
               class="hist-action-btn"
               :disabled="assemblingProject === project.project_id"
               @click.stop="assembleAndEdit(project)"

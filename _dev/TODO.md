@@ -21,3 +21,10 @@ FIX SPECIAL CHARACTER AND FOREIGN THE NAME PRONUNCIACION IN THE TTS
  Fix cut initial audop voice.
 
  how to add a little reverb in the tts voice
+
+
+ explain each part of the video of the sequecial part of the vide and then generate a prompt that can show  the action 
+
+ multiple prompts for taste 
+
+ define editing presets

@@ -144,7 +144,7 @@ function toggleAudio() {
       </router-link>
       <button class="nav-item" @click="emit('toggle')" title="Toggle sidebar">
         <svg class="nav-icon collapse-icon" :class="{ flipped: collapsed }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
-        <span v-show="!collapsed" class="nav-label">Collapse</span>
+        <span v-show="!collapsed" class="nav-label">COLLAPSE</span>
       </button>
     </div>
   </nav>

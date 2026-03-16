@@ -13,7 +13,7 @@ export function useDoneSound() {
 
     try {
       if (!audioEl) {
-        audioEl = new Audio('/sounds/done.mp3')
+        audioEl = new Audio(`${import.meta.env.BASE_URL}sounds/done.mp3`)
         audioEl.volume = 0.5
       }
       audioEl.currentTime = 0

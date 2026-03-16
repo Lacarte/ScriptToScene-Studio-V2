@@ -5412,14 +5412,14 @@
 
 /* ---- No data overlay ---- */
 .no-data-overlay {
-    position: fixed;
+    position: absolute;
     inset: 0;
     background: var(--bg-darkest);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 100;
 }
 
 .no-data-overlay.hidden {

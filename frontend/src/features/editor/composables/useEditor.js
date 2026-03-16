@@ -74,12 +74,27 @@ async function init(containerEl) {
   // For now, we rely on the modules being already loaded (they expose onto window).
   // If not yet available, wait briefly then bail.
   if (typeof window.initEditor !== 'function') {
-    // Try dynamic import — the editor entry point attaches to window
+    // Load via <script> tag — files in public/ cannot use import()
     try {
-      const editorUrl = '/js/editor/video-editor.js'
-      await import(/* @vite-ignore */ editorUrl)
-    } catch {
-      console.warn('[useEditor] Could not load video-editor.js')
+      const s = document.createElement('script')
+      s.type = 'module'
+      s.src = `${import.meta.env.BASE_URL}js/editor/video-editor.js`
+      document.head.appendChild(s)
+      // Poll for window.initEditor — module scripts execute asynchronously
+      await new Promise((resolve, reject) => {
+        let elapsed = 0
+        const iv = setInterval(() => {
+          if (typeof window.initEditor === 'function') {
+            clearInterval(iv)
+            resolve()
+          } else if ((elapsed += 50) > 10000) {
+            clearInterval(iv)
+            reject(new Error('Editor module did not load within 10s'))
+          }
+        }, 50)
+      })
+    } catch (e) {
+      console.warn('[useEditor] Could not load video-editor.js:', e.message)
     }
   }
 

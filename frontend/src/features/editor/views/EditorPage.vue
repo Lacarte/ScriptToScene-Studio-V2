@@ -76,6 +76,11 @@ onMounted(async () => {
   initEditorInlineScripts()
   await nextTick()
   if (shellRef.value) {
+    // Default to 'menu' (show asset import list) unless another page
+    // already set the entry source (e.g. "Rebuild, Assemble & Edit").
+    if (!sessionStorage.getItem('sts-editor-entry-source')) {
+      sessionStorage.setItem('sts-editor-entry-source', 'menu')
+    }
     init(shellRef.value)
   }
 })
@@ -108,6 +113,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .editor-page {
+  position: relative;
   height: 100vh;
   overflow: hidden;
   background: #040404;

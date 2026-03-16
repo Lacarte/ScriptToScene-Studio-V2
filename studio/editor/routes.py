@@ -477,6 +477,11 @@ def editor_load_project(project_id):
 
     # Resolve correct captions from the alignment folder
     _resolve_project_captions(data, safe_id)
+    if data.get("captions"):
+        if source == "initial":
+            data["captionsEnabled"] = True
+        elif data.get("captionsEnabled") is False and not data.get("edit_history"):
+            data["captionsEnabled"] = True
 
     return jsonify(data)
 
@@ -800,6 +805,8 @@ def assemble_project_for_editor(project_id):
 
     # Resolve captions — auto-generate from alignment if none exist
     _resolve_project_captions(editor_data, safe_id)
+    if editor_data.get("captions"):
+        editor_data["captionsEnabled"] = True
     if not editor_data.get("captions") and source_folder:
         try:
             from studio.captions.routes import (

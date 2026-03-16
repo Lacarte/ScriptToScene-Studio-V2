@@ -15,13 +15,12 @@ export default defineConfig({
 
   server: {
     port: 5174,
+    open: true,
     proxy: {
       '/api': 'http://localhost:5050',
       '/output': 'http://localhost:5050',
-      '/js': 'http://localhost:5050',
-      '/css': 'http://localhost:5050',
-      '/sounds': 'http://localhost:5050',
-      '/static': 'http://localhost:5050',
+      '/assets': 'http://localhost:5050',
+      '/app-config.json': 'http://localhost:5050',
     },
   },
 
