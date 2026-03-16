@@ -138,8 +138,9 @@ class VideoProcessor:
         # Extract output settings
         output = export_data.get('output', {})
         resolution = output.get('resolution', {})
-        self.width = resolution.get('width', 1080)
-        self.height = resolution.get('height', 1920)
+        # Ensure dimensions are even (required by most codecs / yuv420p)
+        self.width = (resolution.get('width', 1080) // 2) * 2
+        self.height = (resolution.get('height', 1920) // 2) * 2
         self.fps = output.get('fps', 30)
         self.codec = output.get('codec', 'libx264')
         self.pixel_format = output.get('pixel_format', 'yuv420p')
@@ -795,6 +796,7 @@ class VideoProcessor:
             filters.append(f"fade=t=in:st=0:d={fade_dur}")
             filters.append(f"fade=t=out:st={duration - fade_dur}:d={fade_dur}")
 
+        filters.append(f"format={self.pixel_format}")
         vf = ','.join(filters)
 
         cmd = [
@@ -810,12 +812,17 @@ class VideoProcessor:
             output_path
         ]
 
-        logger.debug("Simple scene cmd: {}", ' '.join(cmd[:10]) + '...')
+        logger.debug("Simple scene cmd: {}", ' '.join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
+            stderr = result.stderr or ""
+            if len(stderr) > 1500:
+                stderr_summary = stderr[:750] + "\n...\n" + stderr[-750:]
+            else:
+                stderr_summary = stderr
             logger.error("FFmpeg simple scene failed:\nstdout: {}\nstderr: {}",
-                          result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
-            raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:] if result.stderr else ''}")
+                          result.stdout[:500], stderr_summary)
+            raise RuntimeError(f"FFmpeg simple scene failed: {stderr_summary}")
 
     def _create_effect_scene(self, media_path, output_path, duration, effect):
         """Create scene with zoom/pan effects using zoompan filter (for image sources)"""
@@ -883,7 +890,7 @@ class VideoProcessor:
             self._create_simple_scene(media_path, output_path, duration, 'static')
             return
 
-        vf = f"zoompan=z={z_expr}:x={x_expr}:y={y_expr}:d={zoompan_frames}:s={self.width}x{self.height}:fps={zoompan_fps},fps={self.fps}"
+        vf = f"zoompan=z={z_expr}:x={x_expr}:y={y_expr}:d={zoompan_frames}:s={self.width}x{self.height}:fps={zoompan_fps},fps={self.fps},format={self.pixel_format}"
 
         cmd = [
             FFMPEG_BIN, '-y',
@@ -901,9 +908,14 @@ class VideoProcessor:
         logger.debug("Zoompan cmd: {}", ' '.join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
+            stderr = result.stderr or ""
+            if len(stderr) > 1500:
+                stderr_summary = stderr[:750] + "\n...\n" + stderr[-750:]
+            else:
+                stderr_summary = stderr
             logger.error("FFmpeg zoompan failed:\nstdout: {}\nstderr: {}",
-                          result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
-            raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:] if result.stderr else ''}")
+                          result.stdout[:500], stderr_summary)
+            raise RuntimeError(f"FFmpeg zoompan failed: {stderr_summary}")
 
     def _create_scene_from_video(self, video_path, output_path, duration, effect):
         """Create a scene clip from a video source — trim, scale, and re-encode.
@@ -1012,6 +1024,9 @@ class VideoProcessor:
             filters.append(f"fade=t=in:st=0:d={fade_dur}")
             filters.append(f"fade=t=out:st={duration - fade_dur}:d={fade_dur}")
 
+        # Guarantee even dimensions and encoder-compatible pixel format
+        filters.append(f"scale=trunc(iw/2)*2:trunc(ih/2)*2")
+        filters.append(f"format={self.pixel_format}")
         vf = ','.join(filters)
 
         cmd = [
@@ -1030,12 +1045,18 @@ class VideoProcessor:
 
         logger.info("Video source scene: {}s effect={} src={}",
                      duration, effect_type, os.path.basename(video_path))
-        logger.debug("Video scene cmd: {}", ' '.join(cmd[:12]) + '...')
+        logger.debug("Video scene cmd: {}", ' '.join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
+            stderr = result.stderr or ""
+            # Capture both head and tail of stderr so the root cause isn't truncated
+            if len(stderr) > 1500:
+                stderr_summary = stderr[:750] + "\n...\n" + stderr[-750:]
+            else:
+                stderr_summary = stderr
             logger.error("FFmpeg video scene failed:\nstdout: {}\nstderr: {}",
-                          result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
-            raise RuntimeError(f"FFmpeg video scene failed: {result.stderr[-500:] if result.stderr else ''}")
+                          result.stdout[:500], stderr_summary)
+            raise RuntimeError(f"FFmpeg video scene failed: {stderr_summary}")
 
     def _create_scene_subprocess(self, media_path, output_path, duration, effect):
         """Create scene video with effects using subprocess (fallback)"""
@@ -1051,6 +1072,7 @@ class VideoProcessor:
             vf_filters.append(f"fade=t=in:st=0:d={fade_duration}")
             vf_filters.append(f"fade=t=out:st={duration-fade_duration}:d={fade_duration}")
 
+        vf_filters.append(f"format={self.pixel_format}")
         vf = ','.join(vf_filters)
 
         cmd = [
@@ -1066,12 +1088,17 @@ class VideoProcessor:
             '-preset', self.preset,
             output_path
         ]
-        logger.debug("Subprocess scene cmd: {}", ' '.join(cmd[:10]) + '...')
+        logger.debug("Subprocess scene cmd: {}", ' '.join(cmd))
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
+            stderr = result.stderr or ""
+            if len(stderr) > 1500:
+                stderr_summary = stderr[:750] + "\n...\n" + stderr[-750:]
+            else:
+                stderr_summary = stderr
             logger.error("FFmpeg subprocess scene failed:\nstdout: {}\nstderr: {}",
-                          result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
-            raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:] if result.stderr else ''}")
+                          result.stdout[:500], stderr_summary)
+            raise RuntimeError(f"FFmpeg subprocess scene failed: {stderr_summary}")
 
     def _concat_scenes(self, scene_clips, output_path):
         """Concatenate scene clips into final video"""

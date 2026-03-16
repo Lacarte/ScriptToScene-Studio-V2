@@ -16,3 +16,4 @@ working-assets/
 .mcp.json
 static/dist/
 *.bak
+claude-code-skills/
