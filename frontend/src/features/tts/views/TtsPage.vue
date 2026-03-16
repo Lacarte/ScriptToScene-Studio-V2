@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useTts, VOICE_META, LANG_NAMES, LANG_ORDER } from '../composables/useTts.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
+import { STYLE_NAMES } from '@/shared/data/styleNames.js'
 import VoiceSelector from '../components/VoiceSelector.vue'
 import NowPlaying from '../components/NowPlaying.vue'
 import HistoryCard from '../components/HistoryCard.vue'
@@ -369,6 +370,10 @@ const genButtonLabel = computed(() => {
             Random
           </button>
           <span v-if="lastPickedStory?.type" class="story-type-badge">{{ lastPickedStory.type }}</span>
+        </div>
+        <div v-if="lastPickedStory?.styles?.length" class="story-recommended-styles">
+          <span class="rec-label">Recommended:</span>
+          <span v-for="sid in lastPickedStory.styles" :key="sid" class="rec-style-tag">{{ STYLE_NAMES[sid] || sid }}</span>
         </div>
         <div class="shortcut-hint">
           <kbd>Ctrl</kbd>
@@ -919,5 +924,29 @@ const genButtonLabel = computed(() => {
   background: rgba(167, 139, 250, 0.12);
   color: var(--accent-secondary, #A78BFA);
   white-space: nowrap;
+}
+
+.story-recommended-styles {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.rec-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.rec-style-tag {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
 }
 </style>
