@@ -4,8 +4,14 @@ import { useRouter } from 'vue-router'
 import { usePipeline } from '../composables/usePipeline.js'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
+import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
 
 defineOptions({ name: 'PipelinePage' })
+
+function applyRecommendedStyle(styleId) {
+  const tmpl = templates.value.find(t => t.id === styleId)
+  if (tmpl) style.value = styleId
+}
 
 const router = useRouter()
 const {
@@ -183,6 +189,18 @@ function esc(str) {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="16" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
             Random
           </button>
+          <span v-if="lastPickedStory?.type" class="story-type-badge">{{ lastPickedStory.type }}</span>
+        </div>
+        <div v-if="lastPickedStory?.styles?.length" class="story-recommended-styles">
+          <span class="rec-label">Recommended:</span>
+          <button
+            v-for="sid in lastPickedStory.styles"
+            :key="sid"
+            class="rec-style-tag"
+            :class="{ active: style === sid }"
+            :title="'Apply ' + (templates.find(t => t.id === sid)?.name || sid) + ' style'"
+            @click="applyRecommendedStyle(sid)"
+          >{{ templates.find(t => t.id === sid)?.name || sid }}</button>
         </div>
       </div>
       <textarea
@@ -481,6 +499,54 @@ function esc(str) {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(78, 205, 196, 0.06);
+}
+
+.story-type-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(167, 139, 250, 0.12);
+  color: var(--accent-secondary, #A78BFA);
+  white-space: nowrap;
+}
+
+.story-recommended-styles {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.rec-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.rec-style-tag {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.rec-style-tag:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(78, 205, 196, 0.08);
+}
+
+.rec-style-tag.active {
+  border-color: var(--accent);
+  background: rgba(78, 205, 196, 0.15);
+  color: var(--accent);
 }
 
 /* ---- Controls Strip ---- */

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useTts, VOICE_META, LANG_NAMES, LANG_ORDER } from '../composables/useTts.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
 import VoiceSelector from '../components/VoiceSelector.vue'
 import NowPlaying from '../components/NowPlaying.vue'
 import HistoryCard from '../components/HistoryCard.vue'
@@ -367,6 +368,7 @@ const genButtonLabel = computed(() => {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
             Random
           </button>
+          <span v-if="lastPickedStory?.type" class="story-type-badge">{{ lastPickedStory.type }}</span>
         </div>
         <div class="shortcut-hint">
           <kbd>Ctrl</kbd>
@@ -907,5 +909,15 @@ const genButtonLabel = computed(() => {
   .prompt-actions {
     width: 100%;
   }
+}
+
+.story-type-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(167, 139, 250, 0.12);
+  color: var(--accent-secondary, #A78BFA);
+  white-space: nowrap;
 }
 </style>
