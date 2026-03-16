@@ -1601,12 +1601,14 @@ class VideoProcessor:
 
         def _line_x_expr():
             # Clamp so text stays within safe area even when line-scaled
+            # NOTE: expressions with commas MUST be single-quoted in filter_complex_script
+            # or FFmpeg interprets the comma as a filter chain separator.
             r_bound = self.width - safe_pad_x
             if text_align == 'left':
-                return f"min({anchor_x},{r_bound}-text_w)"
+                return f"'min({anchor_x},{r_bound}-text_w)'"
             if text_align == 'right':
-                return f"max({safe_pad_x},{anchor_x}-text_w)"
-            return f"max({safe_pad_x},min({r_bound}-text_w,{anchor_x}-text_w/2))"
+                return f"'max({safe_pad_x},{anchor_x}-text_w)'"
+            return f"'max({safe_pad_x},min({r_bound}-text_w,{anchor_x}-text_w/2))'"
 
         def _line_scale_for(entry, line_no):
             if not random_line_emphasis:

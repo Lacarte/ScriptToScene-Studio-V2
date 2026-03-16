@@ -14,6 +14,7 @@ const S = {
   lastPoll: 0, projectId: null, arguments: '', aspectRatio: '9:16', grokMode: 'video', grokQuality: '480p', grokDuration: '6s',
   scenes: {}, sentScenes: {},
   pollInterval: 5000,
+  jobComplete: false,
   _fetchErrors: 0,
   typing: {
     active: false,
@@ -733,6 +734,7 @@ root.innerHTML = `
     </div>
     <div class="sts-foot-btns">
       <button class="sts-btn sts-btn-ghost" id="sts-retry-btn" style="display:none">Retry</button>
+      <button class="sts-btn sts-btn-ghost" id="sts-redownload-btn" style="display:none">Redownload</button>
       <button class="sts-btn sts-btn-primary" id="sts-action-btn">Start Typing</button>
     </div>
   </div>
@@ -820,6 +822,11 @@ $id('sts-retry-btn').addEventListener('click', () => {
     syncNow();
   }
   render();
+});
+
+// Redownload button - re-downloads failed/missing assets from server
+$id('sts-redownload-btn').addEventListener('click', () => {
+  redownload();
 });
 
 // Click error rows to re-queue individual prompts
@@ -1090,14 +1097,17 @@ function render() {
     }
   }
 
-  // Action button + retry
+  // Action button + retry + redownload
   const btn = $id('sts-action-btn');
   const retryBtn = $id('sts-retry-btn');
+  const redownloadBtn = $id('sts-redownload-btn');
   const hasTypingErrors = S.typing.queue.some(q => q.status === 'error');
   const hasSyncErrors = Object.values(S.scenes).some(sc => sc.status === 'error');
+  const jobDone = isJobComplete();
 
   if (S.activeTab === 'typing') {
     retryBtn.style.display = (hasTypingErrors && !S.typing.active) ? '' : 'none';
+    if (redownloadBtn) redownloadBtn.style.display = 'none';
     if (S.typing.active) {
       btn.textContent = 'Stop';
       btn.className = 'sts-btn sts-btn-danger';
@@ -1107,6 +1117,7 @@ function render() {
     }
   } else {
     retryBtn.style.display = hasSyncErrors ? '' : 'none';
+    if (redownloadBtn) redownloadBtn.style.display = (jobDone && hasSyncErrors) ? '' : 'none';
     btn.textContent = 'Sync Saved';
     btn.className = 'sts-btn sts-btn-primary';
   }
@@ -1923,7 +1934,15 @@ async function typeIntoGrok(text) {
 }
 
 // â”€â”€â”€ API â”€â”€â”€
+function isJobComplete() {
+  if (!S.projectId) return false;
+  const scenes = Object.values(S.scenes);
+  return scenes.length > 0 && scenes.every(sc => sc.status === 'downloaded' || sc.status === 'error');
+}
+
 async function fetchPending() {
+  // Don't re-fetch when all scenes are already downloaded/errored
+  if (isJobComplete()) return;
   try {
     const r = await _fetch(S.studioUrl + '/api/assets/grabber/pending');
     S.connected = true;
@@ -2146,10 +2165,39 @@ function highlightBlock(block) {
 // No longer needed: goBackToSaved, waitForSavedPage, readPostPage, scrollAndCollectCards
 // Sync now uses the thumbnail sidebar on the current post page
 
+async function redownload() {
+  if (!S.projectId) { console.log('No project to redownload'); return; }
+  try {
+    const r = await _fetch(S.studioUrl + '/api/assets/redownload/' + encodeURIComponent(S.projectId), { method: 'POST' });
+    S.connected = true;
+    if (r.ok) {
+      const d = await r.json();
+      console.log('Redownload started:', d);
+      // Reset errored/pending scenes so polling picks up new status
+      for (const sc of Object.values(S.scenes)) {
+        if (sc.status === 'error' || sc.status === 'pending') {
+          sc.status = 'processing';
+        }
+      }
+      S.jobComplete = false;
+      render();
+    } else {
+      console.warn('Redownload failed:', r.status);
+    }
+  } catch (e) { console.error('Redownload error:', e); S.connected = false; }
+}
+
 async function poll() {
   S.lastPoll = Date.now();
   await fetchPending();
   await fetchStatus();
+
+  // Check if job just completed
+  if (isJobComplete() && !S.jobComplete) {
+    S.jobComplete = true;
+    console.log('All scenes downloaded/errored — stopping active polling');
+  }
+
   render();
 
   // Auto-start typing when enabled and there are queued prompts
@@ -2161,8 +2209,10 @@ async function poll() {
     }
   }
 
-  // Adaptive poll interval: exponential backoff on disconnect (5s → 10s → 30s)
-  if (S.connected) {
+  // Adaptive poll interval
+  if (S.jobComplete) {
+    S.pollInterval = 60000; // Slow poll when done (1min)
+  } else if (S.connected) {
     S.pollInterval = 5000;
   } else {
     if (S.pollInterval <= 5000) S.pollInterval = 10000;

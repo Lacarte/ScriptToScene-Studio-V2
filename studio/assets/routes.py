@@ -305,7 +305,7 @@ def grabber_pending():
     with grabber_jobs_lock:
         jobs_snapshot = list(grabber_jobs.values())
     for job in jobs_snapshot:
-        if job["status"] in ("waiting", "grabbing"):
+        if job["status"] == "waiting":
             if not latest or job["created_at"] > latest["created_at"]:
                 latest = job
 

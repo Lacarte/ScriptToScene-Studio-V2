@@ -86,7 +86,7 @@ export function initEditorInlineScripts() {
 
         async function editorImportAssetProject(projectId) {
             const list = document.getElementById('asset-picker-list');
-            list.innerHTML = '<p style="text-align:center;color:var(--text-muted,#666);font-size:12px;padding:24px 0">Loading project...</p>';
+            if (list) list.innerHTML = '<p style="text-align:center;color:var(--text-muted,#666);font-size:12px;padding:24px 0">Loading project...</p>';
 
             try {
                 // Fetch asset project, scene data, and captions in parallel
