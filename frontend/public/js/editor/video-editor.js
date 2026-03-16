@@ -5189,6 +5189,16 @@ function renderAllAudioTracks() {
         });
     });
 
+    // Wire up empty-track placeholders — click to show add-track menu
+    container.querySelectorAll('.audio-placeholder').forEach(el => {
+        el.style.cursor = 'pointer';
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const addTrackRow = document.getElementById('add-track-row');
+            if (addTrackRow) showAddTrackMenu(addTrackRow);
+        });
+    });
+
     // Wire up clip click to select audio track for detail panel
     container.querySelectorAll('.audio-clip-universal').forEach(clip => {
         clip.addEventListener('click', (e) => {
