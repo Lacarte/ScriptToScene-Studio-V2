@@ -532,6 +532,24 @@ SCENE_STYLE_TEMPLATES = [
             "Style: interactive story aesthetic, Bandersnatch meets moral dilemma TikToks — suspense of choice, weight of consequence."
         ),
     },
+    {
+        "id": "lofi_pixel",
+        "name": "Lo-Fi Cozy Pixel",
+        "description": "Low-resolution pixel art, cozy scenes, retro game aesthetics, warm nostalgia",
+        "color": "#7DD3FC",
+        "style_prompt": (
+            "Generate image prompts in low-resolution pixel art animation style with cozy, lo-fi atmosphere. "
+            "Characters and environments should be rendered as chunky pixel sprites — 16-bit to 32-bit era aesthetics. "
+            "Use warm, muted color palettes: soft amber, dusty rose, sage green, lavender, warm cream. "
+            "Scenes should feel intimate and cozy: rainy window with tea, cat on a desk, sunset rooftop, record player corner. "
+            "Include lo-fi details: steam rising from cups, rain streaks on glass, flickering screen glow, gentle leaf falling. "
+            "Lighting: warm lamplight, golden hour pixel gradients, neon sign reflections, moonlit bedroom. "
+            "Environments: small bedrooms with fairy lights, bookshop interiors, ramen stalls, train window views, rooftop gardens. "
+            "Animation cues: describe subtle looping motion — blinking cursor, swaying plants, drifting clouds, flickering candle. "
+            "Composition: side-view or 3/4 isometric perspective, cozy framing with detailed pixel interiors. "
+            "Style: lo-fi hip hop stream backgrounds meets Stardew Valley — pixelated warmth, gentle nostalgia, quiet comfort."
+        ),
+    },
 ]
 
 # Quick lookup by ID
