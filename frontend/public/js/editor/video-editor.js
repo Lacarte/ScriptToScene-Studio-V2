@@ -6441,7 +6441,8 @@ function setupCaptionControls() {
                 EditorState.preview.setCaptions(EditorState.captionData.captions, EditorState.captionData.style);
             }
             _saveCaptionsToStorage();
-            _debouncedServerSave();
+            // Immediate save — preset change is a significant action
+            saveProjectToServer();
             recordEdit(`Change caption preset to ${presetSel.value}`, 'captions', 'style', oldStyle, { ...EditorState.captionData.style });
         }
     });
