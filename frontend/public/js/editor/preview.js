@@ -1330,6 +1330,22 @@ export class CanvasPreview {
             return anchorX - lineWidth / 2;
         };
 
+        // Alignment-aware max width — prevent text from extending past safe area
+        // based on anchor position and text alignment.
+        const alignMaxWidth = (() => {
+            if (textAlign === 'left') return Math.max(120, this.width - anchorX - sideSafePx);
+            if (textAlign === 'right') return Math.max(120, anchorX - sideSafePx);
+            // center: limited by whichever side has less room
+            return Math.max(120, Math.min(anchorX - sideSafePx, this.width - anchorX - sideSafePx) * 2);
+        })();
+
+        // Reserve room for stroke and random-line / word scaling so the
+        // rendered result never exceeds the safe area.
+        const hasStroke = strokeColor && strokeColor !== 'none' && strokeWidth > 0;
+        const strokePad = hasStroke ? strokeWidth * 2 : 0;
+        const maxLineScale = randomLineEmphasis ? randomLineScale : 1;
+        const safeMaxWidth = (raw) => Math.max(80, (raw - strokePad) / maxLineScale);
+
         // Single-line mode: wrap only if text exceeds caption-safe width
         const isSingleLine = (
             style.preset === 'single_line'
@@ -1342,7 +1358,7 @@ export class CanvasPreview {
         let renderFontSize = fontSize;
 
         if (isSingleLine) {
-            const maxWidth = maxCaptionWidth;
+            const maxWidth = safeMaxWidth(Math.min(maxCaptionWidth, alignMaxWidth));
             // Set font before measuring
             this.ctx.font = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
             const measuredWidth = this._measureTextWidth(text, letterSpacing);
@@ -1352,6 +1368,7 @@ export class CanvasPreview {
                 renderFontSize = Math.max(minFontSize, fontSize * fitScale);
                 this.ctx.font = `${fontWeight} ${renderFontSize}px "${fontFamily}", sans-serif`;
             }
+            // After scaling, if text still exceeds width, wrap it
             const finalSingleWidth = this._measureTextWidth(text, letterSpacing);
             lines = finalSingleWidth > maxWidth
                 ? this._wrapText(text, maxWidth, letterSpacing)
@@ -1361,7 +1378,7 @@ export class CanvasPreview {
             totalHeight = lines.length * lineHeight;
             baseY = this.height * posY - (totalHeight - lineHeight) / 2;
         } else {
-            const maxWidth = Math.min(this.width * 0.85, maxCaptionWidth);
+            const maxWidth = safeMaxWidth(Math.min(this.width * 0.85, maxCaptionWidth, alignMaxWidth));
             if (wordFontMix) {
                 lines = wrapWordsPerLine > 0
                     ? this._wrapTextByWordCountMixed(text, wrapWordsPerLine, maxWidth, letterSpacing, renderFontSize, fontFamily, fontWeight, wordFontFamilies, wordFontWeights, wordFontStyles)
@@ -1559,7 +1576,9 @@ export class CanvasPreview {
                     }
                     const totalWordsW = wordWidths.reduce((sum, w) => sum + w, 0);
                     const totalSpacesW = spaceWidths.reduce((sum, w) => sum + w, 0);
-                    let drawX = lineStartX(totalWordsW + totalSpacesW);
+                    const mixedLineW = totalWordsW + totalSpacesW;
+                    let drawX = lineStartX(mixedLineW);
+                    drawX = Math.max(sideSafePx, Math.min(this.width - sideSafePx - mixedLineW, drawX));
 
                     for (let w = 0; w < lineWords.length; w++) {
                         const globalWordIdx = lineWordOffset + w;
@@ -1613,6 +1632,8 @@ export class CanvasPreview {
                     const totalWordsW = wordWidths.reduce((sum, w) => sum + w, 0);
                     const fullLineScaledW = totalWordsW + spaceW * Math.max(0, lineWords.length - 1);
                     drawX = lineStartX(fullLineScaledW);
+                    // Clamp so scaled line stays within safe area
+                    drawX = Math.max(sideSafePx, Math.min(this.width - sideSafePx - fullLineScaledW, drawX));
 
                     for (let w = 0; w < lineWords.length; w++) {
                         const globalWordIdx = wordOffset + w;
@@ -1679,6 +1700,7 @@ export class CanvasPreview {
                         const totalWordsW = wordWidths.reduce((sum, w) => sum + w, 0);
                         const fullLineW = totalWordsW + spaceW * Math.max(0, lineWords.length - 1);
                         let drawX = lineStartX(fullLineW);
+                        drawX = Math.max(sideSafePx, Math.min(this.width - sideSafePx - fullLineW, drawX));
 
                         this.ctx.textAlign = 'left';
                         this.ctx.fillStyle = color;
@@ -1888,9 +1910,10 @@ export class CanvasPreview {
     }
 
     _measureTextWidth(text, letterSpacing = 0) {
-        const width = this.ctx.measureText(text).width;
-        if (!letterSpacing || !text) return width;
-        return width + Math.max(0, (text.length - 1) * letterSpacing);
+        // ctx.letterSpacing is set on the canvas context before any measurement,
+        // so ctx.measureText() already includes letter-spacing. No manual
+        // compensation needed — adding it again would double-count.
+        return this.ctx.measureText(text).width;
     }
 
     _hashToUnit(str) {

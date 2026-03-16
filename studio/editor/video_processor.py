@@ -1587,16 +1587,26 @@ class VideoProcessor:
         safe_pad_x = max(24, int(self.width * 0.05))
         anchor_x = int((position_x / 100.0) * self.width)
         anchor_x = max(safe_pad_x, min(self.width - safe_pad_x, anchor_x))
-        max_text_width = int(self.width * 0.85)
-        max_single_line_width = int(self.width * 0.90)
         base_line_height = int(font_size * 1.25)
 
+        # Reserve room for stroke and random-line scaling so the rendered
+        # result never exceeds the safe area.
+        _stroke_pad = int(stroke_width * 2) if (stroke_color and stroke_color != 'none' and stroke_width) else 0
+        _max_line_scale = random_line_scale if random_line_emphasis else 1.0
+        def _safe_max(raw):
+            return max(80, int((raw - _stroke_pad) / _max_line_scale))
+
+        max_text_width = _safe_max(int(self.width * 0.85))
+        max_single_line_width = _safe_max(int(self.width * 0.90))
+
         def _line_x_expr():
+            # Clamp so text stays within safe area even when line-scaled
+            r_bound = self.width - safe_pad_x
             if text_align == 'left':
-                return str(anchor_x)
+                return f"min({anchor_x},{r_bound}-text_w)"
             if text_align == 'right':
-                return f"{anchor_x}-text_w"
-            return f"{anchor_x}-text_w/2"
+                return f"max({safe_pad_x},{anchor_x}-text_w)"
+            return f"max({safe_pad_x},min({r_bound}-text_w,{anchor_x}-text_w/2))"
 
         def _line_scale_for(entry, line_no):
             if not random_line_emphasis:
@@ -1617,9 +1627,9 @@ class VideoProcessor:
 
         def _wrap_limit_for_align():
             if text_align == 'left':
-                return max(120, self.width - anchor_x - safe_pad_x)
+                return _safe_max(max(120, self.width - anchor_x - safe_pad_x))
             if text_align == 'right':
-                return max(120, anchor_x - safe_pad_x)
+                return _safe_max(max(120, anchor_x - safe_pad_x))
             return max_text_width
 
         wrap_limit_width = _wrap_limit_for_align()
@@ -1696,7 +1706,12 @@ class VideoProcessor:
                     min_size = max(24, int(font_size * 0.72))
                     render_font_size = max(min_size, int(font_size * fit_scale))
                 line_height = int(render_font_size * 1.1 * (random_line_scale if random_line_emphasis else 1.0))
-                lines = [text]
+                # After scaling, if text still exceeds width, wrap it
+                final_w = _measure_text(text, render_font_size)
+                if final_w > max_single_line_width:
+                    lines = self._wrap_caption_text(text, font_path, render_font_size, max_single_line_width)
+                else:
+                    lines = [text]
             else:
                 # Word-wrap text to fit within video width
                 if wrap_words_per_line > 0:
@@ -1742,6 +1757,8 @@ class VideoProcessor:
                     # Calculate x positions for each word in this line
                     full_line_w = _measure_text(line_text, render_font_size)
                     line_start_x = _line_start_x(full_line_w)
+                    # Clamp so line stays within safe area
+                    line_start_x = max(safe_pad_x, min(self.width - safe_pad_x - full_line_w, line_start_x))
                     space_w = _measure_text(' ', render_font_size)
 
                     word_x = line_start_x
@@ -1842,6 +1859,7 @@ class VideoProcessor:
                         line_words = line_text.split(' ')
                         full_line_w = _measure_text(line_text, line_font_size)
                         line_start_x = _line_start_x(full_line_w)
+                        line_start_x = max(safe_pad_x, min(self.width - safe_pad_x - full_line_w, line_start_x))
                         space_w = _measure_text(' ', line_font_size)
 
                         word_x = line_start_x
