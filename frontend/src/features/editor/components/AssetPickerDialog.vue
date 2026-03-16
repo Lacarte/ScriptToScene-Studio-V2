@@ -16,8 +16,8 @@ function onClose() {
       <div
           style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border, #2a2a3e)">
         <div>
-          <h3 style="margin:0;font-size:14px;font-weight:600;color:var(--text, #e0e0e0)">Import from Assets</h3>
-          <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted, #666)">Select a project to load into the editor</p>
+          <h3 style="margin:0;font-size:14px;font-weight:600;color:var(--text, #e0e0e0)">Import Project</h3>
+          <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted, #666)">Load a saved editor project or asset project</p>
         </div>
         <button @click="onClose"
             style="background:none;border:none;cursor:pointer;color:var(--text-muted, #666);padding:4px;border-radius:4px;transition:color 0.15s"

@@ -99,28 +99,13 @@ async function init(containerEl) {
   }
 
   if (typeof window.initEditor === 'function') {
-    // Set up the callback the editor uses to signal readiness
-    window._onEditorReady = (state) => {
-      if (state === 'ready') {
-        _syncBridgeData()
-      }
-    }
+    // initEditor() handles its own boot flow (load from storage / show picker).
+    // Do NOT call editorLoadScenes again via _onEditorReady — that causes a
+    // double-bootstrap race where the second run conflicts with the first.
     window.initEditor()
     initialized.value = true
   } else {
     console.warn('[useEditor] Editor module not available')
-  }
-}
-
-/**
- * Sync scene / caption data into the running editor.
- */
-function _syncBridgeData() {
-  const data = bootProject.value || getStoredBootProject()
-  if (!data) return
-
-  if (typeof window.editorLoadScenes === 'function') {
-    window.editorLoadScenes(data)
   }
 }
 

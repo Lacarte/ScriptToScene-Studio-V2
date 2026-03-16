@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ExportCard from '../components/ExportCard.vue'
+import DeleteExportDialog from '../components/DeleteExportDialog.vue'
 import { useExportLibrary, aspectRatioFromDimensions } from '../composables/useExportLibrary.js'
 import { formatBytes, timeAgo, fmtDuration } from '@/shared/utils/format.js'
 
@@ -33,6 +34,8 @@ const {
 const cardRefs = ref([])
 const highlightedItemKey = ref('')
 const focusedQueryKey = ref('')
+const pendingTrashItem = ref(null)
+const trashing = ref(false)
 let highlightTimer = null
 
 function setCardRef(el, idx) {
@@ -43,6 +46,31 @@ function handlePlay(videoEl) {
   for (const card of cardRefs.value) {
     if (card && card.videoEl !== videoEl) card.stopPlayback()
   }
+}
+
+function handleTrash(item) {
+  pendingTrashItem.value = item
+}
+
+function closeTrashDialog() {
+  if (trashing.value) return
+  pendingTrashItem.value = null
+}
+
+async function confirmTrash() {
+  if (!pendingTrashItem.value || trashing.value) return
+
+  trashing.value = true
+  const item = pendingTrashItem.value
+  const deleted = await trashVideo(item)
+  trashing.value = false
+  if (!deleted) return
+
+  const key = itemKey(item)
+  if (highlightedItemKey.value === key) {
+    highlightedItemKey.value = ''
+  }
+  pendingTrashItem.value = null
 }
 
 function clearFilters() {
@@ -250,9 +278,17 @@ const extendedStats = computed(() => {
         @play="handlePlay"
         @download-video="downloadVideo"
         @download-zip="downloadZip"
-        @trash="trashVideo"
+        @trash="handleTrash"
       />
     </div>
+
+    <DeleteExportDialog
+      :visible="!!pendingTrashItem"
+      :item="pendingTrashItem"
+      :deleting="trashing"
+      @close="closeTrashDialog"
+      @confirm="confirmTrash"
+    />
   </div>
 </template>
 

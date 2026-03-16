@@ -3547,6 +3547,22 @@ async function init() {
             await loadProjectFromServer(lastSavedProjectId);
             return;
         }
+        // Try to auto-load the most recent saved project before showing the import overlay
+        if (editorEntrySource !== 'menu') {
+            try {
+                const savedProjects = await fetch('/api/editor/projects').then(r => r.json()).catch(() => []);
+                if (savedProjects && savedProjects.length > 0) {
+                    savedProjects.sort((a, b) => new Date(b.saved_at || 0) - new Date(a.saved_at || 0));
+                    const mostRecent = savedProjects[0];
+                    if (mostRecent.project_id) {
+                        await loadProjectFromServer(mostRecent.project_id);
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not auto-load recent project:', e);
+            }
+        }
         showNoDataOverlay(true);
         return;
     }
@@ -4087,8 +4103,6 @@ function showNoDataOverlay(showProjects = true) {
 
 function _loadNoDataProjects() {
     const listEl = document.getElementById('no-data-asset-items');
-    const listContainer = document.getElementById('no-data-asset-list');
-    const emptyEl = document.getElementById('no-data-empty');
     if (!listEl) return;
 
     listEl.innerHTML = '<p style="text-align:center;color:var(--text-muted,#666);font-size:12px;padding:24px 0">Loading...</p>';
@@ -4098,6 +4112,9 @@ function _loadNoDataProjects() {
         fetch('/api/assets/history').then(r => r.json()).catch(() => []),
         fetch('/api/editor/projects').then(r => r.json()).catch(() => [])
     ]).then(([assetProjects, savedProjects]) => {
+        // Re-query elements inside callback (Vue may have re-rendered)
+        const listContainer = document.getElementById('no-data-asset-list');
+        const emptyEl = document.getElementById('no-data-empty');
         if ((!assetProjects || !assetProjects.length) && (!savedProjects || !savedProjects.length)) {
             if (listContainer) listContainer.style.display = 'none';
             if (emptyEl) emptyEl.style.display = '';
@@ -4106,32 +4123,66 @@ function _loadNoDataProjects() {
         if (listContainer) listContainer.style.display = '';
         if (emptyEl) emptyEl.style.display = 'none';
 
-        // Build saved project lookup by project_id
+        const assetMap = {};
         const savedMap = {};
+        for (const ap of (assetProjects || [])) {
+            if (ap?.project_id) assetMap[ap.project_id] = ap;
+        }
         for (const sp of (savedProjects || [])) {
-            savedMap[sp.project_id] = sp;
+            if (sp?.project_id) savedMap[sp.project_id] = sp;
         }
 
-        const statusColors = { done: '#4ECDC4', downloading: '#FFB347', error: '#FF6B6B', waiting: '#8B8B8B', grabbing: '#A78BFA' };
+        const statusColors = {
+            done: '#4ECDC4',
+            saved: '#4ECDC4',
+            edited: '#4ECDC4',
+            downloading: '#FFB347',
+            error: '#FF6B6B',
+            waiting: '#8B8B8B',
+            grabbing: '#A78BFA'
+        };
         const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
         const timeAgo = ts => {
             if (!ts) return '';
-            const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+            const parsed = new Date(ts).getTime();
+            if (!Number.isFinite(parsed)) return '';
+            const diff = (Date.now() - parsed) / 1000;
             if (diff < 60) return 'just now';
             if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
             if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
             return Math.floor(diff / 86400) + 'd ago';
         };
+        const sortTime = p => {
+            const parsed = new Date(p?.saved_at || p?.created_at || p?.timestamp || '').getTime();
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
 
-        const projects = assetProjects || [];
+        const projects = [];
+        for (const projectId of new Set([...Object.keys(assetMap), ...Object.keys(savedMap)])) {
+            const asset = assetMap[projectId] || {};
+            const saved = savedMap[projectId] || null;
+            projects.push({
+                ...asset,
+                project_id: projectId,
+                project_name: saved?.project_name || asset.project_name || projectId,
+                scene_count: saved?.scene_count || asset.scene_count || 0,
+                status: asset.status || (saved ? (saved.has_wip ? 'edited' : 'saved') : 'waiting'),
+                saved_at: saved?.saved_at || '',
+                preview: asset.preview || '',
+                ready_count: asset.ready_count || 0,
+                disk_files: asset.disk_files || asset.total_files || 0,
+                _saved: saved,
+            });
+        }
+        projects.sort((a, b) => sortTime(b) - sortTime(a));
 
         listEl.innerHTML = projects.map(p => {
             const sc = statusColors[p.status] || '#8B8B8B';
             const files = p.disk_files || p.total_files || 0;
             const ready = p.ready_count || 0;
             const scenes = p.scene_count || 0;
-            const time = timeAgo(p.created_at || p.timestamp);
-            const saved = savedMap[p.project_id];
+            const time = timeAgo(p.saved_at || p.created_at || p.timestamp);
+            const saved = p._saved;
             const isSaved = !!saved;
 
             // Saved projects load from server save; others import from assets
@@ -4144,7 +4195,7 @@ function _loadNoDataProjects() {
                 : '';
 
             const savedTime = isSaved && saved.saved_at
-                ? `<span style="color:var(--accent,#4ECDC4);opacity:0.8">edited ${timeAgo(saved.saved_at)}</span>`
+                ? `<span style="color:var(--accent,#4ECDC4);opacity:0.8">${saved.has_wip ? 'edited ' : 'saved '}${timeAgo(saved.saved_at)}</span>`
                 : '';
 
             return `
@@ -4184,6 +4235,7 @@ function _loadNoDataProjects() {
  * Hide the no data overlay
  */
 function hideNoDataOverlay() {
+    if (window._vueHideNoData) window._vueHideNoData();
     elements.noDataOverlay?.classList.add('hidden');
     if (typeof window._vueHideNoData === 'function') window._vueHideNoData();
 }
@@ -10228,9 +10280,21 @@ window.initEditor = async function () {
 
 /**
  * Load scenes data directly into the editor (replaces postMessage bridge).
+ * Uses full bootstrap to load media, hide overlays, and validate.
  */
 window.editorLoadScenes = function (data) {
-    if (data) loadProjectData(data);
+    if (!data) return;
+    _resetEditorForNewProject();
+    bootstrapProjectIntoEditor(data, {
+        initialMessage: 'Loading project...',
+        readyMessage: 'Project loaded',
+        failureMessage: 'Failed to load project',
+        showNoDataOnError: true,
+    }).catch(e => {
+        if (e.message !== 'Editor load superseded by a newer request') {
+            console.warn('editorLoadScenes bootstrap failed:', e);
+        }
+    });
 };
 
 /**

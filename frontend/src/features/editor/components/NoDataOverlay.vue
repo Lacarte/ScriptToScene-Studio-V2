@@ -1,6 +1,9 @@
 <script setup>
+import { useRouter } from 'vue-router'
 defineOptions({ name: 'NoDataOverlay' })
 defineProps({ visible: Boolean })
+const router = useRouter()
+function goBack() { router.push('/pipeline') }
 </script>
 
 <template>
@@ -13,6 +16,12 @@ defineProps({ visible: Boolean })
       </svg>
       <h2>No Assets Available</h2>
       <p>Import a project from the Asset Manager to get started.</p>
+      <button class="no-data-back-btn" @click="goBack">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M19 12H5" /><path d="M12 19l-7-7 7-7" />
+        </svg>
+        Back to Studio
+      </button>
     </div>
     <div style="max-width:440px;width:100%;padding:0 20px">
       <div id="no-data-asset-list"
@@ -28,3 +37,25 @@ defineProps({ visible: Boolean })
     </div>
   </div>
 </template>
+
+<style scoped>
+.no-data-back-btn {
+  margin-top: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: rgba(78, 205, 196, 0.1);
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: 8px;
+  color: var(--accent, #4ECDC4);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.no-data-back-btn:hover {
+  background: rgba(78, 205, 196, 0.2);
+  border-color: var(--accent, #4ECDC4);
+}
+</style>

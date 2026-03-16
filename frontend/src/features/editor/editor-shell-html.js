@@ -4,7 +4,7 @@ export const EDITOR_SHELL_HTML = `
     <header class="app-header">
         <div class="header-left">
             <a href="#" onclick="event.preventDefault();editorShowAssetPicker()" class="back-link"
-                title="Import from Assets">
+                title="Import Project">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M19 12H5" />
                     <path d="M12 19l-7-7 7-7" />

@@ -441,7 +441,7 @@ class VideoProcessor:
                 [FFPROBE_BIN, '-v', 'error',
                  '-show_entries', 'format=duration',
                  '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, encoding='utf-8', errors='replace', timeout=10,
             )
             return float(r.stdout.strip())
         except Exception:
@@ -500,7 +500,7 @@ class VideoProcessor:
             '-t', f'{video_dur:.3f}',
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             logger.error("Scene text overlay failed: {}", result.stderr[-700:] if result.stderr else '')
             shutil.copy2(input_path, output_path)
@@ -657,7 +657,7 @@ class VideoProcessor:
             '-c:a', 'copy',
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             logger.error("Overlay compositing failed: {}", result.stderr[-500:] if result.stderr else '')
             shutil.copy2(input_path, output_path)
@@ -724,7 +724,7 @@ class VideoProcessor:
             '-shortest',
             output_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=900)
         if result.returncode != 0:
             logger.error("White-dot grain overlay failed: {}", result.stderr[-700:] if result.stderr else '')
             shutil.copy2(input_path, output_path)
@@ -766,7 +766,7 @@ class VideoProcessor:
             output_path
         ]
         logger.debug("subprocess: image->video cmd={}", ' '.join(cmd[:8]) + '...')
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=300)
         if result.returncode != 0:
             logger.error("FFmpeg image->video failed: {}", result.stderr[:500])
             raise RuntimeError(f"FFmpeg failed: {result.stderr[:200]}")
@@ -813,7 +813,7 @@ class VideoProcessor:
         ]
 
         logger.debug("Simple scene cmd: {}", ' '.join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=300)
         if result.returncode != 0:
             stderr = result.stderr or ""
             if len(stderr) > 1500:
@@ -906,7 +906,7 @@ class VideoProcessor:
 
         logger.info("Zoompan effect: {} {}s", effect_type, duration)
         logger.debug("Zoompan cmd: {}", ' '.join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=300)
         if result.returncode != 0:
             stderr = result.stderr or ""
             if len(stderr) > 1500:
@@ -1046,7 +1046,7 @@ class VideoProcessor:
         logger.info("Video source scene: {}s effect={} src={}",
                      duration, effect_type, os.path.basename(video_path))
         logger.debug("Video scene cmd: {}", ' '.join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=300)
         if result.returncode != 0:
             stderr = result.stderr or ""
             # Capture both head and tail of stderr so the root cause isn't truncated
@@ -1089,7 +1089,7 @@ class VideoProcessor:
             output_path
         ]
         logger.debug("Subprocess scene cmd: {}", ' '.join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=300)
         if result.returncode != 0:
             stderr = result.stderr or ""
             if len(stderr) > 1500:
@@ -1314,7 +1314,7 @@ class VideoProcessor:
                 output_path
             ]
             logger.debug("Concat cmd: {}", ' '.join(cmd))
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
             if result.returncode != 0:
                 logger.error("FFmpeg concat (no audio) failed:\nstderr: {}", result.stderr[-1000:] if result.stderr else "")
                 raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:] if result.stderr else ''}")
@@ -1348,7 +1348,7 @@ class VideoProcessor:
         logger.info("Concat with audio: {} inputs, filter_complex={}",
                      2 + (1 if bgmusic_path else 0), bool(filter_str))
         logger.debug("Full concat cmd: {}", ' '.join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
             logger.error("FFmpeg concat failed:\nstdout: {}\nstderr: {}",
                           result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
@@ -1642,7 +1642,10 @@ class VideoProcessor:
             return (t.replace("\\", "\\\\")
                      .replace("'", "\u2019")
                      .replace(":", "\\:")
-                     .replace("%", "%%"))
+                     .replace("%", "%%")
+                     .replace("[", "\\[")
+                     .replace("]", "\\]")
+                     .replace(";", "\\;"))
 
         def _shadow_suffix():
             if shadow_color and shadow_color not in ('none', 'transparent'):
@@ -2004,11 +2007,15 @@ class VideoProcessor:
                 ]
 
             logger.debug("Caption cmd: {} ... (vf file={})", ' '.join(cmd[:6]), vf_file)
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
             if result.returncode != 0:
-                logger.error("Caption burn-in failed:\nstdout: {}\nstderr: {}",
-                              result.stdout[:300], result.stderr[-1000:] if result.stderr else "")
-                raise RuntimeError(f"Caption burn-in failed: {result.stderr[-500:] if result.stderr else ''}")
+                stderr_msg = (result.stderr or '').strip()
+                logger.error("Caption burn-in failed (rc={}):\nstdout: {}\nstderr: {}",
+                              result.returncode, (result.stdout or '')[:300], stderr_msg[-1500:] if stderr_msg else "(empty)")
+                if not stderr_msg and vf_file and os.path.exists(vf_file):
+                    logger.debug("Filter script preserved for debugging: {}", vf_file)
+                    vf_file = None  # prevent cleanup so we can inspect
+                raise RuntimeError(f"Caption burn-in failed: {stderr_msg[-500:] if stderr_msg else f'ffmpeg exited with code {result.returncode}'}")
         finally:
             if vf_file and os.path.exists(vf_file):
                 try:
