@@ -5618,26 +5618,40 @@ function updateProjectInfo() {
 // ---------------------------------------------------------------------------
 
 function openShareDialog() {
-    const modal = document.getElementById('project-share-modal');
-    if (!modal) return;
+    // Tell Vue to render the modal (v-if="visible")
+    if (window._vueShowShareDialog) {
+        window._vueShowShareDialog();
+    }
 
-    // Populate project info
-    const nameEl = document.getElementById('share-project-name');
-    const metaEl = document.getElementById('share-project-meta');
-    if (nameEl) nameEl.textContent = EditorState.project?.name || EditorState.project?.id || '';
-    const isWip = EditorState.project?.loadedFrom === 'wip';
-    const wipBadge = isWip ? ' <span style="opacity:0.3">/</span> <span style="color:#FFB347;font-weight:600">edited</span>' : '';
-    if (metaEl) metaEl.innerHTML = `<span style="color:#4ECDC4">${EditorState.scenes.length} scenes</span> <span style="opacity:0.3">/</span> ${formatTimestamp(getTotalDuration())}${wipBadge}`;
+    // Vue renders async — wait one frame for the DOM to exist
+    requestAnimationFrame(() => {
+        const modal = document.getElementById('project-share-modal');
+        if (!modal) return;
 
-    // Reset progress indicators
-    _resetShareStatus('export');
-    _resetShareStatus('import');
+        // Bind inner-element listeners (fresh DOM from v-if)
+        _bindShareDialogInner();
 
-    modal.classList.add('active');
+        // Populate project info
+        const nameEl = document.getElementById('share-project-name');
+        const metaEl = document.getElementById('share-project-meta');
+        if (nameEl) nameEl.textContent = EditorState.project?.name || EditorState.project?.id || '';
+        const isWip = EditorState.project?.loadedFrom === 'wip';
+        const wipBadge = isWip ? ' <span style="opacity:0.3">/</span> <span style="color:#FFB347;font-weight:600">edited</span>' : '';
+        if (metaEl) metaEl.innerHTML = `<span style="color:#4ECDC4">${EditorState.scenes.length} scenes</span> <span style="opacity:0.3">/</span> ${formatTimestamp(getTotalDuration())}${wipBadge}`;
+
+        // Reset progress indicators
+        _resetShareStatus('export');
+        _resetShareStatus('import');
+
+        modal.classList.add('active');
+    });
 }
 
 function closeShareDialog() {
     document.getElementById('project-share-modal')?.classList.remove('active');
+    if (window._vueHideShareDialog) {
+        window._vueHideShareDialog();
+    }
 }
 
 // --- Share dialog helpers ---
@@ -5865,8 +5879,9 @@ async function shareOpenFolder() {
     }
 }
 
-function setupShareDialog() {
-    document.getElementById('export-share-btn')?.addEventListener('click', openShareDialog);
+function _bindShareDialogInner() {
+    // Bind listeners on elements inside the Vue-rendered modal.
+    // Called each time the dialog opens (elements are created fresh by v-if).
     document.getElementById('close-share-modal')?.addEventListener('click', closeShareDialog);
     document.getElementById('share-export-video')?.addEventListener('click', () => {
         closeShareDialog();
@@ -5875,7 +5890,6 @@ function setupShareDialog() {
     document.getElementById('share-export-zip')?.addEventListener('click', shareExportZip);
     document.getElementById('share-import-zip')?.addEventListener('click', shareImportZip);
     document.getElementById('share-open-folder')?.addEventListener('click', shareOpenFolder);
-    // Reset button moved to history dropdown — listener set up in setupHistoryDropdown()
     document.getElementById('share-import-file')?.addEventListener('change', (e) => {
         _handleImportZipFile(e.target.files?.[0]);
     });
@@ -5885,6 +5899,11 @@ function setupShareDialog() {
     modal?.addEventListener('click', (e) => {
         if (e.target === modal) closeShareDialog();
     });
+}
+
+function setupShareDialog() {
+    // The trigger button lives in the static shell HTML — always present
+    document.getElementById('export-share-btn')?.addEventListener('click', openShareDialog);
 }
 
 function resetToInitialState() {

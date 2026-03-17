@@ -749,8 +749,8 @@ def _step_assets(scenes_result, config, project_id, job_id):
         "meta-ai": "https://www.meta.ai/",
     }
 
-    # Poll until all scenes are ready (timeout 30 min)
-    max_wait = 30 * 60  # 30 minutes
+    # Poll until all scenes are ready (timeout 2 hours)
+    max_wait = 2 * 60 * 60  # 2 hours
     poll_interval = 10  # seconds
     start_time = time.time()
 
