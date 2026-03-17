@@ -91,6 +91,15 @@ async function handleAbort() {
   toast.info('Generation aborted')
 }
 
+async function handleDownloadModel() {
+  try {
+    await tts.downloadModel()
+    toast.success('Model downloaded and ready')
+  } catch (e) {
+    toast.error(`Download failed: ${e.message}`)
+  }
+}
+
 // ── Multi-Voice ──
 
 function handleAutoDetect() {
@@ -211,7 +220,17 @@ const genButtonLabel = computed(() => {
       </div>
       <div class="model-status">
         <span v-if="tts.modelReady.value" class="status-text status-text--ready">Model ready</span>
-        <span v-else class="status-text status-text--not-ready">Model not downloaded</span>
+        <template v-else>
+          <span v-if="tts.progressText.value" class="status-text status-text--downloading">{{ tts.progressText.value }}</span>
+          <button v-else class="download-model-btn" @click="handleDownloadModel">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download Model
+          </button>
+        </template>
       </div>
     </div>
 
@@ -504,6 +523,37 @@ const genButtonLabel = computed(() => {
 
 .status-text--not-ready {
   color: var(--coral);
+}
+
+.status-text--downloading {
+  color: var(--accent);
+  animation: pulse-text 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-text {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.download-model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  background: rgba(78, 205, 196, 0.1);
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.download-model-btn:hover {
+  background: rgba(78, 205, 196, 0.2);
+  border-color: var(--accent);
 }
 
 .legacy-card {
