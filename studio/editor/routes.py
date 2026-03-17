@@ -82,7 +82,9 @@ def _pick_scene_asset(project_id: str, *scene_keys: str) -> tuple[str, str]:
             if isinstance(path, str) and path.lower().endswith(media_exts)
         ]
         if local_files:
-            media_url = local_files[-1]
+            # Prefer video files over images (thumbnails)
+            video_local = [p for p in local_files if p.lower().endswith(video_exts)]
+            media_url = video_local[-1] if video_local else local_files[-1]
             media_type = "video" if media_url.lower().endswith(video_exts) else "image"
             return media_url, media_type
 
@@ -100,7 +102,10 @@ def _pick_scene_asset(project_id: str, *scene_keys: str) -> tuple[str, str]:
         if not files:
             continue
 
-        _, fname = max(files)
+        # Prefer video files over images (thumbnails) when both exist
+        video_files = [(t, f) for t, f in files if f.lower().endswith(video_exts)]
+        pick = max(video_files) if video_files else max(files)
+        _, fname = pick
         media_url = f"/output/assets/{project_id}/{scene_key}/{fname}"
         media_type = "video" if fname.lower().endswith(video_exts) else "image"
         return media_url, media_type
@@ -1678,18 +1683,21 @@ def export_library_list():
             video_q = quote(rel_video, safe="/")
             zip_q = quote(zip_rel, safe="/") if zip_exists else ""
 
-            # If no metadata found, try reading from scenes project
+            # Read scenes.json for style, scene count, and pipeline timing
             pid = project_id or base
-            if not meta_style:
+            pipeline_timing = {}
+            if not meta_style or not pipeline_timing:
                 try:
                     _sp = os.path.join(SCENES_DIR, pid, "scenes.json")
                     if os.path.isfile(_sp):
                         _sd = safe_json_read(_sp)
-                        meta_style = _sd.get("style", "")
+                        if not meta_style:
+                            meta_style = _sd.get("style", "")
                         if not meta_scene_count:
                             meta_scene_count = len(_sd.get("scenes", []))
+                        pipeline_timing = _sd.get("pipeline_timing", {})
                 except Exception as error:
-                    logger.debug("Could not read scene metadata {}: {}", _sp, error)
+                    logger.debug("Could not read scene metadata: {}", error)
 
             items.append({
                 "project_id": pid,
@@ -1707,6 +1715,7 @@ def export_library_list():
                 "video_ratio": video_ratio,
                 "duration": meta_duration,
                 "scene_count": meta_scene_count,
+                "pipeline_timing": pipeline_timing,
             })
 
     items.sort(key=lambda it: it.get("modified_at", ""), reverse=True)

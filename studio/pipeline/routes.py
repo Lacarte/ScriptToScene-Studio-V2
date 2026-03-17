@@ -232,6 +232,18 @@ def list_jobs():
 # Pipeline runner (background thread)
 # ===================================================================
 
+def _save_pipeline_timing(project_id, step_timings):
+    """Persist pipeline_timing into the project's scenes.json."""
+    scenes_path = os.path.join(SCENES_DIR, project_id, "scenes.json")
+    if os.path.isfile(scenes_path):
+        try:
+            data = safe_json_read(scenes_path)
+            data["pipeline_timing"] = step_timings
+            safe_json_write(scenes_path, data, indent=2)
+        except Exception as e:
+            logger.debug("Could not save pipeline timing: {}", e)
+
+
 def _emit_done(job_id, project_id, results):
     """Emit the 'done' event and mark the job as complete."""
     _emit(job_id, {
@@ -250,6 +262,7 @@ def _emit_done(job_id, project_id, results):
             "assets": results.get("assets"),
             "assemble": results.get("assemble"),
             "export": results.get("export"),
+            "pipeline_timing": results.get("pipeline_timing"),
         },
     })
     with _jobs_lock:
@@ -264,6 +277,8 @@ def _run_pipeline(job_id):
         config = job["config"]
     project_id = config["project_id"]
     results = job["results"]
+    step_timings = {}  # {step_name: duration_seconds}
+    pipeline_start = time.perf_counter()
 
     stop_after = config.get("stop_after")
     step_seq = job.get("step_sequence", [])
@@ -277,7 +292,9 @@ def _run_pipeline(job_id):
         logger.info("[{}] Step 1/7: TTS starting", project_id)
         _emit(job_id, {"step": "tts", "status": "running",
                        "message": f"[{project_id}] Generating audio..."})
+        _t0 = time.perf_counter()
         tts_result = _step_tts(config, project_id)
+        step_timings["tts"] = round(time.perf_counter() - _t0, 2)
         results["tts"] = tts_result
         logger.success("[{}] Step 1/7: TTS done — {:.1f}s audio, {} words",
                        project_id, tts_result["duration_seconds"], tts_result["words"])
@@ -296,7 +313,9 @@ def _run_pipeline(job_id):
         logger.info("[{}] Step 2/7: Timing starting", project_id)
         _emit(job_id, {"step": "timing", "status": "running",
                        "message": f"[{project_id}] Aligning words..."})
+        _t0 = time.perf_counter()
         timing_result = _step_timing(tts_result, config, project_id)
+        step_timings["timing"] = round(time.perf_counter() - _t0, 2)
         results["timing"] = timing_result
         logger.success("[{}] Step 2/7: Timing done — {} words in {:.2f}s",
                        project_id, timing_result["word_count"], timing_result["inference_time"])
@@ -314,7 +333,9 @@ def _run_pipeline(job_id):
         logger.info("[{}] Step 3/7: Segment starting", project_id)
         _emit(job_id, {"step": "segment", "status": "running",
                        "message": f"[{project_id}] Splitting into scenes..."})
+        _t0 = time.perf_counter()
         segment_result = _step_segment(timing_result, config, project_id)
+        step_timings["segment"] = round(time.perf_counter() - _t0, 2)
         results["segment"] = segment_result
         stats = segment_result.get("stats", {})
         logger.success("[{}] Step 3/7: Segment done — {} scenes, avg {:.1f}s",
@@ -334,7 +355,9 @@ def _run_pipeline(job_id):
             logger.info("[{}] Step 4/7: Scenes starting (webhook)", project_id)
             _emit(job_id, {"step": "scenes", "status": "running",
                            "message": f"[{project_id}] Generating scene scripts..."})
+            _t0 = time.perf_counter()
             scenes_result = _step_scenes(segment_result, config, project_id, job_id)
+            step_timings["scenes"] = round(time.perf_counter() - _t0, 2)
             results["scenes"] = scenes_result
             scene_count = len(scenes_result.get("scenes", []))
             logger.success("[{}] Step 4/7: Scenes done — {} scenes generated",
@@ -368,7 +391,9 @@ def _run_pipeline(job_id):
             "message": f"[{project_id}] Starting asset grabber ({provider})...",
             "open_url": provider_urls.get(provider, ""),
         })
+        _t0 = time.perf_counter()
         assets_result = _step_assets(results.get("scenes", {}), config, project_id, job_id)
+        step_timings["assets"] = round(time.perf_counter() - _t0, 2)
         results["assets"] = assets_result
         logger.success("[{}] Step 5/7: Assets done — {}/{} ready, {} errors",
                        project_id, assets_result.get("ready", 0),
@@ -386,7 +411,9 @@ def _run_pipeline(job_id):
         logger.info("[{}] Step 6/7: Assemble starting", project_id)
         _emit(job_id, {"step": "assemble", "status": "running",
                        "message": f"[{project_id}] Assembling project..."})
+        _t0 = time.perf_counter()
         assemble_result = _step_assemble(project_id)
+        step_timings["assemble"] = round(time.perf_counter() - _t0, 2)
         results["assemble"] = assemble_result
         logger.success("[{}] Step 6/7: Assemble done — {} scenes, {:.1f}s, audio={}, captions={}",
                        project_id, assemble_result.get("scene_count", 0),
@@ -406,7 +433,9 @@ def _run_pipeline(job_id):
         logger.info("[{}] Step 7/7: Export starting", project_id)
         _emit(job_id, {"step": "export", "status": "running",
                        "message": f"[{project_id}] Exporting video..."})
+        _t0 = time.perf_counter()
         export_result = _step_export(assemble_result, project_id, job_id)
+        step_timings["export"] = round(time.perf_counter() - _t0, 2)
         results["export"] = export_result
         logger.success("[{}] Step 7/7: Export done — {} ({})",
                        project_id, export_result.get("filename", "?"),
@@ -417,7 +446,14 @@ def _run_pipeline(job_id):
         })
 
         # ── Done ────────────────────────────────────────────────────
-        logger.success("[{}] Pipeline COMPLETE — all {} steps finished", project_id, len(step_seq))
+        step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+        results["pipeline_timing"] = step_timings
+
+        # Persist timing to scenes.json sidecar
+        _save_pipeline_timing(project_id, step_timings)
+
+        logger.success("[{}] Pipeline COMPLETE — all {} steps finished in {:.1f}s",
+                       project_id, len(step_seq), step_timings["total"])
         _emit_done(job_id, project_id, results)
 
         with _jobs_lock:

@@ -15,6 +15,42 @@ const emit = defineEmits(['download-video', 'download-zip', 'play', 'trash'])
 const rootEl = ref(null)
 const videoEl = ref(null)
 const loaded = ref(false)
+const showTiming = ref(false)
+
+const STEP_META = {
+  tts:      { label: 'TTS',      icon: '\uD83C\uDFA4', color: '#4ECDC4' },
+  timing:   { label: 'Timing',   icon: '\u23F1',  color: '#56CCF2' },
+  segment:  { label: 'Segment',  icon: '\u2702',  color: '#A78BFA' },
+  scenes:   { label: 'Scenes',   icon: '\uD83C\uDFAC', color: '#FFB347' },
+  assets:   { label: 'Assets',   icon: '\uD83D\uDDBC',  color: '#FF6B6B' },
+  assemble: { label: 'Assemble', icon: '\uD83D\uDD27', color: '#26DE81' },
+  export:   { label: 'Export',   icon: '\uD83D\uDCE4', color: '#C084FC' },
+}
+
+function hasTiming() {
+  const t = props.item.pipeline_timing
+  return t && typeof t === 'object' && Object.keys(t).length > 0
+}
+
+function fmtSecs(s) {
+  if (s == null) return '--'
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m = Math.floor(s / 60)
+  const sec = (s % 60).toFixed(0)
+  return `${m}m ${sec}s`
+}
+
+function timingSteps() {
+  const t = props.item.pipeline_timing || {}
+  return Object.entries(STEP_META)
+    .filter(([k]) => t[k] != null)
+    .map(([k, meta]) => ({ key: k, ...meta, duration: t[k] }))
+}
+
+function maxStepDuration() {
+  const t = props.item.pipeline_timing || {}
+  return Math.max(...Object.entries(t).filter(([k]) => k !== 'total').map(([, v]) => v), 1)
+}
 
 function stopPlayback() {
   if (videoEl.value && !videoEl.value.paused) {
@@ -135,7 +171,48 @@ onMounted(() => {
         <span v-if="item.video_ratio" class="chip chip--purple">{{ item.video_ratio.replace(':', 'x') }}</span>
         <span v-if="aspectRatioFromDimensions(item.video_ratio)" class="chip chip--purple-bold">{{ aspectRatioFromDimensions(item.video_ratio) }}</span>
         <span v-else-if="ratioLabel(item.ratio)" class="chip chip--purple-bold">{{ ratioLabel(item.ratio) }}</span>
+        <button
+          v-if="hasTiming()"
+          class="chip chip--timing"
+          @click.stop="showTiming = !showTiming"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+          </svg>
+          {{ fmtSecs(item.pipeline_timing.total) }}
+          <svg class="chip-chevron" :class="{ open: showTiming }" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
       </div>
+
+      <!-- Pipeline timing breakdown -->
+      <Transition name="timing-slide">
+        <div v-if="showTiming && hasTiming()" class="timing-panel">
+          <div class="timing-steps">
+            <div
+              v-for="step in timingSteps()"
+              :key="step.key"
+              class="timing-step"
+            >
+              <span class="timing-icon">{{ step.icon }}</span>
+              <span class="timing-label">{{ step.label }}</span>
+              <div class="timing-bar-track">
+                <div
+                  class="timing-bar-fill"
+                  :style="{
+                    width: (step.duration / maxStepDuration() * 100) + '%',
+                    background: step.color,
+                  }"
+                ></div>
+              </div>
+              <span class="timing-value" :style="{ color: step.color }">{{ fmtSecs(step.duration) }}</span>
+            </div>
+          </div>
+          <div class="timing-total">
+            <span>Total pipeline</span>
+            <span class="timing-total-value">{{ fmtSecs(item.pipeline_timing.total) }}</span>
+          </div>
+        </div>
+      </Transition>
 
       <!-- Actions -->
       <div class="actions">
@@ -383,5 +460,130 @@ onMounted(() => {
   color: #FF6B6B;
   border-color: rgba(255, 107, 107, 0.6);
   background: rgba(255, 107, 107, 0.12);
+}
+
+/* ---- Timing chip & panel ---- */
+.chip--timing {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #56CCF2;
+  background: rgba(86, 204, 242, 0.08);
+  border: 1px solid rgba(86, 204, 242, 0.15);
+  transition: all 0.15s;
+}
+.chip--timing:hover {
+  background: rgba(86, 204, 242, 0.15);
+  border-color: rgba(86, 204, 242, 0.3);
+}
+.chip-chevron {
+  transition: transform 0.2s;
+  opacity: 0.6;
+}
+.chip-chevron.open {
+  transform: rotate(180deg);
+}
+
+.timing-panel {
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 2px 0 4px;
+}
+
+.timing-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timing-step {
+  display: grid;
+  grid-template-columns: 16px 58px 1fr 42px;
+  align-items: center;
+  gap: 6px;
+}
+
+.timing-icon {
+  font-size: 10px;
+  text-align: center;
+}
+
+.timing-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.timing-bar-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+.timing-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  min-width: 2px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timing-value {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-align: right;
+  letter-spacing: -0.02em;
+}
+
+.timing-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.timing-total span:first-child {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.timing-total-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  color: #56CCF2;
+  letter-spacing: -0.02em;
+}
+
+/* Slide transition */
+.timing-slide-enter-active,
+.timing-slide-leave-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.timing-slide-enter-from,
+.timing-slide-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.timing-slide-enter-to,
+.timing-slide-leave-from {
+  max-height: 300px;
+  opacity: 1;
 }
 </style>
