@@ -5138,7 +5138,15 @@ function renderAllAudioTracks() {
                     </div>
                 </div>`;
         } else {
-            clipHTML = `<div class="audio-placeholder" style="opacity:0.3; font-size:0.55rem; padding:0 8px; font-style:italic; color:var(--text-muted)">Click + to add ${isVoice ? 'voice audio' : 'audio'}</div>`;
+            const emptyLabel = isVoice
+                ? 'voice audio'
+                : (track.type === 'fx' ? 'sound FX' : 'audio');
+            clipHTML = `
+                <div class="audio-placeholder audio-track-empty-target"
+                     data-track-id="${track.id}"
+                     style="width:100%; min-height:28px; display:flex; align-items:center; opacity:0.3; font-size:0.55rem; padding:0 8px; font-style:italic; color:var(--text-muted)">
+                    Click to add ${emptyLabel}
+                </div>`;
         }
 
         // Speaker icon (for volume popup)
@@ -5190,12 +5198,23 @@ function renderAllAudioTracks() {
     });
 
     // Wire up empty-track placeholders — click to show add-track menu
-    container.querySelectorAll('.audio-placeholder').forEach(el => {
+    container.querySelectorAll('.audio-track-empty-target').forEach(el => {
         el.style.cursor = 'pointer';
+        el.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+        });
         el.addEventListener('click', (e) => {
             e.stopPropagation();
-            const addTrackRow = document.getElementById('add-track-row');
-            if (addTrackRow) showAddTrackMenu(addTrackRow);
+            const trackId = el.dataset.trackId;
+            if (!trackId) {
+                const addTrackRow = document.getElementById('add-track-row');
+                if (addTrackRow) showAddTrackMenu(addTrackRow);
+                return;
+            }
+
+            selectAudioTrack(trackId);
+            promptAudioFileUpload(trackId);
         });
     });
 
@@ -7742,7 +7761,9 @@ function setupPlayheadDrag() {
             e.target.closest('.text-clip') ||
             e.target.closest('.caption-clip') ||
             e.target.closest('.track-header') ||
-            e.target.closest('.audio-clip-universal')
+            e.target.closest('.audio-clip-universal') ||
+            e.target.closest('.audio-track-empty-target') ||
+            e.target.closest('.add-track-row')
         ) return;
 
         isDragging = true;
@@ -7984,6 +8005,10 @@ function setupEventListeners() {
 
     // Add Track row — click anywhere on the row to show dropdown
     const addTrackRow = document.getElementById('add-track-row');
+    addTrackRow?.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+    });
     addTrackRow?.addEventListener('click', (e) => {
         e.stopPropagation();
         showAddTrackMenu(addTrackRow);
@@ -8071,19 +8096,12 @@ function showAddTrackMenu(anchor) {
                     volume: 1.0,
                 });
                 EditorState.audioTracks.push(fxTrack);
+                selectAudioTrack(fxTrack.id);
                 renderAllAudioTracks();
                 saveProjectEdits();
-                showToast('FX track added — drop an audio file to populate', 'info');
+                showToast('FX track added. Click the new lane to upload audio.', 'info');
             } else if (action === 'upload') {
-                // File picker for any audio
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.mp3,.wav,.ogg,.m4a,.aac';
-                input.onchange = () => {
-                    if (!input.files?.length) return;
-                    _handleAudioFileUpload(input.files[0]);
-                };
-                input.click();
+                promptAudioFileUpload();
             }
         });
     });
@@ -8101,13 +8119,87 @@ function showAddTrackMenu(anchor) {
 /**
  * Handle audio file upload — creates a new audio track with the uploaded file
  */
-async function _handleAudioFileUpload(file) {
+function promptAudioFileUpload(targetTrackId = null) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.mp3,.wav,.ogg,.m4a,.aac';
+    input.onchange = () => {
+        if (!input.files?.length) return;
+        _handleAudioFileUpload(input.files[0], { targetTrackId });
+    };
+    input.click();
+}
+
+function populateUploadedAudioTrack(track, file, data) {
+    if (!track) return;
+
+    if (track.element) {
+        try {
+            track.element.pause();
+            track.element.src = '';
+        } catch (_) { /* ignore */ }
+    }
+
+    track.file = data.filename || file.name;
+    track.path = data.path || `/output/musics/${file.name}`;
+    track.duration = 0;
+    track.startOffset = 0;
+    track.trimmedDuration = null;
+    track.loaded = false;
+    track.error = false;
+
+    const audio = new Audio(track.path);
+    track.element = audio;
+    ensureTrackGainNode(track);
+
+    audio.addEventListener('loadedmetadata', () => {
+        track.duration = audio.duration || 0;
+        track.loaded = true;
+        applyTrackTrimState(track, {
+            timelineOffset: getTrackTimelineOffset(track),
+            startOffset: 0,
+            trimmedDuration: null
+        });
+        recalculateDuration();
+        renderTimeRuler();
+        renderAllAudioTracks();
+        updateTimeScrubber();
+        updatePlayhead();
+        if (EditorState.preview) EditorState.preview.setDuration(getTotalDuration());
+        if (EditorState.isPlaying) {
+            syncAudioPlayback();
+        } else {
+            track.element.currentTime = getTrackPlaybackTime(track, EditorState.playbackPosition);
+        }
+        saveProjectEdits();
+        if (EditorState.selectedAudioTrack?.id === track.id) {
+            EditorState.selectedAudioTrack = track;
+            renderAudioProperties();
+        }
+    }, { once: true });
+
+    audio.addEventListener('error', () => {
+        track.error = true;
+        renderAllAudioTracks();
+        if (EditorState.selectedAudioTrack?.id === track.id) {
+            renderAudioProperties();
+        }
+    }, { once: true });
+}
+
+async function _handleAudioFileUpload(file, options = {}) {
     const fd = new FormData();
     fd.append('file', file);
     try {
         const res = await fetch('/api/music/upload', { method: 'POST', body: fd });
         if (!res.ok) throw new Error('Upload failed');
         const data = await res.json();
+        const targetTrack = options.targetTrackId ? getAudioTrackById(options.targetTrackId) : null;
+        if (targetTrack) {
+            populateUploadedAudioTrack(targetTrack, file, data);
+            showToast(`Added to ${targetTrack.label}: ${file.name}`, 'success');
+            return;
+        }
         // Add as a new audio track
         const ext = file.name.split('.').pop().toLowerCase();
         const type = ['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext) ? 'fx' : 'fx';
