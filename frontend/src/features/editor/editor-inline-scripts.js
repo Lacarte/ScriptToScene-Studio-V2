@@ -6,8 +6,18 @@ export function initEditorInlineScripts() {
         function editorShowAssetPicker() {
             // Show via Vue bridge if available, fallback to DOM
             if (window._vueShowAssetPicker) window._vueShowAssetPicker();
-            const list = document.getElementById('asset-picker-list');
-            if (!list) return;
+            // Vue v-if needs a tick to mount the dialog DOM
+            _waitForElement('asset-picker-list', _populateAssetPicker);
+        }
+
+        function _waitForElement(id, cb, attempts = 20) {
+            const el = document.getElementById(id);
+            if (el) return cb(el);
+            if (attempts <= 0) return;
+            requestAnimationFrame(() => _waitForElement(id, cb, attempts - 1));
+        }
+
+        function _populateAssetPicker(list) {
             list.innerHTML = '<p style="text-align:center;color:var(--text-muted,#666);font-size:12px;padding:24px 0">Loading...</p>';
 
             Promise.all([

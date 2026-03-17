@@ -8078,15 +8078,7 @@ function showAddTrackMenu(anchor) {
             menu.remove();
 
             if (action === 'music') {
-                // Open music picker
-                const dialog = document.getElementById('music-picker-dialog');
-                if (dialog) {
-                    dialog.classList.remove('hidden');
-                    dialog.style.display = 'flex';
-                    fetch('/api/music/library').then(r => r.json()).then(files => {
-                        renderMusicList(files);
-                    }).catch(() => {});
-                }
+                showMusicPicker();
             } else if (action === 'fx') {
                 // Create an empty FX track
                 const fxTrack = createAudioTrack({
@@ -9381,17 +9373,33 @@ function setupExportProfileSelector() {
 
 // ---- Background Music ----
 
-function showMusicPicker() {
-    const dialog = document.getElementById('music-picker-dialog');
-    if (!dialog) return;
-    dialog.classList.remove('hidden');
-    dialog.style.display = 'flex';
+function whenMusicPickerReady(callback, attempts = 12) {
+    const list = document.getElementById('music-picker-list');
+    if (list) {
+        callback(list);
+        return;
+    }
+    if (attempts <= 0) return;
+    requestAnimationFrame(() => whenMusicPickerReady(callback, attempts - 1));
+}
 
-    // Fetch music library
-    fetch('/api/music/library')
-        .then(r => r.ok ? r.json() : [])
-        .then(files => renderMusicList(files))
-        .catch(() => renderMusicList([]));
+function showMusicPicker() {
+    if (typeof window._vueShowMusicPicker === 'function') {
+        window._vueShowMusicPicker();
+    }
+
+    whenMusicPickerReady(() => {
+        const dialog = document.getElementById('music-picker-dialog');
+        if (dialog) {
+            dialog.classList.remove('hidden');
+            dialog.style.display = 'flex';
+        }
+
+        fetch('/api/music/library')
+            .then(r => r.ok ? r.json() : [])
+            .then(files => renderMusicList(files))
+            .catch(() => renderMusicList([]));
+    });
 }
 
 // Expose for inline onclick
@@ -9411,6 +9419,9 @@ window.openProjectAssetsFolder = async function () {
 };
 
 window.editorCloseMusicPicker = function () {
+    if (typeof window._vueHideMusicPicker === 'function') {
+        window._vueHideMusicPicker();
+    }
     const dialog = document.getElementById('music-picker-dialog');
     if (dialog) { dialog.classList.add('hidden'); dialog.style.display = ''; }
 };
@@ -9437,19 +9448,39 @@ window.editorUploadMusic = async function (input) {
 function renderMusicList(files) {
     const list = document.getElementById('music-picker-list');
     if (!list) return;
+    const esc = (value) => {
+        const div = document.createElement('div');
+        div.textContent = String(value ?? '');
+        return div.innerHTML;
+    };
     if (!files.length) {
-        list.innerHTML = '<div style="text-align:center;padding:32px 16px;color:var(--text-muted);font-size:12px"><p>No music files yet</p><p style="font-size:11px;opacity:0.6;margin-top:8px">Place .mp3/.wav/.ogg files in output/music/</p></div>';
+        list.innerHTML = '<div style="text-align:center;padding:32px 16px;color:var(--text-muted);font-size:12px"><p>No music files yet</p><p style="font-size:11px;opacity:0.6;margin-top:8px">Place .mp3/.wav/.ogg files in output/musics/</p></div>';
         return;
     }
-    list.innerHTML = files.map(f => `
-        <div class="music-picker-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background 0.12s" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background=''" onclick="selectBgMusic('${f.filename}', '${f.path}', ${f.duration || 0})">
+    list.innerHTML = files.map((f, index) => `
+        <div class="music-picker-item" data-music-index="${index}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background 0.12s">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)" stroke-width="1.5"><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/><path d="M8 17.5V5l12-2v12.5"/></svg>
             <div style="flex:1;min-width:0">
-                <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${f.filename}</div>
+                <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.filename)}</div>
                 <div style="font-size:10px;color:var(--text-muted)">${f.duration ? formatTimecode(f.duration) : ''} · ${f.size_mb || '?'}MB</div>
             </div>
         </div>
     `).join('');
+
+    list.querySelectorAll('.music-picker-item').forEach(item => {
+        item.addEventListener('mouseenter', () => {
+            item.style.background = 'rgba(255,255,255,0.04)';
+        });
+        item.addEventListener('mouseleave', () => {
+            item.style.background = '';
+        });
+        item.addEventListener('click', () => {
+            const index = Number(item.dataset.musicIndex);
+            const file = files[index];
+            if (!file) return;
+            window.selectBgMusic(file.filename, file.path, file.duration || 0);
+        });
+    });
 }
 
 window.selectBgMusic = function (filename, path, duration) {
@@ -9484,6 +9515,7 @@ window.selectBgMusic = function (filename, path, duration) {
     });
 
     EditorState.audioTracks.push(musicTrack);
+    selectAudioTrack(musicTrack.id);
 
     // Legacy compat — keep bgMusic/bgMusicElement pointing at latest music track
     EditorState.bgMusic = musicTrack;
