@@ -9095,29 +9095,50 @@ function previewJson() {
         showToast(`Warning: ${validation.warnings[0]}`, 'warning');
     }
 
-    // Show modal with JSON
-    const modal = document.getElementById('export-modal');
-    const jsonPre = document.getElementById('export-json');
-
-    if (modal && jsonPre) {
-        jsonPre.textContent = JSON.stringify(exportData, null, 2);
-        modal.classList.add('active');
+    // Tell Vue to render the JSON modal (v-if="visible")
+    if (window._vueShowExportJsonModal) {
+        window._vueShowExportJsonModal();
     }
+
+    requestAnimationFrame(() => {
+        const modal = document.getElementById('export-modal');
+        const jsonPre = document.getElementById('export-json');
+
+        if (modal && jsonPre) {
+            _bindExportJsonModalInner();
+            jsonPre.textContent = JSON.stringify(exportData, null, 2);
+            modal.classList.add('active');
+        }
+    });
 }
 
 /**
  * Export MP4 - Show profile selector, then process
  */
 async function exportMp4() {
-    // Show profile selector step
-    const modal = document.getElementById('export-progress-modal');
-    const stepProfile = document.getElementById('export-step-profile');
-    const stepProgress = document.getElementById('export-step-progress');
-    if (modal && stepProfile && stepProgress) {
-        stepProfile.style.display = '';
-        stepProgress.style.display = 'none';
-        modal.classList.add('active');
+    // Tell Vue to render the modal (v-if="visible")
+    if (window._vueShowExportProgressModal) {
+        window._vueShowExportProgressModal();
     }
+
+    // Vue renders async — wait one frame for the DOM to exist
+    requestAnimationFrame(() => {
+        // Re-cache export modal elements (fresh DOM from v-if)
+        _refreshExportElements();
+
+        // Bind inner-element listeners (fresh DOM each time)
+        _bindExportModalInner();
+
+        // Show profile selector step
+        const stepProfile = document.getElementById('export-step-profile');
+        const stepProgress = document.getElementById('export-step-progress');
+        if (stepProfile) stepProfile.style.display = '';
+        if (stepProgress) stepProgress.style.display = 'none';
+
+        if (elements.exportProgressModal) {
+            elements.exportProgressModal.classList.add('active');
+        }
+    });
     return; // Wait for user to click "Export" button
 }
 
@@ -9316,20 +9337,33 @@ function hideExportProgress() {
     if (elements.cancelExportBtn) {
         elements.cancelExportBtn.textContent = 'Cancel';
     }
+    if (window._vueHideExportProgressModal) {
+        window._vueHideExportProgressModal();
+    }
 }
 
 /**
  * Setup export progress modal event listeners
  */
-function setupExportProgressModal() {
+function _refreshExportElements() {
+    elements.exportProgressModal = document.getElementById('export-progress-modal');
+    elements.exportProgressTitle = document.getElementById('export-progress-title');
+    elements.exportProgressBar = document.getElementById('export-progress-bar');
+    elements.exportProgressPercent = document.getElementById('export-progress-percent');
+    elements.exportProgressMessage = document.getElementById('export-progress-message');
+    elements.cancelExportBtn = document.getElementById('cancel-export');
+    elements.previewExportBtn = document.getElementById('preview-export');
+    elements.openExportFolderBtn = document.getElementById('open-export-folder');
+    elements.downloadExportBtn = document.getElementById('download-export');
+}
+
+function _bindExportModalInner() {
     // Cancel/Close button - handles both cancelling and closing after error
     elements.cancelExportBtn?.addEventListener('click', async () => {
         const isCloseButton = elements.cancelExportBtn.textContent === 'Close';
         if (isCloseButton) {
-            // Just close the modal
             hideExportProgress();
         } else {
-            // Cancel the export
             await exportAPI.cancelExport();
             hideExportProgress();
             showToast('Export cancelled', 'info');
@@ -9361,23 +9395,18 @@ function setupExportProgressModal() {
             }
         }
     });
-}
-
-/**
- * Setup export profile selector
- */
-function setupExportProfileSelector() {
-    const grid = document.getElementById('export-profile-grid');
-    if (!grid) return;
 
     // Profile card click
-    grid.querySelectorAll('.export-profile-card').forEach(card => {
-        card.addEventListener('click', () => {
-            grid.querySelectorAll('.export-profile-card').forEach(c => c.classList.remove('active'));
-            card.classList.add('active');
-            EditorState.selectedExportProfile = card.dataset.profile;
+    const grid = document.getElementById('export-profile-grid');
+    if (grid) {
+        grid.querySelectorAll('.export-profile-card').forEach(card => {
+            card.addEventListener('click', () => {
+                grid.querySelectorAll('.export-profile-card').forEach(c => c.classList.remove('active'));
+                card.classList.add('active');
+                EditorState.selectedExportProfile = card.dataset.profile;
+            });
         });
-    });
+    }
 
     // Start export button
     document.getElementById('start-export-btn')?.addEventListener('click', () => {
@@ -9388,6 +9417,23 @@ function setupExportProfileSelector() {
     document.getElementById('close-export-profile')?.addEventListener('click', () => {
         hideExportProgress();
     });
+
+    // Close on backdrop click (only when complete/error)
+    elements.exportProgressModal?.addEventListener('click', (e) => {
+        if (e.target === elements.exportProgressModal &&
+            (elements.exportProgressModal.classList.contains('export-complete') ||
+                elements.exportProgressModal.classList.contains('export-error'))) {
+            hideExportProgress();
+        }
+    });
+}
+
+function setupExportProgressModal() {
+    // Inner listeners are now bound per-open via _bindExportModalInner()
+}
+
+function setupExportProfileSelector() {
+    // Inner listeners are now bound per-open via _bindExportModalInner()
 }
 
 // ---- Background Music ----
@@ -9613,36 +9659,26 @@ function setupBeforeUnloadWarning() {
     });
 }
 
-/**
- * Setup export modal event listeners
- */
-function setupExportModal() {
+function _closeExportJsonModal() {
+    document.getElementById('export-modal')?.classList.remove('active');
+    if (window._vueHideExportJsonModal) {
+        window._vueHideExportJsonModal();
+    }
+}
+
+function _bindExportJsonModalInner() {
     const modal = document.getElementById('export-modal');
     const closeBtn = document.getElementById('close-export-modal');
     const copyBtn = document.getElementById('copy-export-json');
     const downloadBtn = document.getElementById('download-export-json');
     const jsonPre = document.getElementById('export-json');
 
-    // Close modal
-    closeBtn?.addEventListener('click', () => {
-        modal?.classList.remove('active');
-    });
+    closeBtn?.addEventListener('click', _closeExportJsonModal);
 
-    // Close on backdrop click
     modal?.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.classList.remove('active');
-        }
+        if (e.target === modal) _closeExportJsonModal();
     });
 
-    // Close on Escape
-    document.addEventListener('keydown', (e) => {
-        if (e.code === 'Escape' && modal?.classList.contains('active')) {
-            modal.classList.remove('active');
-        }
-    });
-
-    // Copy JSON
     copyBtn?.addEventListener('click', async () => {
         const json = jsonPre?.textContent || '';
         try {
@@ -9653,7 +9689,6 @@ function setupExportModal() {
         }
     });
 
-    // Download JSON
     downloadBtn?.addEventListener('click', () => {
         const json = jsonPre?.textContent || '';
         const blob = new Blob([json], { type: 'application/json' });
@@ -9666,24 +9701,10 @@ function setupExportModal() {
         showToast('JSON downloaded', 'success');
     });
 
-    // Export progress modal - close on backdrop click (only when complete/error)
-    elements.exportProgressModal?.addEventListener('click', (e) => {
-        if (e.target === elements.exportProgressModal &&
-            (elements.exportProgressModal.classList.contains('export-complete') ||
-                elements.exportProgressModal.classList.contains('export-error'))) {
-            hideExportProgress();
-        }
-    });
+}
 
-    // Close progress modal on Escape (only when complete/error)
-    document.addEventListener('keydown', (e) => {
-        if (e.code === 'Escape' && elements.exportProgressModal?.classList.contains('active')) {
-            if (elements.exportProgressModal.classList.contains('export-complete') ||
-                elements.exportProgressModal.classList.contains('export-error')) {
-                hideExportProgress();
-            }
-        }
-    });
+function setupExportModal() {
+    // Inner listeners are now bound per-open via _bindExportJsonModalInner()
 }
 
 // ---- Effects Tab ----
