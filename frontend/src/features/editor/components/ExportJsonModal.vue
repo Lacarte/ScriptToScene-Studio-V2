@@ -5,7 +5,7 @@ const emit = defineEmits(['close'])
 </script>
 
 <template>
-  <div v-if="visible" id="export-modal" class="modal" style="display:flex">
+  <div v-if="visible" id="export-modal" class="modal active">
     <div class="modal-content modal-lg">
       <div class="modal-header">
         <h3>Export JSON</h3>

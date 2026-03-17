@@ -6,7 +6,7 @@ function onClose() { emit('close') }
 </script>
 
 <template>
-  <div v-if="visible" id="project-share-modal" class="modal" style="display:flex">
+  <div v-if="visible" id="project-share-modal" class="modal active">
     <div class="modal-content modal-sm" style="border-radius:16px;overflow:hidden">
       <!-- Header with gradient accent -->
       <div style="position:relative;padding:20px 20px 16px;background:linear-gradient(135deg,rgba(78,205,196,0.08) 0%,rgba(78,205,196,0.02) 100%);border-bottom:1px solid var(--border)">

@@ -5,7 +5,7 @@ const emit = defineEmits(['close'])
 </script>
 
 <template>
-  <div v-if="visible" id="export-progress-modal" class="modal" style="display:flex">
+  <div v-if="visible" id="export-progress-modal" class="modal active">
     <div class="modal-content">
       <!-- Step 1: Profile Selector -->
       <div id="export-step-profile">

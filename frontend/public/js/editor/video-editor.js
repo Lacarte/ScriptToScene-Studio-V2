@@ -5642,8 +5642,6 @@ function openShareDialog() {
         // Reset progress indicators
         _resetShareStatus('export');
         _resetShareStatus('import');
-
-        modal.classList.add('active');
     });
 }
 
@@ -9107,7 +9105,6 @@ function previewJson() {
         if (modal && jsonPre) {
             _bindExportJsonModalInner();
             jsonPre.textContent = JSON.stringify(exportData, null, 2);
-            modal.classList.add('active');
         }
     });
 }
@@ -9135,9 +9132,6 @@ async function exportMp4() {
         if (stepProfile) stepProfile.style.display = '';
         if (stepProgress) stepProgress.style.display = 'none';
 
-        if (elements.exportProgressModal) {
-            elements.exportProgressModal.classList.add('active');
-        }
     });
     return; // Wait for user to click "Export" button
 }
