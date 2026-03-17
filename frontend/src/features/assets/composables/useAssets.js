@@ -151,7 +151,8 @@ export function useAssets() {
     try {
       const res = await api.get(`/api/assets/grabber/status/${projectId}`)
       if (res.scene_statuses) {
-        sceneStatuses.value = { ...res.scene_statuses }
+        // Merge so that scenes not in the current job keep their status
+        sceneStatuses.value = { ...sceneStatuses.value, ...res.scene_statuses }
       }
       if (res.status === 'completed' || res.status === 'error') {
         grabberRunning.value = false
@@ -296,6 +297,13 @@ export function useAssets() {
   async function resendSelected(projectId) {
     const selected = scenes.value.filter(s => selectedScenes.value.has(s.index))
     if (!selected.length) return
+
+    // Instant feedback: mark selected scenes as pending
+    const updated = { ...sceneStatuses.value }
+    for (const s of selected) {
+      updated[s.index] = { status: 'pending', urls: [], local_files: [] }
+    }
+    sceneStatuses.value = updated
 
     const payload = {
       project_id: projectId || `project_${Date.now()}`,

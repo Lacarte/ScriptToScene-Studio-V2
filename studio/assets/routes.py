@@ -180,8 +180,10 @@ def grabber_start(data: GrabberStartRequest):
         automa_payload["grok_duration"] = request_data.get("grok_duration", "6s")
         automa_payload["auto_type"] = request_data.get("auto_type", False)
 
-    # Per-scene status tracking
-    scene_statuses = {}
+    # Per-scene status tracking — preserve existing statuses for scenes not
+    # being resent so that already-completed scenes keep their "ready" state.
+    prev_job = _get_job(project_id)
+    scene_statuses = dict(prev_job["scene_statuses"]) if prev_job else {}
     for s in automa_payload["scenes"]:
         scene_statuses[str(s["scene"])] = {
             "status": "pending",
