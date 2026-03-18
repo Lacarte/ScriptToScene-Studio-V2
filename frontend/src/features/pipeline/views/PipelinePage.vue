@@ -120,7 +120,7 @@ const canResumeStopped = computed(() => (
   && !!stoppedProjectId.value
   && !running.value
 ))
-const showHeaderPipelineAction = computed(() => running.value || stopping.value || canResumeStopped.value)
+
 
 // Reset progress when form fields change
 watch([text, voice, speed, style], () => {
@@ -329,23 +329,7 @@ function logStepLabel(step) {
         <h2 class="page-title">Pipeline</h2>
         <p class="page-subtitle">Run the full TTS &rarr; Alignment &rarr; Segment &rarr; Scenes pipeline</p>
       </div>
-      <div v-if="showHeaderPipelineAction" class="header-actions">
-        <button
-          v-if="running || stopping"
-          class="header-pipeline-btn header-pipeline-btn--stop"
-          :disabled="stopping"
-          @click="stop"
-        >
-          {{ stopping ? 'Stopping...' : 'Stop Pipeline' }}
-        </button>
-        <button
-          v-else-if="canResumeStopped"
-          class="header-pipeline-btn header-pipeline-btn--resume"
-          @click="resumeStopped"
-        >
-          Resume Pipeline
-        </button>
-      </div>
+      <!-- Stop/Resume moved to progress card -->
     </div>
 
     <!-- Input -->
@@ -541,7 +525,26 @@ function logStepLabel(step) {
     <section v-if="showProgress" class="card progress-card">
       <div class="progress-header">
         <label class="field-label progress-label">Progress</label>
-        <span v-if="activeProjectId" class="progress-project font-mono">{{ activeProjectId }}</span>
+        <div class="progress-header-right">
+          <span v-if="activeProjectId" class="progress-project font-mono">{{ activeProjectId }}</span>
+          <button
+            v-if="running || stopping"
+            class="progress-stop-btn"
+            :disabled="stopping"
+            @click="stop"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            {{ stopping ? 'Stopping...' : 'Stop' }}
+          </button>
+          <button
+            v-else-if="canResumeStopped"
+            class="progress-resume-btn"
+            @click="resumeStopped"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Resume
+          </button>
+        </div>
       </div>
       <div class="steps-row">
         <template v-for="(step, i) in STEPS" :key="step.id">
@@ -706,54 +709,53 @@ function logStepLabel(step) {
   justify-content: flex-end;
 }
 
-.header-pipeline-btn {
+.progress-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress-stop-btn,
+.progress-resume-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 140px;
-  height: 38px;
-  padding: 0 16px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-darkest);
-  color: var(--text-secondary);
-  cursor: pointer;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
+  border: 1px solid;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
   white-space: nowrap;
 }
 
-.header-pipeline-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.header-pipeline-btn:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-.header-pipeline-btn--stop {
+.progress-stop-btn {
   border-color: rgba(255, 107, 107, 0.4);
   color: #FF9C9C;
   background: rgba(255, 107, 107, 0.08);
 }
 
-.header-pipeline-btn--stop:hover:not(:disabled) {
+.progress-stop-btn:hover:not(:disabled) {
   border-color: #FF6B6B;
-  box-shadow: 0 8px 20px rgba(255, 107, 107, 0.16);
+  box-shadow: 0 4px 12px rgba(255, 107, 107, 0.2);
 }
 
-.header-pipeline-btn--resume {
+.progress-stop-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.progress-resume-btn {
   border-color: rgba(255, 179, 71, 0.35);
   color: #FFD37A;
   background: rgba(255, 179, 71, 0.1);
 }
 
-.header-pipeline-btn--resume:hover:not(:disabled) {
+.progress-resume-btn:hover {
   border-color: #FFB347;
-  box-shadow: 0 8px 20px rgba(255, 179, 71, 0.16);
+  box-shadow: 0 4px 12px rgba(255, 179, 71, 0.2);
 }
 
 /* ---- Card ---- */
