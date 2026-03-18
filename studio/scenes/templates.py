@@ -4,6 +4,8 @@ Each template bundles a style_prompt (LLM instructions for generating image prom
 along with display metadata for the frontend picker.
 """
 
+from studio.scenes.style_compiler import enrich_templates
+
 SCENE_STYLE_TEMPLATES = [
     {
         "id": "cinematic",
@@ -551,6 +553,8 @@ SCENE_STYLE_TEMPLATES = [
         ),
     },
 ]
+
+SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
 
 # Quick lookup by ID
 TEMPLATES_BY_ID = {t["id"]: t for t in SCENE_STYLE_TEMPLATES}

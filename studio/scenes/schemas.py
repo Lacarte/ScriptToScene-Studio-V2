@@ -17,6 +17,7 @@ class SceneGenerateRequest(BaseModel):
     script: str = ""
     style: str = "cinematic"
     style_prompt: Optional[str] = None
+    custom_style_notes: Optional[str] = None
     full_segments: Optional[list] = None
     webhook_url: Optional[str] = None
     project_id: Optional[str] = None

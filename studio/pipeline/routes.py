@@ -91,6 +91,7 @@ def run_pipeline(data: PipelineRunRequest):
         "voice": data.voice,
         "speed": data.speed,
         "style": data.style,
+        "style_prompt": data.custom_style_notes or data.style_prompt,
         "segment_config": data.segment_config,
         "webhook_url": data.webhook_url,
         "auto_scenes": data.auto_scenes,
@@ -634,11 +635,19 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     from studio.scenes.chapters import (
         should_use_chapters,
     )
-    from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
+    from studio.scenes.prompts import build_scene_system_prompt
+    from studio.scenes.style_compiler import resolve_template_bundle
+    from studio.scenes.planner import (
+        build_scene_blueprints,
+        build_visual_bible,
+        summarize_blueprints,
+    )
+    from studio.scenes.validators import ensure_analysis_payload, finalize_scene_result
     from studio.scenes.routes import (
         _call_webhook, generate_with_chapters_chunked,
         _apply_segmenter_timing, _normalize_webhook_response,
     )
+    from studio.scenes.templates import TEMPLATES_BY_ID
 
     all_segments = segment_result.get("segments", [])
     segments = [
@@ -652,14 +661,16 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     webhook_url = config.get("webhook_url") or N8N_WEBHOOK_URL
     script = config.get("text", "")
     style_id = config.get("style", "cinematic")
-    style_prompt = config.get("style_prompt", "")
-
-    # Resolve style_prompt from template if not provided
-    if not style_prompt:
-        from studio.scenes.templates import SCENE_STYLE_TEMPLATES
-        tmpl = next((t for t in SCENE_STYLE_TEMPLATES if t["id"] == style_id), None)
-        if tmpl:
-            style_prompt = tmpl.get("style_prompt", "")
+    custom_style_notes = config.get("style_prompt", "") or ""
+    bundle = resolve_template_bundle(style_id, TEMPLATES_BY_ID, custom_style_notes)
+    planning_segments = [s for s in all_segments if not s.get("is_filler")]
+    visual_bible = build_visual_bible(script, planning_segments, bundle["style_spec"])
+    scene_blueprints = build_scene_blueprints(
+        planning_segments,
+        visual_bible,
+        bundle["style_spec"],
+    )
+    plan_summary = summarize_blueprints(scene_blueprints)
 
     # ── Chapter-based or single request ──
     if should_use_chapters(all_segments):
@@ -670,19 +681,35 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
         result = generate_with_chapters_chunked(
             script=script,
             style_id=style_id,
-            style_prompt=style_prompt,
+            style_spec=bundle["style_spec"],
+            style_prompt=bundle["style_prompt"],
+            visual_bible=visual_bible,
+            scene_blueprints=scene_blueprints,
+            plan_summary=plan_summary,
             full_segments=all_segments,
             webhook_url=webhook_url,
             progress_cb=_progress if job_id else None,
+            custom_style_notes=custom_style_notes,
         )
     else:
         # Single request (small script)
-        system_prompt = SCENE_GENERATOR_PROMPT
-        if style_prompt:
-            system_prompt += f"\n\n## STYLE INSTRUCTIONS\n{style_prompt}"
+        system_prompt = build_scene_system_prompt(
+            bundle["style_spec"],
+            visual_bible,
+            scene_blueprints,
+            plan_summary=plan_summary,
+            custom_style_notes=custom_style_notes,
+        )
         payload = {
-            "script": script, "style": style_id,
-            "system_prompt": system_prompt, "segments": segments,
+            "script": script,
+            "style": style_id,
+            "style_prompt": bundle["style_prompt"],
+            "system_prompt": system_prompt,
+            "segments": segments,
+            "style_spec": bundle["style_spec"],
+            "visual_bible": visual_bible,
+            "scene_blueprints": scene_blueprints,
+            "plan_summary": plan_summary,
         }
         result = _call_webhook(webhook_url, payload)
 
@@ -690,6 +717,13 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     result = _normalize_webhook_response(result)
     speech_segments = [s for s in all_segments if not s.get("is_filler")]
     _apply_segmenter_timing(result, speech_segments, all_segments)
+    ensure_analysis_payload(result, visual_bible, bundle["style_spec"], bundle["template"])
+    result["style_spec"] = bundle["style_spec"]
+    result["style_prompt"] = bundle["style_prompt"]
+    result["scene_blueprints"] = scene_blueprints
+    if custom_style_notes:
+        result["custom_style_notes"] = custom_style_notes
+    finalize_scene_result(result, scene_blueprints, visual_bible)
 
     # Save result
     result["project_id"] = project_id

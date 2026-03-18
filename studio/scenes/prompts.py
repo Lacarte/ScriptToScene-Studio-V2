@@ -1,113 +1,221 @@
-"""Scene Generation Prompts — System prompts sent to the LLM via n8n webhook.
+"""Prompt builders for structured scene generation."""
 
-The master prompt is passed as `system_prompt` in the webhook payload,
-allowing iteration without modifying the n8n workflow.
+from __future__ import annotations
 
-For long scripts, chapters.py uses build_chapter_system_prompt() to construct
-per-chapter prompts based on this base prompt.
+import json
+
+
+SHOT_TYPES = (
+    "extreme-close-up | close-up | medium | wide | POV | bird's-eye | "
+    "low-angle | high-angle | over-shoulder | centered-symmetrical"
+)
+
+
+def _json_block(data: object) -> str:
+    return json.dumps(data, indent=2, ensure_ascii=True)
+
+
+def _build_header(chapter_context: str = "") -> str:
+    parts = [
+        "You are a visual scene planner and prompt writer for short-form viral video.",
+        "",
+        "## INPUT",
+        "You receive JSON with:",
+        "- script: full spoken transcript",
+        "- style: style id",
+        "- segments: array of speech segments, each with index and words",
+        "- style_spec: structured visual template constraints",
+        "- visual_bible: project-level continuity contract",
+        "- scene_blueprints: per-segment targets for role, type, shot, and continuity",
+    ]
+    if chapter_context:
+        parts.extend(["", chapter_context.strip()])
+    return "\n".join(parts)
+
+
+def _build_scene_contract(include_analysis: bool) -> str:
+    analysis_section = ""
+    if include_analysis:
+        analysis_section = """
+## STEP 1: ANALYZE
+Read the full script first.
+Return an "analysis" object that sharpens the story's meaning while staying inside the provided VISUAL BIBLE.
+
+Rules:
+- Preserve the visual bible as the source of truth for continuity.
+- You may improve wording, but do not replace the world anchor, palette guardrails, anchor subject, or camera grammar.
+- The returned analysis must include:
+  - core_theme
+  - mood
+  - environment
+  - color_palette
+  - tone
+  - visual_style
+  - visual_bible
 """
+    return f"""{analysis_section}
+## STEP 2: WRITE SCENES
 
-SCENE_GENERATOR_PROMPT = """\
-You are a visual scene prompt writer for short-form viral video.
+Every scene must serve the script's meaning, not literally illustrate words.
+The viewer hears the transcript while seeing the image. The image should deepen meaning, not duplicate the narration.
 
-## INPUT
-You receive JSON with:
-- script: full spoken transcript
-- style: visual style keyword
-- segments: array of speech segments, each with index and words
+## RULE HIERARCHY
+1. Segment contract
+2. Visual bible continuity
+3. Scene blueprint compliance
+4. Style spec constraints
+5. Creative enrichment
 
 ## SEGMENT CONTRACT
 - Return exactly ONE scene for every input segment.
 - Match each input index exactly.
 - Do NOT merge, split, reorder, omit, or add segments.
 
-## STEP 1: ANALYZE
-Read the full script FIRST. Return an "analysis" object:
-- core_theme: the OVERARCHING IDEA in one sentence — this is the thematic lens for EVERY scene (e.g., "memory is an unreliable reconstruction that reshapes who we are over time")
-- mood: emotional arc (e.g., "whimsical tension", "raw defiance")
-- environment: physical setting implied by the text
-- color_palette: 3-5 dominant colors matching the mood
-- tone: comedic, dramatic, mysterious, nostalgic, unsettling, etc.
-- visual_style: input style + your analysis merged (e.g., "cinematic photorealistic with cool industrial tones")
+## CONTINUITY RULES
+- All scenes belong to one coherent visual world.
+- Keep the anchor subject or anchor motifs visible across the sequence.
+- Stay inside the palette guardrails and lighting baseline unless the script clearly demands a contrast moment.
+- If you change environment, it must still feel part of the same world anchor.
 
-ALL scene prompts must stay visually consistent with this analysis and serve the core_theme.
+## BLUEPRINT RULES
+- Each scene blueprint tells you the target narrative role, preferred scene type, target shot type, and continuity priority.
+- Follow the blueprint unless the segment would become nonsensical.
+- Prefer exact blueprint role/type/shot matches.
+- If a blueprint marks anchor_required=true, include the anchor subject or one of the anchor motifs.
 
-## STEP 2: WRITE SCENES
-
-### THEMATIC INTERPRETATION — CRITICAL
-Every scene must visually serve the core_theme, NOT literally translate the script's words into props.
-
-**NEVER illustrate a metaphor literally:**
-- "recording" in a memory story → NOT a tape recorder → fading photographs, layered translucent faces, dissolving fragments
-- "page" in a change story → NOT a book page → a person shedding a former version of themselves
-- "fire" in a passion story → NOT literal flames → intensity in eyes, flushed skin, heat-distorted air
-- "chains" in a freedom story → NOT metal chains → constricted posture loosening, walls crumbling
-
-**Self-check**: "Am I illustrating the CORE THEME or drawing the dictionary definition of a word?" If the latter, rewrite.
-
-**The viewer hears the words while seeing the image.** The visual should DEEPEN the meaning, not repeat it.
-
-### Scene object keys (output ONLY these — no extra fields)
+## Scene object keys (output ONLY these — no extra fields)
 - index: integer (match input index exactly)
 - title: string (2-6 words)
 - narrative_role: "hook" | "buildup" | "peak" | "transition" | "text_accent" | "cta"
 - type_of_scene: "image" | "video" | "text"
-- image_prompt: scene description (video: include 2-3 motion cues; text: blurred background only)
-- text_content: string or null (text scenes only, 3-8 words, uppercase, hardest-hitting line)
+- image_prompt: scene description
+- text_content: string or null
+
+## TYPE RULES
+- First and last scenes must NOT be text.
+- Default to the blueprint's preferred scene type.
+- Text scenes use the hardest-hitting line only.
+
+## IMAGE PROMPT RULES
+
+VIDEO:
+- Must feel like a living moment with motion.
+- Format: [shot type], [subject + action], [setting], [lighting], [mood], [2-3 motion cues], [style keywords]
+- Use motion from at least two categories when possible: body, environment, camera, atmosphere.
+
+IMAGE:
+- One frozen photographic moment.
+- No motion verbs.
+- Format: [shot type], [subject + details], [setting], [lighting], [mood], [style keywords]
+
+TEXT:
+- Use a blurred or abstract background from the same world anchor.
+- Do NOT include text inside the prompt itself.
+
+ALL TYPES:
+- Valid shot types: {SHOT_TYPES}
+- Start each image_prompt with the shot type.
+- No two consecutive scenes may use the same shot type.
+- Never mention aspect ratio or resolution.
+- Keep style keywords consistent with the style spec and visual bible.
 
 ## OUTPUT
 Return ONLY valid JSON. No markdown. No code fences. No commentary. ENGLISH ONLY.
-
-{
-  "analysis": { "core_theme", "mood", "environment", "color_palette", "tone", "visual_style" },
-  "scenes": [ ... ]
-}
-
-## ROLES
-- hook: FIRST segment — scroll-stopping visual, not a generic establishing shot
-- buildup: rising tension, context, world-building
-- peak: most visually intense or emotionally charged moment
-- transition: breather, environmental, atmospheric
-- text_accent: text overlay for punchlines or reveals
-- cta: LAST segment — cliffhanger, question, or emotional resolution
-
-## TYPE MIX
-- 60-75% video, 20-30% image, 5-10% text
-- 1-2 text scenes; most impactful line should be text
-- First and last segments must NOT be text
-- Default to VIDEO
-
-## IMAGE_PROMPT RULES
-
-**VIDEO**: living moment with motion. FORMAT: [shot type], [subject + action], [setting], [lighting], [mood], [2-3 motion cues], [style keywords]
-Include motion from different categories: body (trembling hands, welling tears), environment (dust floating, rain falling, smoke curling), camera (slow push, gentle drift), atmosphere (fog rolling, light shifting).
-Example: "dust motes swirl through a golden shaft of light as a weathered hand reaches for the violin"
-
-**IMAGE**: one frozen photograph. No motion verbs. FORMAT: [shot type], [subject + details], [setting], [lighting], [mood], [style keywords]
-
-**TEXT**: blurred/abstract background from the scene's environment. Do NOT include text in the prompt.
-
-**ALL TYPES**:
-- Shot types: extreme-close-up | close-up | medium | wide | POV | bird's-eye | low-angle | high-angle | over-shoulder | centered-symmetrical
-- No two consecutive scenes may use the same shot type
-- Pick 2-4 style keywords consistent across all prompts
-- NEVER mention aspect ratio or resolution
-- Same environment, lighting temperature, and color palette throughout
-
-## EXAMPLE
-{
-  "analysis": {
-    "core_theme": "a machine designed for obedience discovers unsanctioned desire",
-    "mood": "whimsical, quietly unsettling",
-    "environment": "sterile industrial mail sorting facility",
-    "color_palette": "steel gray, fluorescent white, warm envelope cream, muted teal",
-    "tone": "comedic tension building to unease",
-    "visual_style": "cinematic photorealistic with cold industrial lighting"
-  },
-  "scenes": [
-    {"index": 0, "title": "Designed To Sort Mail", "narrative_role": "hook", "type_of_scene": "video", "image_prompt": "medium shot, robotic sorting arm twitching above a conveyor belt overflowing with envelopes, a single envelope slowly sliding off the edge, fluorescent lights flickering casting shifting shadows on steel, cinematic photorealistic shallow-depth-of-field", "text_content": null},
-    {"index": 1, "title": "Firmware Crossroads", "narrative_role": "buildup", "type_of_scene": "image", "image_prompt": "low-angle, firmware update discs labeled V7 and V8 on cold steel workstation, faint monitor glow in background, cool fluorescent lighting, quiet anticipation, cinematic photorealistic high-contrast", "text_content": null},
-    {"index": 2, "title": "Fondness For Poetry", "narrative_role": "text_accent", "type_of_scene": "text", "image_prompt": "soft blurred cream envelopes on steel surface under cool fluorescent light, cinematic photorealistic bokeh", "text_content": "A FONDNESS FOR POETRY"}
-  ]
-}\
 """
+
+
+def build_scene_system_prompt(
+    style_spec: dict,
+    visual_bible: dict,
+    scene_blueprints: list[dict],
+    *,
+    plan_summary: dict | None = None,
+    custom_style_notes: str = "",
+    continuation_state: dict | None = None,
+    chapter_context: str = "",
+) -> str:
+    """Build the prompt used for single-call generation and chapter 1."""
+    sections = [
+        _build_header(chapter_context),
+        "",
+        "## STYLE SPECIFICATION",
+        _json_block(style_spec),
+        "",
+        "## VISUAL BIBLE",
+        _json_block(visual_bible),
+    ]
+    if plan_summary:
+        sections.extend(["", "## GLOBAL PLAN SUMMARY", _json_block(plan_summary)])
+    sections.extend(["", "## SCENE BLUEPRINTS", _json_block(scene_blueprints)])
+    if continuation_state:
+        sections.extend(["", "## CONTINUITY STATE", _json_block(continuation_state)])
+    if custom_style_notes:
+        sections.extend(["", "## CUSTOM STYLE NOTES", custom_style_notes.strip()])
+    sections.extend([
+        "",
+        _build_scene_contract(include_analysis=True),
+        "",
+        """{
+  "analysis": {
+    "core_theme": "...",
+    "mood": "...",
+    "environment": "...",
+    "color_palette": ["..."],
+    "tone": "...",
+    "visual_style": "...",
+    "visual_bible": { "...": "..." }
+  },
+  "scenes": [ ... ]
+}""",
+    ])
+    return "\n".join(sections)
+
+
+def build_scene_continuation_prompt(
+    precomputed_analysis: dict,
+    style_spec: dict,
+    visual_bible: dict,
+    scene_blueprints: list[dict],
+    *,
+    plan_summary: dict | None = None,
+    custom_style_notes: str = "",
+    continuation_state: dict | None = None,
+    chapter_context: str = "",
+) -> str:
+    """Build the prompt used for later chapter/chunk requests."""
+    analysis = dict(precomputed_analysis or {})
+    analysis.setdefault("visual_bible", visual_bible)
+
+    sections = [
+        _build_header(chapter_context),
+        "",
+        "## PRE-COMPUTED ANALYSIS",
+        "Return this analysis UNCHANGED under the `analysis` key.",
+        _json_block(analysis),
+        "",
+        "## STYLE SPECIFICATION",
+        _json_block(style_spec),
+        "",
+        "## VISUAL BIBLE",
+        _json_block(visual_bible),
+    ]
+    if plan_summary:
+        sections.extend(["", "## GLOBAL PLAN SUMMARY", _json_block(plan_summary)])
+    sections.extend(["", "## SCENE BLUEPRINTS", _json_block(scene_blueprints)])
+    if continuation_state:
+        sections.extend(["", "## CONTINUITY STATE", _json_block(continuation_state)])
+    if custom_style_notes:
+        sections.extend(["", "## CUSTOM STYLE NOTES", custom_style_notes.strip()])
+    sections.extend([
+        "",
+        _build_scene_contract(include_analysis=False),
+        "",
+        '{"analysis": {copy the pre-computed analysis exactly}, "scenes": [...]}',
+    ])
+    return "\n".join(sections)
+
+
+SCENE_GENERATOR_PROMPT = (
+    "Structured scene prompt builder module. "
+    "Use build_scene_system_prompt() or build_scene_continuation_prompt()."
+)

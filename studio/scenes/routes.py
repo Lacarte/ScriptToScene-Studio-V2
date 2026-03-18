@@ -15,7 +15,16 @@ from studio.security import is_safe_webhook_url, sanitize_folder_name, sanitize_
 from studio.validation import validate_json
 from studio.scenes.schemas import SceneGenerateRequest
 from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
-from studio.scenes.prompts import SCENE_GENERATOR_PROMPT
+from studio.scenes.style_compiler import public_template_payload, resolve_template_bundle
+from studio.scenes.planner import (
+    build_scene_blueprints,
+    build_visual_bible,
+    slice_scene_blueprints,
+    summarize_blueprints,
+)
+from studio.scenes.prompts import build_scene_system_prompt
+from studio.scenes.continuity import build_progress_state
+from studio.scenes.validators import ensure_analysis_payload, finalize_scene_result
 from studio.scenes.chapters import (
     should_use_chapters, group_into_chapters,
     build_chapter_system_prompt, merge_chapter_results,
@@ -76,6 +85,23 @@ def _normalize_webhook_response(result):
         del result["segments"]
 
     return result
+
+
+def _planning_segments(segments, full_segments=None):
+    if full_segments:
+        speech = [dict(seg) for seg in full_segments if not seg.get("is_filler")]
+        if speech:
+            return speech
+    return [dict(seg) for seg in segments]
+
+
+def _build_generation_context(script, style_id, segments, full_segments=None, custom_style_notes=""):
+    planning_segments = _planning_segments(segments, full_segments)
+    bundle = resolve_template_bundle(style_id, TEMPLATES_BY_ID, custom_style_notes)
+    visual_bible = build_visual_bible(script, planning_segments, bundle["style_spec"])
+    scene_blueprints = build_scene_blueprints(planning_segments, visual_bible, bundle["style_spec"])
+    plan_summary = summarize_blueprints(scene_blueprints)
+    return bundle, visual_bible, scene_blueprints, plan_summary
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +233,7 @@ def _apply_segmenter_timing(result, segments, full_segments=None):
 @scenes_bp.route("/api/scenes/templates")
 def get_templates():
     """Return all available scene style templates."""
-    return jsonify(SCENE_STYLE_TEMPLATES)
+    return jsonify([public_template_payload(template) for template in SCENE_STYLE_TEMPLATES])
 
 
 @scenes_bp.route("/api/scenes/webhook-url")
@@ -230,8 +256,7 @@ def generate_scenes(data: SceneGenerateRequest):
       - webhook_url: optional override for the webhook URL
     """
     style_id = data.style
-    template = TEMPLATES_BY_ID.get(style_id, {})
-    style_prompt = data.style_prompt or template.get("style_prompt", "")
+    custom_style_notes = getattr(data, "custom_style_notes", None) or data.style_prompt or ""
     webhook_url = data.webhook_url or N8N_WEBHOOK_URL
     allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
     if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
@@ -240,6 +265,13 @@ def generate_scenes(data: SceneGenerateRequest):
 
     segments_raw = _normalize_segments(data.segments)
     full_segments_raw = data.full_segments or []
+    bundle, visual_bible, scene_blueprints, plan_summary = _build_generation_context(
+        script,
+        style_id,
+        segments_raw,
+        full_segments_raw,
+        custom_style_notes,
+    )
 
     # Strip timing for webhook — LLM only sees {index, words}
     segments_for_webhook = [
@@ -253,21 +285,43 @@ def generate_scenes(data: SceneGenerateRequest):
         full_segments = full_segments_raw
         if full_segments and should_use_chapters(full_segments):
             result = _generate_with_chapters(
-                script, style_id, style_prompt, full_segments,
+                script,
+                style_id,
+                bundle["style_spec"],
+                bundle["style_prompt"],
+                visual_bible,
+                scene_blueprints,
+                plan_summary,
+                full_segments,
                 webhook_url,
+                custom_style_notes,
             )
         else:
-            system_prompt = SCENE_GENERATOR_PROMPT
-            if style_prompt:
-                system_prompt += f"\n\n## STYLE INSTRUCTIONS\n{style_prompt}"
+            system_prompt = build_scene_system_prompt(
+                bundle["style_spec"],
+                visual_bible,
+                scene_blueprints,
+                plan_summary=plan_summary,
+                custom_style_notes=custom_style_notes,
+            )
             result = _call_webhook(webhook_url, {
                 "script": script,
                 "style": style_id,
+                "style_prompt": bundle["style_prompt"],
                 "system_prompt": system_prompt,
                 "segments": segments_for_webhook,
+                "style_spec": bundle["style_spec"],
+                "visual_bible": visual_bible,
+                "scene_blueprints": scene_blueprints,
+                "plan_summary": plan_summary,
             })
         result = _normalize_webhook_response(result)
         _apply_segmenter_timing(result, segments_raw, full_segments_raw)
+        ensure_analysis_payload(result, visual_bible, bundle["style_spec"], bundle["template"])
+        result["style_spec"] = bundle["style_spec"]
+        result["style_prompt"] = bundle["style_prompt"]
+        result["scene_blueprints"] = scene_blueprints
+        finalize_scene_result(result, scene_blueprints, visual_bible)
 
         # Save to disk
         project_id_raw = (data.project_id or result.get("pp_randomId")
@@ -280,6 +334,8 @@ def generate_scenes(data: SceneGenerateRequest):
         result["generation_time"] = round(time.perf_counter() - started, 3)
         result["source_folder"] = sanitize_folder_name(data.source_folder or "")
         result["style"] = style_id
+        if custom_style_notes:
+            result["custom_style_notes"] = custom_style_notes
         if data.parent_id:
             result["parent_id"] = data.parent_id
 
@@ -302,8 +358,10 @@ def generate_scenes(data: SceneGenerateRequest):
 # Chapter-based generation
 # ---------------------------------------------------------------------------
 
-def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments,
-                                   webhook_url, progress_cb=None):
+def generate_with_chapters_chunked(script, style_id, style_spec, style_prompt,
+                                   visual_bible, scene_blueprints, plan_summary,
+                                   full_segments, webhook_url, progress_cb=None,
+                                   custom_style_notes=""):
     """Generate scenes in chapter mode with digestible payload chunks.
 
     Each chapter is split into small segment batches and validated to ensure
@@ -318,6 +376,7 @@ def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments
     chapter_results = []
     analysis = None
     failed_chapters = []
+    generated_scenes = []
 
     for i, ch in enumerate(chapters):
         chapter_no = i + 1
@@ -338,15 +397,35 @@ def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments
 
             try:
                 for chunk_idx, seg_chunk in enumerate(seg_chunks, start=1):
+                    chunk_blueprints = slice_scene_blueprints(scene_blueprints, seg_chunk)
+                    continuation_state = build_progress_state(
+                        generated_scenes,
+                        visual_bible,
+                        plan_summary,
+                    ) if generated_scenes else None
                     prompt = build_chapter_system_prompt(
-                        SCENE_GENERATOR_PROMPT, style_prompt, analysis,
-                        i, total, chapters,
+                        style_spec,
+                        visual_bible,
+                        chunk_blueprints,
+                        analysis,
+                        i,
+                        total,
+                        chapters,
+                        plan_summary=plan_summary,
+                        continuation_state=continuation_state,
+                        custom_style_notes=custom_style_notes,
                     )
                     payload = {
                         "script": script_window,
                         "style": style_id,
+                        "style_prompt": style_prompt,
                         "system_prompt": prompt,
                         "segments": seg_chunk,
+                        "style_spec": style_spec,
+                        "visual_bible": visual_bible,
+                        "scene_blueprints": chunk_blueprints,
+                        "plan_summary": plan_summary,
+                        "continuation_state": continuation_state or {},
                         "chapter": chapter_no,
                         "total_chapters": total,
                         "chapter_chunk": chunk_idx,
@@ -358,7 +437,9 @@ def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments
                             f"Chapter {chapter_no}/{total}, chunk {chunk_idx}/{len(seg_chunks)}: "
                             f"{len(seg_chunk)} segments"
                         )
-                    result = _call_webhook(webhook_url, payload, timeout=300)
+                    result = _normalize_webhook_response(
+                        _call_webhook(webhook_url, payload, timeout=300)
+                    )
                     missing, unexpected = validate_scene_indexes(result, seg_chunk)
                     if missing or unexpected:
                         raise RuntimeError(
@@ -366,6 +447,7 @@ def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments
                             f"(missing={missing}, unexpected={unexpected})"
                         )
                     chunk_results.append(result)
+                    generated_scenes.extend(result.get("scenes", []))
 
                     if analysis is None and result.get("analysis"):
                         analysis = result["analysis"]
@@ -400,11 +482,22 @@ def generate_with_chapters_chunked(script, style_id, style_prompt, full_segments
     return merged
 
 
-def _generate_with_chapters(script, style_id, style_prompt, full_segments,
-                            webhook_url):
+def _generate_with_chapters(script, style_id, style_spec, style_prompt,
+                            visual_bible, scene_blueprints, plan_summary,
+                            full_segments, webhook_url,
+                            custom_style_notes=""):
     """Backward-compatible wrapper used by /api/scenes/generate."""
     return generate_with_chapters_chunked(
-        script, style_id, style_prompt, full_segments, webhook_url
+        script,
+        style_id,
+        style_spec,
+        style_prompt,
+        visual_bible,
+        scene_blueprints,
+        plan_summary,
+        full_segments,
+        webhook_url,
+        custom_style_notes=custom_style_notes,
     )
 
 

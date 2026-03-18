@@ -13,6 +13,7 @@ class PipelineRunRequest(BaseModel):
     segment_config: Optional[dict] = None
     webhook_url: Optional[str] = None
     style_prompt: Optional[str] = None
+    custom_style_notes: Optional[str] = None
     auto_scenes: bool = True
     stop_after: Optional[str] = None  # tts, alignment/timing, segment, scenes, assets, assemble, export, or None (all)
     # Asset grabber options (used when pipeline reaches assets step)

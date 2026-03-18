@@ -8,6 +8,11 @@ per-chapter webhook payloads and merge the results.
 import json
 from loguru import logger
 
+from studio.scenes.prompts import (
+    build_scene_continuation_prompt,
+    build_scene_system_prompt,
+)
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
@@ -122,12 +127,15 @@ def group_into_chapters(segments, config=None):
     return chapters
 
 
-def build_chapter_system_prompt(base_prompt, style_prompt, analysis_json,
-                                chapter_idx, total_chapters, chapters):
+def build_chapter_system_prompt(style_spec, visual_bible, scene_blueprints,
+                                analysis_json, chapter_idx, total_chapters,
+                                chapters, plan_summary=None,
+                                continuation_state=None,
+                                custom_style_notes=""):
     """Build the system prompt for a chapter webhook call.
 
-    For chapter 1: base_prompt + chapter mode suffix + style instructions.
-    For chapters 2+: chapter scene prompt with pre-computed analysis.
+    For chapter 1: build the analysis + scene-writing prompt.
+    For later chunks: continue with pre-computed analysis and continuity state.
     """
     ch = chapters[chapter_idx]
     prev_words = chapters[chapter_idx - 1]["last_words"] if chapter_idx > 0 else ""
@@ -144,17 +152,27 @@ def build_chapter_system_prompt(base_prompt, style_prompt, analysis_json,
     if next_words:
         chapter_context += f'Next chapter starts with: "{next_words}"\n'
 
-    if chapter_idx == 0:
-        # Chapter 1: full prompt (includes ANALYZE step) + chapter scope
-        prompt = base_prompt + "\n\n" + chapter_context
-    else:
-        # Chapters 2+: inject pre-computed analysis, skip ANALYZE step
-        prompt = _build_continuation_prompt(analysis_json, chapter_context)
+    if chapter_idx == 0 and not analysis_json:
+        return build_scene_system_prompt(
+            style_spec,
+            visual_bible,
+            scene_blueprints,
+            plan_summary=plan_summary,
+            custom_style_notes=custom_style_notes,
+            continuation_state=continuation_state,
+            chapter_context=chapter_context,
+        )
 
-    if style_prompt:
-        prompt += f"\n\n## STYLE INSTRUCTIONS\n{style_prompt}"
-
-    return prompt
+    return build_scene_continuation_prompt(
+        analysis_json or {"visual_bible": visual_bible},
+        style_spec,
+        visual_bible,
+        scene_blueprints,
+        plan_summary=plan_summary,
+        custom_style_notes=custom_style_notes,
+        continuation_state=continuation_state,
+        chapter_context=chapter_context,
+    )
 
 
 def merge_chapter_results(chapter_results):
