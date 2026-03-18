@@ -813,10 +813,33 @@ $id('sts-action-btn').addEventListener('click', () => {
   }
 });
 
+function resetTypingItem(item) {
+  if (!item) return false;
+  item.status = 'queued';
+  item.errorCount = 0;
+  delete item.videoUrl;
+  delete item.allVideoUrls;
+  return true;
+}
+
+function requeueTypingItems(statuses) {
+  const targetStatuses = statuses || ['error', 'failed'];
+  let revived = 0;
+  S.typing.queue.forEach(q => {
+    if (targetStatuses.indexOf(q.status) !== -1 && resetTypingItem(q)) {
+      revived++;
+    }
+  });
+  if (revived) {
+    console.log('Re-queued', revived, 'prompt(s) for typing');
+  }
+  return revived;
+}
+
 // Retry button - re-queues errors on current tab
 $id('sts-retry-btn').addEventListener('click', () => {
   if (S.activeTab === 'typing') {
-    S.typing.queue.forEach(q => { if (q.status === 'error') q.status = 'queued'; });
+    requeueTypingItems(['error', 'failed']);
   } else {
     Object.values(S.scenes).forEach(sc => { if (sc.status === 'error') sc.status = 'pending'; });
     syncNow();
@@ -829,15 +852,14 @@ $id('sts-redownload-btn').addEventListener('click', () => {
   redownload();
 });
 
-// Click error rows to re-queue individual prompts
+// Click failed/error rows to re-queue individual prompts
 $id('sts-list').addEventListener('click', (e) => {
   const row = e.target.closest('.sts-row.error-clickable');
   if (!row) return;
   const idx = parseInt(row.dataset.idx);
   if (isNaN(idx)) return;
   const item = S.typing.queue[idx];
-  if (item && item.status === 'error') {
-    item.status = 'queued';
+  if (item && (item.status === 'error' || item.status === 'failed') && resetTypingItem(item)) {
     render();
   }
 });
@@ -1101,7 +1123,7 @@ function render() {
   const btn = $id('sts-action-btn');
   const retryBtn = $id('sts-retry-btn');
   const redownloadBtn = $id('sts-redownload-btn');
-  const hasTypingErrors = S.typing.queue.some(q => q.status === 'error');
+  const hasTypingErrors = S.typing.queue.some(q => q.status === 'error' || q.status === 'failed');
   const hasSyncErrors = Object.values(S.scenes).some(sc => sc.status === 'error');
   const jobDone = isJobComplete();
 
@@ -1139,7 +1161,7 @@ function render() {
       else if (q.status === 'typed') { sHTML = '<span class="sts-d-typed">&#x2714;</span>'; meta = 'typed'; }
       else if (q.status === 'failed') { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = 'failed (' + (q.errorCount || 0) + 'x)'; }
       else if (q.status === 'error') { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = 'error' + (q.errorCount > 1 ? ' (' + q.errorCount + 'x)' : ''); }
-      var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + (q.status === 'error' ? ' error-clickable' : '');
+      var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + ((q.status === 'error' || q.status === 'failed') ? ' error-clickable' : '');
       return '<div class="' + rowCls + '" data-idx="' + i + '"><div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + pr.replace(/</g, '&lt;') + '</div><div class="sts-row-meta">' + meta + '</div></div><div class="sts-row-status">' + sHTML + '</div></div>';
     }).join('');
   } else {
@@ -1200,6 +1222,8 @@ function updateTimer() {
 async function startTyping() {
   const tq = S.typing.queue;
   if (!tq.length) { console.log('No prompts to type'); return; }
+
+  requeueTypingItems(['error', 'failed']);
 
   S.typing.active = true;
   S.typing.batchCount = 0;
