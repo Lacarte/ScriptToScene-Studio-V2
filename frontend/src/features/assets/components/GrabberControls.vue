@@ -26,6 +26,7 @@ const emit = defineEmits([
   'select-none',
   'resend-selected',
   'update:autoType',
+  'validate-and-build',
 ])
 
 const providers = [
@@ -214,6 +215,14 @@ const progressPercent = computed(() => props.progress.percent)
         style="padding:6px 14px;font-size:11px"
         @click="emit('select-all')"
       >Download All</button>
+      <button
+        class="action-btn validate-build-btn"
+        title="Validate assets, generate thumbnails, assemble & edit"
+        @click="emit('validate-and-build')"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        Validate &amp; Build
+      </button>
     </div>
 
     <!-- Progress bar -->
@@ -380,6 +389,23 @@ const progressPercent = computed(() => props.progress.percent)
 .action-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.validate-build-btn {
+  padding: 6px 14px !important;
+  font-size: 11px !important;
+  background: rgba(78, 205, 196, 0.08);
+  border-color: rgba(78, 205, 196, 0.3);
+  color: #4ECDC4;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.validate-build-btn:hover {
+  background: rgba(78, 205, 196, 0.15);
+  border-color: #4ECDC4;
+  color: #4ECDC4;
 }
 
 /* ---- Progress bar ---- */

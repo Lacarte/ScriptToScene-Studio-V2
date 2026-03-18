@@ -328,7 +328,7 @@ def regenerate_assets(project_id):
     base_url = f"http://127.0.0.1:{server_port}"
 
     scenes_with_prompts = [
-        {"prompt": s.get("image_prompt", ""), "scene": i}
+        {"prompt": s.get("image_prompt", ""), "scene": s.get("index", i)}
         for i, s in enumerate(scenes)
         if s.get("image_prompt")
     ]
@@ -1051,8 +1051,9 @@ def _step_assets(scenes_result, config, project_id, job_id):
         "aspect_ratio": aspect_ratio,
         "auto_type": auto_type,
         "scenes": [
-            {"prompt": s.get("image_prompt", ""), "scene": i}
+            {"prompt": s.get("image_prompt", ""), "scene": s.get("index", i)}
             for i, s in enumerate(scenes)
+            if s.get("image_prompt")
         ],
     }
     # Add provider-specific options

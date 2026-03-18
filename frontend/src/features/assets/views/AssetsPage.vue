@@ -178,6 +178,80 @@ function setStep(label, status) {
 
 const STEP_DELAY = 400
 
+async function validateAndBuild(project) {
+  const pid = project.project_id
+  assemblingProject.value = pid
+  buildSteps.value = []
+  buildVisible.value = true
+
+  try {
+    // Step 1: Reconcile disk files with metadata
+    setStep('Reconciling assets', 'running')
+    await api.post(`/api/assets/reconcile/${pid}`)
+    setStep('Reconciling assets', 'done')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    // Step 2: Validate each scene folder has at least one asset
+    setStep('Validating scene assets', 'running')
+    const assetData = await api.get(`/api/assets/project/${pid}`)
+    if (!assetData || assetData.error) {
+      setStep('Validating scene assets', 'error')
+      setStep('Error: could not load asset data', 'error')
+      await new Promise(r => setTimeout(r, 5000))
+      buildVisible.value = false
+      return
+    }
+
+    const sceneStatuses = assetData.scene_statuses || {}
+    const sceneKeys = Object.keys(sceneStatuses)
+    const totalScenes = sceneKeys.length || project.scene_count || 0
+    let readyCount = 0
+    const missingScenes = []
+
+    for (const key of sceneKeys) {
+      const s = sceneStatuses[key]
+      if (s.status === 'ready' && s.local_files?.length) {
+        readyCount++
+      } else {
+        missingScenes.push(key)
+      }
+    }
+
+    setStep(`Validated: ${readyCount}/${totalScenes} scenes have assets`, readyCount === totalScenes ? 'done' : 'error')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    if (missingScenes.length) {
+      setStep(`Missing assets: scene${missingScenes.length > 1 ? 's' : ''} ${missingScenes.join(', ')}`, 'error')
+      await new Promise(r => setTimeout(r, 5000))
+      buildVisible.value = false
+      return
+    }
+
+    // Step 3: Generate thumbnails
+    setStep('Generating thumbnails', 'running')
+    const thumbResult = await api.post(`/api/thumbnails/${pid}/generate?modules=assets`)
+    const thumbGen = thumbResult?.total_generated || 0
+    const thumbSkip = thumbResult?.total_skipped || 0
+    const thumbErr = thumbResult?.total_errors || 0
+    setStep(`Thumbnails: ${thumbGen} generated, ${thumbSkip} cached${thumbErr ? `, ${thumbErr} errors` : ''}`, thumbErr ? 'error' : 'done')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+
+    // Step 4: Proceed to assemble & edit
+    setStep('Validation passed — assembling project', 'done')
+    await new Promise(r => setTimeout(r, STEP_DELAY))
+  } catch (e) {
+    setStep('Error: ' + (e.message || 'Unknown error'), 'error')
+    await new Promise(r => setTimeout(r, 5000))
+    buildVisible.value = false
+    return
+  }
+
+  // Clear the overlay and delegate to the regular assembleAndEdit flow
+  buildVisible.value = false
+  assemblingProject.value = null
+  await assembleAndEdit(project)
+}
+
 async function assembleAndEdit(project) {
   const pid = project.project_id
   assemblingProject.value = pid
@@ -359,6 +433,17 @@ async function onOpenFolder(idx) {
 
 function onDownloadScene(idx) {
   downloadScene(idx, projectId.value)
+}
+
+function onValidateAndBuild() {
+  if (!projectId.value) {
+    toast.error('No project loaded')
+    return
+  }
+  validateAndBuild({
+    project_id: projectId.value,
+    scene_count: sceneCount.value,
+  })
 }
 
 function onOpenLightbox(scene, file) {
@@ -582,6 +667,7 @@ onMounted(async () => {
       @select-pending="selectPending"
       @select-none="selectNone"
       @resend-selected="onResendSelected"
+      @validate-and-build="onValidateAndBuild"
     />
 
     <!-- Asset Grid -->
@@ -689,13 +775,19 @@ onMounted(async () => {
               </div>
             </div>
 
-            <!-- Action -->
-            <button
-              v-if="project.status === 'done' && project.ready_count"
-              class="hist-action-btn"
-              :disabled="assemblingProject === project.project_id"
-              @click.stop="assembleAndEdit(project)"
-            >{{ assemblingProject === project.project_id ? 'Building...' : (project.has_build ? 'Rebuild, Assemble &amp; Edit' : 'Build, Assemble &amp; Edit') }}</button>
+            <!-- Actions -->
+            <div v-if="project.status === 'done' && project.ready_count" class="hist-actions">
+              <button
+                class="hist-action-btn hist-action-btn--validate"
+                :disabled="assemblingProject === project.project_id"
+                @click.stop="validateAndBuild(project)"
+              >{{ assemblingProject === project.project_id ? 'Validating...' : 'Validate, Build &amp; Edit' }}</button>
+              <button
+                class="hist-action-btn"
+                :disabled="assemblingProject === project.project_id"
+                @click.stop="assembleAndEdit(project)"
+              >{{ assemblingProject === project.project_id ? 'Building...' : (project.has_build ? 'Rebuild &amp; Edit' : 'Build &amp; Edit') }}</button>
+            </div>
             <svg v-else width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" class="hist-chevron">
               <path d="M9 18l6-6-6-6" />
             </svg>
@@ -1198,6 +1290,12 @@ onMounted(async () => {
   color: #A78BFA;
 }
 
+.hist-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .hist-action-btn {
   flex-shrink: 0;
   padding: 5px 12px;
@@ -1210,6 +1308,10 @@ onMounted(async () => {
   cursor: pointer;
   white-space: nowrap;
   transition: opacity 0.15s, box-shadow 0.3s;
+}
+
+.hist-action-btn--validate {
+  background: #A78BFA;
 }
 
 .hist-action-btn:hover {
