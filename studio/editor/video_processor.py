@@ -3,6 +3,7 @@ Video Processor
 FFmpeg-based video processing for scene assembly and effects
 """
 
+import json
 import os
 import re
 import subprocess
@@ -947,7 +948,6 @@ class VideoProcessor:
                                     errors='replace', timeout=15)
             if result.returncode != 0:
                 return None
-            import json
             data = json.loads(result.stdout)
             streams = data.get('streams', [])
             if not streams:

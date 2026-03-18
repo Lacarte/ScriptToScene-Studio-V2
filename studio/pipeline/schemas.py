@@ -1,8 +1,10 @@
 """Pydantic schemas for Pipeline routes."""
 
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+_VALID_STEPS = ("tts", "timing", "alignment", "segment", "scenes", "assets", "assemble", "export")
 
 
 class PipelineRunRequest(BaseModel):
@@ -15,9 +17,19 @@ class PipelineRunRequest(BaseModel):
     style_prompt: Optional[str] = None
     custom_style_notes: Optional[str] = None
     auto_scenes: bool = True
-    stop_after: Optional[str] = None  # tts, alignment/timing, segment, scenes, assets, assemble, export, or None (all)
-    resume_from: Optional[str] = None  # step to resume from (skips prior steps, reuses saved outputs)
-    resume_project_id: Optional[str] = None  # existing project ID to resume
+    stop_after: Optional[str] = None
+    resume_from: Optional[str] = None
+    resume_project_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_steps(self):
+        if self.stop_after and self.stop_after not in _VALID_STEPS:
+            raise ValueError(f"stop_after must be one of {_VALID_STEPS}, got '{self.stop_after}'")
+        if self.resume_from and self.resume_from not in _VALID_STEPS:
+            raise ValueError(f"resume_from must be one of {_VALID_STEPS}, got '{self.resume_from}'")
+        if self.resume_from and not self.resume_project_id:
+            raise ValueError("resume_project_id is required when resume_from is set")
+        return self
     # Asset grabber options (used when pipeline reaches assets step)
     provider: str = "grok"
     aspect_ratio: str = "9:16"

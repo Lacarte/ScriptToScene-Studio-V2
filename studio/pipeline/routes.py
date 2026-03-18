@@ -205,6 +205,8 @@ def list_jobs():
                     "speed": cfg.get("speed", 1.0),
                     "style": cfg.get("style", ""),
                     "provider": cfg.get("provider", "grok"),
+                    "stop_after": cfg.get("stop_after") or "",
+                    "auto_scenes": cfg.get("auto_scenes", True),
                     "scene_count": scene_count,
                     "timestamp": data.get("timestamp", ""),
                     "created": os.path.getmtime(pj_path),
@@ -325,15 +327,20 @@ def regenerate_assets(project_id):
     server_port = request.host.split(":")[-1] if ":" in request.host else "5050"
     base_url = f"http://127.0.0.1:{server_port}"
 
+    scenes_with_prompts = [
+        {"prompt": s.get("image_prompt", ""), "scene": i}
+        for i, s in enumerate(scenes)
+        if s.get("image_prompt")
+    ]
+    if not scenes_with_prompts:
+        return jsonify({"error": "No scenes have image prompts to regenerate"}), 400
+
     payload = {
         "project_id": project_id,
         "provider": provider,
         "aspect_ratio": aspect_ratio,
         "auto_type": True,
-        "scenes": [
-            {"prompt": s.get("image_prompt", ""), "scene": i}
-            for i, s in enumerate(scenes)
-        ],
+        "scenes": scenes_with_prompts,
     }
     if provider == "grok":
         payload["grok_mode"] = body.get("grok_mode") or config.get("grok_mode", "video")
@@ -497,6 +504,33 @@ def _run_pipeline(job_id):
         logger.info("[{}] Resuming from step '{}' — loading prior results from disk",
                     project_id, resume_from)
         prior = _load_prior_results(project_id, resume_from)
+
+        # Validate that required prior steps were loaded
+        required_chain = {
+            "timing": ["tts"],
+            "segment": ["tts", "timing"],
+            "scenes": ["tts", "timing", "segment"],
+            "assets": ["tts", "timing", "segment", "scenes"],
+            "assemble": ["tts", "timing", "segment", "scenes"],
+            "export": ["tts", "timing", "segment", "scenes"],
+        }
+        missing = [s for s in required_chain.get(resume_from, []) if s not in prior]
+        if missing:
+            error_msg = (
+                f"Cannot resume from '{resume_from}': missing prior data for "
+                f"{', '.join(missing)}. Run the full pipeline first."
+            )
+            logger.error("[{}] {}", project_id, error_msg)
+            _save_pipeline_json(project_id, job_id, config, "error",
+                                {}, step_timings, error_msg=error_msg,
+                                error_step=resume_from)
+            _emit(job_id, {"step": "error", "status": "error",
+                           "message": f"[{project_id}] {error_msg}",
+                           "error_step": resume_from})
+            with _jobs_lock:
+                job["status"] = "error"
+            return
+
         results.update(prior)
         # Emit skipped status for prior steps
         for step_name in all_steps[:resume_idx]:
@@ -703,18 +737,24 @@ def _run_pipeline(job_id):
             job["status"] = "done"
 
     except Exception as e:
-        logger.error("[{}] Pipeline FAILED at step '{}': {}", project_id,
-                     job.get("step_statuses", {}).keys() or "unknown", e)
-        logger.exception("Pipeline traceback")
-        # Find which step failed
+        # Find which step failed (the one still marked "running")
         error_step = None
-        for sname, sval in job.get("step_statuses", {}).items():
+        step_statuses = job.get("step_statuses", {})
+        for sname, sval in step_statuses.items():
             if sval == "running":
                 error_step = sname
                 break
+        # Update the failed step status to "error" before saving
+        if error_step:
+            step_statuses[error_step] = "error"
+
+        logger.error("[{}] Pipeline FAILED at step '{}': {}", project_id,
+                     error_step or "unknown", e)
+        logger.exception("Pipeline traceback")
+
         # Persist pipeline.json with error state
         _save_pipeline_json(project_id, job_id, config, "error",
-                            job.get("step_statuses", {}), step_timings,
+                            step_statuses, step_timings,
                             error_msg=str(e), error_step=error_step)
         _emit(job_id, {"step": "error", "status": "error",
                        "message": f"[{project_id}] {e}",

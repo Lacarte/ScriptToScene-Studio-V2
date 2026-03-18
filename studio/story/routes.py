@@ -27,6 +27,7 @@ from studio.story.prompts import (
     build_story_user_prompt,
     compute_word_target,
     STORY_CATEGORIES,
+    WORDS_PER_SECOND,
 )
 from studio.story.engine import parse_story_sections
 
@@ -143,14 +144,16 @@ def generate_story(data: StoryGenerateRequest):
     try:
         result = _call_story_webhook(webhook_url, payload)
 
-        # Extract story text — webhook may return {story_text} or {output} or {text}
-        raw_text = (
-            result.get("story_text")
-            or result.get("output")
-            or result.get("text")
-            or result.get("response")
-            or ""
-        )
+        # Extract story text — webhook returns {story_text} (preferred) with fallbacks
+        raw_text = result.get("story_text", "")
+        matched_field = "story_text"
+        if not raw_text:
+            for field in ("output", "text", "response"):
+                raw_text = result.get(field, "")
+                if raw_text:
+                    matched_field = field
+                    logger.info("Story webhook: found text in '{}' field (expected 'story_text')", field)
+                    break
         if not raw_text:
             return jsonify({"error": "Webhook returned no story text"}), 502
 
@@ -165,7 +168,7 @@ def generate_story(data: StoryGenerateRequest):
             project_id = generate_project_id("ps")
 
         # Build response
-        estimated_duration = round(parsed["word_count"] / 2.5)
+        estimated_duration = round(parsed["word_count"] / WORDS_PER_SECOND)
         response = {
             "success": True,
             "project_id": project_id,

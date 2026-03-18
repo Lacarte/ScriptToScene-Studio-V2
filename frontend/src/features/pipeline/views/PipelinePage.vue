@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { api } from '@/shared/api/client.js'
 import { usePipeline } from '../composables/usePipeline.js'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
+import { useAssets } from '@/features/assets/composables/useAssets.js'
 import { useStory } from '../composables/useStory.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
@@ -55,9 +57,11 @@ const {
   running, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
   failedStep, failedProjectId,
-  start, retry, regenerateAssets, loadFromHistory, randomStory, resetProgress,
+  start, retry, loadFromHistory, randomStory, resetProgress,
   timeAgo,
 } = usePipeline()
+
+const assets = useAssets()
 
 const STEPS = computed(() => {
   const stop = stopAfter.value
@@ -197,6 +201,56 @@ function onHistoryClick(index) {
   loadFromHistory(index)
 }
 
+function retryFromHistory(index) {
+  const j = jobs.value[index]
+  if (!j || !j.error_step) return
+  activeProjectId.value = j.project_id
+  loadFromHistory(index)
+  // Auto-trigger retry after state is loaded
+  nextTick(() => retry())
+}
+
+const PROVIDER_URLS = {
+  grok: 'https://grok.com/imagine',
+  midjourney: 'https://www.midjourney.com/imagine',
+  'meta-ai': 'https://www.meta.ai/media',
+}
+
+async function handleRegenerateAssets(projectId) {
+  // 1. Check if scenes exist for this project
+  let sceneData
+  try {
+    sceneData = await api.get(`/api/scenes/${projectId}`)
+  } catch {
+    toast.error('No scenes found — run the Scene Generator for this project first')
+    return
+  }
+
+  if (!sceneData?.scenes?.length) {
+    toast.error('No scenes found — run the Scene Generator for this project first')
+    return
+  }
+
+  // 2. Load scenes into the assets composable
+  assets.loadScenes(sceneData)
+
+  // 3. Start the grabber (same as Asset Manager's Start button)
+  try {
+    await assets.startGrabber(projectId)
+    toast.success(`Grabber started for ${sceneData.scenes.length} scenes`)
+  } catch (e) {
+    toast.error(e.message || 'Failed to start grabber')
+    return
+  }
+
+  // 4. Open the provider website
+  const providerUrl = PROVIDER_URLS[assets.provider.value]
+  if (providerUrl) window.open(providerUrl, 'sts-provider-tab')
+
+  // 5. Navigate to the assets page
+  router.push({ path: '/assets', query: { project: projectId } })
+}
+
 function openInScenes(projectId) {
   router.push({ path: '/scenes', query: { project: projectId } })
 }
@@ -251,6 +305,7 @@ function logStepLabel(step) {
             <button
               class="mode-btn"
               :class="{ active: sourceMode === 'manual' }"
+              :disabled="running"
               @click="sourceMode = 'manual'"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="16" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
@@ -259,6 +314,7 @@ function logStepLabel(step) {
             <button
               class="mode-btn"
               :class="{ active: sourceMode === 'generate' }"
+              :disabled="running"
               @click="sourceMode = 'generate'"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -519,7 +575,7 @@ function logStepLabel(step) {
                 v-if="j.status === 'error' && j.error_step"
                 class="hist-action-btn hist-action-btn--retry"
                 title="Retry from failed step"
-                @click.stop="onHistoryClick(i)"
+                @click.stop="retryFromHistory(i)"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 Retry
@@ -529,7 +585,7 @@ function logStepLabel(step) {
                 v-if="j.status === 'done' && j.scene_count > 0"
                 class="hist-action-btn hist-action-btn--regen"
                 title="Regenerate assets with provider"
-                @click.stop="regenerateAssets(j.project_id)"
+                @click.stop="handleRegenerateAssets(j.project_id)"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
                 Regen Assets

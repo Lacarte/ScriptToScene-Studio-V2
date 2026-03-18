@@ -27,17 +27,24 @@ def parse_story_sections(raw_text: str) -> dict:
         elif current_key and current_key in sections:
             sections[current_key] = part.strip()
 
-    # If parsing failed (no labels found), put everything in build
-    if not any(sections.values()):
+    # If parsing failed (no labels found), keep original text as-is
+    has_labels = any(sections.values())
+    if not has_labels:
         sections["build"] = text
+        # Return original text unchanged — don't prepend labels
+        return {
+            "sections": sections,
+            "story_text": text,
+            "word_count": len(text.split()),
+        }
 
-    # Reconstruct full story text
+    # Reconstruct full story text from labeled sections
     story_parts = []
     for label in labels:
         key = label.lower()
         if sections.get(key):
             story_parts.append(f"{label}: {sections[key]}")
-    story_text = "\n\n".join(story_parts) if story_parts else text
+    story_text = "\n\n".join(story_parts)
 
     word_count = len(story_text.split())
 

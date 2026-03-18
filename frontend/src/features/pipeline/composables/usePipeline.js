@@ -210,18 +210,25 @@ function startSSE(id) {
       eventSource.close()
       eventSource = null
       running.value = false
-      // Determine which step failed for retry
-      const lastRunning = Object.entries(stepStatus.value)
-        .find(([, s]) => s === 'running')
-      if (lastRunning) {
-        failedStep.value = lastRunning[0]
-        failedProjectId.value = event.project_id || lastCompletedProjectId.value || null
+
+      // Use error_step from backend (authoritative) with fallback to last running step
+      const errorStep = event.error_step
+        || Object.entries(stepStatus.value).find(([, s]) => s === 'running')?.[0]
+        || null
+      if (errorStep) {
+        failedStep.value = errorStep
+        // Mark the failed step as 'error' in stepStatus
+        stepStatus.value = { ...stepStatus.value, [errorStep]: 'error' }
       }
-      // Also try to extract project_id from the error message
-      const pidMatch = (event.message || '').match(/\[(pp_\w+)\]/)
-      if (pidMatch && !failedProjectId.value) {
-        failedProjectId.value = pidMatch[1]
+
+      // Resolve project_id: prefer event field, then extract from message
+      failedProjectId.value = event.project_id || failedProjectId.value || null
+      if (!failedProjectId.value) {
+        const pidMatch = (event.message || '').match(/\[(pp_\w+)\]/)
+        if (pidMatch) failedProjectId.value = pidMatch[1]
       }
+
+      setTimeout(() => loadHistory(), 500)
       return
     }
 
@@ -233,6 +240,9 @@ function startSSE(id) {
     eventSource.close()
     eventSource = null
     running.value = false
+    if (globalStatus.value === 'running') {
+      globalStatus.value = 'error'
+    }
   }
 }
 
@@ -257,6 +267,15 @@ function loadFromHistory(index) {
     if (tmpl) style.value = tmpl.id
     else style.value = j.style
   }
+  // Restore pipeline settings from step_statuses if available
+  if (j.stop_after !== undefined) stopAfter.value = j.stop_after || ''
+  if (j.auto_scenes !== undefined) autoScenes.value = j.auto_scenes
+
+  // Restore step statuses for progress display
+  if (j.step_statuses && Object.keys(j.step_statuses).length) {
+    stepStatus.value = { ...j.step_statuses }
+  }
+
   // Restore error state for retry
   if (j.status === 'error' && j.error_step) {
     globalStatus.value = 'error'
@@ -265,7 +284,7 @@ function loadFromHistory(index) {
   } else {
     failedStep.value = null
     failedProjectId.value = null
-    globalStatus.value = ''
+    globalStatus.value = j.status === 'done' ? 'done' : ''
   }
 }
 
@@ -308,6 +327,10 @@ function resetProgress() {
 
 async function retry() {
   const toast = useToast()
+  if (running.value) {
+    toast.error('Pipeline is already running')
+    return
+  }
   const resumeStep = failedStep.value
   const resumeProject = failedProjectId.value
   if (!resumeStep || !resumeProject) {
