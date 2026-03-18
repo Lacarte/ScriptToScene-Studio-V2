@@ -35,6 +35,30 @@ function setStyle(id) {
   story.storyCategory.value = id  // sync category to match
 }
 
+const detecting = ref(false)
+const detectedStyle = ref(null) // { style_id, confidence, reason }
+
+async function detectStyle() {
+  const t = text.value.trim()
+  if (!t) { toast.error('Paste some text first'); return }
+  detecting.value = true
+  detectedStyle.value = null
+  try {
+    const result = await api.post('/api/story/classify-style', { body: { text: t }, timeout: 35000 })
+    if (result.error) { toast.error(result.error); return }
+    detectedStyle.value = result
+    setStyle(result.style_id)
+    const tmpl = templates.value.find(tp => tp.id === result.style_id)
+    const label = tmpl?.name || result.style_id
+    const pct = Math.round((result.confidence || 0) * 100)
+    toast.success(`Detected: ${label} (${pct}%) — ${result.reason || ''}`)
+  } catch (e) {
+    toast.error(e.message || 'Style detection failed')
+  } finally {
+    detecting.value = false
+  }
+}
+
 async function handleGenerateStory() {
   try {
     const data = await story.generateStory(style.value)
@@ -54,10 +78,10 @@ const router = useRouter()
 const {
   ALL_STEPS, VOICES,
   text, voice, speed, style, autoScenes, stopAfter, templates,
-  running, stepStatus, log, globalStatus,
+  running, stopping, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
-  failedStep, failedProjectId,
-  start, retry, loadFromHistory, randomStory, resetProgress,
+  failedStep, failedProjectId, stoppedStep, stoppedProjectId,
+  start, stop, retry, resumeStopped, loadFromHistory, randomStory, resetProgress,
   timeAgo,
 } = usePipeline()
 
@@ -72,8 +96,10 @@ const STEPS = computed(() => {
 
 const { styleLabel, styleColor } = useScenes()
 
-// Sync category to match current style on init
-story.storyCategory.value = style.value || 'cinematic'
+// Keep category in sync with style (covers async init + later changes)
+watch(style, (val) => {
+  story.storyCategory.value = val || 'cinematic'
+}, { immediate: true })
 
 const logEl = ref(null)
 const activeProjectId = ref('')
@@ -88,6 +114,13 @@ watch(log, async () => {
 })
 
 const canRun = computed(() => text.value.trim().length > 0 && !running.value)
+const canResumeStopped = computed(() => (
+  globalStatus.value === 'stopped'
+  && !!stoppedStep.value
+  && !!stoppedProjectId.value
+  && !running.value
+))
+const showHeaderPipelineAction = computed(() => running.value || stopping.value || canResumeStopped.value)
 
 // Reset progress when form fields change
 watch([text, voice, speed, style], () => {
@@ -142,6 +175,7 @@ function dotColor(stepId) {
   const s = stepStatus.value[stepId] || 'pending'
   if (s === 'running') return 'var(--accent)'
   if (s === 'done') return '#26DE81'
+  if (s === 'stopped') return '#FFB347'
   if (s === 'skipped') return 'var(--text-muted)'
   if (s === 'error') return '#FF6B6B'
   return 'var(--border)'
@@ -151,6 +185,7 @@ function dotTextColor(stepId) {
   const s = stepStatus.value[stepId] || 'pending'
   if (s === 'running') return 'var(--accent)'
   if (s === 'done') return '#26DE81'
+  if (s === 'stopped') return '#FFB347'
   if (s === 'skipped') return 'var(--text-muted)'
   if (s === 'error') return '#FF6B6B'
   return 'var(--text-muted)'
@@ -159,6 +194,7 @@ function dotTextColor(stepId) {
 function dotIcon(step) {
   const s = stepStatus.value[step.id] || 'pending'
   if (s === 'done') return '\u2713'
+  if (s === 'stopped') return '\u23F8'
   if (s === 'skipped') return '\u2014'
   if (s === 'error') return '\u2717'
   return step.icon
@@ -190,6 +226,7 @@ function logColor(entry) {
 
 function statusColor(status) {
   if (status === 'done') return '#26DE81'
+  if (status === 'stopped') return '#FFB347'
   if (status === 'error') return '#FF6B6B'
   return 'var(--accent)'
 }
@@ -291,6 +328,23 @@ function logStepLabel(step) {
       <div>
         <h2 class="page-title">Pipeline</h2>
         <p class="page-subtitle">Run the full TTS &rarr; Alignment &rarr; Segment &rarr; Scenes pipeline</p>
+      </div>
+      <div v-if="showHeaderPipelineAction" class="header-actions">
+        <button
+          v-if="running || stopping"
+          class="header-pipeline-btn header-pipeline-btn--stop"
+          :disabled="stopping"
+          @click="stop"
+        >
+          {{ stopping ? 'Stopping...' : 'Stop Pipeline' }}
+        </button>
+        <button
+          v-else-if="canResumeStopped"
+          class="header-pipeline-btn header-pipeline-btn--resume"
+          @click="resumeStopped"
+        >
+          Resume Pipeline
+        </button>
       </div>
     </div>
 
@@ -394,6 +448,21 @@ function logStepLabel(step) {
         :placeholder="sourceMode === 'generate' ? 'Click Generate Story above, or type your own text...' : 'Paste your story, script, or narration text here...'"
       ></textarea>
 
+      <!-- Detect style bar -->
+      <div v-if="text.trim()" class="detect-style-bar">
+        <button class="detect-style-btn" :disabled="detecting" @click="detectStyle">
+          <span v-if="detecting" class="detect-spinner"></span>
+          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          {{ detecting ? 'Detecting...' : 'Detect Style' }}
+        </button>
+        <span v-if="detectedStyle" class="detect-result">
+          <span class="detect-dot" :style="{ background: styleColor(detectedStyle.style_id) }"></span>
+          <span :style="{ color: styleColor(detectedStyle.style_id), fontWeight: 600 }">{{ styleLabel(detectedStyle.style_id) }}</span>
+          <span class="detect-confidence">{{ Math.round((detectedStyle.confidence || 0) * 100) }}%</span>
+          <span v-if="detectedStyle.reason" class="detect-reason">{{ detectedStyle.reason }}</span>
+        </span>
+      </div>
+
       <!-- Controls strip -->
       <div class="controls-strip">
         <div class="control-group">
@@ -451,7 +520,7 @@ function logStepLabel(step) {
               <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
             </svg>
           </span>
-          <span class="run-label">{{ running ? 'Running...' : 'Run Pipeline' }}</span>
+          <span class="run-label">{{ stopping ? 'Stopping...' : running ? 'Running...' : 'Run Pipeline' }}</span>
         </button>
         <!-- Retry button — appears when pipeline failed -->
         <button
@@ -497,7 +566,7 @@ function logStepLabel(step) {
       <div v-if="lastEvent" class="current-step">
         <div class="current-step-inner">
           <div v-if="globalStatus === 'running'" class="step-spinner"></div>
-          <span class="current-step-msg" :class="{ 'is-error': lastEvent.step === 'error' }">
+          <span class="current-step-msg" :class="{ 'is-error': lastEvent.step === 'error', 'is-stopped': lastEvent.step === 'stopped' || lastEvent.status === 'stopped' }">
             {{ lastEvent.step === 'done' ? 'Pipeline complete' : lastEvent.message || '' }}
           </span>
         </div>
@@ -623,11 +692,68 @@ function logStepLabel(step) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 16px;
 }
 
 .page-title {
   letter-spacing: -0.02em;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.header-pipeline-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 140px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-darkest);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.header-pipeline-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.header-pipeline-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.header-pipeline-btn--stop {
+  border-color: rgba(255, 107, 107, 0.4);
+  color: #FF9C9C;
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.header-pipeline-btn--stop:hover:not(:disabled) {
+  border-color: #FF6B6B;
+  box-shadow: 0 8px 20px rgba(255, 107, 107, 0.16);
+}
+
+.header-pipeline-btn--resume {
+  border-color: rgba(255, 179, 71, 0.35);
+  color: #FFD37A;
+  background: rgba(255, 179, 71, 0.1);
+}
+
+.header-pipeline-btn--resume:hover:not(:disabled) {
+  border-color: #FFB347;
+  box-shadow: 0 8px 20px rgba(255, 179, 71, 0.16);
 }
 
 /* ---- Card ---- */
@@ -689,6 +815,78 @@ function logStepLabel(step) {
 
 .textarea--empty {
   color: var(--text-muted);
+}
+
+/* ---- Detect Style ---- */
+.detect-style-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.detect-style-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.detect-style-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(78, 205, 196, 0.06);
+}
+
+.detect-style-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.detect-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid transparent;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+.detect-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.detect-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.detect-confidence {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.detect-reason {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- Source Header ---- */
@@ -1226,6 +1424,10 @@ function logStepLabel(step) {
 
 .current-step-msg.is-error {
   color: #FF6B6B;
+}
+
+.current-step-msg.is-stopped {
+  color: #FFB347;
 }
 
 /* ---- Log ---- */

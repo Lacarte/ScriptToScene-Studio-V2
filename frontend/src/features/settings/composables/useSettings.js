@@ -8,6 +8,7 @@ const DEFAULTS = {
   'sts-editor-session-storage': true,
   'sts-sound-enabled': true,
   'sts-caption-default-preset': 'bold_popup',
+  'sts-default-style': 'cinematic',
 }
 
 const settings = ref({ ...DEFAULTS })

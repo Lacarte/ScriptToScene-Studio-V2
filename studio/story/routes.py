@@ -17,7 +17,7 @@ import requests as http_requests
 from flask import Blueprint, jsonify, request
 from loguru import logger
 
-from config import STORIES_DIR, N8N_STORY_WEBHOOK_URL, generate_project_id
+from config import STORIES_DIR, N8N_STORY_WEBHOOK_URL, N8N_CLASSIFY_WEBHOOK_URL, generate_project_id
 from studio.io_utils import safe_json_write
 from studio.security import is_safe_webhook_url, sanitize_project_id
 from studio.validation import validate_json
@@ -30,6 +30,7 @@ from studio.story.prompts import (
     WORDS_PER_SECOND,
 )
 from studio.story.engine import parse_story_sections
+from studio.scenes.templates import SCENE_STYLE_TEMPLATES
 
 story_bp = Blueprint("story", __name__)
 
@@ -267,3 +268,66 @@ def get_story(project_id):
             return jsonify(json.load(f))
     except (json.JSONDecodeError, OSError) as e:
         return jsonify({"error": f"Failed to read story data: {e}"}), 500
+
+
+@story_bp.route("/api/story/classify-style", methods=["POST"])
+def classify_style_route():
+    """Classify pasted text into the best-matching visual style template via LLM."""
+    body = request.get_json(silent=True) or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    # Build concise style list for the LLM
+    style_options = [
+        {"id": t["id"], "name": t["name"], "description": t["description"]}
+        for t in SCENE_STYLE_TEMPLATES
+    ]
+    style_ids = [s["id"] for s in style_options]
+
+    webhook_url = N8N_CLASSIFY_WEBHOOK_URL
+    if not webhook_url:
+        return jsonify({"error": "N8N_CLASSIFY_WEBHOOK_URL not configured"}), 500
+
+    payload = {
+        "text": text[:2000],  # limit to avoid huge payloads
+        "styles": style_options,
+        "system_prompt": (
+            "You are a text style classifier. Given a story/script text and a list of visual styles, "
+            "pick the single best-matching style for the text's genre, mood, and theme. "
+            "Respond with ONLY a JSON object: {\"style_id\": \"<id>\", \"confidence\": <0.0-1.0>, \"reason\": \"<one sentence>\"} "
+            "where style_id is one of the provided style IDs. No markdown, no extra text."
+        ),
+    }
+
+    try:
+        resp = http_requests.post(webhook_url, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # n8n respondToWebhook returns an array — unwrap if needed
+        if isinstance(data, list) and data:
+            data = data[0]
+
+        style_id = data.get("style_id", "")
+        confidence = data.get("confidence", 0)
+        reason = data.get("reason", "")
+
+        # Validate the returned style_id
+        if style_id not in style_ids:
+            logger.warning("Classify webhook returned unknown style_id: {}", style_id)
+            return jsonify({"error": f"Unknown style returned: {style_id}"}), 502
+
+        return jsonify({
+            "style_id": style_id,
+            "confidence": confidence,
+            "reason": reason,
+        })
+    except http_requests.Timeout:
+        return jsonify({"error": "Classification timed out"}), 504
+    except http_requests.RequestException as e:
+        logger.error("Classify webhook error: {!r}", e)
+        return jsonify({"error": f"Classify webhook error: {e}"}), 502
+    except (ValueError, KeyError) as e:
+        logger.error("Invalid classify response: {!r}", e)
+        return jsonify({"error": "Invalid response from classifier"}), 502

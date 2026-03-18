@@ -1,0 +1,479 @@
+{
+    "updatedAt": "2026-03-18T23:22:17.991Z",
+    "createdAt": "2026-03-18T23:22:17.991Z",
+    "id": "B21V9o0GLGSPIYOd",
+    "name": "Classify Style",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "classify-style",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "b1c2d3e4-0001-4000-8000-000000000001",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                240,
+                300
+            ],
+            "webhookId": "classify-style"
+        },
+        {
+            "parameters": {
+                "jsCode": "// \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac Style Classifier Input Validator \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\nconst body = $input.first().json.body || $input.first().json;\n\nconst text = (body.text || '').trim();\nconst system_prompt = (body.system_prompt || '').trim();\nconst styles = body.styles || [];\n\nconst errors = [];\nif (!text) errors.push('text is required');\nif (!system_prompt) errors.push('system_prompt is required');\nif (!styles.length) errors.push('styles list is required');\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      valid: false,\n      error: errors.join('; '),\n      status: 400\n    }\n  }];\n}\n\n// Build a compact style reference for the LLM\nconst styleRef = styles.map(s => s.id + ': ' + s.name + ' (' + s.description + ')').join('\\n');\n\nreturn [{\n  json: {\n    valid: true,\n    system_prompt,\n    user_prompt: 'Available styles:\\n' + styleRef + '\\n\\nClassify this text:\\n\\n' + text,\n  }\n}];"
+            },
+            "id": "b1c2d3e4-0002-4000-8000-000000000002",
+            "name": "input_validator",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                460,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "condition-0",
+                            "leftValue": "={{ $json.valid }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "true"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "b1c2d3e4-0003-4000-8000-000000000003",
+            "name": "If",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                680,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "promptType": "define",
+                "text": "={{ $json.user_prompt }}",
+                "messages": {
+                    "messageValues": [
+                        {
+                            "message": "={{ $json.system_prompt }}",
+                            "type": "systemMessage"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "b1c2d3e4-0004-4000-8000-000000000004",
+            "name": "LLM Chain",
+            "type": "@n8n/n8n-nodes-langchain.chainLlm",
+            "typeVersion": 1.4,
+            "position": [
+                920,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "model": "google/gemini-2.5-flash",
+                "options": {}
+            },
+            "id": "b1c2d3e4-0005-4000-8000-000000000005",
+            "name": "Gemini via OpenRouter",
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+            "typeVersion": 1,
+            "position": [
+                920,
+                420
+            ],
+            "credentials": {
+                "openRouterApi": {
+                    "id": "mbWrJSQdMKz6Ve5M",
+                    "name": "OpenRouter account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac Style Classifier Output Parser \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\nconst item = $input.first().json;\n\nlet raw = '';\nif (typeof item === 'string') raw = item;\nelse if (item.text) raw = item.text;\nelse if (item.response) raw = item.response;\nelse if (item.output) raw = item.output;\nelse {\n  for (const [key, val] of Object.entries(item)) {\n    if (typeof val === 'string' && val.length > 5) { raw = val; break; }\n  }\n}\n\nraw = raw.trim();\n\n// Strip markdown code fences if present\nraw = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  // Try to extract JSON from mixed text\n  const match = raw.match(/\\{[^}]+\\}/);\n  if (match) {\n    try { parsed = JSON.parse(match[0]); } catch (e2) {}\n  }\n}\n\nif (!parsed || !parsed.style_id) {\n  return [{\n    json: {\n      error: 'Failed to parse LLM classification response',\n      raw: raw.slice(0, 500)\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    style_id: parsed.style_id,\n    confidence: parseFloat(parsed.confidence) || 0,\n    reason: (parsed.reason || '').slice(0, 200)\n  }\n}];"
+            },
+            "id": "b1c2d3e4-0006-4000-8000-000000000006",
+            "name": "output_parser",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1160,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "allIncomingItems",
+                "options": {}
+            },
+            "id": "b1c2d3e4-0007-4000-8000-000000000007",
+            "name": "Respond to Webhook",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                1400,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "input_validator",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "input_validator": {
+            "main": [
+                [
+                    {
+                        "node": "If",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "If": {
+            "main": [
+                [
+                    {
+                        "node": "LLM Chain",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "LLM Chain": {
+            "main": [
+                [
+                    {
+                        "node": "output_parser",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Gemini via OpenRouter": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "LLM Chain",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "output_parser": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "callerPolicy": "workflowsFromSameOwner",
+        "availableInMCP": false
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": null,
+    "versionId": "742d4f86-13c0-4768-8cbb-699b37735153",
+    "activeVersionId": "742d4f86-13c0-4768-8cbb-699b37735153",
+    "versionCounter": 3,
+    "triggerCount": 1,
+    "shared": [
+        {
+            "updatedAt": "2026-03-18T23:22:17.994Z",
+            "createdAt": "2026-03-18T23:22:17.994Z",
+            "role": "workflow:owner",
+            "workflowId": "B21V9o0GLGSPIYOd",
+            "projectId": "idqh3cH896wXTu4l",
+            "project": {
+                "updatedAt": "2026-02-24T22:46:52.192Z",
+                "createdAt": "2026-02-24T04:08:08.720Z",
+                "id": "idqh3cH896wXTu4l",
+                "name": "Glaby Lacarte <carteasy@gmail.com>",
+                "type": "personal",
+                "icon": null,
+                "description": null,
+                "creatorId": "63c2a077-6466-41a9-aebb-99dfac4dd9bb"
+            }
+        }
+    ],
+    "tags": [],
+    "activeVersion": {
+        "updatedAt": "2026-03-18T23:22:18.002Z",
+        "createdAt": "2026-03-18T23:22:18.002Z",
+        "versionId": "742d4f86-13c0-4768-8cbb-699b37735153",
+        "workflowId": "B21V9o0GLGSPIYOd",
+        "nodes": [
+            {
+                "parameters": {
+                    "httpMethod": "POST",
+                    "path": "classify-style",
+                    "responseMode": "responseNode",
+                    "options": {}
+                },
+                "id": "b1c2d3e4-0001-4000-8000-000000000001",
+                "name": "Webhook",
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 2,
+                "position": [
+                    240,
+                    300
+                ],
+                "webhookId": "classify-style"
+            },
+            {
+                "parameters": {
+                    "jsCode": "// \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac Style Classifier Input Validator \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\nconst body = $input.first().json.body || $input.first().json;\n\nconst text = (body.text || '').trim();\nconst system_prompt = (body.system_prompt || '').trim();\nconst styles = body.styles || [];\n\nconst errors = [];\nif (!text) errors.push('text is required');\nif (!system_prompt) errors.push('system_prompt is required');\nif (!styles.length) errors.push('styles list is required');\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      valid: false,\n      error: errors.join('; '),\n      status: 400\n    }\n  }];\n}\n\n// Build a compact style reference for the LLM\nconst styleRef = styles.map(s => s.id + ': ' + s.name + ' (' + s.description + ')').join('\\n');\n\nreturn [{\n  json: {\n    valid: true,\n    system_prompt,\n    user_prompt: 'Available styles:\\n' + styleRef + '\\n\\nClassify this text:\\n\\n' + text,\n  }\n}];"
+                },
+                "id": "b1c2d3e4-0002-4000-8000-000000000002",
+                "name": "input_validator",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    460,
+                    300
+                ]
+            },
+            {
+                "parameters": {
+                    "conditions": {
+                        "options": {
+                            "caseSensitive": true,
+                            "leftValue": "",
+                            "typeValidation": "strict"
+                        },
+                        "conditions": [
+                            {
+                                "id": "condition-0",
+                                "leftValue": "={{ $json.valid }}",
+                                "rightValue": true,
+                                "operator": {
+                                    "type": "boolean",
+                                    "operation": "true"
+                                }
+                            }
+                        ],
+                        "combinator": "and"
+                    },
+                    "options": {}
+                },
+                "id": "b1c2d3e4-0003-4000-8000-000000000003",
+                "name": "If",
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 2,
+                "position": [
+                    680,
+                    300
+                ]
+            },
+            {
+                "parameters": {
+                    "promptType": "define",
+                    "text": "={{ $json.user_prompt }}",
+                    "messages": {
+                        "messageValues": [
+                            {
+                                "message": "={{ $json.system_prompt }}",
+                                "type": "systemMessage"
+                            }
+                        ]
+                    },
+                    "options": {}
+                },
+                "id": "b1c2d3e4-0004-4000-8000-000000000004",
+                "name": "LLM Chain",
+                "type": "@n8n/n8n-nodes-langchain.chainLlm",
+                "typeVersion": 1.4,
+                "position": [
+                    920,
+                    200
+                ]
+            },
+            {
+                "parameters": {
+                    "model": "google/gemini-2.5-flash",
+                    "options": {}
+                },
+                "id": "b1c2d3e4-0005-4000-8000-000000000005",
+                "name": "Gemini via OpenRouter",
+                "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+                "typeVersion": 1,
+                "position": [
+                    920,
+                    420
+                ],
+                "credentials": {
+                    "openRouterApi": {
+                        "id": "mbWrJSQdMKz6Ve5M",
+                        "name": "OpenRouter account"
+                    }
+                }
+            },
+            {
+                "parameters": {
+                    "jsCode": "// \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac Style Classifier Output Parser \u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\u00c3\u00a2\u00e2\u20ac\udc9d\u00e2\u201a\u00ac\nconst item = $input.first().json;\n\nlet raw = '';\nif (typeof item === 'string') raw = item;\nelse if (item.text) raw = item.text;\nelse if (item.response) raw = item.response;\nelse if (item.output) raw = item.output;\nelse {\n  for (const [key, val] of Object.entries(item)) {\n    if (typeof val === 'string' && val.length > 5) { raw = val; break; }\n  }\n}\n\nraw = raw.trim();\n\n// Strip markdown code fences if present\nraw = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  // Try to extract JSON from mixed text\n  const match = raw.match(/\\{[^}]+\\}/);\n  if (match) {\n    try { parsed = JSON.parse(match[0]); } catch (e2) {}\n  }\n}\n\nif (!parsed || !parsed.style_id) {\n  return [{\n    json: {\n      error: 'Failed to parse LLM classification response',\n      raw: raw.slice(0, 500)\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    style_id: parsed.style_id,\n    confidence: parseFloat(parsed.confidence) || 0,\n    reason: (parsed.reason || '').slice(0, 200)\n  }\n}];"
+                },
+                "id": "b1c2d3e4-0006-4000-8000-000000000006",
+                "name": "output_parser",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    1160,
+                    200
+                ]
+            },
+            {
+                "parameters": {
+                    "respondWith": "allIncomingItems",
+                    "options": {}
+                },
+                "id": "b1c2d3e4-0007-4000-8000-000000000007",
+                "name": "Respond to Webhook",
+                "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.1,
+                "position": [
+                    1400,
+                    300
+                ]
+            }
+        ],
+        "connections": {
+            "Webhook": {
+                "main": [
+                    [
+                        {
+                            "node": "input_validator",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "input_validator": {
+                "main": [
+                    [
+                        {
+                            "node": "If",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "If": {
+                "main": [
+                    [
+                        {
+                            "node": "LLM Chain",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ],
+                    [
+                        {
+                            "node": "Respond to Webhook",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "LLM Chain": {
+                "main": [
+                    [
+                        {
+                            "node": "output_parser",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Gemini via OpenRouter": {
+                "ai_languageModel": [
+                    [
+                        {
+                            "node": "LLM Chain",
+                            "type": "ai_languageModel",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "output_parser": {
+                "main": [
+                    [
+                        {
+                            "node": "Respond to Webhook",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            }
+        },
+        "authors": "Glaby Lacarte",
+        "name": null,
+        "description": null,
+        "autosaved": false,
+        "workflowPublishHistory": [
+            {
+                "createdAt": "2026-03-18T23:22:25.028Z",
+                "id": 57,
+                "workflowId": "B21V9o0GLGSPIYOd",
+                "versionId": "742d4f86-13c0-4768-8cbb-699b37735153",
+                "event": "activated",
+                "userId": "63c2a077-6466-41a9-aebb-99dfac4dd9bb"
+            }
+        ]
+    }
+}

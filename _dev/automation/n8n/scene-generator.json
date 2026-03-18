@@ -1,228 +1,494 @@
 {
-  "name": "scene-generator",
-  "nodes": [
-    {
-      "parameters": {
-        "promptType": "define",
-        "text": "={{ JSON.stringify($json.payload) }}",
-        "messages": {
-          "messageValues": [
-            {
-              "type": "system",
-              "message": "={{ $json.system_prompt }}"
-            }
-          ]
+    "updatedAt": "2026-03-11T04:37:00.704Z",
+    "createdAt": "2026-02-25T02:28:36.856Z",
+    "id": "1ga5ercqD130rcAH",
+    "name": "Scene-generator",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+        {
+            "parameters": {
+                "promptType": "define",
+                "text": "={{ JSON.stringify($json.payload) }}",
+                "messages": {
+                    "messageValues": [
+                        {
+                            "message": "={{ $json.system_prompt }}"
+                        }
+                    ]
+                },
+                "batching": {}
+            },
+            "type": "@n8n/n8n-nodes-langchain.chainLlm",
+            "typeVersion": 1.9,
+            "position": [
+                1440,
+                432
+            ],
+            "id": "7317b008-7bf8-4779-9e81-b695b1fb4ecc",
+            "name": "Basic LLM Chain"
         },
-        "batching": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.chainLlm",
-      "typeVersion": 1.9,
-      "position": [
-        1440,
-        432
-      ],
-      "id": "7317b008-7bf8-4779-9e81-b695b1fb4ecc",
-      "name": "Basic LLM Chain"
-    },
-    {
-      "parameters": {
-        "model": "google/gemini-2.5-flash",
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
-      "typeVersion": 1,
-      "position": [
-        1512,
-        656
-      ],
-      "id": "38f04ec9-bdf7-4e52-a602-7960a4fa4e3f",
-      "name": "OpenRouter Chat Model",
-      "credentials": {
-        "openRouterApi": {
-          "id": "mbWrJSQdMKz6Ve5M",
-          "name": "OpenRouter account"
+        {
+            "parameters": {
+                "model": "google/gemini-2.5-flash",
+                "options": {}
+            },
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+            "typeVersion": 1,
+            "position": [
+                1616,
+                704
+            ],
+            "id": "38f04ec9-bdf7-4e52-a602-7960a4fa4e3f",
+            "name": "OpenRouter Chat Model",
+            "credentials": {
+                "openRouterApi": {
+                    "id": "mbWrJSQdMKz6Ve5M",
+                    "name": "OpenRouter account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "scene-generator",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2.1,
+            "position": [
+                768,
+                560
+            ],
+            "id": "d34015e2-f527-4da9-ab60-ab12351b7a91",
+            "name": "Webhook",
+            "webhookId": "6ea28ba0-5b8c-43ee-8843-59542f0ac4b5"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "version": 3,
+                        "leftValue": "",
+                        "caseSensitive": true,
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "d20fea18-1a23-49da-a623-2189b4ea7d4b",
+                            "leftValue": "={{ $json.valid }}",
+                            "rightValue": false,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "true",
+                                "singleValue": true
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2.3,
+            "position": [
+                1216,
+                560
+            ],
+            "id": "620e6814-7397-4317-8074-d75a5d5629ae",
+            "name": "If"
+        },
+        {
+            "parameters": {
+                "jsCode": "// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Input Validator \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Normalizes and validates the incoming webhook payload.\n// Accepts segments as [{index, words, ...}] OR [\"text1\", \"text2\"].\n// Strips everything except {index, words} before forwarding to LLM.\n\nconst body = $input.first().json.body || $input.first().json;\n\nconst script = (body.script || '').trim();\nconst style  = (body.style  || 'cinematic').trim();\nconst system_prompt = body.system_prompt || '';\nconst rawSegments   = body.segments || [];\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Validate required fields \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst errors = [];\nif (!script)            errors.push('Missing or empty \"script\"');\nif (!rawSegments.length) errors.push('Missing or empty \"segments\"');\n\nif (errors.length) {\n  return [{\n    json: {\n      valid: false,\n      error: errors.join('; '),\n      payload: null,\n      system_prompt: null\n    }\n  }];\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Normalize segments \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Accept both string arrays and object arrays; output {index, words} only.\nconst segments = rawSegments.map((seg, i) => {\n  if (typeof seg === 'string') {\n    return { index: i, words: seg };\n  }\n  return {\n    index: seg.index ?? i,\n    words: seg.words || String(seg)\n  };\n});\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Build clean payload for LLM \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nreturn [{\n  json: {\n    valid: true,\n    error: null,\n    payload: { script, style, segments },\n    system_prompt\n  }\n}];"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                992,
+                560
+            ],
+            "id": "d1c9c4e3-5b27-48a2-8edd-d68ddf672357",
+            "name": "input_validator"
+        },
+        {
+            "parameters": {
+                "respondWith": "allIncomingItems",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.5,
+            "position": [
+                1808,
+                1184
+            ],
+            "id": "46220b80-0d05-405d-b7a4-d98431bf94a7",
+            "name": "Respond to Webhook"
+        },
+        {
+            "parameters": {
+                "jsCode": "// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Output Validator \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Parses LLM JSON, validates structure, strips timing fields,\n// normalises field names, and sorts scenes by index.\n\nconst VALID_ROLES = new Set([\n  'hook', 'buildup', 'peak', 'transition', 'text_accent', 'cta'\n]);\nconst VALID_TYPES = new Set(['image', 'video', 'text']);\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 1. Extract raw text from LLM \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nlet raw = $input.first().json;\n\n// The LLM Chain node may nest output in .text or .output\nlet text = typeof raw === 'string' ? raw\n         : raw.text   || raw.output || raw.response || '';\n\nif (typeof text !== 'string') {\n  text = JSON.stringify(text);\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 2. Clean & parse \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Strip markdown fences\ntext = text.replace(/```json\\s*/gi, '').replace(/```/g, '').trim();\n\n// Always sanitize control characters BEFORE parsing.\n// LLMs emit raw newlines/tabs inside JSON string values which break JSON.parse.\ntext = text.replace(/[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]/g, '');  // strip non-whitespace ctrl chars\ntext = text.replace(/(?<=\":[ ]*\"[^\"]*)\\n(?=[^\"]*\")/g, ' ');  // newlines inside strings -> space\n\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  // Aggressive fallback: replace ALL newlines/tabs with spaces, then parse\n  const flat = text.replace(/[\\n\\r\\t]/g, ' ');\n  try {\n    parsed = JSON.parse(flat);\n  } catch (e2) {\n    // Last resort: extract the outermost JSON object\n    const match = flat.match(/\\{[\\s\\S]*\\}/);\n    if (match) {\n      try { parsed = JSON.parse(match[0]); }\n      catch (e3) { throw new Error('Failed to parse LLM JSON: ' + e3.message); }\n    } else {\n      throw new Error('No JSON object found in LLM response');\n    }\n  }\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 3. Validate analysis \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst analysis = parsed.analysis || {};\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 4. Validate scenes array \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst scenes = parsed.scenes || [];\nif (!scenes.length) {\n  throw new Error('LLM returned no scenes');\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 5. Normalise, validate, and clean each scene \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst cleaned = scenes.map((s, i) => {\n  const role = VALID_ROLES.has(s.narrative_role) ? s.narrative_role : 'buildup';\n  const type = VALID_TYPES.has(s.type_of_scene)  ? s.type_of_scene  : 'video';\n\n  // Auto-fix: text type needs text_content\n  const textContent = (type === 'text' && !s.text_content) ? null : (s.text_content || null);\n\n  return {\n    index:          s.index ?? i,\n    title:          s.title || '',\n    narrative_role: role,\n    type_of_scene:  type,\n    image_prompt:   s.image_prompt || s.prompt || '',\n    text_content:   textContent,\n  };\n});\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 6. Sort by index \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\ncleaned.sort((a, b) => a.index - b.index);\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 7. Return clean response \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nreturn [{\n  json: {\n    analysis,\n    scenes: cleaned\n  }\n}];"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1792,
+                432
+            ],
+            "id": "45f35b52-ed20-4a88-9025-788e1b03e39e",
+            "name": "output_validator"
         }
-      }
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "scene-generator",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
-      "position": [
-        768,
-        556
-      ],
-      "id": "d34015e2-f527-4da9-ab60-ab12351b7a91",
-      "name": "Webhook",
-      "webhookId": "6ea28ba0-5b8c-43ee-8843-59542f0ac4b5"
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
-            {
-              "id": "d20fea18-1a23-49da-a623-2189b4ea7d4b",
-              "leftValue": "={{ $json.valid }}",
-              "rightValue": false,
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
+    ],
+    "connections": {
+        "OpenRouter Chat Model": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "Basic LLM Chain",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
         },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
-      "position": [
-        1216,
-        556
-      ],
-      "id": "620e6814-7397-4317-8074-d75a5d5629ae",
-      "name": "If"
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "input_validator",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Basic LLM Chain": {
+            "main": [
+                [
+                    {
+                        "node": "output_validator",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "input_validator": {
+            "main": [
+                [
+                    {
+                        "node": "If",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "If": {
+            "main": [
+                [
+                    {
+                        "node": "Basic LLM Chain",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "output_validator": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
     },
-    {
-      "parameters": {
-        "jsCode": "// n8n Code Node: Validate Scene Generator Input\n// Place right after the Webhook node\n\nconst input = $input.first().json.body;\nconst errors = [];\nconst warnings = [];\n\n// ──────────────────────────────────────\n// 1. REQUIRED KEYS\n// ──────────────────────────────────────\nif (!input.script || typeof input.script !== 'string') {\n  errors.push('Missing or invalid \"script\": must be a non-empty string');\n}\n\nif (!input.segments || !Array.isArray(input.segments)) {\n  errors.push('Missing or invalid \"segments\": must be an array');\n}\n\nif (!input.style || typeof input.style !== 'string') {\n  warnings.push('Missing \"style\": will default to \"cinematic photorealistic\"');\n}\n\nif (!input.system_prompt || typeof input.system_prompt !== 'string') {\n  errors.push('Missing or invalid \"system_prompt\": must be a non-empty string');\n}\n\n// ──────────────────────────────────────\n// 2. SCRIPT VALIDATION\n// ──────────────────────────────────────\nif (input.script) {\n  const wordCount = input.script.split(/\\s+/).length;\n\n  if (wordCount < 10) {\n    errors.push(`Script too short: ${wordCount} words (min 10)`);\n  }\n\n  if (wordCount > 500) {\n    warnings.push(`Script is long: ${wordCount} words — LLM output may be truncated`);\n  }\n}\n\n// ──────────────────────────────────────\n// 3. SEGMENTS VALIDATION\n// ──────────────────────────────────────\nif (Array.isArray(input.segments)) {\n  if (input.segments.length === 0) {\n    errors.push('Segments array is empty');\n  }\n\n  if (input.segments.length < 3) {\n    warnings.push(`Only ${input.segments.length} segments — may produce thin scene plan`);\n  }\n\n  if (input.segments.length > 25) {\n    warnings.push(`${input.segments.length} segments — LLM may struggle with this many`);\n  }\n\n  const seenIndexes = new Set();\n\n  input.segments.forEach((seg, i) => {\n    // Index exists and is integer\n    if (seg.index === undefined || typeof seg.index !== 'number') {\n      errors.push(`Segment ${i}: missing or invalid \"index\"`);\n    }\n\n    // Duplicate index check\n    if (seenIndexes.has(seg.index)) {\n      errors.push(`Segment ${i}: duplicate index ${seg.index}`);\n    }\n    seenIndexes.add(seg.index);\n\n    // Words exists and is string\n    if (!seg.words || typeof seg.words !== 'string') {\n      errors.push(`Segment ${i} (index ${seg.index}): missing or invalid \"words\"`);\n    }\n\n    // Words not empty\n    if (seg.words && seg.words.trim().length === 0) {\n      errors.push(`Segment ${i} (index ${seg.index}): \"words\" is empty`);\n    }\n  });\n\n  // Check chronological index order\n  for (let i = 1; i < input.segments.length; i++) {\n    if (input.segments[i].index <= input.segments[i - 1].index) {\n      errors.push(`Segments not in order: index ${input.segments[i].index} after ${input.segments[i - 1].index}`);\n    }\n  }\n}\n\n// ──────────────────────────────────────\n// 4. OPTIONAL FIELDS CHECK\n// ──────────────────────────────────────\nconst VALID_STYLES = [\n  'cinematic', 'cinematic photorealistic', 'abstract',\n  'painterly', 'anime', 'watercolor', 'noir',\n  'retro', 'minimalist', 'surreal'\n];\n\nif (input.style && !VALID_STYLES.some(s => input.style.toLowerCase().includes(s))) {\n  warnings.push(`Style \"${input.style}\" not in known presets — LLM will interpret freely`);\n}\n\nif (input.aspect_ratio) {\n  const validRatios = ['9:16', '16:9', '1:1', '4:5'];\n  if (!validRatios.includes(input.aspect_ratio)) {\n    warnings.push(`Aspect ratio \"${input.aspect_ratio}\" not standard`);\n  }\n}\n\n// ──────────────────────────────────────\n// 5. BUILD CLEAN PAYLOAD\n// ──────────────────────────────────────\nconst valid = errors.length === 0;\n\nif (!valid) {\n  return {\n    json: {\n      valid: false,\n      errors,\n      warnings\n    }\n  };\n}\n\n// Clean payload — only what the LLM needs\nconst cleanPayload = {\n  script: input.script.trim(),\n  style: (input.style || 'cinematic photorealistic').trim(),\n  segments: input.segments.map(s => ({\n    index: s.index,\n    words: s.words.trim()\n  }))\n};\n\n// Pass-through metadata for later merge\nconst metadata = {\n  source_folder: input.source_folder || '',\n  aspect_ratio: input.aspect_ratio || '9:16',\n  segment_count: input.segments.length\n};\n\nreturn {\n  json: {\n    valid: true,\n    errors: [],\n    warnings,\n    payload: cleanPayload,\n    metadata,\n    system_prompt: input.system_prompt.trim()\n  }\n};"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        992,
-        556
-      ],
-      "id": "d1c9c4e3-5b27-48a2-8edd-d68ddf672357",
-      "name": "input_validator"
+    "settings": {
+        "executionOrder": "v1",
+        "binaryMode": "separate",
+        "availableInMCP": false,
+        "timeSavedMode": "fixed",
+        "errorWorkflow": "c3QvjYD1bkgYSzOg",
+        "callerPolicy": "workflowsFromSameOwner"
     },
-    {
-      "parameters": {
-        "respondWith": "allIncomingItems",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.5,
-      "position": [
-        1808,
-        1184
-      ],
-      "id": "46220b80-0d05-405d-b7a4-d98431bf94a7",
-      "name": "Respond to Webhook"
+    "staticData": null,
+    "meta": {
+        "templateCredsSetupCompleted": true
     },
-    {
-      "parameters": {
-        "jsCode": "// n8n Code Node: Validate LLM Scene Output v10\n// Place after the LLM Chain node\n\nconst raw = $input.first().json.text;\nconst errors = [];\nconst warnings = [];\n\n// ──────────────────────────────────────\n// 1. PARSE JSON\n// ──────────────────────────────────────\nlet data;\ntry {\n  data = JSON.parse(raw);\n} catch (e) {\n  const match = raw.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  if (match) {\n    try {\n      data = JSON.parse(match[1].trim());\n    } catch (e2) {\n      return { json: { valid: false, errors: ['Failed to parse JSON: ' + e2.message], warnings: [] } };\n    }\n  } else {\n    return { json: { valid: false, errors: ['Failed to parse JSON: ' + e.message], warnings: [] } };\n  }\n}\n\n// ──────────────────────────────────────\n// 2. VALIDATE ANALYSIS\n// ──────────────────────────────────────\nif (!data.analysis || typeof data.analysis !== 'object') {\n  errors.push('Missing \"analysis\" object');\n} else {\n  const requiredAnalysis = ['mood', 'environment', 'color_palette', 'tone', 'visual_style'];\n  requiredAnalysis.forEach(key => {\n    if (!data.analysis[key] || typeof data.analysis[key] !== 'string') {\n      warnings.push(`analysis.${key} missing or empty`);\n    }\n  });\n}\n\n// ──────────────────────────────────────\n// 3. VALIDATE SCENES ARRAY\n// ──────────────────────────────────────\nif (!data.scenes || !Array.isArray(data.scenes)) {\n  return { json: { valid: false, errors: ['Missing \"scenes\" array'], warnings } };\n}\n\nif (data.scenes.length === 0) {\n  return { json: { valid: false, errors: ['Scenes array is empty'], warnings } };\n}\n\n// ──────────────────────────────────────\n// 4. VALIDATE EACH SCENE\n// ──────────────────────────────────────\nconst VALID_ROLES = ['hook', 'buildup', 'peak', 'transition', 'text_accent', 'cta'];\nconst VALID_TYPES = ['image', 'video', 'text'];\nconst NON_ASCII = /[^\\x00-\\x7F]/;\n\nconst seenIndexes = new Set();\n\ndata.scenes.forEach((scene, i) => {\n  const label = `Scene ${i} (index ${scene.index})`;\n\n  // index\n  if (scene.index === undefined || typeof scene.index !== 'number') {\n    errors.push(`${label}: missing or invalid index`);\n  }\n  if (seenIndexes.has(scene.index)) {\n    errors.push(`${label}: duplicate index ${scene.index}`);\n  }\n  seenIndexes.add(scene.index);\n\n  // title\n  if (!scene.title || typeof scene.title !== 'string') {\n    errors.push(`${label}: missing title`);\n  } else if (scene.title.split(/\\s+/).length > 8) {\n    warnings.push(`${label}: title \"${scene.title}\" is long`);\n  }\n\n  // narrative_role\n  if (!VALID_ROLES.includes(scene.narrative_role)) {\n    errors.push(`${label}: invalid narrative_role \"${scene.narrative_role}\"`);\n  }\n\n  // type_of_scene\n  if (!VALID_TYPES.includes(scene.type_of_scene)) {\n    errors.push(`${label}: invalid type_of_scene \"${scene.type_of_scene}\"`);\n  }\n\n  // image_prompt\n  if (!scene.image_prompt || typeof scene.image_prompt !== 'string') {\n    errors.push(`${label}: missing image_prompt`);\n  } else {\n    // Check for non-ASCII\n    if (NON_ASCII.test(scene.image_prompt)) {\n      warnings.push(`${label}: image_prompt contains non-ASCII — auto-cleaned`);\n      scene.image_prompt = scene.image_prompt.replace(/[^\\x00-\\x7F]/g, '');\n    }\n\n    // Check prompt length\n    if (scene.image_prompt.length < 30) {\n      warnings.push(`${label}: image_prompt very short (${scene.image_prompt.length} chars)`);\n    }\n\n    // Video scenes should have motion cues\n    if (scene.type_of_scene === 'video') {\n      const motionWords = /\\b(slowly|gently|drifting|floating|flickering|swirling|trembling|rolling|curling|sliding|rising|falling|blowing|shifting|creeping|twitching|pulsing|breathing|swaying|dripping)\\b/i;\n      if (!motionWords.test(scene.image_prompt)) {\n        warnings.push(`${label}: video scene may lack motion cues in prompt`);\n      }\n    }\n  }\n\n  // text_content\n  if (scene.type_of_scene === 'text') {\n    if (!scene.text_content || typeof scene.text_content !== 'string') {\n      errors.push(`${label}: text scene missing text_content`);\n    }\n  } else {\n    if (scene.text_content !== null && scene.text_content !== undefined) {\n      scene.text_content = null; // auto-fix\n    }\n  }\n\n  // Remove legacy keys if present\n  delete scene.motion_in_image;\n  delete scene.fx;\n  delete scene.segment_index;\n});\n\n// ──────────────────────────────────────\n// 5. STRUCTURE CHECKS\n// ──────────────────────────────────────\n\n// First scene should be hook\nif (data.scenes[0] && data.scenes[0].narrative_role !== 'hook') {\n  warnings.push(`First scene role is \"${data.scenes[0].narrative_role}\" — expected \"hook\"`);\n}\n\n// Last scene should be cta\nconst lastScene = data.scenes[data.scenes.length - 1];\nif (lastScene && lastScene.narrative_role !== 'cta') {\n  warnings.push(`Last scene role is \"${lastScene.narrative_role}\" — expected \"cta\"`);\n}\n\n// Type mix check\nconst typeCounts = { video: 0, image: 0, text: 0 };\ndata.scenes.forEach(s => { if (typeCounts[s.type_of_scene] !== undefined) typeCounts[s.type_of_scene]++; });\nconst total = data.scenes.length;\n\nconst videoPct = Math.round(typeCounts.video / total * 100);\nconst imagePct = Math.round(typeCounts.image / total * 100);\nconst textPct = Math.round(typeCounts.text / total * 100);\n\nif (videoPct < 55) {\n  warnings.push(`Video at ${videoPct}% — target 60-75%`);\n}\n\nif (typeCounts.text === 0 && total >= 6) {\n  warnings.push('No text scenes — recommend at least 1');\n}\n\nif (typeCounts.text > 2) {\n  warnings.push(`${typeCounts.text} text scenes — recommend max 2`);\n}\n\n// ──────────────────────────────────────\n// 6. ADD DURATION\n// ──────────────────────────────────────\nconst randomDuration = () => +(2 + Math.random() * 1.5).toFixed(1);\n\ndata.scenes.forEach(scene => {\n  scene.duration = randomDuration();\n});\n\n// ──────────────────────────────────────\n// 7. OUTPUT\n// ──────────────────────────────────────\nconst valid = errors.length === 0;\n\nreturn {\n  json: {\n    valid,\n    errors,\n    warnings,\n    type_mix: {\n      video: `${typeCounts.video} (${videoPct}%)`,\n      image: `${typeCounts.image} (${imagePct}%)`,\n      text: `${typeCounts.text} (${textPct}%)`\n    },\n    analysis: data.analysis || {},\n    scenes: data.scenes,\n    scene_count: data.scenes.length\n  }\n};"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1792,
-        432
-      ],
-      "id": "45f35b52-ed20-4a88-9025-788e1b03e39e",
-      "name": "output_validator"
-    }
-  ],
-  "pinData": {},
-  "connections": {
-    "OpenRouter Chat Model": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Basic LLM Chain",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Webhook": {
-      "main": [
-        [
-          {
-            "node": "input_validator",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Basic LLM Chain": {
-      "main": [
-        [
-          {
-            "node": "output_validator",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "input_validator": {
-      "main": [
-        [
-          {
-            "node": "If",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "If": {
-      "main": [
-        [
-          {
-            "node": "Basic LLM Chain",
-            "type": "main",
-            "index": 0
-          }
+    "pinData": {},
+    "versionId": "e721cdce-b077-4ccf-b808-6068560282a2",
+    "activeVersionId": "e721cdce-b077-4ccf-b808-6068560282a2",
+    "versionCounter": 272,
+    "triggerCount": 1,
+    "shared": [
+        {
+            "updatedAt": "2026-02-25T02:28:36.858Z",
+            "createdAt": "2026-02-25T02:28:36.858Z",
+            "role": "workflow:owner",
+            "workflowId": "1ga5ercqD130rcAH",
+            "projectId": "idqh3cH896wXTu4l",
+            "project": {
+                "updatedAt": "2026-02-24T22:46:52.192Z",
+                "createdAt": "2026-02-24T04:08:08.720Z",
+                "id": "idqh3cH896wXTu4l",
+                "name": "Glaby Lacarte <carteasy@gmail.com>",
+                "type": "personal",
+                "icon": null,
+                "description": null,
+                "creatorId": "63c2a077-6466-41a9-aebb-99dfac4dd9bb"
+            }
+        }
+    ],
+    "tags": [],
+    "activeVersion": {
+        "updatedAt": "2026-03-11T04:37:00.705Z",
+        "createdAt": "2026-03-11T04:37:00.705Z",
+        "versionId": "e721cdce-b077-4ccf-b808-6068560282a2",
+        "workflowId": "1ga5ercqD130rcAH",
+        "nodes": [
+            {
+                "parameters": {
+                    "promptType": "define",
+                    "text": "={{ JSON.stringify($json.payload) }}",
+                    "messages": {
+                        "messageValues": [
+                            {
+                                "message": "={{ $json.system_prompt }}"
+                            }
+                        ]
+                    },
+                    "batching": {}
+                },
+                "type": "@n8n/n8n-nodes-langchain.chainLlm",
+                "typeVersion": 1.9,
+                "position": [
+                    1440,
+                    432
+                ],
+                "id": "7317b008-7bf8-4779-9e81-b695b1fb4ecc",
+                "name": "Basic LLM Chain"
+            },
+            {
+                "parameters": {
+                    "model": "google/gemini-2.5-flash",
+                    "options": {}
+                },
+                "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+                "typeVersion": 1,
+                "position": [
+                    1616,
+                    704
+                ],
+                "id": "38f04ec9-bdf7-4e52-a602-7960a4fa4e3f",
+                "name": "OpenRouter Chat Model",
+                "credentials": {
+                    "openRouterApi": {
+                        "id": "mbWrJSQdMKz6Ve5M",
+                        "name": "OpenRouter account"
+                    }
+                }
+            },
+            {
+                "parameters": {
+                    "httpMethod": "POST",
+                    "path": "scene-generator",
+                    "responseMode": "responseNode",
+                    "options": {}
+                },
+                "type": "n8n-nodes-base.webhook",
+                "typeVersion": 2.1,
+                "position": [
+                    768,
+                    560
+                ],
+                "id": "d34015e2-f527-4da9-ab60-ab12351b7a91",
+                "name": "Webhook",
+                "webhookId": "6ea28ba0-5b8c-43ee-8843-59542f0ac4b5"
+            },
+            {
+                "parameters": {
+                    "conditions": {
+                        "options": {
+                            "version": 3,
+                            "leftValue": "",
+                            "caseSensitive": true,
+                            "typeValidation": "strict"
+                        },
+                        "conditions": [
+                            {
+                                "id": "d20fea18-1a23-49da-a623-2189b4ea7d4b",
+                                "leftValue": "={{ $json.valid }}",
+                                "rightValue": false,
+                                "operator": {
+                                    "type": "boolean",
+                                    "operation": "true",
+                                    "singleValue": true
+                                }
+                            }
+                        ],
+                        "combinator": "and"
+                    },
+                    "options": {}
+                },
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 2.3,
+                "position": [
+                    1216,
+                    560
+                ],
+                "id": "620e6814-7397-4317-8074-d75a5d5629ae",
+                "name": "If"
+            },
+            {
+                "parameters": {
+                    "jsCode": "// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Input Validator \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Normalizes and validates the incoming webhook payload.\n// Accepts segments as [{index, words, ...}] OR [\"text1\", \"text2\"].\n// Strips everything except {index, words} before forwarding to LLM.\n\nconst body = $input.first().json.body || $input.first().json;\n\nconst script = (body.script || '').trim();\nconst style  = (body.style  || 'cinematic').trim();\nconst system_prompt = body.system_prompt || '';\nconst rawSegments   = body.segments || [];\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Validate required fields \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst errors = [];\nif (!script)            errors.push('Missing or empty \"script\"');\nif (!rawSegments.length) errors.push('Missing or empty \"segments\"');\n\nif (errors.length) {\n  return [{\n    json: {\n      valid: false,\n      error: errors.join('; '),\n      payload: null,\n      system_prompt: null\n    }\n  }];\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Normalize segments \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Accept both string arrays and object arrays; output {index, words} only.\nconst segments = rawSegments.map((seg, i) => {\n  if (typeof seg === 'string') {\n    return { index: i, words: seg };\n  }\n  return {\n    index: seg.index ?? i,\n    words: seg.words || String(seg)\n  };\n});\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Build clean payload for LLM \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nreturn [{\n  json: {\n    valid: true,\n    error: null,\n    payload: { script, style, segments },\n    system_prompt\n  }\n}];"
+                },
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    992,
+                    560
+                ],
+                "id": "d1c9c4e3-5b27-48a2-8edd-d68ddf672357",
+                "name": "input_validator"
+            },
+            {
+                "parameters": {
+                    "respondWith": "allIncomingItems",
+                    "options": {}
+                },
+                "type": "n8n-nodes-base.respondToWebhook",
+                "typeVersion": 1.5,
+                "position": [
+                    1808,
+                    1184
+                ],
+                "id": "46220b80-0d05-405d-b7a4-d98431bf94a7",
+                "name": "Respond to Webhook"
+            },
+            {
+                "parameters": {
+                    "jsCode": "// \u00e2\u201d\u20ac\u00e2\u201d\u20ac Output Validator \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Parses LLM JSON, validates structure, strips timing fields,\n// normalises field names, and sorts scenes by index.\n\nconst VALID_ROLES = new Set([\n  'hook', 'buildup', 'peak', 'transition', 'text_accent', 'cta'\n]);\nconst VALID_TYPES = new Set(['image', 'video', 'text']);\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 1. Extract raw text from LLM \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nlet raw = $input.first().json;\n\n// The LLM Chain node may nest output in .text or .output\nlet text = typeof raw === 'string' ? raw\n         : raw.text   || raw.output || raw.response || '';\n\nif (typeof text !== 'string') {\n  text = JSON.stringify(text);\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 2. Clean & parse \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\n// Strip markdown fences\ntext = text.replace(/```json\\s*/gi, '').replace(/```/g, '').trim();\n\n// Always sanitize control characters BEFORE parsing.\n// LLMs emit raw newlines/tabs inside JSON string values which break JSON.parse.\ntext = text.replace(/[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]/g, '');  // strip non-whitespace ctrl chars\ntext = text.replace(/(?<=\":[ ]*\"[^\"]*)\\n(?=[^\"]*\")/g, ' ');  // newlines inside strings -> space\n\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  // Aggressive fallback: replace ALL newlines/tabs with spaces, then parse\n  const flat = text.replace(/[\\n\\r\\t]/g, ' ');\n  try {\n    parsed = JSON.parse(flat);\n  } catch (e2) {\n    // Last resort: extract the outermost JSON object\n    const match = flat.match(/\\{[\\s\\S]*\\}/);\n    if (match) {\n      try { parsed = JSON.parse(match[0]); }\n      catch (e3) { throw new Error('Failed to parse LLM JSON: ' + e3.message); }\n    } else {\n      throw new Error('No JSON object found in LLM response');\n    }\n  }\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 3. Validate analysis \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst analysis = parsed.analysis || {};\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 4. Validate scenes array \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst scenes = parsed.scenes || [];\nif (!scenes.length) {\n  throw new Error('LLM returned no scenes');\n}\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 5. Normalise, validate, and clean each scene \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nconst cleaned = scenes.map((s, i) => {\n  const role = VALID_ROLES.has(s.narrative_role) ? s.narrative_role : 'buildup';\n  const type = VALID_TYPES.has(s.type_of_scene)  ? s.type_of_scene  : 'video';\n\n  // Auto-fix: text type needs text_content\n  const textContent = (type === 'text' && !s.text_content) ? null : (s.text_content || null);\n\n  return {\n    index:          s.index ?? i,\n    title:          s.title || '',\n    narrative_role: role,\n    type_of_scene:  type,\n    image_prompt:   s.image_prompt || s.prompt || '',\n    text_content:   textContent,\n  };\n});\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 6. Sort by index \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\ncleaned.sort((a, b) => a.index - b.index);\n\n// \u00e2\u201d\u20ac\u00e2\u201d\u20ac 7. Return clean response \u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\u00e2\u201d\u20ac\nreturn [{\n  json: {\n    analysis,\n    scenes: cleaned\n  }\n}];"
+                },
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    1792,
+                    432
+                ],
+                "id": "45f35b52-ed20-4a88-9025-788e1b03e39e",
+                "name": "output_validator"
+            }
         ],
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
+        "connections": {
+            "OpenRouter Chat Model": {
+                "ai_languageModel": [
+                    [
+                        {
+                            "node": "Basic LLM Chain",
+                            "type": "ai_languageModel",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Webhook": {
+                "main": [
+                    [
+                        {
+                            "node": "input_validator",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "Basic LLM Chain": {
+                "main": [
+                    [
+                        {
+                            "node": "output_validator",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "input_validator": {
+                "main": [
+                    [
+                        {
+                            "node": "If",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "If": {
+                "main": [
+                    [
+                        {
+                            "node": "Basic LLM Chain",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ],
+                    [
+                        {
+                            "node": "Respond to Webhook",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "output_validator": {
+                "main": [
+                    [
+                        {
+                            "node": "Respond to Webhook",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            }
+        },
+        "authors": "Glaby Lacarte",
+        "name": null,
+        "description": null,
+        "autosaved": false,
+        "workflowPublishHistory": [
+            {
+                "createdAt": "2026-03-11T04:37:00.760Z",
+                "id": 55,
+                "workflowId": "1ga5ercqD130rcAH",
+                "versionId": "e721cdce-b077-4ccf-b808-6068560282a2",
+                "event": "activated",
+                "userId": "63c2a077-6466-41a9-aebb-99dfac4dd9bb"
+            },
+            {
+                "createdAt": "2026-03-11T04:37:00.743Z",
+                "id": 54,
+                "workflowId": "1ga5ercqD130rcAH",
+                "versionId": "e721cdce-b077-4ccf-b808-6068560282a2",
+                "event": "deactivated",
+                "userId": "63c2a077-6466-41a9-aebb-99dfac4dd9bb"
+            }
         ]
-      ]
-    },
-    "output_validator": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
-  },
-  "active": true,
-  "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate",
-    "availableInMCP": false
-  },
-  "versionId": "fea24474-7e2f-4238-b084-dcdafa7ed1ac",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "b08ffe7189a3bf891067c24699a40fefd7fab74ba662332f16c66f310d400ff0"
-  },
-  "id": "1ga5ercqD130rcAH",
-  "tags": []
 }

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useSettings } from '../composables/useSettings.js'
+import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useWelcomeOverlay } from '@/shared/composables/useWelcomeOverlay.js'
 import { api } from '@/shared/api/client.js'
@@ -10,6 +11,7 @@ import ClearProjectsDialog from '../components/ClearProjectsDialog.vue'
 defineOptions({ name: 'SettingsPage' })
 
 const { settings, loading, health, healthLoading, update, fetchHealth } = useSettings()
+const { templates: styleTemplates } = useScenes()
 const toast = useToast()
 const welcome = useWelcomeOverlay()
 const showClearDialog = ref(false)
@@ -143,6 +145,26 @@ function featureLabel(val) {
         description="Play a sound when pipeline, export, or asset download completes"
         @update:model-value="onToggle('sts-sound-enabled', $event)"
       />
+    </section>
+
+    <!-- Pipeline Defaults -->
+    <section class="card p-5 mb-4">
+      <label class="section-label">Pipeline Defaults</label>
+      <div class="export-defaults">
+        <div class="export-default-row">
+          <div class="export-copy">
+            <label class="export-label">Default Style</label>
+            <p class="export-help">Visual style applied to new pipelines and story generation</p>
+          </div>
+          <select
+            class="input-field export-select"
+            :value="settings['sts-default-style'] ?? 'cinematic'"
+            @change="onToggle('sts-default-style', $event.target.value)"
+          >
+            <option v-for="t in styleTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
+          </select>
+        </div>
+      </div>
     </section>
 
     <!-- Export Defaults -->

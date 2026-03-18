@@ -1,7 +1,8 @@
 """Pipeline Module — Orchestrates the full TTS → Alignment → Segment → Scenes pipeline.
 
 Provides:
-  POST /api/pipeline/run          — start a pipeline job (returns job_id + project_id)
+  POST /api/pipeline/run           — start a pipeline job (returns job_id + project_id)
+  POST /api/pipeline/<job_id>/stop — request a running pipeline to stop
   GET  /api/pipeline/progress/<id> — SSE stream of step-by-step progress
   GET  /api/pipeline/jobs          — list recent pipeline jobs
 """
@@ -37,6 +38,16 @@ pipeline_bp = Blueprint("pipeline", __name__)
 # ---------------------------------------------------------------------------
 _jobs = {}
 _jobs_lock = threading.Lock()
+ALL_PIPELINE_STEPS = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+
+
+class PipelineStopped(RuntimeError):
+    """Raised when a running pipeline is stopped by the user."""
+
+    def __init__(self, step_name=None, message="Pipeline stopped by user"):
+        super().__init__(message)
+        self.step_name = step_name
+        self.message = message
 
 
 def _emit(job_id, event):
@@ -47,7 +58,7 @@ def _emit(job_id, event):
         # Track per-step status for history
         step = event.get("step")
         status = event.get("status")
-        if step and step != "done" and status in ("running", "done", "skipped", "error"):
+        if step and step not in ("done", "stopped") and status in ("running", "done", "skipped", "error", "stopped"):
             job.setdefault("step_statuses", {})[step] = status
 
 
@@ -58,6 +69,47 @@ def _cleanup_old_jobs(max_age_s=600):
                    if now - j.get("created", 0) > max_age_s]
         for jid in expired:
             del _jobs[jid]
+
+
+def _current_running_step(job):
+    """Return the currently running step for a job, if any."""
+    if not isinstance(job, dict):
+        return None
+    statuses = job.get("step_statuses", {}) or {}
+    for step in job.get("step_sequence", ALL_PIPELINE_STEPS):
+        if statuses.get(step) == "running":
+            return step
+    for step_name, status in statuses.items():
+        if status == "running":
+            return step_name
+    return None
+
+
+def _resume_step_for_job(job):
+    """Return the step a stopped job should resume from."""
+    if not isinstance(job, dict):
+        return None
+    running_step = _current_running_step(job)
+    if running_step:
+        return running_step
+
+    statuses = job.get("step_statuses", {}) or {}
+    for step in job.get("step_sequence", ALL_PIPELINE_STEPS):
+        if statuses.get(step) not in ("done", "skipped"):
+            return step
+    return None
+
+
+def _stop_requested(job_id):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        return bool(job and job.get("stop_requested"))
+
+
+def _raise_if_stop_requested(job_id, *, step_name=None):
+    """Raise a PipelineStopped exception when the user has requested a stop."""
+    if _stop_requested(job_id):
+        raise PipelineStopped(step_name=step_name)
 
 
 # ===================================================================
@@ -111,7 +163,7 @@ def run_pipeline(data: PipelineRunRequest):
     }
 
     # Compute which steps will run
-    all_steps = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+    all_steps = ALL_PIPELINE_STEPS
     stop = config.get("stop_after")
     if stop and stop in all_steps:
         step_sequence = all_steps[:all_steps.index(stop) + 1]
@@ -127,6 +179,7 @@ def run_pipeline(data: PipelineRunRequest):
             "results": {},
             "step_sequence": step_sequence,
             "step_statuses": {},
+            "stop_requested": False,
             "created": time.time(),
         }
 
@@ -134,6 +187,45 @@ def run_pipeline(data: PipelineRunRequest):
     t.start()
 
     return jsonify({"job_id": job_id, "project_id": project_id}), 202
+
+
+@pipeline_bp.route("/api/pipeline/<job_id>/stop", methods=["POST"])
+def stop_pipeline(job_id):
+    """Request an active pipeline job to stop after the current interruptible point."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Unknown job ID"}), 404
+
+        status = str(job.get("status") or "")
+        if status == "stopped":
+            return jsonify({
+                "status": "stopped",
+                "job_id": job_id,
+                "project_id": job.get("project_id"),
+                "resume_from": _resume_step_for_job(job),
+            }), 200
+        if status in ("done", "error"):
+            return jsonify({
+                "error": f"Cannot stop a pipeline with status '{status}'",
+                "status": status,
+            }), 409
+
+        job["stop_requested"] = True
+        job["stop_requested_at"] = time.time()
+        current_step = _current_running_step(job)
+        resume_from = _resume_step_for_job(job)
+        project_id = job.get("project_id")
+
+    logger.info("[{}] Stop requested for pipeline job {} at step {}",
+                project_id, job_id, current_step or resume_from or "?")
+    return jsonify({
+        "status": "stopping",
+        "job_id": job_id,
+        "project_id": project_id,
+        "current_step": current_step,
+        "resume_from": resume_from,
+    }), 202
 
 
 @pipeline_bp.route("/api/pipeline/progress/<job_id>")
@@ -152,18 +244,18 @@ def pipeline_progress(job_id):
             except Exception:
                 with _jobs_lock:
                     status = job.get("status")
-                if status in ("done", "error"):
+                if status in ("done", "error", "stopped"):
                     yield f"data: {json.dumps({'step': status, 'status': status})}\n\n"
                     break
                 continue
             yield f"data: {json.dumps(event)}\n\n"
-            if event.get("step") in ("done", "error"):
+            if event.get("step") in ("done", "error", "stopped"):
                 break
 
     return Response(
         stream(),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
                  "X-Accel-Buffering": "no"},
     )
 
@@ -214,6 +306,8 @@ def list_jobs():
                     "step_statuses": data.get("step_statuses", {}),
                     "error": data.get("error"),
                     "error_step": data.get("error_step"),
+                    "resume_from": data.get("resume_from"),
+                    "stopped_step": data.get("stopped_step"),
                 })
             except Exception:
                 continue
@@ -242,6 +336,8 @@ def list_jobs():
                     "step_statuses": {},
                     "error": None,
                     "error_step": None,
+                    "resume_from": None,
+                    "stopped_step": None,
                 }
                 if source:
                     tts_meta = os.path.join(TTS_DIR, source, "tts.json")
@@ -273,12 +369,17 @@ def list_jobs():
                 "voice": cfg.get("voice", "af_heart"),
                 "speed": cfg.get("speed", 1.0),
                 "style": cfg.get("style", ""),
+                "provider": cfg.get("provider", "grok"),
+                "stop_after": cfg.get("stop_after") or "",
+                "auto_scenes": cfg.get("auto_scenes", True),
                 "scene_count": 0,
                 "created": j.get("created", 0),
                 "step_sequence": j.get("step_sequence", []),
                 "step_statuses": j.get("step_statuses", {}),
                 "error": None,
                 "error_step": None,
+                "resume_from": _resume_step_for_job(j) if j.get("status") == "stopped" else None,
+                "stopped_step": _resume_step_for_job(j) if j.get("status") == "stopped" else None,
             })
 
     items.sort(key=lambda x: x.get("created", 0), reverse=True)
@@ -390,7 +491,8 @@ def _pipeline_json_path(project_id):
 
 
 def _save_pipeline_json(project_id, job_id, config, status, step_statuses,
-                        step_timings, error_msg=None, error_step=None):
+                        step_timings, error_msg=None, error_step=None,
+                        resume_from=None, stopped_step=None):
     """Persist full pipeline state to output/pipeline/{project_id}/pipeline.json."""
     data = {
         "project_id": project_id,
@@ -413,6 +515,9 @@ def _save_pipeline_json(project_id, job_id, config, status, step_statuses,
         "step_timings": dict(step_timings),
         "error": error_msg,
         "error_step": error_step,
+        "resume_from": resume_from,
+        "resume_project_id": project_id if resume_from else None,
+        "stopped_step": stopped_step,
         "timestamp": datetime.now().isoformat(),
     }
     try:
@@ -446,6 +551,47 @@ def _emit_done(job_id, project_id, results):
         job = _jobs.get(job_id)
         if job:
             job["status"] = "done"
+            job["stop_requested"] = False
+
+
+def _emit_stopped(job_id, project_id, config, step_timings, *, resume_from=None, message=None):
+    """Persist and emit a stopped pipeline state."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return
+        step_statuses = dict(job.get("step_statuses", {}))
+        if resume_from:
+            job["step_statuses"][resume_from] = "stopped"
+            step_statuses[resume_from] = "stopped"
+        job["status"] = "stopped"
+        job["stop_requested"] = False
+
+    _save_pipeline_json(
+        project_id,
+        job_id,
+        config,
+        "stopped",
+        step_statuses,
+        step_timings,
+        resume_from=resume_from,
+        stopped_step=resume_from,
+    )
+    if resume_from:
+        _emit(job_id, {
+            "step": resume_from,
+            "status": "stopped",
+            "message": f"[{project_id}] Paused before {resume_from}.",
+            "project_id": project_id,
+        })
+    _emit(job_id, {
+        "step": "stopped",
+        "status": "stopped",
+        "message": message or f"[{project_id}] Pipeline stopped",
+        "project_id": project_id,
+        "resume_from": resume_from,
+        "stopped_step": resume_from,
+    })
 
 
 def _load_prior_results(project_id, up_to_step):
@@ -453,7 +599,7 @@ def _load_prior_results(project_id, up_to_step):
 
     Returns a dict of {step_name: result_data} for all steps before `up_to_step`.
     """
-    all_steps = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+    all_steps = ALL_PIPELINE_STEPS
     idx = all_steps.index(up_to_step) if up_to_step in all_steps else 0
     steps_to_load = all_steps[:idx]
     loaded = {}
@@ -496,7 +642,7 @@ def _run_pipeline(job_id):
     provider = config.get("provider", "grok")
     resume_from = config.get("resume_from")
 
-    all_steps = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+    all_steps = ALL_PIPELINE_STEPS
     resume_idx = all_steps.index(resume_from) if resume_from in all_steps else 0
 
     # Load prior results from disk when resuming
@@ -553,6 +699,7 @@ def _run_pipeline(job_id):
 
     try:
         # ── Step 1: TTS ─────────────────────────────────────────────
+        _raise_if_stop_requested(job_id, step_name="tts")
         if _should_skip("tts"):
             tts_result = results.get("tts", {})
         else:
@@ -577,6 +724,7 @@ def _run_pipeline(job_id):
             return
 
         # ── Step 2: Force Alignment ─────────────────────────────────
+        _raise_if_stop_requested(job_id, step_name="timing")
         if _should_skip("timing"):
             timing_result = results.get("timing", {})
         else:
@@ -600,6 +748,7 @@ def _run_pipeline(job_id):
             return
 
         # ── Step 3: Segmentation ────────────────────────────────────
+        _raise_if_stop_requested(job_id, step_name="segment")
         if _should_skip("segment"):
             segment_result = results.get("segment", {})
         else:
@@ -624,6 +773,7 @@ def _run_pipeline(job_id):
             return
 
         # ── Step 4: Scene Generation (webhook) — optional ────────────
+        _raise_if_stop_requested(job_id, step_name="scenes")
         if config.get("auto_scenes", True):
             logger.info("[{}] Step 4/7: Scenes starting (webhook)", project_id)
             _emit(job_id, {"step": "scenes", "status": "running",
@@ -653,6 +803,7 @@ def _run_pipeline(job_id):
             return
 
         # ── Step 5: Asset Grabber ─────────────────────────────────
+        _raise_if_stop_requested(job_id, step_name="assets")
         provider_urls = {
             "grok": "https://grok.com/imagine",
             "midjourney": "https://www.midjourney.com/imagine",
@@ -681,6 +832,7 @@ def _run_pipeline(job_id):
             return
 
         # ── Step 6: Assemble Project ──────────────────────────────
+        _raise_if_stop_requested(job_id, step_name="assemble")
         logger.info("[{}] Step 6/7: Assemble starting", project_id)
         _emit(job_id, {"step": "assemble", "status": "running",
                        "message": f"[{project_id}] Assembling project..."})
@@ -703,6 +855,7 @@ def _run_pipeline(job_id):
             return
 
         # ── Step 7: Export Video ──────────────────────────────────
+        _raise_if_stop_requested(job_id, step_name="export")
         logger.info("[{}] Step 7/7: Export starting", project_id)
         _emit(job_id, {"step": "export", "status": "running",
                        "message": f"[{project_id}] Exporting video..."})
@@ -736,6 +889,25 @@ def _run_pipeline(job_id):
         with _jobs_lock:
             job["status"] = "done"
 
+    except PipelineStopped as e:
+        resume_step = e.step_name or _resume_step_for_job(job)
+        step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+        results["pipeline_timing"] = step_timings
+        _save_pipeline_timing(project_id, step_timings)
+        logger.info("[{}] Pipeline STOPPED by user{}", project_id,
+                    f" at step '{resume_step}'" if resume_step else "")
+        _emit_stopped(
+            job_id,
+            project_id,
+            config,
+            step_timings,
+            resume_from=resume_step,
+            message=(
+                f"[{project_id}] Pipeline stopped. "
+                + (f"Resume from {resume_step} when ready." if resume_step else "Ready to resume.")
+            ),
+        )
+
     except Exception as e:
         # Find which step failed (the one still marked "running")
         error_step = None
@@ -761,6 +933,7 @@ def _run_pipeline(job_id):
                        "error_step": error_step})
         with _jobs_lock:
             job["status"] = "error"
+            job["stop_requested"] = False
 
 
 # ===================================================================
@@ -1064,6 +1237,8 @@ def _step_assets(scenes_result, config, project_id, job_id):
 
     # Start grabber via internal API call
     base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
+    if _stop_requested(job_id):
+        raise PipelineStopped(step_name="assets")
     resp = http_requests.post(f"{base_url}/api/assets/grabber/start",
                               json=payload, timeout=30)
     resp.raise_for_status()
@@ -1083,7 +1258,11 @@ def _step_assets(scenes_result, config, project_id, job_id):
     start_time = time.time()
 
     while time.time() - start_time < max_wait:
+        if _stop_requested(job_id):
+            raise PipelineStopped(step_name="assets")
         time.sleep(poll_interval)
+        if _stop_requested(job_id):
+            raise PipelineStopped(step_name="assets")
         try:
             status_resp = http_requests.get(
                 f"{base_url}/api/assets/grabber/status/{project_id}", timeout=10)
@@ -1275,12 +1454,24 @@ def _step_export(assemble_result, project_id, job_id):
     if not export_job_id:
         raise RuntimeError("Export did not return a job ID")
 
+    def _cancel_export_job():
+        try:
+            http_requests.delete(f"{base_url}/api/export/{export_job_id}", timeout=10)
+        except Exception as cancel_err:
+            logger.debug("Pipeline Export cancel request failed: {}", cancel_err)
+
     # Poll export progress
     max_wait = 15 * 60  # 15 minutes
     start_time = time.time()
 
     while time.time() - start_time < max_wait:
+        if _stop_requested(job_id):
+            _cancel_export_job()
+            raise PipelineStopped(step_name="export")
         time.sleep(3)
+        if _stop_requested(job_id):
+            _cancel_export_job()
+            raise PipelineStopped(step_name="export")
         try:
             status_resp = http_requests.get(
                 f"{base_url}/api/export/{export_job_id}/status", timeout=10)

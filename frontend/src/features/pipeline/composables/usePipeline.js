@@ -4,6 +4,7 @@ import { useToast } from '@/shared/composables/useToast.js'
 import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
 import { timeAgo } from '@/shared/utils/format.js'
 import { useDoneSound } from '@/shared/composables/useDoneSound.js'
+import { useSettings } from '@/features/settings/composables/useSettings.js'
 
 // ── Provider tab loading screen ──
 
@@ -100,6 +101,7 @@ const stopAfter = ref('')  // '', 'tts', 'timing', 'segment'
 const templates = ref([])
 
 const running = ref(false)
+const stopping = ref(false)
 const jobId = ref(null)
 const stepStatus = ref({})
 const log = ref([])
@@ -112,9 +114,43 @@ const lastCompletedExportFilename = ref(null)
 // Retry state — tracks the failed step and project for resume
 const failedStep = ref(null)
 const failedProjectId = ref(null)
+const stoppedStep = ref(null)
+const stoppedProjectId = ref(null)
 
 let eventSource = null
 let initialized = false
+
+function inferResumeStep(statuses = {}) {
+  const stepIds = ALL_STEPS.map(step => step.id)
+  for (const stepId of stepIds) {
+    if (statuses?.[stepId] === 'stopped' || statuses?.[stepId] === 'running') {
+      return stepId
+    }
+  }
+  for (const stepId of stepIds) {
+    if (!['done', 'skipped'].includes(statuses?.[stepId])) {
+      return stepId
+    }
+  }
+  return null
+}
+
+function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
+  const stepIds = ALL_STEPS.map(step => step.id)
+  const assetsIdx = stepIds.indexOf('assets')
+  const stopIdx = stopValue ? stepIds.indexOf(stopValue) : -1
+  const resumeIdx = resumeStep ? stepIds.indexOf(resumeStep) : -1
+  const reachesAssets = !stopValue || stopIdx >= assetsIdx
+  const startsBeforeAssets = resumeStep == null || resumeIdx <= assetsIdx
+  if (!reachesAssets || !startsBeforeAssets) return
+  try {
+    const w = window.open('about:blank', 'sts-provider-tab')
+    if (w) {
+      w.document.write(providerTabLoadingHTML)
+      w.document.close()
+    }
+  } catch {}
+}
 
 // ── Actions ──
 
@@ -130,8 +166,9 @@ async function start() {
     return
   }
 
-  running.value = true
   resetProgress()
+  running.value = true
+  stopping.value = false
 
   const webhookUrl = localStorage.getItem('sts-scenes-webhook-url') || ''
   const config = {
@@ -147,30 +184,22 @@ async function start() {
     auto_type: true,
   }
 
-  // Pre-open a named tab on user click if pipeline will reach assets step
-  // (browsers block popups from async/SSE handlers, so we open now and navigate later via SSE open_url)
-  const stopVal = config.stop_after
-  const reachesAssets = !stopVal || ['assets', 'assemble', 'export'].includes(stopVal)
-  if (reachesAssets) {
-    try {
-      const w = window.open('about:blank', 'sts-provider-tab')
-      if (w) {
-        w.document.write(providerTabLoadingHTML)
-        w.document.close()
-      }
-    } catch {}
-  }
+  // Browsers block popups from async/SSE handlers, so open the provider tab now if needed.
+  maybeOpenProviderLoadingTab({ stopValue: config.stop_after })
 
   try {
     const res = await api.post('/api/pipeline/run', { body: config })
     jobId.value = res.job_id
-    failedProjectId.value = res.project_id  // track for potential retry
+    failedProjectId.value = res.project_id
+    stoppedProjectId.value = null
+    stoppedStep.value = null
     globalStatus.value = 'running'
     toast.success('Pipeline started')
     startSSE(res.job_id)
   } catch (e) {
     toast.error(e.message || 'Pipeline failed to start')
     running.value = false
+    stopping.value = false
   }
 }
 
@@ -199,9 +228,33 @@ function startSSE(id) {
       eventSource.close()
       eventSource = null
       running.value = false
+      stopping.value = false
+      jobId.value = null
+      stoppedStep.value = null
+      stoppedProjectId.value = null
       lastCompletedProjectId.value = summary.scenes?.project_id || event.project_id || null
       lastCompletedExportFilename.value = summary.export?.filename || null
       useDoneSound().play()
+      setTimeout(() => loadHistory(), 500)
+      return
+    }
+    if (step === 'stopped') {
+      globalStatus.value = 'stopped'
+      eventSource.close()
+      eventSource = null
+      running.value = false
+      stopping.value = false
+      jobId.value = null
+      failedStep.value = null
+      failedProjectId.value = null
+
+      const resumeStep = event.resume_from
+        || event.stopped_step
+        || inferResumeStep(stepStatus.value)
+        || null
+      stoppedStep.value = resumeStep
+
+      stoppedProjectId.value = event.project_id || stoppedProjectId.value || null
       setTimeout(() => loadHistory(), 500)
       return
     }
@@ -210,6 +263,10 @@ function startSSE(id) {
       eventSource.close()
       eventSource = null
       running.value = false
+      stopping.value = false
+      jobId.value = null
+      stoppedStep.value = null
+      stoppedProjectId.value = null
 
       // Use error_step from backend (authoritative) with fallback to last running step
       const errorStep = event.error_step
@@ -240,6 +297,7 @@ function startSSE(id) {
     eventSource.close()
     eventSource = null
     running.value = false
+    stopping.value = false
     if (globalStatus.value === 'running') {
       globalStatus.value = 'error'
     }
@@ -274,16 +332,32 @@ function loadFromHistory(index) {
   // Restore step statuses for progress display
   if (j.step_statuses && Object.keys(j.step_statuses).length) {
     stepStatus.value = { ...j.step_statuses }
+  } else {
+    stepStatus.value = {}
   }
 
-  // Restore error state for retry
+  running.value = false
+  stopping.value = false
+  jobId.value = null
+
+  // Restore error/stopped state for resume
   if (j.status === 'error' && j.error_step) {
     globalStatus.value = 'error'
     failedStep.value = j.error_step
     failedProjectId.value = j.project_id
+    stoppedStep.value = null
+    stoppedProjectId.value = null
+  } else if (j.status === 'stopped') {
+    globalStatus.value = 'stopped'
+    failedStep.value = null
+    failedProjectId.value = null
+    stoppedStep.value = j.resume_from || j.stopped_step || inferResumeStep(j.step_statuses) || null
+    stoppedProjectId.value = j.project_id
   } else {
     failedStep.value = null
     failedProjectId.value = null
+    stoppedStep.value = null
+    stoppedProjectId.value = null
     globalStatus.value = j.status === 'done' ? 'done' : ''
   }
 }
@@ -319,22 +393,24 @@ function resetProgress() {
   stepStatus.value = {}
   log.value = []
   globalStatus.value = ''
+  jobId.value = null
+  stopping.value = false
   lastCompletedProjectId.value = null
   lastCompletedExportFilename.value = null
   failedStep.value = null
   failedProjectId.value = null
+  stoppedStep.value = null
+  stoppedProjectId.value = null
 }
 
-async function retry() {
+async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', successMessage, failureMessage } = {}) {
   const toast = useToast()
   if (running.value) {
     toast.error('Pipeline is already running')
     return
   }
-  const resumeStep = failedStep.value
-  const resumeProject = failedProjectId.value
   if (!resumeStep || !resumeProject) {
-    toast.error('No failed step to retry')
+    toast.error('No pipeline step to resume')
     return
   }
 
@@ -344,10 +420,11 @@ async function retry() {
     return
   }
 
+  const previousStatus = globalStatus.value
+  const previousStepStatus = { ...stepStatus.value }
   running.value = true
-  // Keep log but clear error status
+  stopping.value = false
   globalStatus.value = 'running'
-  // Reset the failed step status back to pending
   const newStatus = { ...stepStatus.value }
   newStatus[resumeStep] = 'running'
   stepStatus.value = newStatus
@@ -367,32 +444,57 @@ async function retry() {
     resume_project_id: resumeProject,
   }
 
-  // Pre-open provider tab if resuming into assets or later
-  const allSteps = ['tts', 'timing', 'segment', 'scenes', 'assets', 'assemble', 'export']
-  const resumeIdx = allSteps.indexOf(resumeStep)
-  const assetsIdx = allSteps.indexOf('assets')
-  const stopVal = config.stop_after
-  const reachesAssets = !stopVal || allSteps.indexOf(stopVal) >= assetsIdx
-  if (resumeIdx <= assetsIdx && reachesAssets) {
-    try {
-      const w = window.open('about:blank', 'sts-provider-tab')
-      if (w) {
-        w.document.write(providerTabLoadingHTML)
-        w.document.close()
-      }
-    } catch {}
-  }
+  maybeOpenProviderLoadingTab({ stopValue: config.stop_after, resumeStep })
 
   try {
     const res = await api.post('/api/pipeline/run', { body: config })
     jobId.value = res.job_id
     failedStep.value = null
-    toast.success(`Retrying from ${resumeStep}...`)
+    failedProjectId.value = null
+    stoppedStep.value = null
+    stoppedProjectId.value = null
+    toast.success(successMessage || `Resuming from ${resumeStep}...`)
     startSSE(res.job_id)
   } catch (e) {
-    toast.error(e.message || 'Retry failed to start')
+    toast.error(e.message || failureMessage || 'Resume failed to start')
     running.value = false
+    stopping.value = false
+    globalStatus.value = idleStatus || previousStatus
+    stepStatus.value = previousStepStatus
   }
+}
+
+async function retry() {
+  return startResumedRun(failedStep.value, failedProjectId.value, {
+    idleStatus: 'error',
+    successMessage: `Retrying from ${failedStep.value}...`,
+    failureMessage: 'Retry failed to start',
+  })
+}
+
+async function stop() {
+  const toast = useToast()
+  if (!running.value || !jobId.value) {
+    toast.error('No running pipeline to stop')
+    return
+  }
+  if (stopping.value) return
+
+  try {
+    const res = await api.post(`/api/pipeline/${jobId.value}/stop`)
+    stopping.value = true
+    toast.info(`Stopping after ${res.current_step || res.resume_from || 'the current step'}...`)
+  } catch (e) {
+    toast.error(e.message || 'Failed to stop pipeline')
+  }
+}
+
+async function resumeStopped() {
+  return startResumedRun(stoppedStep.value, stoppedProjectId.value, {
+    idleStatus: 'stopped',
+    successMessage: `Resuming from ${stoppedStep.value}...`,
+    failureMessage: 'Resume failed to start',
+  })
 }
 
 function dispose() {
@@ -401,6 +503,7 @@ function dispose() {
     eventSource = null
   }
   running.value = false
+  stopping.value = false
 }
 
 async function init() {
@@ -416,6 +519,13 @@ async function init() {
   if (saved) {
     const match = templates.value.find(t => t.id === saved)
     if (match) style.value = saved
+  } else {
+    // Fall back to the default style from settings
+    const { settings } = useSettings()
+    const defaultStyle = settings.value['sts-default-style']
+    if (defaultStyle && templates.value.find(t => t.id === defaultStyle)) {
+      style.value = defaultStyle
+    }
   }
 
   await loadHistory()
@@ -444,6 +554,7 @@ export function usePipeline() {
     templates: readonly(templates),
 
     running: readonly(running),
+    stopping: readonly(stopping),
     jobId: readonly(jobId),
     stepStatus: readonly(stepStatus),
     log: readonly(log),
@@ -454,10 +565,14 @@ export function usePipeline() {
     lastCompletedExportFilename: readonly(lastCompletedExportFilename),
     failedStep: readonly(failedStep),
     failedProjectId: readonly(failedProjectId),
+    stoppedStep: readonly(stoppedStep),
+    stoppedProjectId: readonly(stoppedProjectId),
 
     // Actions
     start,
+    stop,
     retry,
+    resumeStopped,
     regenerateAssets,
     loadHistory,
     loadFromHistory,

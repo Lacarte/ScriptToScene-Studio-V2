@@ -60,6 +60,9 @@ N8N_ASSET_WEBHOOK_URL = os.environ.get(
 N8N_STORY_WEBHOOK_URL = os.environ.get(
     "N8N_STORY_WEBHOOK_URL", "http://localhost:5678/webhook/story-generator"
 )
+N8N_CLASSIFY_WEBHOOK_URL = os.environ.get(
+    "N8N_CLASSIFY_WEBHOOK_URL", "http://localhost:5678/webhook/classify-style"
+)
 
 # ---------------------------------------------------------------------------
 # Kie AI image generation
