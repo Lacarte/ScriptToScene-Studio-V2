@@ -24,7 +24,7 @@ from loguru import logger
 
 from config import (
     TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ASSETS_DIR, EXPORT_DIR,
-    N8N_WEBHOOK_URL, generate_project_id,
+    PIPELINE_DIR, N8N_WEBHOOK_URL, generate_project_id,
 )
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
@@ -78,7 +78,10 @@ def run_pipeline(data: PipelineRunRequest):
       - webhook_url: override n8n URL
     """
     _cleanup_old_jobs()
-    project_id = generate_project_id(prefix="pp")
+    resume_from = data.resume_from
+    resume_project_id = data.resume_project_id
+    # Reuse existing project ID when resuming, otherwise generate new
+    project_id = resume_project_id if (resume_from and resume_project_id) else generate_project_id(prefix="pp")
     job_id = uuid.uuid4().hex[:12]
     stop_after = "timing" if data.stop_after == "alignment" else data.stop_after
 
@@ -97,6 +100,7 @@ def run_pipeline(data: PipelineRunRequest):
         "auto_scenes": data.auto_scenes,
         "stop_after": stop_after,
         "project_id": project_id,
+        "resume_from": resume_from,
         # Asset grabber options
         "provider": data.provider,
         "aspect_ratio": data.aspect_ratio,
@@ -166,67 +170,115 @@ def pipeline_progress(job_id):
 
 @pipeline_bp.route("/api/pipeline/jobs")
 def list_jobs():
-    """List recent pipeline jobs from disk (pp_* folders in scenes dir)."""
+    """List recent pipeline jobs — reads from pipeline.json (primary) + scenes.json (fallback)."""
     items = []
+    seen_ids = set()
+
+    # ── Primary: read from output/pipeline/{id}/pipeline.json ──
+    if os.path.isdir(PIPELINE_DIR):
+        for entry in os.listdir(PIPELINE_DIR):
+            pj_path = os.path.join(PIPELINE_DIR, entry, "pipeline.json")
+            if not os.path.isfile(pj_path):
+                continue
+            try:
+                data = safe_json_read(pj_path)
+                cfg = data.get("config", {})
+                pid = data.get("project_id", entry)
+                seen_ids.add(pid)
+
+                # Count scenes from scenes.json if available
+                scene_count = 0
+                scenes_path = os.path.join(SCENES_DIR, pid, "scenes.json")
+                if os.path.isfile(scenes_path):
+                    try:
+                        sd = safe_json_read(scenes_path)
+                        scene_count = len(sd.get("scenes", []))
+                    except Exception:
+                        pass
+
+                items.append({
+                    "project_id": pid,
+                    "label": pid,
+                    "status": data.get("status", "done"),
+                    "text": cfg.get("text", ""),
+                    "voice": cfg.get("voice", "af_heart"),
+                    "speed": cfg.get("speed", 1.0),
+                    "style": cfg.get("style", ""),
+                    "provider": cfg.get("provider", "grok"),
+                    "scene_count": scene_count,
+                    "timestamp": data.get("timestamp", ""),
+                    "created": os.path.getmtime(pj_path),
+                    "pipeline_timing": data.get("step_timings", {}),
+                    "step_statuses": data.get("step_statuses", {}),
+                    "error": data.get("error"),
+                    "error_step": data.get("error_step"),
+                })
+            except Exception:
+                continue
+
+    # ── Fallback: older pp_* projects without pipeline.json ──
     if os.path.isdir(SCENES_DIR):
         for entry in os.listdir(SCENES_DIR):
-            if not entry.startswith("pp_"):
+            if not entry.startswith("pp_") or entry in seen_ids:
                 continue
             scenes_path = os.path.join(SCENES_DIR, entry, "scenes.json")
             if not os.path.isfile(scenes_path):
                 continue
             try:
                 mtime = os.path.getmtime(scenes_path)
-                with open(scenes_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = safe_json_read(scenes_path)
                 scene_count = data.get("scene_count", len(data.get("scenes", [])))
                 source = data.get("source_folder", "")
-                # extract human-readable part from project ID (pp_EA9W1W_my-cool-project)
-                parts = entry.split("_", 2)
-                label = parts[2].replace("-", " ") if len(parts) > 2 else entry
                 item = {
                     "project_id": entry,
-                    "label": label[:40],
+                    "label": entry,
                     "scene_count": scene_count,
                     "status": "done",
                     "created": mtime,
                     "timestamp": data.get("timestamp", ""),
                     "pipeline_timing": data.get("pipeline_timing", {}),
+                    "step_statuses": {},
+                    "error": None,
+                    "error_step": None,
                 }
-                # Look up original text, voice, speed from TTS metadata
                 if source:
                     tts_meta = os.path.join(TTS_DIR, source, "tts.json")
                     if os.path.isfile(tts_meta):
                         try:
-                            with open(tts_meta, "r", encoding="utf-8") as mf:
-                                meta = json.load(mf)
+                            meta = safe_json_read(tts_meta)
                             item["text"] = meta.get("prompt", "")
                             item["voice"] = meta.get("voice", "af_heart")
                             item["speed"] = meta.get("speed", 1.0)
                         except Exception:
                             pass
-                # Get style template ID (stored directly) or fallback to analysis
                 item["style"] = data.get("style", "")
-                if not item["style"]:
-                    analysis = data.get("analysis", {})
-                    if analysis:
-                        item["style"] = analysis.get("visual_style", "")
                 items.append(item)
             except Exception:
                 continue
-    # Also include in-progress jobs from memory
+
+    # ── In-progress jobs from memory ──
     with _jobs_lock:
         for jid, j in _jobs.items():
             pid = j.get("project_id", jid)
+            if pid in seen_ids:
+                continue
+            cfg = j.get("config", {})
             items.append({
                 "project_id": pid,
                 "label": "Running..." if j.get("status") == "running" else pid,
-                "scene_count": 0,
                 "status": j.get("status", "unknown"),
+                "text": cfg.get("text", ""),
+                "voice": cfg.get("voice", "af_heart"),
+                "speed": cfg.get("speed", 1.0),
+                "style": cfg.get("style", ""),
+                "scene_count": 0,
                 "created": j.get("created", 0),
                 "step_sequence": j.get("step_sequence", []),
                 "step_statuses": j.get("step_statuses", {}),
+                "error": None,
+                "error_step": None,
             })
+
     items.sort(key=lambda x: x.get("created", 0), reverse=True)
     return jsonify(items)
 
@@ -234,6 +286,85 @@ def list_jobs():
 # ===================================================================
 # Pipeline runner (background thread)
 # ===================================================================
+
+@pipeline_bp.route("/api/pipeline/<project_id>/regenerate-assets", methods=["POST"])
+def regenerate_assets(project_id):
+    """Re-run the asset grabber step for an existing pipeline project.
+
+    Reads scenes.json, starts a new grabber job, and returns immediately.
+    The frontend should open the provider tab and poll for status.
+    """
+    project_id = os.path.basename(project_id)
+    scenes_path = os.path.join(SCENES_DIR, project_id, "scenes.json")
+    if not os.path.isfile(scenes_path):
+        return jsonify({"error": "No scenes found for this project"}), 404
+
+    try:
+        scenes_data = safe_json_read(scenes_path)
+    except Exception as e:
+        return jsonify({"error": f"Failed to read scenes: {e}"}), 500
+
+    scenes = scenes_data.get("scenes", [])
+    if not scenes:
+        return jsonify({"error": "No scenes in project"}), 400
+
+    # Read config from pipeline.json if available
+    pj_path = os.path.join(PIPELINE_DIR, project_id, "pipeline.json")
+    config = {}
+    if os.path.isfile(pj_path):
+        try:
+            config = safe_json_read(pj_path).get("config", {})
+        except Exception:
+            pass
+
+    body = request.get_json(silent=True) or {}
+    provider = body.get("provider") or config.get("provider", "grok")
+    aspect_ratio = body.get("aspect_ratio") or config.get("aspect_ratio", "9:16")
+
+    # Build grabber payload
+    server_port = request.host.split(":")[-1] if ":" in request.host else "5050"
+    base_url = f"http://127.0.0.1:{server_port}"
+
+    payload = {
+        "project_id": project_id,
+        "provider": provider,
+        "aspect_ratio": aspect_ratio,
+        "auto_type": True,
+        "scenes": [
+            {"prompt": s.get("image_prompt", ""), "scene": i}
+            for i, s in enumerate(scenes)
+        ],
+    }
+    if provider == "grok":
+        payload["grok_mode"] = body.get("grok_mode") or config.get("grok_mode", "video")
+        payload["grok_quality"] = body.get("grok_quality") or config.get("grok_quality", "480p")
+        payload["grok_duration"] = body.get("grok_duration") or config.get("grok_duration", "6s")
+
+    try:
+        resp = http_requests.post(f"{base_url}/api/assets/grabber/start",
+                                  json=payload, timeout=30)
+        resp.raise_for_status()
+        grab_data = resp.json()
+        logger.info("Regenerate assets started for {}", project_id)
+
+        # Provider URLs for frontend to open
+        provider_urls = {
+            "grok": "https://grok.com/imagine",
+            "midjourney": "https://www.midjourney.com/imagine",
+            "meta-ai": "https://www.meta.ai/",
+        }
+        return jsonify({
+            "status": "started",
+            "project_id": project_id,
+            "provider": provider,
+            "scene_count": len(scenes),
+            "open_url": provider_urls.get(provider, ""),
+            **grab_data,
+        })
+    except Exception as e:
+        logger.error("Failed to start asset regeneration: {}", e)
+        return jsonify({"error": f"Failed to start grabber: {e}"}), 500
+
 
 def _save_pipeline_timing(project_id, step_timings):
     """Persist pipeline_timing into the project's scenes.json."""
@@ -245,6 +376,42 @@ def _save_pipeline_timing(project_id, step_timings):
             safe_json_write(scenes_path, data, indent=2)
         except Exception as e:
             logger.debug("Could not save pipeline timing: {}", e)
+
+
+def _pipeline_json_path(project_id):
+    return os.path.join(PIPELINE_DIR, project_id, "pipeline.json")
+
+
+def _save_pipeline_json(project_id, job_id, config, status, step_statuses,
+                        step_timings, error_msg=None, error_step=None):
+    """Persist full pipeline state to output/pipeline/{project_id}/pipeline.json."""
+    data = {
+        "project_id": project_id,
+        "job_id": job_id,
+        "status": status,
+        "config": {
+            "text": config.get("text", ""),
+            "voice": config.get("voice", "af_heart"),
+            "speed": config.get("speed", 1.0),
+            "style": config.get("style", "cinematic"),
+            "provider": config.get("provider", "grok"),
+            "auto_scenes": config.get("auto_scenes", True),
+            "stop_after": config.get("stop_after") or None,
+            "aspect_ratio": config.get("aspect_ratio", "9:16"),
+            "grok_mode": config.get("grok_mode", "video"),
+            "grok_quality": config.get("grok_quality", "480p"),
+            "grok_duration": config.get("grok_duration", "6s"),
+        },
+        "step_statuses": dict(step_statuses),
+        "step_timings": dict(step_timings),
+        "error": error_msg,
+        "error_step": error_step,
+        "timestamp": datetime.now().isoformat(),
+    }
+    try:
+        safe_json_write(_pipeline_json_path(project_id), data, indent=2)
+    except Exception as e:
+        logger.debug("Could not save pipeline.json: {}", e)
 
 
 def _emit_done(job_id, project_id, results):
@@ -274,6 +441,40 @@ def _emit_done(job_id, project_id, results):
             job["status"] = "done"
 
 
+def _load_prior_results(project_id, up_to_step):
+    """Load saved step results from disk for pipeline resume.
+
+    Returns a dict of {step_name: result_data} for all steps before `up_to_step`.
+    """
+    all_steps = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+    idx = all_steps.index(up_to_step) if up_to_step in all_steps else 0
+    steps_to_load = all_steps[:idx]
+    loaded = {}
+
+    for step in steps_to_load:
+        if step == "tts":
+            tts_path = os.path.join(TTS_DIR, project_id, "tts.json")
+            if os.path.isfile(tts_path):
+                data = safe_json_read(tts_path)
+                wav_path = os.path.join(TTS_DIR, project_id, data.get("filename", "voice.wav"))
+                data["wav_path"] = wav_path
+                loaded["tts"] = data
+        elif step == "timing":
+            align_path = os.path.join(ALIGN_DIR, project_id, "alignment.json")
+            if os.path.isfile(align_path):
+                loaded["timing"] = safe_json_read(align_path)
+        elif step == "segment":
+            seg_path = os.path.join(SEGMENTER_DIR, project_id, "segmented.json")
+            if os.path.isfile(seg_path):
+                loaded["segment"] = safe_json_read(seg_path)
+        elif step == "scenes":
+            scenes_path = os.path.join(SCENES_DIR, project_id, "scenes.json")
+            if os.path.isfile(scenes_path):
+                loaded["scenes"] = safe_json_read(scenes_path)
+
+    return loaded
+
+
 def _run_pipeline(job_id):
     with _jobs_lock:
         job = _jobs[job_id]
@@ -286,68 +487,103 @@ def _run_pipeline(job_id):
     stop_after = config.get("stop_after")
     step_seq = job.get("step_sequence", [])
     provider = config.get("provider", "grok")
+    resume_from = config.get("resume_from")
 
-    logger.info("[{}] Pipeline started | steps={} stop_after={} provider={} voice={} speed={} style={}",
-                project_id, step_seq, stop_after, provider, config.get("voice"), config.get("speed"), config.get("style"))
+    all_steps = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+    resume_idx = all_steps.index(resume_from) if resume_from in all_steps else 0
+
+    # Load prior results from disk when resuming
+    if resume_from and resume_idx > 0:
+        logger.info("[{}] Resuming from step '{}' — loading prior results from disk",
+                    project_id, resume_from)
+        prior = _load_prior_results(project_id, resume_from)
+        results.update(prior)
+        # Emit skipped status for prior steps
+        for step_name in all_steps[:resume_idx]:
+            if step_name in prior:
+                _emit(job_id, {"step": step_name, "status": "done",
+                               "message": f"[{project_id}] (reused from previous run)"})
+            else:
+                _emit(job_id, {"step": step_name, "status": "skipped",
+                               "message": f"[{project_id}] (no prior data found)"})
+
+    def _should_skip(step_name):
+        """Return True if this step should be skipped during resume."""
+        if not resume_from:
+            return False
+        return all_steps.index(step_name) < resume_idx
+
+    logger.info("[{}] Pipeline started | steps={} stop_after={} resume_from={} provider={} voice={} speed={} style={}",
+                project_id, step_seq, stop_after, resume_from or 'none', provider,
+                config.get("voice"), config.get("speed"), config.get("style"))
 
     try:
         # ── Step 1: TTS ─────────────────────────────────────────────
-        logger.info("[{}] Step 1/7: TTS starting", project_id)
-        _emit(job_id, {"step": "tts", "status": "running",
-                       "message": f"[{project_id}] Generating audio..."})
-        _t0 = time.perf_counter()
-        tts_result = _step_tts(config, project_id)
-        step_timings["tts"] = round(time.perf_counter() - _t0, 2)
-        results["tts"] = tts_result
-        logger.success("[{}] Step 1/7: TTS done — {:.1f}s audio, {} words",
-                       project_id, tts_result["duration_seconds"], tts_result["words"])
-        _emit(job_id, {
-            "step": "tts", "status": "done",
-            "message": f"[{project_id}] {tts_result['duration_seconds']:.1f}s audio, "
-                       f"{tts_result['words']} words",
-            "data": {k: v for k, v in tts_result.items() if k != "wav_path"},
-        })
+        if _should_skip("tts"):
+            tts_result = results.get("tts", {})
+        else:
+            logger.info("[{}] Step 1/7: TTS starting", project_id)
+            _emit(job_id, {"step": "tts", "status": "running",
+                           "message": f"[{project_id}] Generating audio..."})
+            _t0 = time.perf_counter()
+            tts_result = _step_tts(config, project_id)
+            step_timings["tts"] = round(time.perf_counter() - _t0, 2)
+            results["tts"] = tts_result
+            logger.success("[{}] Step 1/7: TTS done — {:.1f}s audio, {} words",
+                           project_id, tts_result["duration_seconds"], tts_result["words"])
+            _emit(job_id, {
+                "step": "tts", "status": "done",
+                "message": f"[{project_id}] {tts_result['duration_seconds']:.1f}s audio, "
+                           f"{tts_result['words']} words",
+                "data": {k: v for k, v in tts_result.items() if k != "wav_path"},
+            })
         if stop_after == "tts":
             logger.info("[{}] Pipeline stopped after TTS (stop_after=tts)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 2: Force Alignment ─────────────────────────────────
-        logger.info("[{}] Step 2/7: Alignment starting", project_id)
-        _emit(job_id, {"step": "timing", "status": "running",
-                       "message": f"[{project_id}] Aligning words..."})
-        _t0 = time.perf_counter()
-        timing_result = _step_timing(tts_result, config, project_id)
-        step_timings["timing"] = round(time.perf_counter() - _t0, 2)
-        results["timing"] = timing_result
-        logger.success("[{}] Step 2/7: Alignment done — {} words in {:.2f}s",
-                       project_id, timing_result["word_count"], timing_result["inference_time"])
-        _emit(job_id, {
-            "step": "timing", "status": "done",
-            "message": f"[{project_id}] {timing_result['word_count']} words aligned "
-                       f"in {timing_result['inference_time']:.2f}s",
-        })
+        if _should_skip("timing"):
+            timing_result = results.get("timing", {})
+        else:
+            logger.info("[{}] Step 2/7: Alignment starting", project_id)
+            _emit(job_id, {"step": "timing", "status": "running",
+                           "message": f"[{project_id}] Aligning words..."})
+            _t0 = time.perf_counter()
+            timing_result = _step_timing(tts_result, config, project_id)
+            step_timings["timing"] = round(time.perf_counter() - _t0, 2)
+            results["timing"] = timing_result
+            logger.success("[{}] Step 2/7: Alignment done — {} words in {:.2f}s",
+                           project_id, timing_result["word_count"], timing_result["inference_time"])
+            _emit(job_id, {
+                "step": "timing", "status": "done",
+                "message": f"[{project_id}] {timing_result['word_count']} words aligned "
+                           f"in {timing_result['inference_time']:.2f}s",
+            })
         if stop_after == "timing":
             logger.info("[{}] Pipeline stopped after Alignment (stop_after=timing)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
         # ── Step 3: Segmentation ────────────────────────────────────
-        logger.info("[{}] Step 3/7: Segment starting", project_id)
-        _emit(job_id, {"step": "segment", "status": "running",
-                       "message": f"[{project_id}] Splitting into scenes..."})
-        _t0 = time.perf_counter()
-        segment_result = _step_segment(timing_result, config, project_id)
-        step_timings["segment"] = round(time.perf_counter() - _t0, 2)
-        results["segment"] = segment_result
-        stats = segment_result.get("stats", {})
-        logger.success("[{}] Step 3/7: Segment done — {} scenes, avg {:.1f}s",
-                       project_id, stats.get("segment_count", 0), stats.get("avg_duration", 0))
-        _emit(job_id, {
-            "step": "segment", "status": "done",
-            "message": f"[{project_id}] {stats.get('segment_count', 0)} scenes, "
-                       f"avg {stats.get('avg_duration', 0):.1f}s",
-        })
+        if _should_skip("segment"):
+            segment_result = results.get("segment", {})
+        else:
+            logger.info("[{}] Step 3/7: Segment starting", project_id)
+            _emit(job_id, {"step": "segment", "status": "running",
+                           "message": f"[{project_id}] Splitting into scenes..."})
+            _t0 = time.perf_counter()
+            segment_result = _step_segment(timing_result, config, project_id)
+            step_timings["segment"] = round(time.perf_counter() - _t0, 2)
+            results["segment"] = segment_result
+            stats = segment_result.get("stats", {})
+            logger.success("[{}] Step 3/7: Segment done — {} scenes, avg {:.1f}s",
+                           project_id, stats.get("segment_count", 0), stats.get("avg_duration", 0))
+            _emit(job_id, {
+                "step": "segment", "status": "done",
+                "message": f"[{project_id}] {stats.get('segment_count', 0)} scenes, "
+                           f"avg {stats.get('avg_duration', 0):.1f}s",
+            })
         if stop_after == "segment":
             logger.info("[{}] Pipeline stopped after Segment (stop_after=segment)", project_id)
             _emit_done(job_id, project_id, results)
@@ -455,6 +691,10 @@ def _run_pipeline(job_id):
         # Persist timing to scenes.json sidecar
         _save_pipeline_timing(project_id, step_timings)
 
+        # Persist pipeline.json
+        _save_pipeline_json(project_id, job_id, config, "done",
+                            job.get("step_statuses", {}), step_timings)
+
         logger.success("[{}] Pipeline COMPLETE — all {} steps finished in {:.1f}s",
                        project_id, len(step_seq), step_timings["total"])
         _emit_done(job_id, project_id, results)
@@ -466,8 +706,19 @@ def _run_pipeline(job_id):
         logger.error("[{}] Pipeline FAILED at step '{}': {}", project_id,
                      job.get("step_statuses", {}).keys() or "unknown", e)
         logger.exception("Pipeline traceback")
+        # Find which step failed
+        error_step = None
+        for sname, sval in job.get("step_statuses", {}).items():
+            if sval == "running":
+                error_step = sname
+                break
+        # Persist pipeline.json with error state
+        _save_pipeline_json(project_id, job_id, config, "error",
+                            job.get("step_statuses", {}), step_timings,
+                            error_msg=str(e), error_step=error_step)
         _emit(job_id, {"step": "error", "status": "error",
-                       "message": f"[{project_id}] {e}"})
+                       "message": f"[{project_id}] {e}",
+                       "error_step": error_step})
         with _jobs_lock:
             job["status"] = "error"
 

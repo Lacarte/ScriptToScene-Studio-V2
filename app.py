@@ -15,7 +15,8 @@ from loguru import logger
 
 from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
-    N8N_ASSET_WEBHOOK_URL, OUTPUT_DIR, SCENES_DIR, ASSETS_DIR,
+    N8N_ASSET_WEBHOOK_URL, N8N_STORY_WEBHOOK_URL, OUTPUT_DIR,
+    SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR, APP_CONFIG_PATH,
 )
@@ -61,6 +62,7 @@ from studio.pipeline import pipeline_bp
 from studio.captions import captions_bp
 from studio.music import music_bp
 from studio.thumbnails import thumbnails_bp
+from studio.story import story_bp
 app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
@@ -71,6 +73,7 @@ app.register_blueprint(pipeline_bp)
 app.register_blueprint(captions_bp)
 app.register_blueprint(music_bp)
 app.register_blueprint(thumbnails_bp)
+app.register_blueprint(story_bp)
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +182,11 @@ _CLEAR_MODULES = [
     {"page": "Editor", "module": "Timeline Editor", "dir": PROJECTS_DIR},
     {"page": "Music", "module": "Music Library", "dir": MUSIC_DIR},
     {"page": "Exports", "module": "Export Library", "dir": EXPORT_DIR},
+    {"page": "Stories", "module": "Story Generator", "dir": STORIES_DIR},
+    {"page": "Pipeline", "module": "Pipeline Data", "dir": PIPELINE_DIR},
 ]
 _PROJECT_DIRS = [
-    ALIGN_DIR, SCENES_DIR, ASSETS_DIR, SEGMENTER_DIR,
+    ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, SEGMENTER_DIR,
     CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR,
 ]
@@ -292,6 +297,7 @@ if __name__ == "__main__":
     print(f"  \033[90m-\033[0m Alignment: {'available' if _check_alignment_available() else 'unavailable'}")
     print(f"  \033[90m-\033[0m Scene webhook: {N8N_WEBHOOK_URL}")
     print(f"  \033[90m-\033[0m Asset webhook: {N8N_ASSET_WEBHOOK_URL}")
+    print(f"  \033[90m-\033[0m Story webhook: {N8N_STORY_WEBHOOK_URL}")
     print()
 
     if not os.environ.get("STS_NO_BROWSER"):

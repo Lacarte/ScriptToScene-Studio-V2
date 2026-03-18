@@ -109,6 +109,10 @@ const jobs = ref([])
 const lastCompletedProjectId = ref(null)
 const lastCompletedExportFilename = ref(null)
 
+// Retry state — tracks the failed step and project for resume
+const failedStep = ref(null)
+const failedProjectId = ref(null)
+
 let eventSource = null
 let initialized = false
 
@@ -160,6 +164,7 @@ async function start() {
   try {
     const res = await api.post('/api/pipeline/run', { body: config })
     jobId.value = res.job_id
+    failedProjectId.value = res.project_id  // track for potential retry
     globalStatus.value = 'running'
     toast.success('Pipeline started')
     startSSE(res.job_id)
@@ -205,6 +210,18 @@ function startSSE(id) {
       eventSource.close()
       eventSource = null
       running.value = false
+      // Determine which step failed for retry
+      const lastRunning = Object.entries(stepStatus.value)
+        .find(([, s]) => s === 'running')
+      if (lastRunning) {
+        failedStep.value = lastRunning[0]
+        failedProjectId.value = event.project_id || lastCompletedProjectId.value || null
+      }
+      // Also try to extract project_id from the error message
+      const pidMatch = (event.message || '').match(/\[(pp_\w+)\]/)
+      if (pidMatch && !failedProjectId.value) {
+        failedProjectId.value = pidMatch[1]
+      }
       return
     }
 
@@ -236,8 +253,38 @@ function loadFromHistory(index) {
   if (j.voice) voice.value = j.voice
   if (j.speed) speed.value = j.speed
   if (j.style) {
-    const tmpl = templates.value.find(t => j.style.toLowerCase().includes(t.id))
+    const tmpl = templates.value.find(t => t.id === j.style)
     if (tmpl) style.value = tmpl.id
+    else style.value = j.style
+  }
+  // Restore error state for retry
+  if (j.status === 'error' && j.error_step) {
+    globalStatus.value = 'error'
+    failedStep.value = j.error_step
+    failedProjectId.value = j.project_id
+  } else {
+    failedStep.value = null
+    failedProjectId.value = null
+    globalStatus.value = ''
+  }
+}
+
+async function regenerateAssets(projectId) {
+  const toast = useToast()
+  if (!projectId) {
+    toast.error('No project to regenerate assets for')
+    return
+  }
+  try {
+    const res = await api.post(`/api/pipeline/${projectId}/regenerate-assets`)
+    if (res.open_url) {
+      try { window.open(res.open_url, 'sts-provider-tab') } catch {}
+    }
+    toast.success(`Asset regeneration started (${res.scene_count} scenes)`)
+    return res
+  } catch (e) {
+    toast.error(e.message || 'Failed to start asset regeneration')
+    throw e
   }
 }
 
@@ -255,6 +302,74 @@ function resetProgress() {
   globalStatus.value = ''
   lastCompletedProjectId.value = null
   lastCompletedExportFilename.value = null
+  failedStep.value = null
+  failedProjectId.value = null
+}
+
+async function retry() {
+  const toast = useToast()
+  const resumeStep = failedStep.value
+  const resumeProject = failedProjectId.value
+  if (!resumeStep || !resumeProject) {
+    toast.error('No failed step to retry')
+    return
+  }
+
+  const t = text.value.trim()
+  if (!t) {
+    toast.error('Enter story text')
+    return
+  }
+
+  running.value = true
+  // Keep log but clear error status
+  globalStatus.value = 'running'
+  // Reset the failed step status back to pending
+  const newStatus = { ...stepStatus.value }
+  newStatus[resumeStep] = 'running'
+  stepStatus.value = newStatus
+
+  const webhookUrl = localStorage.getItem('sts-scenes-webhook-url') || ''
+  const config = {
+    text: t,
+    voice: voice.value,
+    speed: speed.value,
+    style: style.value,
+    auto_scenes: autoScenes.value,
+    stop_after: stopAfter.value || undefined,
+    webhook_url: webhookUrl || undefined,
+    provider: localStorage.getItem('sts-asset-provider') || 'grok',
+    auto_type: true,
+    resume_from: resumeStep,
+    resume_project_id: resumeProject,
+  }
+
+  // Pre-open provider tab if resuming into assets or later
+  const allSteps = ['tts', 'timing', 'segment', 'scenes', 'assets', 'assemble', 'export']
+  const resumeIdx = allSteps.indexOf(resumeStep)
+  const assetsIdx = allSteps.indexOf('assets')
+  const stopVal = config.stop_after
+  const reachesAssets = !stopVal || allSteps.indexOf(stopVal) >= assetsIdx
+  if (resumeIdx <= assetsIdx && reachesAssets) {
+    try {
+      const w = window.open('about:blank', 'sts-provider-tab')
+      if (w) {
+        w.document.write(providerTabLoadingHTML)
+        w.document.close()
+      }
+    } catch {}
+  }
+
+  try {
+    const res = await api.post('/api/pipeline/run', { body: config })
+    jobId.value = res.job_id
+    failedStep.value = null
+    toast.success(`Retrying from ${resumeStep}...`)
+    startSSE(res.job_id)
+  } catch (e) {
+    toast.error(e.message || 'Retry failed to start')
+    running.value = false
+  }
 }
 
 function dispose() {
@@ -314,9 +429,13 @@ export function usePipeline() {
     jobs: readonly(jobs),
     lastCompletedProjectId: readonly(lastCompletedProjectId),
     lastCompletedExportFilename: readonly(lastCompletedExportFilename),
+    failedStep: readonly(failedStep),
+    failedProjectId: readonly(failedProjectId),
 
     // Actions
     start,
+    retry,
+    regenerateAssets,
     loadHistory,
     loadFromHistory,
     randomStory,

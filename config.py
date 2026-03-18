@@ -23,6 +23,8 @@ OUTPUT_DIR = os.path.join(ROOT_DIR, "output")
 TRASH_DIR = os.path.join(OUTPUT_DIR, "TRASH")
 ALIGN_DIR = os.path.join(OUTPUT_DIR, "alignments")
 SCENES_DIR = os.path.join(OUTPUT_DIR, "scenes")
+STORIES_DIR = os.path.join(OUTPUT_DIR, "stories")
+PIPELINE_DIR = os.path.join(OUTPUT_DIR, "pipeline")
 ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets")
 SEGMENTER_DIR = os.path.join(OUTPUT_DIR, "segmenters")
 CAPTIONS_DIR = os.path.join(OUTPUT_DIR, "captions")
@@ -41,7 +43,7 @@ APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app-config.json")
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
-for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, ASSETS_DIR,
+for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR,
            SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
            EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR):
     os.makedirs(_d, exist_ok=True)
@@ -54,6 +56,9 @@ N8N_WEBHOOK_URL = os.environ.get(
 )
 N8N_ASSET_WEBHOOK_URL = os.environ.get(
     "N8N_ASSET_WEBHOOK_URL", "http://localhost:5678/webhook/image-generator"
+)
+N8N_STORY_WEBHOOK_URL = os.environ.get(
+    "N8N_STORY_WEBHOOK_URL", "http://localhost:5678/webhook/story-generator"
 )
 
 # ---------------------------------------------------------------------------

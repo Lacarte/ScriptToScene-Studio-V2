@@ -571,7 +571,21 @@ class VideoProcessor:
         is_video_source = full_media_path.lower().endswith(('.mp4', '.webm', '.mov', '.avi', '.mkv'))
 
         if is_video_source:
-            self._create_scene_from_video(full_media_path, output_path, duration, effect)
+            # Probe the video to verify it's valid before heavy processing
+            probe = self._probe_video(full_media_path)
+            if probe and probe['width'] > 0 and probe['height'] > 0:
+                self._create_scene_from_video(full_media_path, output_path, duration, effect)
+            else:
+                # Video is invalid/corrupt — try extracting first frame as image
+                logger.warning("Scene {}: video probe failed or empty, falling back to image",
+                               scene_id)
+                fallback_img = os.path.join(temp_dir, f"scene_{index:03d}_probe_fb.jpg")
+                if self._extract_first_frame(full_media_path, fallback_img):
+                    logger.info("Scene {}: using extracted frame as static image", scene_id)
+                    self._create_scene_subprocess(fallback_img, output_path, duration, effect)
+                else:
+                    logger.error("Scene {}: video unusable and frame extraction failed", scene_id)
+                    raise RuntimeError(f"Scene {scene_id}: video file is corrupt")
         elif USE_FFMPEG_PYTHON:
             self._create_scene_ffmpeg(full_media_path, output_path, duration, effect)
         else:
@@ -917,6 +931,53 @@ class VideoProcessor:
                           result.stdout[:500], stderr_summary)
             raise RuntimeError(f"FFmpeg zoompan failed: {stderr_summary}")
 
+    def _probe_video(self, video_path):
+        """Probe a video file and return stream info. Returns None if invalid."""
+        try:
+            cmd = [
+                FFPROBE_BIN,
+                '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=codec_name,width,height,duration,nb_frames',
+                '-show_entries', 'format=duration',
+                '-of', 'json',
+                video_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, encoding='utf-8',
+                                    errors='replace', timeout=15)
+            if result.returncode != 0:
+                return None
+            import json
+            data = json.loads(result.stdout)
+            streams = data.get('streams', [])
+            if not streams:
+                return None
+            stream = streams[0]
+            fmt = data.get('format', {})
+            return {
+                'codec': stream.get('codec_name', ''),
+                'width': int(stream.get('width', 0)),
+                'height': int(stream.get('height', 0)),
+                'duration': float(stream.get('duration') or fmt.get('duration') or 0),
+                'nb_frames': int(stream.get('nb_frames') or 0),
+            }
+        except Exception as e:
+            logger.debug("Probe failed for {}: {}", video_path, e)
+            return None
+
+    def _extract_first_frame(self, video_path, output_image_path):
+        """Extract the first frame from a video as a fallback image."""
+        cmd = [
+            FFMPEG_BIN, '-y',
+            '-i', video_path,
+            '-vframes', '1',
+            '-q:v', '2',
+            output_image_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8',
+                                errors='replace', timeout=30)
+        return result.returncode == 0 and os.path.isfile(output_image_path)
+
     def _create_scene_from_video(self, video_path, output_path, duration, effect):
         """Create a scene clip from a video source — trim, scale, and re-encode.
 
@@ -926,6 +987,8 @@ class VideoProcessor:
         2. Use FFmpeg ``crop`` with time-based expressions to animate the
            visible viewport, producing the motion effect.
         3. Scale back to the target resolution if the crop size varies (zoom).
+
+        Falls back to image-based processing if the video is invalid/corrupt.
         """
         effect_type = effect.get('type', 'static')
         W, H = self.width, self.height
@@ -1049,13 +1112,54 @@ class VideoProcessor:
         result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=300)
         if result.returncode != 0:
             stderr = result.stderr or ""
-            # Capture both head and tail of stderr so the root cause isn't truncated
             if len(stderr) > 1500:
                 stderr_summary = stderr[:750] + "\n...\n" + stderr[-750:]
             else:
                 stderr_summary = stderr
-            logger.error("FFmpeg video scene failed:\nstdout: {}\nstderr: {}",
-                          result.stdout[:500], stderr_summary)
+            logger.warning("FFmpeg video scene failed, attempting fallback:\n{}",
+                            stderr_summary[-300:])
+
+            # ── Fallback: extract first frame and process as image ──
+            fallback_img = output_path.replace('.mp4', '_fallback.jpg')
+            try:
+                if self._extract_first_frame(video_path, fallback_img):
+                    logger.info("Fallback: extracted first frame, processing as image")
+                    self._create_scene_subprocess(fallback_img, output_path, duration, effect)
+                    return
+                else:
+                    logger.warning("Fallback: frame extraction failed, trying re-encode with safe settings")
+            except Exception as fb_err:
+                logger.warning("Fallback image processing failed: {}", fb_err)
+            finally:
+                if os.path.isfile(fallback_img):
+                    try:
+                        os.remove(fallback_img)
+                    except OSError:
+                        pass
+
+            # ── Fallback 2: re-encode with minimal filters ──
+            safe_cmd = [
+                FFMPEG_BIN, '-y',
+                '-i', video_path,
+                '-t', str(duration),
+                '-vf', f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+                       f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2:black,"
+                       f"format={self.pixel_format}",
+                '-c:v', self.codec,
+                '-pix_fmt', self.pixel_format,
+                '-an',
+                '-preset', 'fast',
+                '-crf', str(self.crf),
+                output_path,
+            ]
+            logger.debug("Safe fallback cmd: {}", ' '.join(safe_cmd))
+            safe_result = subprocess.run(safe_cmd, capture_output=True, encoding='utf-8',
+                                          errors='replace', timeout=300)
+            if safe_result.returncode == 0:
+                logger.success("Fallback 2 succeeded: safe re-encode")
+                return
+
+            logger.error("All video processing attempts failed for: {}", video_path)
             raise RuntimeError(f"FFmpeg video scene failed: {stderr_summary}")
 
     def _create_scene_subprocess(self, media_path, output_path, duration, effect):

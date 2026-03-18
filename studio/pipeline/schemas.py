@@ -16,6 +16,8 @@ class PipelineRunRequest(BaseModel):
     custom_style_notes: Optional[str] = None
     auto_scenes: bool = True
     stop_after: Optional[str] = None  # tts, alignment/timing, segment, scenes, assets, assemble, export, or None (all)
+    resume_from: Optional[str] = None  # step to resume from (skips prior steps, reuses saved outputs)
+    resume_project_id: Optional[str] = None  # existing project ID to resume
     # Asset grabber options (used when pipeline reaches assets step)
     provider: str = "grok"
     aspect_ratio: str = "9:16"

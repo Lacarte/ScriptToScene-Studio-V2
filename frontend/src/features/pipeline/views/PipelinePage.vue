@@ -3,15 +3,49 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePipeline } from '../composables/usePipeline.js'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
+import { useStory } from '../composables/useStory.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
 import { formatElapsed } from '@/shared/utils/format.js'
+import { useToast } from '@/shared/composables/useToast.js'
 
 defineOptions({ name: 'PipelinePage' })
+
+const toast = useToast()
+const story = useStory()
+
+// Source mode: 'manual' (paste/random) or 'generate' (AI story)
+const sourceMode = ref(localStorage.getItem('sts-pipeline-source-mode') || 'manual')
+watch(sourceMode, (v) => localStorage.setItem('sts-pipeline-source-mode', v))
 
 function applyRecommendedStyle(styleId) {
   const tmpl = templates.value.find(t => t.id === styleId)
   if (tmpl) style.value = styleId
+}
+
+// Link Category ↔ Style: they share the same template list
+function setCategory(id) {
+  story.storyCategory.value = id
+  style.value = id  // sync style to match
+}
+function setStyle(id) {
+  style.value = id
+  story.storyCategory.value = id  // sync category to match
+}
+
+async function handleGenerateStory() {
+  try {
+    const data = await story.generateStory(style.value)
+    // Strip section labels for clean pipeline text
+    const plain = data.story_text
+      .replace(/^(Hook|Build|Climax|CTA):\s*/gim, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    text.value = plain
+    toast.success('Story generated and applied')
+  } catch (e) {
+    toast.error(e.message || 'Story generation failed')
+  }
 }
 
 const router = useRouter()
@@ -20,7 +54,8 @@ const {
   text, voice, speed, style, autoScenes, stopAfter, templates,
   running, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
-  start, loadFromHistory, randomStory, resetProgress,
+  failedStep, failedProjectId,
+  start, retry, regenerateAssets, loadFromHistory, randomStory, resetProgress,
   timeAgo,
 } = usePipeline()
 
@@ -32,6 +67,9 @@ const STEPS = computed(() => {
 })
 
 const { styleLabel, styleColor } = useScenes()
+
+// Sync category to match current style on init
+story.storyCategory.value = style.value || 'cinematic'
 
 const logEl = ref(null)
 const activeProjectId = ref('')
@@ -204,16 +242,39 @@ function logStepLabel(step) {
 
     <!-- Input -->
     <section class="card input-card">
-      <div class="field-row">
+      <!-- Source mode header -->
+      <div class="source-header">
         <label class="field-label">Story Text</label>
-        <div class="field-row-right">
+        <div class="source-header-right">
           <span v-if="text.trim()" class="word-count">{{ text.trim().split(/\s+/).length }} words</span>
-          <button class="random-btn" title="Load a random story excerpt" @click="randomStory">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="16" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
-            Random
-          </button>
-          <span v-if="lastPickedStory?.type" class="story-type-badge">{{ lastPickedStory.type }}</span>
+          <div class="mode-toggle">
+            <button
+              class="mode-btn"
+              :class="{ active: sourceMode === 'manual' }"
+              @click="sourceMode = 'manual'"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="16" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+              Random
+            </button>
+            <button
+              class="mode-btn"
+              :class="{ active: sourceMode === 'generate' }"
+              @click="sourceMode = 'generate'"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              Generate
+            </button>
+          </div>
         </div>
+      </div>
+
+      <!-- Random mode: action row + recommended styles -->
+      <div v-if="sourceMode === 'manual'" class="source-random">
+        <button class="random-action-btn" @click="randomStory">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/><circle cx="8" cy="16" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+          Roll Random Story
+        </button>
+        <span v-if="lastPickedStory?.type" class="story-type-badge">{{ lastPickedStory.type }}</span>
         <div v-if="lastPickedStory?.styles?.length" class="story-recommended-styles">
           <span class="rec-label">Recommended:</span>
           <button
@@ -221,17 +282,60 @@ function logStepLabel(step) {
             :key="sid"
             class="rec-style-tag"
             :class="{ active: style === sid }"
-            :title="'Apply ' + (templates.find(t => t.id === sid)?.name || sid) + ' style'"
             @click="applyRecommendedStyle(sid)"
           >{{ templates.find(t => t.id === sid)?.name || sid }}</button>
         </div>
       </div>
+
+      <!-- Generate mode: inline story form -->
+      <div v-if="sourceMode === 'generate'" class="source-generate">
+        <div class="gen-form">
+          <div class="gen-group">
+            <label class="control-label">Category / Style</label>
+            <select :value="style" class="input-field control-select" @change="setCategory($event.target.value)">
+              <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }}</option>
+            </select>
+          </div>
+          <div class="gen-group">
+            <label class="control-label">Language</label>
+            <select v-model="story.storyLanguage.value" class="input-field control-select">
+              <option v-for="lang in story.LANGUAGES" :key="lang.id" :value="lang.id">{{ lang.label }}</option>
+            </select>
+          </div>
+          <div class="gen-group">
+            <label class="control-label">Duration</label>
+            <input v-model.number="story.storyDuration.value" type="number" class="input-field control-number" min="15" max="180" step="5">
+          </div>
+          <div class="gen-group gen-group--action">
+            <button class="gen-story-btn" :disabled="story.isGenerating.value" @click="handleGenerateStory">
+              <span v-if="story.isGenerating.value" class="gen-spinner"></span>
+              <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              {{ story.isGenerating.value ? 'Generating...' : 'Generate Story' }}
+            </button>
+          </div>
+        </div>
+        <p v-if="story.error.value" class="gen-error">{{ story.error.value }}</p>
+        <!-- Generation result stats -->
+        <div v-if="story.result.value" class="gen-result-bar">
+          <span class="gen-result-id">{{ story.result.value.project_id }}</span>
+          <span class="gen-sep">&middot;</span>
+          <span>{{ story.result.value.word_count }} words</span>
+          <span class="gen-sep">&middot;</span>
+          <span>~{{ story.result.value.estimated_duration }}s</span>
+          <span class="gen-sep">&middot;</span>
+          <span>{{ styleLabel(story.result.value.story_category || story.result.value.preset_style || '') || story.result.value.story_category }}</span>
+          <span class="gen-sep">&middot;</span>
+          <span class="gen-result-muted">{{ (story.result.value.generation_time || 0).toFixed(1) }}s gen</span>
+        </div>
+      </div>
+
+      <!-- Textarea (always visible) -->
       <textarea
         v-model="text"
         class="input-field textarea"
         :class="{ 'textarea--empty': !text.trim() }"
         rows="5"
-        placeholder="Paste your story, script, or narration text here..."
+        :placeholder="sourceMode === 'generate' ? 'Click Generate Story above, or type your own text...' : 'Paste your story, script, or narration text here...'"
       ></textarea>
 
       <!-- Controls strip -->
@@ -255,7 +359,7 @@ function logStepLabel(step) {
         </div>
         <div class="control-group">
           <label class="control-label">Style</label>
-          <select v-model="style" class="input-field control-select">
+          <select :value="style" class="input-field control-select" @change="setStyle($event.target.value)">
             <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </div>
@@ -293,7 +397,18 @@ function logStepLabel(step) {
           </span>
           <span class="run-label">{{ running ? 'Running...' : 'Run Pipeline' }}</span>
         </button>
-        <span v-if="!text.trim() && !running" class="run-hint">Paste text or click Random to get started</span>
+        <!-- Retry button — appears when pipeline failed -->
+        <button
+          v-if="globalStatus === 'error' && failedStep && failedProjectId && !running"
+          class="retry-btn"
+          @click="retry"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          Retry from {{ failedStep }}
+        </button>
+        <span v-if="!text.trim() && !running && globalStatus !== 'error'" class="run-hint">{{ sourceMode === 'generate' ? 'Generate a story or type text to get started' : 'Paste text or click Random to get started' }}</span>
       </div>
     </section>
 
@@ -357,7 +472,7 @@ function logStepLabel(step) {
           v-for="(j, i) in jobs"
           :key="j.project_id || i"
           class="hist-item"
-          :class="{ active: j.project_id === activeProjectId }"
+          :class="{ active: j.project_id === activeProjectId, 'hist-item--error': j.status === 'error' }"
           @click="onHistoryClick(i)"
         >
           <div class="hist-inner">
@@ -379,6 +494,10 @@ function logStepLabel(step) {
                     <span :style="{ color: styleColor(j.style), fontWeight: 600 }">{{ styleLabel(j.style) }}</span>
                   </span>
                 </template>
+                <template v-if="j.status === 'error'">
+                  <span class="hist-sep">&middot;</span>
+                  <span class="hist-error-badge">error at {{ j.error_step || '?' }}</span>
+                </template>
               </div>
               <div v-if="j.pipeline_timing && Object.keys(j.pipeline_timing).length" class="hist-timings">
                 <span v-if="formatElapsed(j.pipeline_timing.total)" class="hist-timing hist-timing--total">
@@ -393,17 +512,41 @@ function logStepLabel(step) {
                 </span>
               </div>
             </div>
-            <button
-              class="hist-open-btn"
-              title="Open in Scene Generator"
-              @click.stop="openInScenes(j.project_id)"
-            >
-              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                <path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                <path d="M4 11V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/>
-                <path d="M4 11h16"/>
-              </svg>
-            </button>
+            <!-- Action buttons -->
+            <div class="hist-actions">
+              <!-- Retry button for errored pipelines -->
+              <button
+                v-if="j.status === 'error' && j.error_step"
+                class="hist-action-btn hist-action-btn--retry"
+                title="Retry from failed step"
+                @click.stop="onHistoryClick(i)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Retry
+              </button>
+              <!-- Regenerate assets button for completed pipelines with scenes -->
+              <button
+                v-if="j.status === 'done' && j.scene_count > 0"
+                class="hist-action-btn hist-action-btn--regen"
+                title="Regenerate assets with provider"
+                @click.stop="regenerateAssets(j.project_id)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                Regen Assets
+              </button>
+              <!-- Open in scenes -->
+              <button
+                class="hist-open-btn"
+                title="Open in Scene Generator"
+                @click.stop="openInScenes(j.project_id)"
+              >
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                  <path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                  <path d="M4 11V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/>
+                  <path d="M4 11h16"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -492,18 +635,18 @@ function logStepLabel(step) {
   color: var(--text-muted);
 }
 
-/* ---- Field Row ---- */
-.field-row {
+/* ---- Source Header ---- */
+.source-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
 }
 
-.field-row-right {
+.source-header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .word-count {
@@ -513,24 +656,71 @@ function logStepLabel(step) {
   font-weight: 600;
 }
 
-/* ---- Random Button ---- */
-.random-btn {
+/* ---- Mode Toggle ---- */
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg-darkest);
+}
+
+.mode-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  gap: 5px;
+  padding: 5px 12px;
   font-size: 10px;
   font-weight: 600;
   font-family: var(--font-mono);
-  border: 1px solid var(--border);
+  border: none;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.15s;
+  white-space: nowrap;
 }
 
-.random-btn:hover {
+.mode-btn:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.mode-btn:hover:not(.active) {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.mode-btn.active {
+  color: var(--accent);
+  background: rgba(78, 205, 196, 0.1);
+}
+
+/* ---- Random Mode ---- */
+.source-random {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.random-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.random-action-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
   background: rgba(78, 205, 196, 0.06);
@@ -550,7 +740,6 @@ function logStepLabel(step) {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-top: 4px;
   flex-wrap: wrap;
 }
 
@@ -582,6 +771,103 @@ function logStepLabel(step) {
   border-color: var(--accent);
   background: rgba(78, 205, 196, 0.15);
   color: var(--accent);
+}
+
+/* ---- Generate Mode ---- */
+.source-generate {
+  margin-bottom: 10px;
+}
+
+.gen-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gen-group {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.gen-group--action {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.gen-story-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border: none;
+  cursor: pointer;
+  color: white;
+  background: linear-gradient(135deg, #A78BFA, #7C3AED);
+  box-shadow: 0 2px 12px rgba(167, 139, 250, 0.25);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.gen-story-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(167, 139, 250, 0.4);
+  transform: translateY(-1px);
+}
+
+.gen-story-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.gen-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+.gen-error {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #FF6B6B;
+  font-family: var(--font-mono);
+}
+
+.gen-result-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.gen-result-id {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.gen-sep {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.gen-result-muted {
+  color: var(--text-muted);
 }
 
 /* ---- Controls Strip ---- */
@@ -676,6 +962,35 @@ function logStepLabel(step) {
   color: var(--text-muted);
   font-family: var(--font-mono);
   opacity: 0.7;
+}
+
+/* ---- Retry Button ---- */
+.retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 20px;
+  height: 42px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border-radius: 10px;
+  border: 1.5px solid #FF6B6B;
+  background: rgba(255, 107, 107, 0.08);
+  color: #FF6B6B;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.retry-btn:hover {
+  background: rgba(255, 107, 107, 0.16);
+  box-shadow: 0 4px 16px rgba(255, 107, 107, 0.2);
+  transform: translateY(-1px);
+}
+
+.retry-btn:active {
+  transform: translateY(0);
 }
 
 /* ---- Run Button ---- */
@@ -1032,6 +1347,67 @@ function logStepLabel(step) {
   height: 6px;
   border-radius: 50%;
   display: inline-block;
+}
+
+.hist-item--error {
+  border-color: rgba(255, 107, 107, 0.25);
+}
+
+.hist-item--error .hist-excerpt {
+  color: var(--text-secondary);
+}
+
+.hist-error-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #FF6B6B;
+  background: rgba(255, 107, 107, 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.hist-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.hist-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.hist-action-btn--retry {
+  color: #FF6B6B;
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+.hist-action-btn--retry:hover {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: #FF6B6B;
+}
+
+.hist-action-btn--regen {
+  color: var(--text-muted);
+}
+
+.hist-action-btn--regen:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(78, 205, 196, 0.06);
 }
 
 .hist-open-btn {
