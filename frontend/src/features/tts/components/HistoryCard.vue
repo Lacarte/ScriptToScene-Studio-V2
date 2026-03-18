@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { VOICE_META } from '../composables/useTts.js'
-import { timeAgo } from '@/shared/utils/format.js'
+import { timeAgo, formatElapsed } from '@/shared/utils/format.js'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -18,6 +18,7 @@ const excerpt = computed(() => {
 const durationLabel = computed(() => {
   return props.item.duration_seconds ? `${props.item.duration_seconds.toFixed(1)}s` : ''
 })
+const generationLabel = computed(() => formatElapsed(props.item.inference_time))
 
 const ago = computed(() => timeAgo(props.item.timestamp))
 </script>
@@ -36,6 +37,10 @@ const ago = computed(() => timeAgo(props.item.timestamp))
         <span>{{ voiceName }}</span>
         <span class="sep">/</span>
         <span>{{ durationLabel }}</span>
+        <template v-if="generationLabel">
+          <span class="sep">/</span>
+          <span>gen {{ generationLabel }}</span>
+        </template>
         <span class="sep">/</span>
         <span>{{ ago }}</span>
       </div>

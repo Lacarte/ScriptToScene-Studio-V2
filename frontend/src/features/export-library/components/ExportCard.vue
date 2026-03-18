@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { ratioLabel, aspectRatioFromDimensions } from '../composables/useExportLibrary.js'
-import { formatBytes, timeAgo, fmtDuration } from '@/shared/utils/format.js'
+import { formatBytes, timeAgo, fmtDuration, formatElapsed } from '@/shared/utils/format.js'
 
 defineOptions({ name: 'ExportCard' })
 
@@ -16,10 +16,11 @@ const rootEl = ref(null)
 const videoEl = ref(null)
 const loaded = ref(false)
 const showTiming = ref(false)
+const showDetails = ref(false)
 
 const STEP_META = {
   tts:      { label: 'TTS',      icon: '\uD83C\uDFA4', color: '#4ECDC4' },
-  timing:   { label: 'Timing',   icon: '\u23F1',  color: '#56CCF2' },
+  timing:   { label: 'Alignment', icon: '\u23F1',  color: '#56CCF2' },
   segment:  { label: 'Segment',  icon: '\u2702',  color: '#A78BFA' },
   scenes:   { label: 'Scenes',   icon: '\uD83C\uDFAC', color: '#FFB347' },
   assets:   { label: 'Assets',   icon: '\uD83D\uDDBC',  color: '#FF6B6B' },
@@ -33,11 +34,7 @@ function hasTiming() {
 }
 
 function fmtSecs(s) {
-  if (s == null) return '--'
-  if (s < 60) return `${s.toFixed(1)}s`
-  const m = Math.floor(s / 60)
-  const sec = (s % 60).toFixed(0)
-  return `${m}m ${sec}s`
+  return formatElapsed(s) || '--'
 }
 
 function timingSteps() {
@@ -50,6 +47,53 @@ function timingSteps() {
 function maxStepDuration() {
   const t = props.item.pipeline_timing || {}
   return Math.max(...Object.entries(t).filter(([k]) => k !== 'total').map(([, v]) => v), 1)
+}
+
+function hasDetails() {
+  return Boolean(
+    resolutionLabel() ||
+    props.item.source_folder ||
+    props.item.audio_track_count ||
+    props.item.caption_count ||
+    props.item.has_captions ||
+    mediaSummary() ||
+    props.item.completed_at ||
+    props.item.project_total_duration
+  )
+}
+
+function resolutionLabel() {
+  if (props.item.resolution_label) return props.item.resolution_label
+  if (props.item.width && props.item.height) return `${props.item.width}x${props.item.height}`
+  return ''
+}
+
+function mediaSummary() {
+  const counts = props.item.media_counts || {}
+  const parts = []
+  if (counts.video) parts.push(`${counts.video} video${counts.video === 1 ? '' : 's'}`)
+  if (counts.image) parts.push(`${counts.image} image${counts.image === 1 ? '' : 's'}`)
+  if (counts.text) parts.push(`${counts.text} text${counts.text === 1 ? ' scene' : ' scenes'}`)
+  return parts.join(' / ')
+}
+
+function captionSummary() {
+  if (props.item.caption_count) {
+    return `${props.item.caption_count} caption${props.item.caption_count === 1 ? '' : 's'}`
+  }
+  return props.item.has_captions ? 'Enabled' : 'None'
+}
+
+function audioSummary() {
+  const count = Number(props.item.audio_track_count || 0)
+  return count ? `${count} track${count === 1 ? '' : 's'}` : 'No tracks'
+}
+
+function exactTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString()
 }
 
 function stopPlayback() {
@@ -182,7 +226,63 @@ onMounted(() => {
           {{ fmtSecs(item.pipeline_timing.total) }}
           <svg class="chip-chevron" :class="{ open: showTiming }" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
         </button>
+        <button
+          v-if="hasDetails()"
+          class="chip chip--details"
+          @click.stop="showDetails = !showDetails"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 10v6" />
+            <path d="M12 7h.01" />
+          </svg>
+          Details
+          <svg class="chip-chevron" :class="{ open: showDetails }" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
       </div>
+
+      <Transition name="timing-slide">
+        <div v-if="showDetails && hasDetails()" class="details-panel">
+          <div class="details-grid">
+            <div v-if="resolutionLabel()" class="detail-row">
+              <span class="detail-label">Resolution</span>
+              <span class="detail-value detail-value--mono">{{ resolutionLabel() }}</span>
+            </div>
+            <div v-if="item.source_folder" class="detail-row">
+              <span class="detail-label">Source</span>
+              <span class="detail-value detail-value--mono">{{ item.source_folder }}</span>
+            </div>
+            <div v-if="mediaSummary()" class="detail-row">
+              <span class="detail-label">Media</span>
+              <span class="detail-value">{{ mediaSummary() }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Audio</span>
+              <span class="detail-value">{{ audioSummary() }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Captions</span>
+              <span class="detail-value">{{ captionSummary() }}</span>
+            </div>
+            <div v-if="item.project_total_duration" class="detail-row">
+              <span class="detail-label">Timeline</span>
+              <span class="detail-value">{{ fmtDuration(item.project_total_duration) }}</span>
+            </div>
+            <div v-if="hasTiming() && item.pipeline_timing.total" class="detail-row">
+              <span class="detail-label">Pipeline</span>
+              <span class="detail-value">{{ fmtSecs(item.pipeline_timing.total) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">ZIP</span>
+              <span class="detail-value">{{ item.zip_source === 'file' ? 'Bundled ZIP ready' : 'Generate on download' }}</span>
+            </div>
+            <div v-if="exactTime(item.completed_at || item.modified_at)" class="detail-row detail-row--wide">
+              <span class="detail-label">Exported</span>
+              <span class="detail-value">{{ exactTime(item.completed_at || item.modified_at) }}</span>
+            </div>
+          </div>
+        </div>
+      </Transition>
 
       <!-- Pipeline timing breakdown -->
       <Transition name="timing-slide">
@@ -485,12 +585,66 @@ onMounted(() => {
   transform: rotate(180deg);
 }
 
+.chip--details {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #c7d2fe;
+  background: rgba(199, 210, 254, 0.08);
+  border: 1px solid rgba(199, 210, 254, 0.16);
+  transition: all 0.15s;
+}
+
+.chip--details:hover {
+  background: rgba(199, 210, 254, 0.14);
+  border-color: rgba(199, 210, 254, 0.3);
+}
+
+.details-panel,
 .timing-panel {
   background: var(--bg-darkest);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
   margin: 2px 0 4px;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.detail-row--wide {
+  grid-column: 1 / -1;
+}
+
+.detail-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.detail-value {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.detail-value--mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .timing-steps {
@@ -585,5 +739,11 @@ onMounted(() => {
 .timing-slide-leave-from {
   max-height: 300px;
   opacity: 1;
+}
+
+@media (max-width: 640px) {
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

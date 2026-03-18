@@ -27,6 +27,22 @@ export function formatDuration(seconds) {
   return `${s}s`
 }
 
+export function formatElapsed(seconds) {
+  const value = Number(seconds)
+  if (!Number.isFinite(value) || value <= 0) return ''
+  if (value < 10) {
+    const precision = value < 1 ? 2 : 1
+    return `${value.toFixed(precision).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0$/, '$1')}s`
+  }
+  const rounded = Math.round(value)
+  const h = Math.floor(rounded / 3600)
+  const m = Math.floor((rounded % 3600) / 60)
+  const s = rounded % 60
+  if (h > 0) return `${h}h ${m}m ${s}s`
+  if (m > 0) return `${m}m ${s}s`
+  return `${rounded}s`
+}
+
 export function formatBytes(bytes) {
   if (bytes == null || bytes === 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']

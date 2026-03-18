@@ -19,7 +19,11 @@ const routes = [
   },
   {
     path: '/timing',
-    name: 'timing',
+    redirect: '/alignment',
+  },
+  {
+    path: '/alignment',
+    name: 'alignment',
     component: () => import('@/features/timing/views/TimingPage.vue'),
     meta: { title: 'Force Alignment', icon: 'clock' },
   },

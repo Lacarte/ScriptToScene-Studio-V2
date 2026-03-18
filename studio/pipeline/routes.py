@@ -1,4 +1,4 @@
-"""Pipeline Module — Orchestrates the full TTS → Timing → Segment → Scenes pipeline.
+"""Pipeline Module — Orchestrates the full TTS → Alignment → Segment → Scenes pipeline.
 
 Provides:
   POST /api/pipeline/run          — start a pipeline job (returns job_id + project_id)
@@ -80,6 +80,7 @@ def run_pipeline(data: PipelineRunRequest):
     _cleanup_old_jobs()
     project_id = generate_project_id(prefix="pp")
     job_id = uuid.uuid4().hex[:12]
+    stop_after = "timing" if data.stop_after == "alignment" else data.stop_after
 
     # Store the server port for internal API calls from background thread
     server_port = request.host.split(":")[-1] if ":" in request.host else "5050"
@@ -93,7 +94,7 @@ def run_pipeline(data: PipelineRunRequest):
         "segment_config": data.segment_config,
         "webhook_url": data.webhook_url,
         "auto_scenes": data.auto_scenes,
-        "stop_after": data.stop_after,
+        "stop_after": stop_after,
         "project_id": project_id,
         # Asset grabber options
         "provider": data.provider,
@@ -189,6 +190,7 @@ def list_jobs():
                     "status": "done",
                     "created": mtime,
                     "timestamp": data.get("timestamp", ""),
+                    "pipeline_timing": data.get("pipeline_timing", {}),
                 }
                 # Look up original text, voice, speed from TTS metadata
                 if source:
@@ -310,14 +312,14 @@ def _run_pipeline(job_id):
             return
 
         # ── Step 2: Force Alignment ─────────────────────────────────
-        logger.info("[{}] Step 2/7: Timing starting", project_id)
+        logger.info("[{}] Step 2/7: Alignment starting", project_id)
         _emit(job_id, {"step": "timing", "status": "running",
                        "message": f"[{project_id}] Aligning words..."})
         _t0 = time.perf_counter()
         timing_result = _step_timing(tts_result, config, project_id)
         step_timings["timing"] = round(time.perf_counter() - _t0, 2)
         results["timing"] = timing_result
-        logger.success("[{}] Step 2/7: Timing done — {} words in {:.2f}s",
+        logger.success("[{}] Step 2/7: Alignment done — {} words in {:.2f}s",
                        project_id, timing_result["word_count"], timing_result["inference_time"])
         _emit(job_id, {
             "step": "timing", "status": "done",
@@ -325,7 +327,7 @@ def _run_pipeline(job_id):
                        f"in {timing_result['inference_time']:.2f}s",
         })
         if stop_after == "timing":
-            logger.info("[{}] Pipeline stopped after Timing (stop_after=timing)", project_id)
+            logger.info("[{}] Pipeline stopped after Alignment (stop_after=timing)", project_id)
             _emit_done(job_id, project_id, results)
             return
 
@@ -592,7 +594,7 @@ def _step_timing(tts_result, config, project_id):
 
     safe_json_write(os.path.join(align_dir, "alignment.json"), result_data, indent=2)
 
-    logger.success("Pipeline Timing: {} words in {:.2f}s",
+    logger.success("Pipeline Alignment: {} words in {:.2f}s",
                    len(alignment), elapsed)
     return result_data
 

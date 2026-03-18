@@ -13,7 +13,7 @@ const { stepStatus, globalStatus } = usePipeline()
 const audioPlaying = computed(() => !!playingSource.value)
 
 const PATH_TO_STEP = {
-  '/tts': 'tts', '/timing': 'timing', '/segmenter': 'segment', '/scenes': 'scenes',
+  '/tts': 'tts', '/alignment': 'timing', '/segmenter': 'segment', '/scenes': 'scenes',
   '/assets': 'assets', '/editor': 'assemble', '/export-library': 'export',
 }
 
@@ -86,7 +86,7 @@ function toggleAudio() {
           <span v-show="!collapsed" class="nav-label">TTS</span>
         </router-link>
 
-        <router-link to="/timing" class="nav-item" :class="[{ active: isActive('/timing') }, pipelineClasses['/timing']]" title="Force Alignment">
+        <router-link to="/alignment" class="nav-item" :class="[{ active: isActive('/alignment') }, pipelineClasses['/alignment']]" title="Force Alignment">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="19" cy="17" r="2"/></svg>
           <span v-show="!collapsed" class="nav-label">ALIGNMENT</span>
         </router-link>

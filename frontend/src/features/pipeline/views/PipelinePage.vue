@@ -5,6 +5,7 @@ import { usePipeline } from '../composables/usePipeline.js'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
+import { formatElapsed } from '@/shared/utils/format.js'
 
 defineOptions({ name: 'PipelinePage' })
 
@@ -66,7 +67,7 @@ watch(globalStatus, (status) => {
     // Map stop_after to the appropriate page
     const destinations = {
       tts: '/tts',
-      timing: '/timing',
+      timing: '/alignment',
       segment: '/segmenter',
       scenes: '/scenes',
       assets: '/assets',
@@ -166,6 +167,28 @@ function esc(str) {
   if (!str) return ''
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
+
+const HISTORY_STEP_LABELS = {
+  tts: 'TTS',
+  timing: 'Alignment',
+  segment: 'Segment',
+  scenes: 'Scenes',
+  assets: 'Assets',
+  assemble: 'Build',
+  export: 'Export',
+}
+
+function historyTimings(job) {
+  const timings = job?.pipeline_timing || {}
+  return Object.entries(HISTORY_STEP_LABELS)
+    .filter(([key]) => timings[key] != null)
+    .map(([key, label]) => ({ key, label, duration: timings[key] }))
+}
+
+function logStepLabel(step) {
+  if (step === 'timing') return 'alignment'
+  return step || ''
+}
 </script>
 
 <template>
@@ -175,7 +198,7 @@ function esc(str) {
     <div class="header">
       <div>
         <h2 class="page-title">Pipeline</h2>
-        <p class="page-subtitle">Run the full TTS &rarr; Timing &rarr; Segment &rarr; Scenes pipeline</p>
+        <p class="page-subtitle">Run the full TTS &rarr; Alignment &rarr; Segment &rarr; Scenes pipeline</p>
       </div>
     </div>
 
@@ -241,7 +264,7 @@ function esc(str) {
           <select v-model="stopAfter" class="input-field control-select control-select--sm">
             <option value="">All steps (→ Export)</option>
             <option value="tts">TTS only</option>
-            <option value="timing">→ Timing</option>
+            <option value="timing">→ Alignment</option>
             <option value="segment">→ Segment</option>
             <option value="scenes">→ Scenes</option>
             <option value="assets">→ Assets</option>
@@ -316,7 +339,7 @@ function esc(str) {
       <div ref="logEl" class="log-container">
         <div v-for="(entry, i) in log" :key="i" class="log-entry" :style="{ color: logColor(entry) }">
           <span class="log-icon">{{ logIcon(entry) }}</span>
-          <span class="log-step">{{ entry.step || '' }}</span>
+          <span class="log-step">{{ logStepLabel(entry.step) }}</span>
           {{ entry.message || '' }}
         </div>
       </div>
@@ -356,6 +379,18 @@ function esc(str) {
                     <span :style="{ color: styleColor(j.style), fontWeight: 600 }">{{ styleLabel(j.style) }}</span>
                   </span>
                 </template>
+              </div>
+              <div v-if="j.pipeline_timing && Object.keys(j.pipeline_timing).length" class="hist-timings">
+                <span v-if="formatElapsed(j.pipeline_timing.total)" class="hist-timing hist-timing--total">
+                  total {{ formatElapsed(j.pipeline_timing.total) }}
+                </span>
+                <span
+                  v-for="step in historyTimings(j)"
+                  :key="step.key"
+                  class="hist-timing"
+                >
+                  {{ step.label }} {{ formatElapsed(step.duration) }}
+                </span>
               </div>
             </div>
             <button
@@ -966,6 +1001,30 @@ function esc(str) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+}
+
+.hist-timings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.hist-timing {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-darkest);
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.hist-timing--total {
+  color: var(--accent);
+  border: 1px solid rgba(78, 205, 196, 0.22);
 }
 
 .hist-style-dot {

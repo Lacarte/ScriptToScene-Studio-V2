@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useSegmenter } from '../composables/useSegmenter.js'
-import { useTiming } from '@/features/timing/composables/useTiming.js'
+import { useAlignment as useTiming } from '@/features/timing/composables/useTiming.js'
 import { useToast } from '@/shared/composables/useToast.js'
-import { timeAgo } from '@/shared/utils/format.js'
+import { timeAgo, formatElapsed } from '@/shared/utils/format.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import SegmentTimeline from '../components/SegmentTimeline.vue'
 import SegmentCard from '../components/SegmentCard.vue'
@@ -29,13 +29,13 @@ const {
   currentTime,
   activeSegmentIdx,
   history,
-  timingHistory,
+  alignmentHistory,
   setAlignment,
   updateConfig,
   runSegmenter,
   loadHistory,
   loadResult,
-  loadTimingHistory,
+  loadAlignmentHistory,
   loadAudio,
   togglePlay,
   playSegment,
@@ -98,7 +98,7 @@ const displaySegments = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.allSettled([loadHistory(), loadTimingHistory()])
+  await Promise.allSettled([loadHistory(), loadAlignmentHistory()])
   // Load audio if we already have alignment data
   if (sourceFolder.value) {
     await loadAudio()
@@ -107,7 +107,7 @@ onMounted(async () => {
 
 async function useCurrentResult() {
   if (!timing.alignment.value.length) {
-    toast.error('No alignment result available. Run timing first.')
+    toast.error('No alignment result available. Run alignment first.')
     return
   }
 
@@ -123,7 +123,7 @@ async function useCurrentResult() {
 }
 
 async function openPicker() {
-  await loadTimingHistory()
+  await loadAlignmentHistory()
   showPicker.value = true
 }
 
@@ -385,6 +385,10 @@ const relativeTime = timeAgo
               <span style="color: var(--text-secondary)">avg {{ formatDuration(item.avg_duration) }}</span>
               <span class="history-divider">/</span>
               <span style="color: var(--text-secondary)">{{ formatTotal(item.total_duration) }}</span>
+              <template v-if="formatElapsed(item.generation_time)">
+                <span class="history-divider">/</span>
+                <span style="color: var(--accent-active)">segment {{ formatElapsed(item.generation_time) }}</span>
+              </template>
               <span class="history-divider">/</span>
               <span>{{ relativeTime(item.segmented_at || item.timestamp || item.created_at) }}</span>
             </div>
@@ -410,7 +414,7 @@ const relativeTime = timeAgo
 
     <AlignmentPicker
       :show="showPicker"
-      :items="timingHistory"
+      :items="alignmentHistory"
       @select="onPickAlignment"
       @close="showPicker = false"
     />

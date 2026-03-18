@@ -5,7 +5,7 @@ import { api } from '@/shared/api/client.js'
 import { useAssets } from '../composables/useAssets.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useStagingStore } from '@/shared/stores/stagingStore.js'
-import { timeAgo } from '@/shared/utils/format.js'
+import { timeAgo, formatElapsed } from '@/shared/utils/format.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
 import AssetCard from '../components/AssetCard.vue'
@@ -675,6 +675,10 @@ onMounted(async () => {
                 <template v-if="project.disk_files">
                   <span class="hist-sep">/</span>
                   <span style="color: var(--text-secondary)">{{ project.disk_files }} files</span>
+                </template>
+                <template v-if="formatElapsed(project.generation_time)">
+                  <span class="hist-sep">/</span>
+                  <span style="color: var(--accent-warning)">elapsed {{ formatElapsed(project.generation_time) }}</span>
                 </template>
                 <span class="hist-sep">/</span>
                 <span style="color: var(--text-muted)">{{ timeAgo(project.created_at || project.timestamp) }}</span>

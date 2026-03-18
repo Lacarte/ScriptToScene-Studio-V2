@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useScenes } from '../composables/useScenes.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useStagingStore } from '@/shared/stores/stagingStore.js'
-import { timeAgo } from '@/shared/utils/format.js'
+import { timeAgo, formatElapsed } from '@/shared/utils/format.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import StylePicker from '../components/StylePicker.vue'
 import SceneCard from '../components/SceneCard.vue'
@@ -520,6 +520,8 @@ function truncate(str, len = 45) {
             <div class="history-item-meta font-mono">
               <span style="color: var(--accent)">{{ item.scene_count }} scenes</span>
               <span class="history-divider">/</span>
+              <span v-if="formatElapsed(item.generation_time)" style="color: var(--accent-secondary)">gen {{ formatElapsed(item.generation_time) }}</span>
+              <span v-if="formatElapsed(item.generation_time)" class="history-divider">/</span>
               <span style="color: var(--text-secondary)">{{ timeAgo(item.timestamp) }}</span>
               <template v-if="scenes.styleLabel(item.style)">
                 <span class="history-divider">/</span>

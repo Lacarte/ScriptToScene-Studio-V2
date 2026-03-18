@@ -96,9 +96,62 @@ def _set_job(project_id, job):
 def _save_job(job):
     """Persist grabber job state to disk."""
     try:
+        job["updated_at"] = _now_iso()
         safe_json_write(os.path.join(ASSETS_DIR, job["project_id"], "grabber_job.json"), job, indent=2)
     except Exception as e:
         logger.error("Failed to persist job {}: {}", job.get("grabber_id", "?"), e)
+
+
+def _now_iso():
+    """Return a timezone-aware ISO timestamp for job bookkeeping."""
+    return datetime.now().astimezone().isoformat()
+
+
+def _parse_iso_dt(value):
+    """Best-effort ISO timestamp parser."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _job_elapsed_seconds(job, *, include_running=False):
+    """Return elapsed wall-clock seconds for a grabber job."""
+    try:
+        existing = float(job.get("generation_time", 0) or 0)
+        if existing > 0:
+            return round(existing, 3)
+    except (TypeError, ValueError):
+        pass
+
+    start_dt = _parse_iso_dt(job.get("created_at"))
+    if not start_dt:
+        return 0
+
+    end_dt = _parse_iso_dt(job.get("completed_at"))
+    if end_dt is None and include_running:
+        end_dt = datetime.now().astimezone()
+    if end_dt is None:
+        end_dt = _parse_iso_dt(job.get("updated_at"))
+    if end_dt is None:
+        return 0
+
+    return round(max((end_dt - start_dt).total_seconds(), 0.0), 3)
+
+
+def _clear_job_completion(job):
+    """Clear stale completion fields before a new run or retry begins."""
+    job.pop("completed_at", None)
+    job.pop("generation_time", None)
+
+
+def _mark_job_done(job):
+    """Stamp completion fields for a finished grabber job."""
+    job["status"] = "done"
+    job["completed_at"] = _now_iso()
+    job["generation_time"] = _job_elapsed_seconds(job)
 
 
 def _load_jobs_from_disk():
@@ -199,7 +252,8 @@ def grabber_start(data: GrabberStartRequest):
         "payload": automa_payload,
         "scene_statuses": scene_statuses,
         "status": "waiting",  # waiting | grabbing | generating | downloading | done | error
-        "created_at": datetime.now().isoformat(),
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
     }
 
     # Store Kie AI generation options for the background thread
@@ -295,7 +349,7 @@ def _kie_ai_generate_all(project_id, job):
         for s in job["scene_statuses"].values()
     )
     if all_done:
-        job["status"] = "done"
+        _mark_job_done(job)
         _save_job(job)
         logger.success("Kie AI generation complete for {}", project_id)
 
@@ -338,6 +392,7 @@ def grabber_results():
             logger.warning("Grabber results for unknown project: {}", project_id)
             continue
 
+        _clear_job_completion(job)
         job["status"] = "downloading"
         scenes = project.get("scenes", [])
         logger.info("Received results for {}: {} scenes", project_id, len(scenes))
@@ -392,7 +447,7 @@ def grabber_results():
                 for s in job_ref["scene_statuses"].values()
             )
             if all_done:
-                job_ref["status"] = "done"
+                _mark_job_done(job_ref)
                 _save_job(job_ref)
                 logger.success("Grabber job complete for {}", pid)
 
@@ -434,6 +489,7 @@ def grabber_upload():
 
     job = _get_job(project_id)
     if job:
+        _clear_job_completion(job)
         job["status"] = "downloading"
 
     logger.info("Upload received for {}: {} scenes", project_id, len(scenes))
@@ -487,7 +543,7 @@ def grabber_upload():
                 for s in job_ref["scene_statuses"].values()
             )
             if all_done:
-                job_ref["status"] = "done"
+                _mark_job_done(job_ref)
                 _save_job(job_ref)
                 logger.success("Upload job complete for {}", pid)
 
@@ -514,6 +570,9 @@ def grabber_status(project_id):
         "grabber_id": job["grabber_id"],
         "project_id": project_id,
         "status": job["status"],
+        "generation_time": _job_elapsed_seconds(
+            job, include_running=job.get("status") not in ("done", "error")
+        ),
         "scene_statuses": job["scene_statuses"],
     })
 
@@ -561,6 +620,7 @@ def redownload_assets(project_id):
     if not scenes_to_retry:
         return jsonify({"status": "nothing_to_retry", "message": "All scenes already downloaded"})
 
+    _clear_job_completion(job)
     job["status"] = "downloading"
     _save_job(job)
 
@@ -593,7 +653,7 @@ def redownload_assets(project_id):
             for s in job_ref["scene_statuses"].values()
         )
         if all_done:
-            job_ref["status"] = "done"
+            _mark_job_done(job_ref)
             _save_job(job_ref)
 
     threading.Thread(
@@ -644,6 +704,11 @@ def assets_history():
                 project_info["provider"] = job.get("provider", "")
                 project_info["status"] = job.get("status", "unknown")
                 project_info["created_at"] = job.get("created_at", "")
+                project_info["updated_at"] = job.get("updated_at", "")
+                project_info["completed_at"] = job.get("completed_at", "")
+                project_info["generation_time"] = _job_elapsed_seconds(
+                    job, include_running=job.get("status") not in ("done", "error")
+                )
                 project_info["scene_count"] = len(job.get("scene_statuses", {}))
                 # Count ready/pending/error
                 statuses = [s["status"] for s in job.get("scene_statuses", {}).values()]
@@ -786,6 +851,11 @@ def get_asset_project(project_id):
         result["provider"] = job.get("provider", "")
         result["status"] = job.get("status", "unknown")
         result["created_at"] = job.get("created_at", "")
+        result["updated_at"] = job.get("updated_at", "")
+        result["completed_at"] = job.get("completed_at", "")
+        result["generation_time"] = _job_elapsed_seconds(
+            job, include_running=job.get("status") not in ("done", "error")
+        )
         result["scene_statuses"] = job.get("scene_statuses", {})
         result["prompts"] = {
             str(s["scene"]): s["prompt"]

@@ -28,8 +28,8 @@ const currentTime = ref(0)
 const duration = ref(0)
 const activeSegmentIdx = ref(-1)
 
-/* Timing history (for alignment picker) */
-const timingHistory = ref([])
+/* Alignment history (for alignment picker) */
+const alignmentHistory = ref([])
 
 let historyLoaded = false
 
@@ -129,15 +129,15 @@ export function useSegmenter() {
     }
   }
 
-  /* ── Timing history (for alignment picker) ── */
+  /* ── Alignment history (for alignment picker) ── */
 
-  async function loadTimingHistory() {
+  async function loadAlignmentHistory() {
     try {
-      const data = await api.get('/api/timing/history')
-      timingHistory.value = Array.isArray(data) ? data : []
+      const data = await api.get('/api/alignment/history')
+      alignmentHistory.value = Array.isArray(data) ? data : []
     } catch (e) {
-      console.warn('[Segmenter] Failed to load timing history:', e.message)
-      timingHistory.value = []
+      console.warn('[Segmenter] Failed to load alignment history:', e.message)
+      alignmentHistory.value = []
     }
   }
 
@@ -310,7 +310,8 @@ export function useSegmenter() {
     result: readonly(result),
     isRunning: readonly(isRunning),
     history: readonly(history),
-    timingHistory: readonly(timingHistory),
+    alignmentHistory: readonly(alignmentHistory),
+    timingHistory: readonly(alignmentHistory),
 
     // Audio
     audioUrl: readonly(audioUrl),
@@ -333,7 +334,8 @@ export function useSegmenter() {
     runSegmenter,
     loadHistory,
     loadResult,
-    loadTimingHistory,
+    loadAlignmentHistory,
+    loadTimingHistory: loadAlignmentHistory,
     loadAudio,
     togglePlay,
     playSegment,

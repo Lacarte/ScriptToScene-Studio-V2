@@ -1604,6 +1604,19 @@ def export_library_list():
     video_exts = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
     items = []
 
+    def _normalize_completed_at(value):
+        """Normalize export completion stamps to ISO strings."""
+        if value in (None, ""):
+            return ""
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        if isinstance(value, str):
+            try:
+                return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+            except (TypeError, ValueError):
+                return value
+        return ""
+
     for root, _dirs, files in os.walk(EXPORT_DIR):
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
@@ -1623,6 +1636,7 @@ def export_library_list():
             meta_duration = 0
             meta_width = 0
             meta_height = 0
+            meta_completed_at = ""
             meta_dirty = False  # whether sidecar needs update
             if os.path.isfile(meta_path):
                 try:
@@ -1634,6 +1648,7 @@ def export_library_list():
                     meta_duration = meta.get("duration", 0)
                     meta_width = meta.get("width", 0)
                     meta_height = meta.get("height", 0)
+                    meta_completed_at = _normalize_completed_at(meta.get("completed_at"))
                 except Exception as error:
                     logger.debug("Could not read export metadata {}: {}", meta_path, error)
                     project_id = ""
@@ -1686,6 +1701,7 @@ def export_library_list():
             # Read scenes.json for style, scene count, and pipeline timing
             pid = project_id or base
             pipeline_timing = {}
+            source_folder = ""
             if not meta_style or not pipeline_timing:
                 try:
                     _sp = os.path.join(SCENES_DIR, pid, "scenes.json")
@@ -1695,26 +1711,79 @@ def export_library_list():
                             meta_style = _sd.get("style", "")
                         if not meta_scene_count:
                             meta_scene_count = len(_sd.get("scenes", []))
+                        source_folder = _sd.get("source_folder", "")
                         pipeline_timing = _sd.get("pipeline_timing", {})
                 except Exception as error:
                     logger.debug("Could not read scene metadata: {}", error)
 
+            project_name = ""
+            project_total_duration = 0
+            audio_track_count = 0
+            caption_count = 0
+            has_captions = False
+            media_counts = {"video": 0, "image": 0, "text": 0}
+            try:
+                _project_json = _initial_path(pid)
+                if os.path.isfile(_project_json):
+                    _pdata = safe_json_read(_project_json)
+                    project_name = _pdata.get("project_name", "")
+                    source_folder = source_folder or _pdata.get("source_folder", "")
+                    project_total_duration = _pdata.get("total_duration", 0)
+                    audio_track_count = len(_pdata.get("audio_tracks") or [])
+
+                    _captions = _pdata.get("captions") or {}
+                    _caption_entries = []
+                    if isinstance(_captions, dict):
+                        _caption_entries = _captions.get("entries")
+                        if not isinstance(_caption_entries, list):
+                            _caption_entries = _captions.get("captions", [])
+                    caption_count = len(_caption_entries or [])
+                    has_captions = bool(_pdata.get("captionsEnabled") or caption_count)
+
+                    for scene in _pdata.get("scenes") or []:
+                        if not isinstance(scene, dict):
+                            continue
+                        scene_type = str(scene.get("type", "")).lower()
+                        if scene_type in media_counts:
+                            media_counts[scene_type] += 1
+                            continue
+                        if scene.get("isVideo"):
+                            media_counts["video"] += 1
+                        else:
+                            media_counts["image"] += 1
+            except Exception as error:
+                logger.debug("Could not read project metadata: {}", error)
+
+            completed_at = meta_completed_at or mtime_iso
+            resolution_label = f"{meta_width}x{meta_height}" if meta_width and meta_height else ""
+
             items.append({
                 "project_id": pid,
+                "project_name": project_name or pid,
                 "video_name": fname,
                 "video_relpath": rel_video,
                 "folder_relpath": rel_folder if rel_folder != "." else "",
                 "size_bytes": os.path.getsize(abs_video),
                 "modified_at": mtime_iso,
+                "completed_at": completed_at,
                 "preview_url": f"/api/export/library/preview/{video_q}",
                 "video_download_url": f"/api/export/library/download/{video_q}",
-                "zip_download_url": (f"/api/export/library/download/{zip_q}" if zip_exists else (f"/api/editor/export-zip/{project_id}" if project_id else "")),
+                "zip_download_url": (f"/api/export/library/download/{zip_q}" if zip_exists else (f"/api/editor/export-zip/{pid}" if pid else "")),
                 "zip_source": ("file" if zip_exists else "generated"),
                 "style": meta_style,
                 "ratio": meta_ratio,
                 "video_ratio": video_ratio,
                 "duration": meta_duration,
+                "project_total_duration": project_total_duration or meta_duration,
                 "scene_count": meta_scene_count,
+                "source_folder": source_folder,
+                "width": meta_width,
+                "height": meta_height,
+                "resolution_label": resolution_label,
+                "media_counts": media_counts,
+                "audio_track_count": audio_track_count,
+                "caption_count": caption_count,
+                "has_captions": has_captions,
                 "pipeline_timing": pipeline_timing,
             })
 

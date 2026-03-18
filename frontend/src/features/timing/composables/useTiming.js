@@ -21,7 +21,7 @@ const activeWordIdx = ref(-1)
 /* TTS picker */
 const ttsHistory = ref([])
 
-export function useTiming() {
+function createAlignmentComposable() {
   /* ── Alignment ── */
 
   async function runAlignment(audioFile, text) {
@@ -31,14 +31,14 @@ export function useTiming() {
       form.append('audio', audioFile)
       form.append('text', text)
 
-      const res = await fetch('/api/timing/align', {
+      const res = await fetch('/api/alignment/align', {
         method: 'POST',
         body: form,
       })
 
       if (!res.ok) {
         const errText = await res.text().catch(() => res.statusText)
-        throw new Error(`POST /api/timing/align → ${res.status}: ${errText}`)
+        throw new Error(`POST /api/alignment/align -> ${res.status}: ${errText}`)
       }
 
       const data = await res.json()
@@ -64,10 +64,10 @@ export function useTiming() {
 
   async function loadHistory() {
     try {
-      const data = await api.get('/api/timing/history')
+      const data = await api.get('/api/alignment/history')
       history.value = Array.isArray(data) ? data : []
     } catch (e) {
-      console.warn('[Timing] Failed to load history:', e.message)
+      console.warn('[Alignment] Failed to load history:', e.message)
       history.value = []
     }
   }
@@ -88,12 +88,12 @@ export function useTiming() {
         }
       }
     } catch (e) {
-      console.warn('[Timing] Failed to load result:', e.message)
+      console.warn('[Alignment] Failed to load result:', e.message)
     }
   }
 
   async function deleteResult(folder) {
-    await api.delete(`/api/timing/${folder}`)
+    await api.delete(`/api/alignment/${folder}`)
     history.value = history.value.filter(h => h.folder !== folder)
 
     // Clear active if deleted
@@ -116,7 +116,7 @@ export function useTiming() {
       const data = await api.get('/api/tts/generation')
       ttsHistory.value = Array.isArray(data) ? data : []
     } catch (e) {
-      console.warn('[Timing] Failed to load TTS history:', e.message)
+      console.warn('[Alignment] Failed to load TTS history:', e.message)
       ttsHistory.value = []
     }
   }
@@ -184,4 +184,12 @@ export function useTiming() {
     setPlaying,
     setDuration,
   }
+}
+
+export function useAlignment() {
+  return createAlignmentComposable()
+}
+
+export function useTiming() {
+  return createAlignmentComposable()
 }

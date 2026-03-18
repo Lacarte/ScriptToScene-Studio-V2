@@ -16,7 +16,7 @@ Turn a script into a fully produced short-form video — TTS narration, AI scene
 - **Breathing blocks** — natural pauses inserted for realistic narration
 - **Loudness normalization** — consistent audio levels across exports
 
-### Timing & Segmentation
+### Alignment & Segmentation
 - **Force alignment** — word-level timestamps via Whisper
 - **Smart segmentation** — splits aligned text into scenes based on natural speech boundaries
 - **Configurable** — adjust segment duration, word count, and other parameters

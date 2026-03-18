@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -38,7 +39,11 @@ def segment_alignment(data: SegmenterRunRequest):
     }
     config = data.config
 
+    started = time.perf_counter()
     result = run_segmenter(alignment, config, metadata)
+    result.setdefault("metadata", {})["generation_time"] = round(
+        time.perf_counter() - started, 3
+    )
 
     # Save to disk
     should_save = data.save
@@ -76,6 +81,7 @@ def segment_history():
                 "project_id": meta.get("project_id", ""),
                 "source_folder": meta.get("source_folder", ""),
                 "total_duration": meta.get("total_duration", 0),
+                "generation_time": meta.get("generation_time", 0),
                 "segmented_at": meta.get("segmented_at", ""),
                 "segment_count": stats.get("segment_count", 0),
                 "filler_count": stats.get("filler_count", 0),

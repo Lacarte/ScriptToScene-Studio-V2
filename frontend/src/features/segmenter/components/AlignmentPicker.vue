@@ -34,7 +34,7 @@ function truncate(str, max = 60) {
         </div>
 
         <div v-if="!items.length" class="picker-empty">
-          No alignment history found. Run timing first.
+          No alignment history found. Run alignment first.
         </div>
 
         <div v-else class="picker-list">

@@ -1,15 +1,15 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useTiming } from '../composables/useTiming.js'
+import { useAlignment as useTiming } from '../composables/useTiming.js'
 import { useToast } from '@/shared/composables/useToast.js'
-import { timeAgo } from '@/shared/utils/format.js'
+import { timeAgo, formatElapsed } from '@/shared/utils/format.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
 import AlignmentTimeline from '../components/AlignmentTimeline.vue'
 import WordChips from '../components/WordChips.vue'
 import KaraokeOverlay from '../components/KaraokeOverlay.vue'
 
-defineOptions({ name: 'TimingPage' })
+defineOptions({ name: 'AlignmentPage' })
 
 const timing = useTiming()
 const toast = useToast()
@@ -450,6 +450,10 @@ onBeforeUnmount(() => {
                 <span class="meta-words">{{ item.word_count || '?' }} words</span>
                 <span class="meta-sep">/</span>
                 <span>{{ formatDuration(item.duration_seconds) }}</span>
+                <template v-if="formatElapsed(item.inference_time)">
+                  <span class="meta-sep">/</span>
+                  <span>align {{ formatElapsed(item.inference_time) }}</span>
+                </template>
                 <span v-if="item.timestamp" class="meta-sep">/</span>
                 <span v-if="item.timestamp">{{ formatDate(item.timestamp) }}</span>
               </div>

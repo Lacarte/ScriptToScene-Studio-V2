@@ -246,6 +246,8 @@ def generate_scenes(data: SceneGenerateRequest):
         {"index": s["index"], "words": s["words"]} for s in segments_raw
     ]
 
+    started = time.perf_counter()
+
     try:
         # Check if we should use chapter-based generation
         full_segments = full_segments_raw
@@ -275,6 +277,7 @@ def generate_scenes(data: SceneGenerateRequest):
             return jsonify({"error": "Invalid project id"}), 400
         result["project_id"] = project_id
         result["timestamp"] = datetime.now().isoformat()
+        result["generation_time"] = round(time.perf_counter() - started, 3)
         result["source_folder"] = sanitize_folder_name(data.source_folder or "")
         result["style"] = style_id
         if data.parent_id:
@@ -533,6 +536,10 @@ def list_scenes():
                     "timestamp": data.get("timestamp", ""),
                     "source_folder": data.get("source_folder", ""),
                     "style": data.get("style", ""),
+                    "generation_time": (
+                        data.get("generation_time")
+                        or (data.get("pipeline_timing", {}) or {}).get("scenes", 0)
+                    ),
                 }
                 if data.get("parent_id"):
                     item["parent_id"] = data["parent_id"]

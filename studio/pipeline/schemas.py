@@ -14,7 +14,7 @@ class PipelineRunRequest(BaseModel):
     webhook_url: Optional[str] = None
     style_prompt: Optional[str] = None
     auto_scenes: bool = True
-    stop_after: Optional[str] = None  # tts, timing, segment, scenes, assets, assemble, export, or None (all)
+    stop_after: Optional[str] = None  # tts, alignment/timing, segment, scenes, assets, assemble, export, or None (all)
     # Asset grabber options (used when pipeline reaches assets step)
     provider: str = "grok"
     aspect_ratio: str = "9:16"

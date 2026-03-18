@@ -91,6 +91,7 @@ def _run_alignment(wav_path, prompt_text):
 # Routes
 # ---------------------------------------------------------------------------
 
+@timing_bp.route("/api/alignment/history")
 @timing_bp.route("/api/timing/history")
 def list_force_alignments():
     items = []
@@ -126,6 +127,7 @@ def list_force_alignments():
     return jsonify(items)
 
 
+@timing_bp.route("/api/alignment/align", methods=["POST"])
 @timing_bp.route("/api/timing/align", methods=["POST"])
 def force_align():
     if not _check_alignment_available():
@@ -199,11 +201,12 @@ def force_align():
                 pass
 
 
+@timing_bp.route("/api/alignment/align-and-segment", methods=["POST"])
 @timing_bp.route("/api/timing/align-and-segment", methods=["POST"])
 def align_and_segment():
     """Combined alignment + segmentation in one request.
 
-    Same inputs as /api/timing/align, plus optional segment_config JSON field.
+    Same inputs as /api/alignment/align, plus optional segment_config JSON field.
     Returns both alignment and segmentation results.
     """
     from studio.timing.segmenter import run_segmenter, save_output
@@ -305,6 +308,7 @@ def align_and_segment():
                 pass
 
 
+@timing_bp.route("/api/alignment/<folder>", methods=["DELETE"])
 @timing_bp.route("/api/timing/<folder>", methods=["DELETE"])
 def delete_alignment(folder):
     folder = os.path.basename(folder)
