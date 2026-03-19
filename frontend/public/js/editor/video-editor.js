@@ -4168,7 +4168,7 @@ function _loadNoDataProjects() {
                 scene_count: saved?.scene_count || asset.scene_count || 0,
                 status: asset.status || (saved ? (saved.has_wip ? 'edited' : 'saved') : 'waiting'),
                 saved_at: saved?.saved_at || '',
-                preview: asset.preview || '',
+                preview: asset.preview || saved?.preview || '',
                 ready_count: asset.ready_count || 0,
                 disk_files: asset.disk_files || asset.total_files || 0,
                 _saved: saved,
@@ -4199,14 +4199,14 @@ function _loadNoDataProjects() {
                 : '';
 
             return `
-            <div style="cursor:pointer;padding:10px 14px;border-radius:8px;border:1px solid transparent;transition:all 0.15s;margin-bottom:4px"
+            <div data-pid="${esc(p.project_id)}" style="cursor:pointer;padding:10px 14px;border-radius:8px;border:1px solid transparent;transition:all 0.15s;margin-bottom:4px"
                  onclick="${onclick}"
                  onmouseover="this.style.background='var(--bg-darkest,#111)';this.style.borderColor='${isSaved ? 'var(--accent,#4ECDC4)' : 'var(--border,#2a2a3e)'}'"
                  onmouseout="this.style.background='';this.style.borderColor='transparent'">
                 <div style="display:flex;align-items:center;gap:10px">
                     ${p.preview
-                    ? '<div style="width:40px;height:40px;border-radius:6px;overflow:hidden;flex-shrink:0;border:1px solid var(--border,#2a2a3e)"><img src="' + esc(p.preview) + '" style="width:100%;height:100%;object-fit:cover" /></div>'
-                    : '<div style="width:40px;height:40px;border-radius:6px;flex-shrink:0;background:var(--bg-darkest,#111);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" fill="none" stroke="var(--text-muted,#666)" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.4"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>'}
+                    ? '<div class="proj-thumb" style="width:40px;height:40px;border-radius:6px;overflow:hidden;flex-shrink:0;border:1px solid var(--border,#2a2a3e)"><img src="' + esc(p.preview) + '" style="width:100%;height:100%;object-fit:cover" /></div>'
+                    : '<div class="proj-thumb" style="width:40px;height:40px;border-radius:6px;flex-shrink:0;background:var(--bg-darkest,#111);display:flex;align-items:center;justify-content:center"><svg width="18" height="18" fill="none" stroke="var(--text-muted,#666)" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.4"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>'}
                     <div style="flex:1;min-width:0">
                         <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
                             <span style="font-size:12px;font-weight:600;color:var(--text,#e0e0e0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.project_id)}</span>
@@ -4225,6 +4225,33 @@ function _loadNoDataProjects() {
                 </div>
             </div>`;
         }).join('');
+
+        // Lazy thumbnail generation: for projects missing previews, generate in background then update
+        const missingPreviews = projects.filter(p => !p.preview && (p.scene_count > 0 || p.disk_files > 0));
+        if (missingPreviews.length > 0) {
+            Promise.all(missingPreviews.map(p =>
+                fetch(`/api/thumbnails/${encodeURIComponent(p.project_id)}/generate?modules=assets`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => ({ project_id: p.project_id, generated: data.total_generated || 0 }))
+                    .catch(() => ({ project_id: p.project_id, generated: 0 }))
+            )).then(results => {
+                const updated = results.filter(r => r.generated > 0);
+                if (updated.length > 0) {
+                    // Update thumbnail images in-place
+                    for (const r of updated) {
+                        const url = `/api/thumbnails/${encodeURIComponent(r.project_id)}/assets/0.jpg`;
+                        const card = listEl.querySelector(`[data-pid="${r.project_id}"]`);
+                        if (card) {
+                            const thumbEl = card.querySelector('.proj-thumb');
+                            if (thumbEl) {
+                                thumbEl.style.cssText = 'width:40px;height:40px;border-radius:6px;overflow:hidden;flex-shrink:0;border:1px solid var(--border,#2a2a3e)';
+                                thumbEl.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover" />`;
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }).catch(() => {
         if (listContainer) listContainer.style.display = 'none';
         if (emptyEl) emptyEl.style.display = '';

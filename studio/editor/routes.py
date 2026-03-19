@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.ffmpeg_utils import find_ffprobe
@@ -68,8 +68,14 @@ def _load_asset_metadata(project_id: str) -> dict:
     return data.get("scenes", {}) if isinstance(data, dict) else {}
 
 
-def _pick_scene_asset(project_id: str, *scene_keys: str) -> tuple[str, str]:
-    """Return the best asset URL and resolved type for the given scene keys."""
+def _pick_scene_asset(project_id: str, *scene_keys: str,
+                      used_urls: set | None = None) -> tuple[str, str]:
+    """Return the best asset URL and resolved type for the given scene keys.
+
+    If *used_urls* is provided, any URL already in the set is skipped and the
+    chosen URL is added to the set — preventing the same asset from being
+    assigned to multiple scenes.
+    """
     video_exts = (".mp4", ".webm", ".mov")
     media_exts = video_exts + (".jpg", ".jpeg", ".png", ".webp")
     metadata = _load_asset_metadata(project_id)
@@ -85,7 +91,11 @@ def _pick_scene_asset(project_id: str, *scene_keys: str) -> tuple[str, str]:
             # Prefer video files over images (thumbnails)
             video_local = [p for p in local_files if p.lower().endswith(video_exts)]
             media_url = video_local[-1] if video_local else local_files[-1]
+            if used_urls is not None and media_url in used_urls:
+                continue
             media_type = "video" if media_url.lower().endswith(video_exts) else "image"
+            if used_urls is not None:
+                used_urls.add(media_url)
             return media_url, media_type
 
     for scene_key in deduped_keys:
@@ -107,7 +117,11 @@ def _pick_scene_asset(project_id: str, *scene_keys: str) -> tuple[str, str]:
         pick = max(video_files) if video_files else max(files)
         _, fname = pick
         media_url = f"/output/assets/{project_id}/{scene_key}/{fname}"
+        if used_urls is not None and media_url in used_urls:
+            continue
         media_type = "video" if fname.lower().endswith(video_exts) else "image"
+        if used_urls is not None:
+            used_urls.add(media_url)
         return media_url, media_type
 
     return "", ""
@@ -510,6 +524,15 @@ def editor_list_projects():
         try:
             data = safe_json_read(fpath)
             seen_ids.add(pid)
+            # Look up thumbnail preview
+            preview = None
+            thumb_base = os.path.join(THUMBNAILS_DIR, pid)
+            editor_cover = os.path.join(thumb_base, "editor", "cover.jpg")
+            assets_thumb_0 = os.path.join(thumb_base, "assets", "0.jpg")
+            if os.path.isfile(editor_cover):
+                preview = f"/api/thumbnails/{pid}/editor/cover.jpg"
+            elif os.path.isfile(assets_thumb_0):
+                preview = f"/api/thumbnails/{pid}/assets/0.jpg"
             projects.append({
                 "project_id": data.get("project_id", pid),
                 "project_name": data.get("project_name", ""),
@@ -517,6 +540,7 @@ def editor_list_projects():
                 "scene_count": data.get("scene_count", 0),
                 "total_duration": data.get("total_duration", 0),
                 "has_wip": has_wip,
+                "preview": preview,
             })
         except Exception as error:
             logger.debug("Skipping project manifest {}: {}", json_path, error)
@@ -705,11 +729,13 @@ def assemble_project_for_editor(project_id):
 
     # Build editor-format scenes
     editor_scenes = []
+    used_asset_urls = set()  # prevent the same asset from being assigned to multiple scenes
     for i, s in enumerate(raw_scenes):
         scene_index = s.get("index", i)
         scene_type = s.get("type_of_scene", s.get("type", "image"))
         duration = s.get("duration", 3)
-        media_url, media_type = _pick_scene_asset(safe_id, i, scene_index)
+        media_url, media_type = _pick_scene_asset(safe_id, i, scene_index,
+                                                   used_urls=used_asset_urls)
         if scene_type != "text" and media_type:
             scene_type = media_type
 

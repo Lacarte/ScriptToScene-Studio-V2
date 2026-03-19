@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, KIE_AI_MODEL
+from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR, KIE_AI_MODEL
 from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import safe_json_write
 from studio.security import sanitize_project_id
@@ -137,6 +137,12 @@ def _job_elapsed_seconds(job, *, include_running=False):
         end_dt = _parse_iso_dt(job.get("updated_at"))
     if end_dt is None:
         return 0
+
+    # Normalize both to naive datetimes to avoid offset-aware vs offset-naive errors
+    if start_dt.tzinfo is not None:
+        start_dt = start_dt.replace(tzinfo=None)
+    if end_dt.tzinfo is not None:
+        end_dt = end_dt.replace(tzinfo=None)
 
     return round(max((end_dt - start_dt).total_seconds(), 0.0), 3)
 
@@ -715,7 +721,7 @@ def assets_history():
                 project_info["ready_count"] = statuses.count("ready")
                 project_info["error_count"] = statuses.count("error")
                 project_info["pending_count"] = statuses.count("pending")
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError, TypeError, ValueError, KeyError):
                 pass
 
         # Read metadata for file counts
@@ -755,39 +761,48 @@ def assets_history():
             except Exception:
                 pass
 
-        # Get a preview image (first file from first scene)
-        # For video-only projects, generate a thumbnail frame via FFmpeg
+        # Get a preview image — prefer generated thumbnails, fall back to assets
         project_info["preview"] = None
-        try:
-            scene_dirs = sorted(os.listdir(entry.path))
-        except OSError:
-            scene_dirs = []
-        for scene_num in scene_dirs:
-            scene_path = os.path.join(entry.path, scene_num)
-            if not os.path.isdir(scene_path) or scene_num in (".", ".."):
-                continue
+
+        # 1) Check the thumbnails system first (editor cover, then assets/0)
+        thumb_base = os.path.join(THUMBNAILS_DIR, project_id)
+        editor_cover = os.path.join(thumb_base, "editor", "cover.jpg")
+        assets_thumb_0 = os.path.join(thumb_base, "assets", "0.jpg")
+        if os.path.isfile(editor_cover):
+            project_info["preview"] = f"/api/thumbnails/{project_id}/editor/cover.jpg"
+        elif os.path.isfile(assets_thumb_0):
+            project_info["preview"] = f"/api/thumbnails/{project_id}/assets/0.jpg"
+        else:
+            # 2) Fall back to scanning asset scene directories
             try:
-                scene_files = sorted(os.listdir(scene_path))
+                scene_dirs = sorted(os.listdir(entry.path))
             except OSError:
-                continue
-            for fname in scene_files:
-                fpath = os.path.join(scene_path, fname)
-                if not os.path.isfile(fpath):
+                scene_dirs = []
+            for scene_num in scene_dirs:
+                scene_path = os.path.join(entry.path, scene_num)
+                if not os.path.isdir(scene_path) or scene_num in (".", ".."):
                     continue
-                lower = fname.lower()
-                if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-                    project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{fname}"
-                    break
-                if lower.endswith(VIDEO_EXTS):
-                    thumb = _video_thumbnail(fpath)
-                    if thumb:
-                        thumb_name = os.path.basename(thumb)
-                        project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{thumb_name}"
-                    else:
+                try:
+                    scene_files = sorted(os.listdir(scene_path))
+                except OSError:
+                    continue
+                for fname in scene_files:
+                    fpath = os.path.join(scene_path, fname)
+                    if not os.path.isfile(fpath):
+                        continue
+                    lower = fname.lower()
+                    if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
                         project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{fname}"
+                        break
+                    if lower.endswith(VIDEO_EXTS):
+                        thumb = _video_thumbnail(fpath)
+                        if thumb:
+                            thumb_name = os.path.basename(thumb)
+                            project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{thumb_name}"
+                        # Don't set video URL as preview — <img> can't render it
+                        break
+                if project_info["preview"]:
                     break
-            if project_info["preview"]:
-                break
 
         # Check if a build (initial.json) already exists for this project
         proj_dir = os.path.join(PROJECTS_DIR, project_id)
