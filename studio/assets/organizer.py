@@ -214,7 +214,7 @@ def reconcile_project(assets_dir, project_id):
     meta = {}
     if os.path.isfile(meta_path):
         try:
-            with open(meta_path, "r") as f:
+            with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
         except (json.JSONDecodeError, OSError):
             meta = {}
@@ -224,7 +224,7 @@ def reconcile_project(assets_dir, project_id):
     job = {}
     if os.path.isfile(job_path):
         try:
-            with open(job_path, "r") as f:
+            with open(job_path, "r", encoding="utf-8") as f:
                 job = json.load(f)
         except (json.JSONDecodeError, OSError):
             job = {}
@@ -303,7 +303,7 @@ def _update_project_metadata(assets_dir, project_id, scene_num, source_urls, loc
     meta = {}
     if os.path.isfile(meta_path):
         try:
-            with open(meta_path, "r") as f:
+            with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
         except (json.JSONDecodeError, OSError):
             meta = {}

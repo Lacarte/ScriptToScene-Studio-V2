@@ -250,7 +250,7 @@ def _update_metadata(basename, updates):
     lock = _get_metadata_lock(basename)
     json_path = os.path.join(_tts_job_dir(basename), basename + ".json")
     with lock:
-        with open(json_path, "r") as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             metadata = json.load(f)
         metadata.update(updates)
         safe_json_write(json_path, metadata, indent=2)
@@ -261,7 +261,7 @@ def _read_metadata(basename):
     lock = _get_metadata_lock(basename)
     json_path = os.path.join(_tts_job_dir(basename), basename + ".json")
     with lock:
-        with open(json_path, "r") as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
 
@@ -937,7 +937,7 @@ def list_audio():
             json_path = os.path.join(entry_path, "tts.json")
         if os.path.isfile(json_path):
             try:
-                with open(json_path, "r") as f:
+                with open(json_path, "r", encoding="utf-8") as f:
                     files.append(json.load(f))
             except (json.JSONDecodeError, OSError) as e:
                 logger.debug("Skipping corrupt/partial metadata {}: {}", entry, e)

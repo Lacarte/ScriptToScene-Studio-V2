@@ -105,7 +105,7 @@ def list_force_alignments():
         if not os.path.isfile(json_path):
             continue
         try:
-            with open(json_path, "r") as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
             words = meta.get("alignment", [])
             duration = round(words[-1]["end"], 2) if words else 0

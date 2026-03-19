@@ -169,7 +169,7 @@ def _load_jobs_from_disk():
         if not os.path.isfile(job_path):
             continue
         try:
-            with open(job_path, "r") as f:
+            with open(job_path, "r", encoding="utf-8") as f:
                 job = json.load(f)
             _set_job(pid, job)
         except (json.JSONDecodeError, OSError, KeyError) as e:
@@ -595,7 +595,7 @@ def redownload_assets(project_id):
     meta_path = os.path.join(ASSETS_DIR, project_id, "metadata.json")
     meta = {}
     if os.path.isfile(meta_path):
-        with open(meta_path, "r") as f:
+        with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
 
     scenes_to_retry = []
@@ -698,7 +698,7 @@ def assets_history():
         job_path = os.path.join(entry.path, "grabber_job.json")
         if os.path.isfile(job_path):
             try:
-                with open(job_path, "r") as f:
+                with open(job_path, "r", encoding="utf-8") as f:
                     job = json.load(f)
                 project_info["grabber_id"] = job.get("grabber_id", "")
                 project_info["provider"] = job.get("provider", "")
@@ -722,7 +722,7 @@ def assets_history():
         meta_path = os.path.join(entry.path, "metadata.json")
         if os.path.isfile(meta_path):
             try:
-                with open(meta_path, "r") as f:
+                with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
                 total_files = sum(
                     len(s.get("local_files", []))
@@ -812,7 +812,7 @@ def reconcile_assets(project_id):
     if updated > 0:
         job_path = os.path.join(project_dir, "grabber_job.json")
         if os.path.isfile(job_path):
-            with open(job_path, "r") as f:
+            with open(job_path, "r", encoding="utf-8") as f:
                 _set_job(project_id, json.load(f))
     return jsonify({"updated": updated})
 
@@ -838,14 +838,14 @@ def get_asset_project(project_id):
     # Load metadata
     meta_path = os.path.join(project_dir, "metadata.json")
     if os.path.isfile(meta_path):
-        with open(meta_path, "r") as f:
+        with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
         result["scenes"] = meta.get("scenes", {})
 
     # Load job info
     job_path = os.path.join(project_dir, "grabber_job.json")
     if os.path.isfile(job_path):
-        with open(job_path, "r") as f:
+        with open(job_path, "r", encoding="utf-8") as f:
             job = json.load(f)
         result["grabber_id"] = job.get("grabber_id", "")
         result["provider"] = job.get("provider", "")

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/shared/api/client.js'
 import { usePipeline } from '../composables/usePipeline.js'
@@ -44,7 +44,14 @@ async function detectStyle() {
   detecting.value = true
   detectedStyle.value = null
   try {
-    const result = await api.post('/api/story/classify-style', { body: { text: t }, timeout: 35000 })
+    const webhookUrl = story.webhookUrl.value?.trim()
+    const result = await api.post('/api/story/classify-style', {
+      body: {
+        text: t,
+        webhook_url: webhookUrl || undefined,
+      },
+      timeout: 35000,
+    })
     if (result.error) { toast.error(result.error); return }
     detectedStyle.value = result
     setStyle(result.style_id)
@@ -95,6 +102,20 @@ const STEPS = computed(() => {
 })
 
 const { styleLabel, styleColor } = useScenes()
+
+// -- Custom style dropdown logic --
+const openDropdown = ref('')  // '' | 'category' | 'style'
+function toggleDropdown(id) { openDropdown.value = openDropdown.value === id ? '' : id }
+function selectFromDropdown(id, value) {
+  if (id === 'category') setCategory(value)
+  else setStyle(value)
+  openDropdown.value = ''
+}
+function onClickOutside(e) {
+  if (openDropdown.value && !e.target.closest('.style-dropdown')) openDropdown.value = ''
+}
+onMounted(() => document.addEventListener('mousedown', onClickOutside))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onClickOutside))
 
 // Keep category in sync with style (covers async init + later changes)
 watch(style, (val) => {
@@ -386,9 +407,24 @@ function logStepLabel(step) {
         <div class="gen-form">
           <div class="gen-group">
             <label class="control-label">Category / Style</label>
-            <select :value="style" class="input-field control-select" @change="setCategory($event.target.value)">
-              <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }}</option>
-            </select>
+            <div class="style-dropdown" :class="{ open: openDropdown === 'category' }">
+              <button class="style-dropdown-trigger input-field control-select" @click="toggleDropdown('category')">
+                <span class="style-dropdown-dot" :style="{ background: styleColor(style) }"></span>
+                <span class="style-dropdown-label">{{ styleLabel(style) || 'Select style' }}</span>
+                <svg class="style-dropdown-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div v-show="openDropdown === 'category'" class="style-dropdown-menu">
+                <div
+                  v-for="t in templates" :key="t.id"
+                  class="style-dropdown-item" :class="{ selected: t.id === style }"
+                  :style="t.id === style ? { background: t.color + '18', borderColor: t.color } : {}"
+                  @click="selectFromDropdown('category', t.id)"
+                >
+                  <span class="style-dropdown-dot" :style="{ background: t.color }"></span>
+                  <span class="style-dropdown-item-label">{{ t.name }}</span>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="gen-group">
             <label class="control-label">Language</label>
@@ -448,6 +484,7 @@ function logStepLabel(step) {
       </div>
 
       <!-- Controls strip -->
+      <span class="controls-strip-label">Pipeline Settings</span>
       <div class="controls-strip">
         <div class="control-group">
           <label class="control-label">Voice</label>
@@ -468,9 +505,24 @@ function logStepLabel(step) {
         </div>
         <div class="control-group">
           <label class="control-label">Style</label>
-          <select :value="style" class="input-field control-select" @change="setStyle($event.target.value)">
-            <option v-for="t in templates" :key="t.id" :value="t.id">{{ t.name }}</option>
-          </select>
+          <div class="style-dropdown" :class="{ open: openDropdown === 'style' }">
+            <button class="style-dropdown-trigger input-field control-select" @click="toggleDropdown('style')">
+              <span class="style-dropdown-dot" :style="{ background: styleColor(style) }"></span>
+              <span class="style-dropdown-label">{{ styleLabel(style) || 'Select style' }}</span>
+              <svg class="style-dropdown-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div v-show="openDropdown === 'style'" class="style-dropdown-menu">
+              <div
+                v-for="t in templates" :key="t.id"
+                class="style-dropdown-item" :class="{ selected: t.id === style }"
+                :style="t.id === style ? { background: t.color + '18', borderColor: t.color } : {}"
+                @click="selectFromDropdown('style', t.id)"
+              >
+                <span class="style-dropdown-dot" :style="{ background: t.color }"></span>
+                <span class="style-dropdown-item-label">{{ t.name }}</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="control-group">
           <label class="control-label">Run Until</label>
@@ -1131,9 +1183,19 @@ function logStepLabel(step) {
   display: flex;
   align-items: flex-end;
   gap: 14px;
+}
+.controls-strip-label {
+  display: block;
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
 .control-group {
@@ -1165,6 +1227,84 @@ function logStepLabel(step) {
   font-size: 12px;
   font-family: var(--font-mono);
   text-align: center;
+}
+
+/* ---- Custom style dropdown (matches Scene Generator StylePicker) ---- */
+.style-dropdown {
+  position: relative;
+  width: 100%;
+  min-width: 100px;
+}
+.style-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-darkest);
+  appearance: none;
+  -webkit-appearance: none;
+}
+.style-dropdown-trigger:hover {
+  border-color: var(--text-muted);
+}
+.style-dropdown-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.style-dropdown-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.style-dropdown-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+.style-dropdown.open .style-dropdown-chevron {
+  transform: rotate(180deg);
+}
+.style-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 100;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.style-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: all 0.12s;
+}
+.style-dropdown-item:hover {
+  background: var(--bg-surface);
+}
+.style-dropdown-item.selected {
+  /* dynamic border + bg set via inline style */
+}
+.style-dropdown-item-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
 }
 
 /* ---- Auto-scenes ---- */

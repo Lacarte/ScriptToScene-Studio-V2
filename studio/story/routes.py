@@ -12,6 +12,7 @@ import json
 import os
 import time
 from datetime import datetime
+from urllib.parse import urlparse, urlunparse
 
 import requests as http_requests
 from flask import Blueprint, jsonify, request
@@ -85,6 +86,45 @@ def _call_story_webhook(webhook_url, payload, timeout=120):
             raise
 
     raise last_exc
+
+
+def _swap_webhook_suffix(webhook_url, source_suffix, target_suffix):
+    """Swap the trailing webhook path segment when the host stays the same."""
+    candidate = (webhook_url or "").strip()
+    if not candidate:
+        return ""
+
+    parsed = urlparse(candidate)
+    path = parsed.path or ""
+    if not path.endswith(source_suffix):
+        return candidate
+
+    swapped = parsed._replace(path=path[: -len(source_suffix)] + target_suffix)
+    return urlunparse(swapped)
+
+
+def _resolve_classify_webhook_url(override_url=""):
+    """Resolve the classifier webhook, deriving it from story config when needed."""
+    if override_url:
+        return _swap_webhook_suffix(
+            override_url,
+            "/webhook/story-generator",
+            "/webhook/classify-style",
+        )
+
+    explicit_classify_url = os.environ.get("N8N_CLASSIFY_WEBHOOK_URL", "").strip()
+    if explicit_classify_url:
+        return explicit_classify_url
+
+    derived_from_story = _swap_webhook_suffix(
+        N8N_STORY_WEBHOOK_URL,
+        "/webhook/story-generator",
+        "/webhook/classify-style",
+    )
+    if derived_from_story:
+        return derived_from_story
+
+    return (N8N_CLASSIFY_WEBHOOK_URL or "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -285,9 +325,12 @@ def classify_style_route():
     ]
     style_ids = [s["id"] for s in style_options]
 
-    webhook_url = N8N_CLASSIFY_WEBHOOK_URL
+    webhook_url = _resolve_classify_webhook_url(body.get("webhook_url", ""))
     if not webhook_url:
         return jsonify({"error": "N8N_CLASSIFY_WEBHOOK_URL not configured"}), 500
+    allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
+    if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
+        return jsonify({"error": "Unsafe webhook URL"}), 400
 
     payload = {
         "text": text[:2000],  # limit to avoid huge payloads
