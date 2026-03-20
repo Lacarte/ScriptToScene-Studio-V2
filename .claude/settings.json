@@ -1,5 +1,4 @@
 {
-  "skills": [
-    ".claude/skills/automa-pusher/SKILL.md"
-  ]
+  "enableAgentTeam": true,
+  "skills": []
 }

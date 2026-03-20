@@ -67,6 +67,7 @@ async function detectStyle() {
 }
 
 async function handleGenerateStory() {
+  text.value = ''
   try {
     const data = await story.generateStory(style.value)
     // Strip section labels for clean pipeline text

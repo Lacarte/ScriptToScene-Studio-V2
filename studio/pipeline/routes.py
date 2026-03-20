@@ -1115,8 +1115,8 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
 
     all_segments = segment_result.get("segments", [])
     segments = [
-        {"index": s["index"], "words": s["words"]}
-        for s in all_segments if not s.get("is_filler")
+        {"index": i, "words": s["words"]}
+        for i, s in enumerate(s for s in all_segments if not s.get("is_filler"))
     ]
 
     if not segments:
@@ -1127,7 +1127,10 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     style_id = config.get("style", "cinematic")
     custom_style_notes = config.get("style_prompt", "") or ""
     bundle = resolve_template_bundle(style_id, TEMPLATES_BY_ID, custom_style_notes)
-    planning_segments = [s for s in all_segments if not s.get("is_filler")]
+    planning_segments = [
+        {**s, "index": i}
+        for i, s in enumerate(s for s in all_segments if not s.get("is_filler"))
+    ]
     visual_bible = build_visual_bible(script, planning_segments, bundle["style_spec"])
     scene_blueprints = build_scene_blueprints(
         planning_segments,
@@ -1179,7 +1182,10 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
 
     # Apply segmenter timing — single source of truth for scene placement
     result = _normalize_webhook_response(result)
-    speech_segments = [s for s in all_segments if not s.get("is_filler")]
+    speech_segments = [
+        {**s, "index": i}
+        for i, s in enumerate(s for s in all_segments if not s.get("is_filler"))
+    ]
     _apply_segmenter_timing(result, speech_segments, all_segments)
     ensure_analysis_payload(result, visual_bible, bundle["style_spec"], bundle["template"])
     result["style_spec"] = bundle["style_spec"]

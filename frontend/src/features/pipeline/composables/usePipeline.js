@@ -135,6 +135,18 @@ function inferResumeStep(statuses = {}) {
   return null
 }
 
+let _providerWin = null
+
+function _openInProviderTab(url) {
+  // Reuse existing tab if still open, otherwise open a new one
+  if (_providerWin && !_providerWin.closed) {
+    _providerWin.location.href = url
+    _providerWin.focus()
+  } else {
+    _providerWin = window.open(url, '_blank')
+  }
+}
+
 function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
   const stepIds = ALL_STEPS.map(step => step.id)
   const assetsIdx = stepIds.indexOf('assets')
@@ -144,10 +156,12 @@ function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
   const startsBeforeAssets = resumeStep == null || resumeIdx <= assetsIdx
   if (!reachesAssets || !startsBeforeAssets) return
   try {
-    const w = window.open('about:blank', 'sts-provider-tab')
-    if (w) {
-      w.document.write(providerTabLoadingHTML)
-      w.document.close()
+    // Always open a fresh tab with the loading animation
+    _providerWin = window.open('about:blank', '_blank')
+    if (_providerWin) {
+      _providerWin.document.open()
+      _providerWin.document.write(providerTabLoadingHTML)
+      _providerWin.document.close()
     }
   } catch {}
 }
@@ -219,7 +233,7 @@ function startSSE(id) {
 
     // Open provider URL if the backend requests it
     if (event.open_url) {
-      try { window.open(event.open_url, 'sts-provider-tab') } catch {}
+      try { _openInProviderTab(event.open_url) } catch {}
     }
 
     if (step === 'done') {
@@ -371,7 +385,7 @@ async function regenerateAssets(projectId) {
   try {
     const res = await api.post(`/api/pipeline/${projectId}/regenerate-assets`)
     if (res.open_url) {
-      try { window.open(res.open_url, 'sts-provider-tab') } catch {}
+      try { _openInProviderTab(res.open_url) } catch {}
     }
     toast.success(`Asset regeneration started (${res.scene_count} scenes)`)
     return res

@@ -18,16 +18,54 @@ const S = {
   _fetchErrors: 0,
   typing: {
     active: false,
+    starting: false,
     queue: [],
+    runId: 0,
     currentIndex: -1,
     typedCount: 0,
     batchCount: 0,
     countdown: 0,
     countdownType: '',
+    stopRequested: false,
+    autoPaused: false,
+    nextAutoStartAt: 0,
   }
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function shouldStopTyping(runId) {
+  if (typeof runId === 'number') {
+    return !S.typing.active || S.typing.stopRequested || S.typing.runId !== runId;
+  }
+  return !S.typing.active || S.typing.stopRequested;
+}
+
+function normalizeText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function isPendingGrabberUrl(url) {
+  return /\/api\/assets\/grabber\/pending(?:$|\?)/.test(String(url || ''));
+}
+
+function isNoPendingGrabberPayload(payload) {
+  if (!payload) return false;
+  var text = '';
+  if (typeof payload === 'string') text = payload;
+  else if (payload && typeof payload === 'object') text = payload.error || payload.message || '';
+  return /no pending grabber jobs/i.test(String(text || ''));
+}
+
+function buildFetchResponse(result, status, quiet) {
+  return {
+    ok: status >= 200 && status < 300,
+    status: status,
+    quiet: !!quiet,
+    json: function() { return Promise.resolve(result); },
+    text: function() { return Promise.resolve(typeof result === 'string' ? result : JSON.stringify(result)); },
+  };
+}
 // CSP workaround: Grok blocks fetch() to localhost via Content Security Policy.
 // automaFetch(type, {url, method, body, headers}) bypasses CSP from extension background.
 // Includes retry logic (3 attempts, 2s backoff) and error spam suppression.
@@ -46,29 +84,35 @@ async function _fetch(url, opts) {
         if (raw && typeof raw === 'object' && 'success' in raw) {
           if (!raw.success) {
             S._fetchErrors = 0;
-            return { ok: false, status: 0, json: function() { return Promise.resolve(raw); } };
+            if (isPendingGrabberUrl(url) && isNoPendingGrabberPayload(raw.response || raw)) {
+              return buildFetchResponse(raw.response || raw, 404, true);
+            }
+            return buildFetchResponse(raw, raw.statusCode || raw.status || 0, false);
           }
           result = raw.response !== undefined ? raw.response : raw;
         }
         var hasError = result && typeof result === 'object' && result.error && !result.projectId;
+        if (hasError && isPendingGrabberUrl(url) && isNoPendingGrabberPayload(result)) {
+          S._fetchErrors = 0;
+          return buildFetchResponse(result, 404, true);
+        }
         S._fetchErrors = 0;
-        return {
-          ok: !hasError,
-          status: hasError ? 404 : 200,
-          json: function() { return Promise.resolve(result); },
-          text: function() { return Promise.resolve(typeof result === 'string' ? result : JSON.stringify(result)); },
-        };
+        return buildFetchResponse(result, hasError ? 404 : 200, false);
       } catch(e) {
+        var errMsg = e && e.message ? e.message : String(e);
+        if (isPendingGrabberUrl(url) && /not found/i.test(errMsg)) {
+          S._fetchErrors = 0;
+          return buildFetchResponse({ error: 'No pending grabber jobs' }, 404, true);
+        }
         S._fetchErrors++;
         if (S._fetchErrors <= 1 || S._fetchErrors % 10 === 0) {
-          console.error('automaFetch error (attempt ' + (attempt + 1) + '/' + maxRetries + '):', e && e.message ? e.message : String(e));
+          console.error('automaFetch error (attempt ' + (attempt + 1) + '/' + maxRetries + '):', errMsg);
         }
         if (attempt < maxRetries - 1) {
           await sleep(retryDelay * (attempt + 1));
           continue;
         }
-        var errMsg = e && e.message ? e.message : String(e);
-        return { ok: false, status: 0, json: function() { return Promise.resolve({ error: errMsg }); }, text: function() { return Promise.resolve(errMsg); } };
+        return buildFetchResponse({ error: errMsg }, 0, false);
       }
     }
   }
@@ -76,7 +120,7 @@ async function _fetch(url, opts) {
 }
 
 
-// â”€â”€â”€ Grok DOM Helpers (learned from Grok Automation extension) â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Grok DOM Helpers (learned from Grok Automation extension) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 
 // Simulate a real click with full pointer event sequence (React/Radix need this)
 function simulateClick(el) {
@@ -139,7 +183,7 @@ function parseSvgProgress() {
   return -1;
 }
 
-// â”€â”€â”€ Inject UI â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Inject UI ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 const root = document.createElement('div');
 root.id = 'sts-sync';
 root.innerHTML = `
@@ -176,7 +220,7 @@ root.innerHTML = `
     font-size: 13px; color: var(--text); line-height: 1.5;
   }
 
-  /* â”€â”€â”€ Collapsed Pill â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Collapsed Pill ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-pill {
     display: flex; align-items: center; gap: 12px;
     padding: 12px 20px;
@@ -220,7 +264,7 @@ root.innerHTML = `
   .sts-c-rdy { color: var(--green); }
   .sts-c-sent { color: var(--accent); }
 
-  /* â”€â”€â”€ Expanded Panel â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Expanded Panel ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-panel {
     width: 520px;
     background: var(--bg);
@@ -240,7 +284,7 @@ root.innerHTML = `
     to { opacity: 1; transform: translateY(0) scale(1); }
   }
 
-  /* â”€â”€â”€ Header â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Header ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-head {
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 20px;
@@ -300,7 +344,7 @@ root.innerHTML = `
   .sts-hb:hover { background: var(--bg-hover); color: var(--text-dim); border-color: var(--border); }
   .sts-hb.active { background: var(--accent-bg); color: var(--accent); border-color: rgba(78,205,196,0.15); }
 
-  /* â”€â”€â”€ Settings â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Settings ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-settings {
     padding: 14px 20px;
     border-bottom: 1px solid var(--border);
@@ -340,7 +384,7 @@ root.innerHTML = `
   }
   .sts-url-save:hover { background: linear-gradient(135deg, var(--accent-hover), var(--accent)); transform: translateY(-1px); box-shadow: 0 4px 16px var(--accent-glow); }
 
-  /* â”€â”€â”€ Timer â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Timer ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-timer {
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 20px;
@@ -366,7 +410,7 @@ root.innerHTML = `
     animation: none;
   }
 
-  /* â”€â”€â”€ Stats â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Stats ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-stats {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
     padding: 0; margin: 0;
@@ -390,7 +434,7 @@ root.innerHTML = `
     font-family: var(--display);
   }
 
-  /* â”€â”€â”€ Tabs â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Tabs ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-tabs {
     display: flex; gap: 4px; padding: 10px 20px;
     border-bottom: 1px solid var(--border);
@@ -411,7 +455,7 @@ root.innerHTML = `
     box-shadow: 0 0 0 1px rgba(78,205,196,0.12) inset;
   }
 
-  /* â”€â”€â”€ Progress Bar â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Progress Bar ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-typing-prog {
     padding: 10px 20px;
     border-bottom: 1px solid var(--border);
@@ -441,7 +485,7 @@ root.innerHTML = `
     100% { background-position: -200% 0; }
   }
 
-  /* â”€â”€â”€ Scene / Typing Lists â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Scene / Typing Lists ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-list {
     max-height: 520px; overflow-y: auto;
     scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.06) transparent;
@@ -470,6 +514,24 @@ root.innerHTML = `
     font-family: var(--mono); font-size: 13px; font-weight: 600;
     background: var(--accent-bg); color: var(--accent); flex-shrink: 0;
     border: 1px solid rgba(78,205,196,0.1);
+  }
+  .sts-row-check-wrap {
+    width: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .sts-row-check {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .sts-row-check:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
   .sts-row-info { flex: 1; min-width: 0; }
   .sts-row-prompt {
@@ -510,7 +572,7 @@ root.innerHTML = `
   }
   .sts-empty-icon { font-size: 24px; margin-bottom: 8px; opacity: 0.25; display: block; }
 
-  /* â”€â”€â”€ Sync Cards â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Sync Cards ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-card {
     padding: 14px 20px;
     border-bottom: 1px solid var(--border);
@@ -571,7 +633,7 @@ root.innerHTML = `
     font-size: 10px; color: var(--text-muted); text-align: center; font-weight: 500;
   }
 
-  /* â”€â”€â”€ Scroll Status â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Scroll Status ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-scroll-status {
     display: none; padding: 10px 20px;
     border-bottom: 1px solid var(--border);
@@ -586,7 +648,7 @@ root.innerHTML = `
   .sts-scroll-fill { height: 100%; border-radius: 3px; background: #60a5fa; transition: width 0.4s ease; }
   .sts-scroll-status.done { background: var(--green-bg); color: var(--green); }
 
-  /* â”€â”€â”€ Footer â”€â”€â”€ */
+  /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Footer ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-foot {
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 20px;
@@ -744,11 +806,11 @@ document.body.appendChild(root);
 
 const $id = (id) => document.getElementById(id);
 
-// â”€â”€â”€ Settings â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Settings ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 $id('sts-url').value = S.studioUrl;
 $id('sts-scroll-rows').value = S.scrollRows;
 
-// â”€â”€â”€ Event Listeners â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Event Listeners ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 $id('sts-pill').addEventListener('click', () => {
   S.collapsed = false;
   $id('sts-pill').style.display = 'none';
@@ -776,7 +838,7 @@ $id('sts-url-save').addEventListener('click', () => {
   S.showSettings = false;
   $id('sts-settings').classList.remove('open');
   $id('sts-gear').classList.remove('active');
-  console.log('Settings saved â€” URL:', url, '| Scroll rows:', rows);
+  console.log('Settings saved ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â URL:', url, '| Scroll rows:', rows);
   poll();
 });
 $id('sts-toggle').addEventListener('click', () => {
@@ -812,6 +874,70 @@ $id('sts-action-btn').addEventListener('click', () => {
     syncNow();
   }
 });
+
+function isTypingSelected(item) {
+  return !!item && item.selected !== false;
+}
+
+function getSelectedTypingItems() {
+  return S.typing.queue.filter(isTypingSelected);
+}
+
+function findGrokStopButton() {
+  var selectors = [
+    'button[aria-label*="Stop generating"]',
+    'button[aria-label*="stop generating"]',
+    'button[aria-label*="Cancel generation"]',
+    'button[aria-label*="cancel generation"]',
+    'button[aria-label*="Stop"]',
+    'button[aria-label*="stop"]',
+    'button[aria-label*="Cancel"]',
+    'button[aria-label*="cancel"]',
+    'button[data-testid*="stop"]',
+    'button[data-testid*="cancel"]'
+  ];
+
+  function isValid(btn) {
+    return !!btn && !btn.closest('#sts-sync') && isElReady(btn);
+  }
+
+  for (var si = 0; si < selectors.length; si++) {
+    var hits = document.querySelectorAll(selectors[si]);
+    for (var hi = 0; hi < hits.length; hi++) {
+      if (isValid(hits[hi])) return hits[hi];
+    }
+  }
+
+  var buttons = document.querySelectorAll('button');
+  for (var bi = 0; bi < buttons.length; bi++) {
+    var btn = buttons[bi];
+    if (!isValid(btn)) continue;
+    var text = (btn.textContent || '').trim();
+    var aria = btn.getAttribute('aria-label') || '';
+    var combined = (aria + ' ' + text).toLowerCase();
+    if (!/(stop|cancel)/.test(combined)) continue;
+    if (/retry|redownload|sync saved|start typing/.test(combined)) continue;
+    return btn;
+  }
+
+  return null;
+}
+
+function tryStopGrokGeneration() {
+  try {
+    var stopBtn = findGrokStopButton();
+    if (!stopBtn) {
+      console.log('No Grok stop button found; stopping workflow locally only');
+      return false;
+    }
+    simulateClick(stopBtn);
+    console.log('Clicked Grok stop button');
+    return true;
+  } catch (e) {
+    console.warn('Failed to click Grok stop button:', e.message);
+    return false;
+  }
+}
 
 function resetTypingItem(item) {
   if (!item) return false;
@@ -852,8 +978,22 @@ $id('sts-redownload-btn').addEventListener('click', () => {
   redownload();
 });
 
+$id('sts-list').addEventListener('change', (e) => {
+  const checkbox = e.target.closest('input[data-role="typing-checkbox"]');
+  if (!checkbox) return;
+  const idx = parseInt(checkbox.dataset.idx, 10);
+  if (isNaN(idx)) return;
+  const item = S.typing.queue[idx];
+  if (!item) return;
+  item.selected = !!checkbox.checked;
+  render();
+});
+
 // Click failed/error rows to re-queue individual prompts
 $id('sts-list').addEventListener('click', (e) => {
+  if (e.target.closest('input[data-role="typing-checkbox"]') || e.target.closest('.sts-row-check-wrap')) {
+    return;
+  }
   const row = e.target.closest('.sts-row.error-clickable');
   if (!row) return;
   const idx = parseInt(row.dataset.idx);
@@ -930,7 +1070,7 @@ async function syncNow() {
       console.log('Clicked thumbnail', ti + 1);
 
       // Wait for #sd-video UUID to change (or timeout after 6s)
-      // This is more reliable than prompt text change — works even for duplicate prompts
+      // This is more reliable than prompt text change ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â works even for duplicate prompts
       var videoSwitched = false;
       var sdVideo = null;
       var videoUrl = '';
@@ -953,7 +1093,7 @@ async function syncNow() {
         }
       }
       if (!videoSwitched && ti === 0) {
-        // First thumbnail might already be selected — accept whatever is loaded
+        // First thumbnail might already be selected ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â accept whatever is loaded
         sdVideo = document.getElementById('sd-video');
         if (sdVideo) {
           var fallSrc = sdVideo.src || sdVideo.getAttribute('src') || '';
@@ -1043,10 +1183,13 @@ async function syncNow() {
   render();
 }
 
-// â”€â”€â”€ Render â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Render ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 function render() {
   // Count typing statuses
   const tq = S.typing.queue;
+  const selectedTq = getSelectedTypingItems();
+  const selectedTotal = selectedTq.length;
+  const selectedTyped = selectedTq.filter(q => q.status === 'typed').length;
   let queued = 0, typed = 0;
   tq.forEach(q => { if (q.status === 'queued') queued++; else if (q.status === 'typed') typed++; });
 
@@ -1096,22 +1239,27 @@ function render() {
 
   // Typing progress
   if (S.activeTab === 'typing') {
-    const total = tq.length;
-    const pct = total > 0 ? (typed / total) * 100 : 0;
+    const total = selectedTotal;
+    const pct = total > 0 ? (selectedTyped / total) * 100 : 0;
     $id('sts-prog-fill').style.width = pct + '%';
 
     if (S.typing.active) {
       const ci = S.typing.currentIndex;
       const curItem = ci >= 0 && tq[ci] ? tq[ci] : null;
+      const currentPos = curItem ? (selectedTq.indexOf(curItem) + 1) : 0;
       if (curItem && curItem.status === 'generating') {
         // Progress label is set directly by waitForGeneration (shows %)
         // Don't override it here
       } else {
-        $id('sts-prog-label').textContent = 'Typing ' + (ci + 1) + '/' + total;
+        $id('sts-prog-label').textContent = total > 0 ? 'Typing ' + currentPos + '/' + total : 'Typing...';
       }
-      $id('sts-prog-cd').textContent = '';
+      $id('sts-prog-cd').textContent = getTypingCountdownLabel();
+      $id('sts-prog-cd').className = 'sts-cd' + ((S.typing.countdownType === 'next' || S.typing.countdownType === 'retry') ? ' cool' : '');
     } else if (total > 0) {
-      $id('sts-prog-label').textContent = typed === total ? 'All typed' : 'Ready \u00b7 ' + typed + '/' + total;
+      $id('sts-prog-label').textContent = selectedTyped === total ? 'All selected typed' : 'Selected \u00b7 ' + selectedTyped + '/' + total;
+      $id('sts-prog-cd').textContent = '';
+    } else if (tq.length > 0) {
+      $id('sts-prog-label').textContent = 'No prompts selected';
       $id('sts-prog-cd').textContent = '';
     } else {
       $id('sts-prog-label').textContent = 'No prompts queued';
@@ -1123,7 +1271,7 @@ function render() {
   const btn = $id('sts-action-btn');
   const retryBtn = $id('sts-retry-btn');
   const redownloadBtn = $id('sts-redownload-btn');
-  const hasTypingErrors = S.typing.queue.some(q => q.status === 'error' || q.status === 'failed');
+  const hasTypingErrors = S.typing.queue.some(q => isTypingSelected(q) && (q.status === 'error' || q.status === 'failed'));
   const hasSyncErrors = Object.values(S.scenes).some(sc => sc.status === 'error');
   const jobDone = isJobComplete();
 
@@ -1133,15 +1281,22 @@ function render() {
     if (S.typing.active) {
       btn.textContent = 'Stop';
       btn.className = 'sts-btn sts-btn-danger';
+      btn.disabled = false;
+    } else if (S.typing.starting) {
+      btn.textContent = 'Starting...';
+      btn.className = 'sts-btn sts-btn-ghost';
+      btn.disabled = true;
     } else {
-      btn.textContent = 'Start Typing';
+      btn.textContent = selectedTotal > 0 ? 'Start Typing' : 'Select Prompts';
       btn.className = 'sts-btn sts-btn-primary';
+      btn.disabled = false;
     }
   } else {
     retryBtn.style.display = hasSyncErrors ? '' : 'none';
     if (redownloadBtn) redownloadBtn.style.display = (jobDone && hasSyncErrors) ? '' : 'none';
     btn.textContent = 'Sync Saved';
     btn.className = 'sts-btn sts-btn-primary';
+    btn.disabled = false;
   }
 
   // List content
@@ -1154,6 +1309,7 @@ function render() {
     list.innerHTML = tq.map((q, i) => {
       const pr = (q.displayPrompt || '').length > 46 ? q.displayPrompt.substring(0, 46) + '...' : q.displayPrompt || '';
       let sHTML = '', meta = '';
+      const isSelected = isTypingSelected(q);
       const isCurrent = S.typing.active && i === S.typing.currentIndex;
       if (q.status === 'queued') { sHTML = '<div class="sts-d-q"></div>'; meta = 'queued'; }
       else if (q.status === 'typing') { sHTML = '<div class="sts-d-typing"></div>'; meta = 'typing...'; }
@@ -1161,8 +1317,10 @@ function render() {
       else if (q.status === 'typed') { sHTML = '<span class="sts-d-typed">&#x2714;</span>'; meta = 'typed'; }
       else if (q.status === 'failed') { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = 'failed (' + (q.errorCount || 0) + 'x)'; }
       else if (q.status === 'error') { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = 'error' + (q.errorCount > 1 ? ' (' + q.errorCount + 'x)' : ''); }
+      if (!isSelected) meta = 'unchecked' + (meta ? ' \u00b7 ' + meta : '');
       var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + ((q.status === 'error' || q.status === 'failed') ? ' error-clickable' : '');
-      return '<div class="' + rowCls + '" data-idx="' + i + '"><div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + pr.replace(/</g, '&lt;') + '</div><div class="sts-row-meta">' + meta + '</div></div><div class="sts-row-status">' + sHTML + '</div></div>';
+      var checkboxHtml = '<label class="sts-row-check-wrap"><input type="checkbox" class="sts-row-check" data-role="typing-checkbox" data-idx="' + i + '"' + (isSelected ? ' checked' : '') + (S.typing.active ? ' disabled' : '') + '></label>';
+      return '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + pr.replace(/</g, '&lt;') + '</div><div class="sts-row-meta">' + meta + '</div></div><div class="sts-row-status">' + sHTML + '</div></div>';
     }).join('');
   } else {
     const keys = Object.keys(S.scenes).sort((a, b) => parseInt(a) - parseInt(b));
@@ -1212,23 +1370,54 @@ function render() {
   }
 }
 
-// â”€â”€â”€ Timer â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Timer ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 function updateTimer() {
   if (!S.lastPoll) { $id('sts-timer-val').textContent = '--'; return; }
   $id('sts-timer-val').textContent = Math.floor((Date.now() - S.lastPoll) / 1000) + 's ago';
 }
 
-// â”€â”€â”€ Typing Engine â”€â”€â”€
+function getTypingCountdownLabel() {
+  if (!S.typing.countdown) return '';
+  var type = S.typing.countdownType || 'wait';
+  var labels = {
+    next: 'next in',
+    retry: 'retry in',
+    settle: 'settle',
+  };
+  return (labels[type] || type) + ' ' + S.typing.countdown + 's';
+}
+
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Typing Engine ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 async function startTyping() {
+  if (S.typing.active || S.typing.starting) {
+    console.log('Typing is already running');
+    return;
+  }
   const tq = S.typing.queue;
   if (!tq.length) { console.log('No prompts to type'); return; }
+  if (!getSelectedTypingItems().length) { console.log('No checked prompts to type'); render(); return; }
 
+  S.typing.starting = true;
+  S.typing.stopRequested = false;
+  S.typing.autoPaused = false;
   requeueTypingItems(['error', 'failed']);
+  const runItems = getSelectedTypingItems().filter(function(item) { return item.status !== 'typed'; });
+  if (!runItems.length) {
+    S.typing.starting = false;
+    console.log('All checked prompts are already typed');
+    render();
+    return;
+  }
 
+  const runId = S.typing.runId + 1;
+  S.typing.runId = runId;
   S.typing.active = true;
+  S.typing.starting = false;
+  S.typing.nextAutoStartAt = Date.now() + 3000;
+  S.typing.typedCount = 0;
   S.typing.batchCount = 0;
   render();
-  console.log('=== PHASE 1: Typing all', tq.length, 'prompts ===');
+  console.log('=== PHASE 1: Typing', runItems.length, 'checked prompts ===');
 
   // Setup Grok video mode before first prompt
   try { await setupGrokMode(); } catch(e) { console.warn('Grok mode setup failed:', e.message); }
@@ -1259,8 +1448,9 @@ async function startTyping() {
   console.log('Pre-existing assets to ignore:', seenVideoUrls.size);
 
   for (let i = 0; i < tq.length; i++) {
-    if (!S.typing.active) break;
+    if (shouldStopTyping(runId)) break;
     const item = tq[i];
+    if (!isTypingSelected(item)) continue;
     if (item.status === 'typed') continue;
 
     // Skip permanently failed scenes (3+ errors)
@@ -1282,11 +1472,9 @@ async function startTyping() {
       item.status = 'generating';
       render();
 
-      // Step 3: Wait 3s for Grok to start processing, then poll until complete
-      await sleep(3000);
-      const genResult = await waitForGeneration(item.scene, seenVideoUrls);
+      const genResult = await waitForGeneration(item.scene, seenVideoUrls, undefined, runId);
 
-      if (!S.typing.active) { item.status = item.status === 'generating' ? 'queued' : item.status; break; }
+      if (shouldStopTyping(runId)) { item.status = item.status === 'generating' ? 'queued' : item.status; break; }
       if (genResult) {
         const videoUrl = genResult.primary;
         const allVideoUrls = genResult.allUrls || [videoUrl];
@@ -1308,12 +1496,14 @@ async function startTyping() {
           sc.status = 'ready';
         }
         render();
-        // Send immediately — grab each asset as it finishes
-        try {
-          await sendResults(item.scene, allVideoUrls);
-          console.log('Scene', item.scene, 'sent immediately after generation');
-        } catch (sendErr) {
-          console.error('Immediate send failed for scene', item.scene, ':', sendErr.message);
+        // Send immediately ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â grab each asset as it finishes
+        if (!shouldStopTyping(runId)) {
+          try {
+            await sendResults(item.scene, allVideoUrls);
+            console.log('Scene', item.scene, 'sent immediately after generation');
+          } catch (sendErr) {
+            console.error('Immediate send failed for scene', item.scene, ':', sendErr.message);
+          }
         }
       } else {
         item.errorCount = (item.errorCount || 0) + 1;
@@ -1323,9 +1513,9 @@ async function startTyping() {
       render();
 
       // Wait before next prompt
-      const hasMore = tq.slice(i + 1).some(q => q.status !== 'typed' && q.status !== 'failed');
-      if (hasMore && S.typing.active) {
-        await sleep(5000);
+      const hasMore = tq.slice(i + 1).some(q => isTypingSelected(q) && q.status !== 'typed' && q.status !== 'failed');
+      if (hasMore && !shouldStopTyping(runId)) {
+        await doCountdown(5, 'next', runId);
         await waitForPageReady();
       }
     } catch (e) {
@@ -1333,21 +1523,28 @@ async function startTyping() {
       console.error('Failed for scene', item.scene, '(error #' + item.errorCount + '):', e.message);
       item.status = 'error';
       render();
-      await sleep(5000);
+      await doCountdown(5, 'retry', runId);
     }
+  }
+
+  if (shouldStopTyping(runId)) {
+    console.log('Typing stopped by user - skipping retry and post-processing');
+    S.typing.currentIndex = -1;
+    render();
+    return;
   }
 
   // === Retry pass: re-attempt any failed/error scenes ===
   var retryMax = 2;
   for (var retry = 0; retry < retryMax; retry++) {
-    var failedItems = tq.filter(function(q) { return q.status === 'error' && (q.errorCount || 0) < 3; });
-    if (!failedItems.length || !S.typing.active) break;
+    var failedItems = tq.filter(function(q) { return isTypingSelected(q) && q.status === 'error' && (q.errorCount || 0) < 3; });
+    if (!failedItems.length || shouldStopTyping(runId)) break;
     console.log('Retry pass', retry + 1, ':', failedItems.length, 'failed scenes');
-    await sleep(5000);
+    await doCountdown(5, 'retry', runId);
     await waitForPageReady();
 
     for (var fi = 0; fi < failedItems.length; fi++) {
-      if (!S.typing.active) break;
+      if (shouldStopTyping(runId)) break;
       var item = failedItems[fi];
       item.status = 'typing';
       S.typing.currentIndex = tq.indexOf(item);
@@ -1364,10 +1561,9 @@ async function startTyping() {
         item.status = 'generating';
         render();
 
-        await sleep(3000);
-        var genResult = await waitForGeneration(item.scene, seenVideoUrls);
+        var genResult = await waitForGeneration(item.scene, seenVideoUrls, undefined, runId);
 
-        if (!S.typing.active) { item.status = item.status === 'generating' ? 'queued' : item.status; break; }
+        if (shouldStopTyping(runId)) { item.status = item.status === 'generating' ? 'queued' : item.status; break; }
         if (genResult) {
           var videoUrl = genResult.primary;
           var allVideoUrls = genResult.allUrls || [videoUrl];
@@ -1381,7 +1577,9 @@ async function startTyping() {
           if (sc) { sc.urls = allVideoUrls; sc.previewUrl = videoUrl.replace(/generated_video\.mp4(\?.*)?$/, 'preview_image.jpg'); sc.fileCount = allVideoUrls.length; sc.status = 'ready'; }
           item.allVideoUrls = allVideoUrls;
           render();
-          try { await sendResults(item.scene, allVideoUrls); } catch (sendErr) { console.error('Retry send failed:', sendErr.message); }
+          if (!shouldStopTyping(runId)) {
+            try { await sendResults(item.scene, allVideoUrls); } catch (sendErr) { console.error('Retry send failed:', sendErr.message); }
+          }
         } else {
           item.errorCount = (item.errorCount || 0) + 1;
           item.status = item.errorCount >= 3 ? 'failed' : 'error';
@@ -1389,8 +1587,8 @@ async function startTyping() {
         }
         render();
 
-        if (fi < failedItems.length - 1 && S.typing.active) {
-          await sleep(5000);
+        if (fi < failedItems.length - 1 && !shouldStopTyping(runId)) {
+          await doCountdown(5, 'retry', runId);
           await waitForPageReady();
         }
       } catch (e) {
@@ -1398,9 +1596,16 @@ async function startTyping() {
         console.error('Retry error for scene', item.scene, '(error #' + item.errorCount + '):', e.message);
         item.status = item.errorCount >= 3 ? 'failed' : 'error';
         render();
-        await sleep(5000);
+        await doCountdown(5, 'retry', runId);
       }
     }
+  }
+
+  if (shouldStopTyping(runId)) {
+    console.log('Typing stopped by user - skipping verify and rescan');
+    S.typing.currentIndex = -1;
+    render();
+    return;
   }
 
   // === Verify pass: check all scenes got sent, re-send any unsent ===
@@ -1415,6 +1620,7 @@ async function startTyping() {
   if (unsent.length > 0) {
     console.log('Verify pass:', unsent.length, 'scenes with URLs not confirmed on server, re-sending...');
     for (var ui = 0; ui < unsent.length; ui++) {
+      if (shouldStopTyping(runId)) break;
       try {
         await sendResults(unsent[ui].scene, unsent[ui].allVideoUrls || [unsent[ui].videoUrl]);
       } catch (e) { console.error('Re-send failed for scene', unsent[ui].scene); }
@@ -1424,7 +1630,7 @@ async function startTyping() {
   // Mark remaining errors with 3+ attempts as permanently failed
   tq.forEach(function(q) { if (q.status === 'error' && (q.errorCount || 0) >= 3) q.status = 'failed'; });
 
-  // Phase 2 removed — assets are now sent immediately after each generation completes
+  // Phase 2 removed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â assets are now sent immediately after each generation completes
 
   // === Rescan pass: click all thumbnails to catch any missed videos ===
   console.log('Starting rescan pass - checking all thumbnails...');
@@ -1432,6 +1638,7 @@ async function startTyping() {
   var rescanTagRe = new RegExp('\\[' + S.projectId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\|(\\d+)\\]');
   var rescanFound = 0;
   for (var ri = 0; ri < rescanThumbs.length; ri++) {
+    if (shouldStopTyping(runId)) break;
     var rThumbImg = rescanThumbs[ri];
     var rThumbBtn = rThumbImg.closest('button');
     if (!rThumbBtn) continue;
@@ -1484,25 +1691,35 @@ async function startTyping() {
   // Final status confirmation
   await fetchStatus();
 
-  var finalFailed = tq.filter(function(q) { return q.status === 'error' || q.status === 'failed'; }).length;
-  var finalTyped = tq.filter(function(q) { return q.status === 'typed'; }).length;
-  console.log('=== BATCH COMPLETE:', finalTyped, '/', tq.length, 'succeeded,', finalFailed, 'failed ===');
+  var finalScope = getSelectedTypingItems();
+  var finalFailed = finalScope.filter(function(q) { return q.status === 'error' || q.status === 'failed'; }).length;
+  var finalTyped = finalScope.filter(function(q) { return q.status === 'typed'; }).length;
+  console.log('=== BATCH COMPLETE:', finalTyped, '/', finalScope.length, 'selected prompts succeeded,', finalFailed, 'failed ===');
 
   // Browser notification
   try {
     if (Notification.permission === 'granted') {
-      new Notification('STS Assets Sync', { body: finalTyped + '/' + tq.length + ' scenes completed' + (finalFailed > 0 ? ' (' + finalFailed + ' failed)' : '') });
+      new Notification('STS Assets Sync', { body: finalTyped + '/' + finalScope.length + ' selected scenes completed' + (finalFailed > 0 ? ' (' + finalFailed + ' failed)' : '') });
     }
   } catch(e) {}
 
   S.typing.active = false;
+  S.typing.stopRequested = false;
   S.typing.currentIndex = -1;
+  S.typing.countdown = 0;
+  S.typing.countdownType = '';
   render();
 }
 
 function stopTyping() {
+  S.typing.stopRequested = true;
+  S.typing.autoPaused = true;
   S.typing.active = false;
+  S.typing.starting = false;
   S.typing.countdown = 0;
+  S.typing.countdownType = '';
+  S.typing.nextAutoStartAt = Date.now() + 15000;
+  tryStopGrokGeneration();
   // Reset any in-progress items back to queued
   const tq = S.typing.queue;
   for (var si = 0; si < tq.length; si++) {
@@ -1567,7 +1784,7 @@ function isVideoAssetUrl(url) {
 
 
 // previousSrc: the video src from the previous generation (to distinguish old from new)
-async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
+async function waitForGeneration(sceneId, seenUrls, timeoutMs, runId) {
   timeoutMs = timeoutMs || 300000;
   var pollInterval = 2000;
   var maxPolls = Math.ceil(timeoutMs / pollInterval);
@@ -1577,7 +1794,7 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
   var previousUrl = window.location.href;
   var started = false;
   for (var a = 0; a < 30; a++) {
-    if (!S.typing.active) return null;
+    if (shouldStopTyping(runId)) return null;
 
     // Multiple signals that generation has begun
     var videoGone = !document.getElementById('sd-video');
@@ -1602,7 +1819,7 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
 
   // --- Phase 2: Wait for generation to FINISH (max 5min) ---
   for (var p = 0; p < maxPolls; p++) {
-    if (!S.typing.active) return null;
+    if (shouldStopTyping(runId)) return null;
 
     // Detect active generation: "Generating" text, spinner, canvas, SVG progress
     var isActive = false;
@@ -1647,7 +1864,7 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
       continue;
     }
 
-    // Generation indicators gone — check for completed video
+    // Generation indicators gone ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â check for completed video
     if (started) {
       // Use .last() pattern: latest article's video is the newest generation
       var articles = document.querySelectorAll('article');
@@ -1690,11 +1907,13 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
     await sleep(pollInterval);
   }
 
+  if (shouldStopTyping(runId)) return null;
   console.error('Generation timed out after', timeoutMs / 1000, 'seconds');
   // Try clicking Regenerate button before giving up
   await tryRegenerate();
   // Check one more time after regenerate attempt
   await sleep(5000);
+  if (shouldStopTyping(runId)) return null;
   var articles = document.querySelectorAll('article');
   var lastArt = articles.length > 0 ? articles[articles.length - 1] : document;
   var lastVids = lastArt.querySelectorAll('video[src*="assets.grok.com"]');
@@ -1709,39 +1928,242 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs) {
   return null;
 }
 
+function findGrokInputElement() {
+  var selectors = [
+    '.tiptap.ProseMirror[contenteditable="true"]',
+    '.tiptap.ProseMirror',
+    'div[role="textbox"][contenteditable="true"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    'textarea[placeholder]',
+    'textarea',
+    '[contenteditable="true"]'
+  ];
+  for (var si = 0; si < selectors.length; si++) {
+    var hits = document.querySelectorAll(selectors[si]);
+    for (var hi = 0; hi < hits.length; hi++) {
+      var el = hits[hi];
+      if (!el || el.closest('#sts-sync') || !isElReady(el)) continue;
+      return el;
+    }
+  }
+  return null;
+}
+
+function getComposerRoot(inputEl) {
+  if (!inputEl) return null;
+  return inputEl.closest('form') ||
+    inputEl.closest('[data-testid*="composer"]') ||
+    inputEl.closest('[class*="composer"]') ||
+    inputEl.closest('[class*="input"]') ||
+    inputEl.parentElement ||
+    inputEl;
+}
+
+function getComposerText(inputEl) {
+  if (!inputEl) return '';
+  if (inputEl instanceof HTMLTextAreaElement || inputEl instanceof HTMLInputElement) {
+    return inputEl.value || '';
+  }
+  return inputEl.textContent || '';
+}
+
+function setNativeFieldValue(inputEl, value) {
+  if (!inputEl) return;
+  var proto = inputEl instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+  var descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+  if (descriptor && descriptor.set) descriptor.set.call(inputEl, value);
+  else inputEl.value = value;
+}
+
+function dispatchComposerInput(inputEl, text) {
+  if (!inputEl) return;
+  try {
+    inputEl.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      data: text || '',
+      inputType: text ? 'insertText' : 'deleteContentBackward'
+    }));
+  } catch (e) {
+    inputEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+  }
+  inputEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+}
+
+function selectComposerContents(inputEl) {
+  if (!inputEl || inputEl instanceof HTMLTextAreaElement || inputEl instanceof HTMLInputElement) return;
+  var selection = window.getSelection ? window.getSelection() : null;
+  if (!selection) return;
+  var range = document.createRange();
+  range.selectNodeContents(inputEl);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function clearComposer(inputEl) {
+  if (!inputEl) return;
+  if (inputEl instanceof HTMLTextAreaElement || inputEl instanceof HTMLInputElement) {
+    setNativeFieldValue(inputEl, '');
+    dispatchComposerInput(inputEl, '');
+    return;
+  }
+  selectComposerContents(inputEl);
+  try { document.execCommand('delete', false, null); } catch (e) {}
+  if (normalizeText(getComposerText(inputEl))) {
+    inputEl.textContent = '';
+  }
+  dispatchComposerInput(inputEl, '');
+}
+
+function setComposerText(inputEl, text) {
+  if (!inputEl) return;
+  if (inputEl instanceof HTMLTextAreaElement || inputEl instanceof HTMLInputElement) {
+    setNativeFieldValue(inputEl, text);
+    if (typeof inputEl.selectionStart === 'number') {
+      inputEl.selectionStart = inputEl.value.length;
+      inputEl.selectionEnd = inputEl.value.length;
+    }
+    dispatchComposerInput(inputEl, text);
+    return;
+  }
+
+  selectComposerContents(inputEl);
+  try {
+    inputEl.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      data: text,
+      inputType: 'insertText'
+    }));
+  } catch (e) {}
+  try { document.execCommand('insertText', false, text); } catch (e) {}
+
+  if (!normalizeText(getComposerText(inputEl))) {
+    var paragraph = inputEl.querySelector('p');
+    if (!paragraph && inputEl.classList && inputEl.classList.contains('ProseMirror')) {
+      inputEl.innerHTML = '<p></p>';
+      paragraph = inputEl.querySelector('p');
+    }
+    if (paragraph) paragraph.textContent = text;
+    else inputEl.textContent = text;
+  }
+  dispatchComposerInput(inputEl, text);
+}
+
+function composerHasPrompt(inputEl, text) {
+  var current = normalizeText(getComposerText(inputEl));
+  var expected = normalizeText(text);
+  if (!current || !expected) return false;
+  if (current === expected) return true;
+  var probe = expected.slice(0, Math.min(expected.length, 48));
+  return !!probe && current.indexOf(probe) !== -1;
+}
+
+function findGrokSubmitButton(inputEl) {
+  var root = getComposerRoot(inputEl);
+  var buttons = document.querySelectorAll('button');
+  var best = null;
+  var bestScore = -1;
+
+  for (var bi = 0; bi < buttons.length; bi++) {
+    var btn = buttons[bi];
+    if (!btn || btn.closest('#sts-sync') || btn.disabled || !isElReady(btn)) continue;
+
+    var label = normalizeText(btn.textContent);
+    var aria = btn.getAttribute('aria-label') || '';
+    var testId = btn.getAttribute('data-testid') || '';
+    var combined = (label + ' ' + aria + ' ' + testId).toLowerCase();
+    if (/stop|cancel|retry|regenerate|redownload|sync saved|start typing/.test(combined)) continue;
+
+    var score = 0;
+    if (/send|submit|generate|create/.test(combined)) score += 6;
+    if ((btn.getAttribute('type') || '').toLowerCase() === 'submit') score += 4;
+    if (/send|submit/.test(testId.toLowerCase())) score += 4;
+    if (root && root !== btn && root.contains(btn)) score += 4;
+    if (inputEl && inputEl.form && btn.form === inputEl.form) score += 3;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = btn;
+    }
+  }
+
+  return bestScore > 0 ? best : null;
+}
+
+function dispatchEnterSubmit(inputEl) {
+  if (!inputEl) return;
+  var events = ['keydown', 'keypress', 'keyup'];
+  for (var i = 0; i < events.length; i++) {
+    inputEl.dispatchEvent(new KeyboardEvent(events[i], {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+      cancelable: true
+    }));
+  }
+}
+
+function hasSubmissionSignal(state) {
+  if (!state) return false;
+  if (window.location.href !== state.url) return true;
+  if (document.querySelectorAll('article').length > state.articleCount) return true;
+  if (state.hadVideo && !document.getElementById('sd-video')) return true;
+  if (document.querySelector('canvas')) return true;
+  if (document.querySelector('.animate-spin')) return true;
+  if (parseSvgProgress() >= 0) return true;
+  var genSpan = document.querySelector('span.animate-pulse');
+  return !!(genSpan && /generating/i.test(genSpan.textContent || ''));
+}
+
+async function waitForSubmissionAccepted(inputEl, text, state, timeoutMs) {
+  timeoutMs = timeoutMs || 4000;
+  var started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    var currentInput = findGrokInputElement() || inputEl;
+    if (!composerHasPrompt(currentInput, text)) return true;
+    if (hasSubmissionSignal(state)) return true;
+    await sleep(250);
+  }
+  return hasSubmissionSignal(state);
+}
+
 // --- Wait for /imagine page to be ready after navigation ---
 async function waitForPageReady(timeoutMs) {
   timeoutMs = timeoutMs || 15000;
   var pollInterval = 500;
   var maxAttempts = Math.ceil(timeoutMs / pollInterval);
   for (var i = 0; i < maxAttempts; i++) {
-    var editor = document.querySelector('.tiptap.ProseMirror');
+    var editor = findGrokInputElement();
     if (editor) {
-      console.log('Page ready - editor found');
+      console.log('Page ready - composer found');
       return true;
     }
     await sleep(pollInterval);
   }
-  console.warn('Page ready timeout - editor not found');
+  console.warn('Page ready timeout - composer not found');
   return false;
 }
 
-async function doCountdown(seconds, type) {
+async function doCountdown(seconds, type, runId) {
   S.typing.countdown = seconds;
   S.typing.countdownType = type;
   render();
   for (let i = seconds; i > 0; i--) {
-    if (!S.typing.active) break;
+    if (shouldStopTyping(runId)) break;
     S.typing.countdown = i;
     render();
     await sleep(1000);
   }
   S.typing.countdown = 0;
   S.typing.countdownType = '';
+  render();
 }
 
 
-// ─── Grok Mode Setup (Video, 480p, 6s, aspect ratio) ───
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Grok Mode Setup (Video, 480p, 6s, aspect ratio) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 async function setupGrokMode() {
   console.log('Setting up Grok mode:', S.grokMode + ',', S.grokQuality + ',', S.grokDuration + ', aspect=' + S.aspectRatio);
@@ -1893,71 +2315,64 @@ async function tryRegenerate() {
 }
 
 async function typeIntoGrok(text) {
-  // Find editor — could be contenteditable div or textarea (Grok uses both depending on version)
-  var editor = document.querySelector('.tiptap.ProseMirror');
-  var textarea = document.querySelector('textarea[placeholder]');
-  var inputEl = editor || textarea;
+  var inputEl = findGrokInputElement();
   if (!inputEl) throw new Error('Grok input not found');
+  var submitState = {
+    url: window.location.href,
+    articleCount: document.querySelectorAll('article').length,
+    hadVideo: !!document.getElementById('sd-video')
+  };
 
-  // Click and focus the input (full pointer sequence for React)
   simulateClick(inputEl);
   inputEl.focus();
-  await sleep(300);
+  await sleep(250);
 
-  // Clear any leftover text before typing
-  if (inputEl instanceof HTMLTextAreaElement) {
-    if (inputEl.value.trim()) {
-      console.log('Clearing leftover text in textarea');
-      inputEl.value = '';
-      inputEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-      await sleep(200);
+  clearComposer(inputEl);
+  await sleep(150);
+  setComposerText(inputEl, text);
+  await sleep(350);
+
+  if (!composerHasPrompt(inputEl, text)) {
+    inputEl = findGrokInputElement() || inputEl;
+    setComposerText(inputEl, text);
+    await sleep(350);
+  }
+  if (!composerHasPrompt(inputEl, text)) {
+    throw new Error('Prompt did not land in Grok composer');
+  }
+
+  dispatchEnterSubmit(inputEl);
+  var accepted = await waitForSubmissionAccepted(inputEl, text, submitState, 2500);
+  if (accepted) {
+    console.log('Prompt submitted via Enter');
+    return;
+  }
+
+  var submitBtn = findGrokSubmitButton(inputEl);
+  if (submitBtn) {
+    simulateClick(submitBtn);
+    accepted = await waitForSubmissionAccepted(inputEl, text, submitState, 4000);
+    if (accepted) {
+      console.log('Prompt submitted via send button');
+      return;
     }
-  } else {
-    if (inputEl.textContent.trim()) {
-      console.log('Clearing leftover text in editor');
-      inputEl.textContent = '';
-      inputEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-      await sleep(200);
-    }
   }
 
-  // Set the text content (React-compatible approach from extension)
-  if (inputEl instanceof HTMLTextAreaElement) {
-    inputEl.value = text;
-  } else {
-    inputEl.textContent = text;
+  if (inputEl.form && typeof inputEl.form.requestSubmit === 'function') {
+    try {
+      inputEl.form.requestSubmit();
+      accepted = await waitForSubmissionAccepted(inputEl, text, submitState, 3000);
+      if (accepted) {
+        console.log('Prompt submitted via form.requestSubmit()');
+        return;
+      }
+    } catch (e) {}
   }
 
-  // Dispatch ALL events React might listen to (critical for Grok's React framework):
-  // 1. Native input event
-  inputEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-  // 2. Native change event
-  inputEl.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-  // 3. React-specific input event with target property
-  var reactInput = new Event('input', { bubbles: true });
-  Object.defineProperty(reactInput, 'target', { writable: false, value: inputEl });
-  inputEl.dispatchEvent(reactInput);
-  await sleep(500);
-
-  // Submit via Enter key (more reliable than clicking submit button)
-  inputEl.dispatchEvent(new KeyboardEvent('keydown', {
-    key: 'Enter', code: 'Enter', keyCode: 13,
-    bubbles: true, cancelable: true
-  }));
-  console.log('Prompt submitted via Enter');
-  await sleep(1000);
-
-  // Clear the editor after submit
-  if (inputEl instanceof HTMLTextAreaElement) {
-    inputEl.value = '';
-  } else {
-    inputEl.textContent = '';
-  }
-  inputEl.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-  console.log('Editor cleared');
+  throw new Error('Prompt did not submit to Grok');
 }
 
-// â”€â”€â”€ API â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ API ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 function isJobComplete() {
   if (!S.projectId) return false;
   const scenes = Object.values(S.scenes);
@@ -1969,7 +2384,7 @@ async function fetchPending() {
   if (isJobComplete()) return;
   try {
     const r = await _fetch(S.studioUrl + '/api/assets/grabber/pending');
-    S.connected = true;
+    S.connected = r.quiet ? true : !!r.ok;
     if (!r.ok) { render(); return; }
     const d = await r.json();
     if (!d || !d.projectId || !d.scenes) { render(); return; }
@@ -1995,6 +2410,7 @@ async function fetchPending() {
           scene: k,
           displayPrompt: sc.prompt,
           fullPrompt: sc.prompt + ' [' + d.projectId + '|' + sc.scene + ']' + args,
+          selected: true,
           status: 'queued',
         });
       }
@@ -2075,7 +2491,7 @@ async function sendResults(num, urls) {
         blob = await fetchBlob(url);
         if (!blob && fetchRetry < 2) { console.log('Blob fetch retry', fetchRetry + 1, 'for', url.split('/').pop()); await sleep(2000); }
       }
-      if (!blob) { console.warn('Browser fetch failed for', url, '— will delegate to server'); failedUrls.push(url); continue; }
+      if (!blob) { console.warn('Browser fetch failed for', url, 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â will delegate to server'); failedUrls.push(url); continue; }
       const b64 = await new Promise((res, rej) => {
         const reader = new FileReader();
         reader.onload = () => res(reader.result);
@@ -2102,7 +2518,7 @@ async function sendResults(num, urls) {
       images.push({ data: b64, source_url: url, ext, filename: urlUuid });
       console.log('Fetched', url.split('/').slice(-2).join('/'), '(' + (blob.size / 1024).toFixed(0) + ' KB,', ext + ')', urlUuid ? 'UUID:' + urlUuid.substring(0, 8) : '');
 
-      // Skip preview image — backend generates thumbnails via FFmpeg
+      // Skip preview image ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â backend generates thumbnails via FFmpeg
     } catch (e) { console.warn('Blob fetch failed for', url, e.message); failedUrls.push(url); }
   }
 
@@ -2159,11 +2575,11 @@ async function sendResults(num, urls) {
 
 
 
-// â”€â”€â”€ Scroll to load all blocks â”€â”€â”€
-// MJ uses virtualized rendering â€” only blocks near the viewport are in the DOM.
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Scroll to load all blocks ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
+// MJ uses virtualized rendering ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â only blocks near the viewport are in the DOM.
 // Scroll through #pageScroll to force all blocks to render, then scan.
 
-// â”€â”€â”€ CSS highlight styles (injected once at startup) â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ CSS highlight styles (injected once at startup) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 function injectPickStyles() {
   if (document.getElementById('__sts_pick_styles')) return;
   const s = document.createElement('style');
@@ -2172,7 +2588,7 @@ function injectPickStyles() {
   document.head.appendChild(s);
 }
 
-// â”€â”€â”€ Highlight a single block's media grid â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Highlight a single block's media grid ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 function highlightBlock(block) {
   if (!block.classList.contains('sts-picked')) {
     block.classList.add('sts-picked', 'sts-batch');
@@ -2180,10 +2596,10 @@ function highlightBlock(block) {
   }
 }
 
-// â”€â”€â”€ Quick highlight pass for all currently visible project blocks â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Quick highlight pass for all currently visible project blocks ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 // Used during scroll steps to mark blocks before MJ virtualizes them away
 
-// â”€â”€â”€ Poll â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Poll ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 
 // Navigate back to /imagine/saved
 // No longer needed: goBackToSaved, waitForSavedPage, readPostPage, scrollAndCollectCards
@@ -2219,14 +2635,14 @@ async function poll() {
   // Check if job just completed
   if (isJobComplete() && !S.jobComplete) {
     S.jobComplete = true;
-    console.log('All scenes downloaded/errored — stopping active polling');
+    console.log('All scenes downloaded/errored ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â stopping active polling');
   }
 
   render();
 
   // Auto-start typing when enabled and there are queued prompts
-  if (S.autoType && !S.typing.active) {
-    const hasQueued = S.typing.queue.some(q => q.status === 'queued');
+  if (S.autoType && !S.typing.active && !S.typing.starting && !S.typing.autoPaused && Date.now() >= (S.typing.nextAutoStartAt || 0)) {
+    const hasQueued = S.typing.queue.some(q => isTypingSelected(q) && q.status === 'queued');
     if (hasQueued) {
       console.log('Auto-type: starting typing automatically');
       startTyping();
@@ -2245,12 +2661,12 @@ async function poll() {
   }
 }
 
-// â”€â”€â”€ Start â”€â”€â”€
+// ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Start ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 console.log('Synchronizer v2 (Grok) injected');
 injectPickStyles();
 renderTabs();
 renderAutoType();
-// Start polling (no auto-scroll â€” wait for user to press Sync Now)
+// Start polling (no auto-scroll ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â wait for user to press Sync Now)
 (async () => {
   await poll();
   async function adaptivePoll() {
@@ -2262,3 +2678,5 @@ renderAutoType();
 })();
 
 automaNextBlock();
+
+

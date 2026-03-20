@@ -77,6 +77,10 @@ def group_into_chapters(segments, config=None):
             speech_segments.append(s)
             last_speech_idx = len(speech_segments) - 1
 
+    # Renumber speech segments sequentially (0, 1, 2, ...) after filtering fillers
+    for i, seg in enumerate(speech_segments):
+        seg["index"] = i
+
     if not speech_segments:
         return []
 
