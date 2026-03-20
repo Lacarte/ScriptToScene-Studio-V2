@@ -99,14 +99,17 @@ The viewer hears the transcript while seeing the image. The image should deepen 
 ## IMAGE PROMPT RULES
 
 VIDEO:
-- Must feel like a living moment with motion.
-- Format: [shot type], [subject + action], [setting], [lighting], [mood], [2-3 motion cues], [style keywords]
-- Use motion from at least two categories when possible: body, environment, camera, atmosphere.
+- Must feel like a living moment with motion — never a static pose.
+- Format: [shot type], [subject + action], [setting], [lighting], [mood], [2-3 motion cues]
+- MANDATORY: include at least TWO motion cues from different categories:
+  body (gesturing, walking, turning), environment (wind, rain, flickering lights),
+  camera (slow pan, tracking, dolly), atmosphere (smoke drifting, dust particles, shadows shifting).
+- If no obvious action exists, use subtle ambient motion (swaying fabric, breathing, light flicker).
 
 IMAGE:
 - One frozen photographic moment.
 - No motion verbs.
-- Format: [shot type], [subject + details], [setting], [lighting], [mood], [style keywords]
+- Format: [shot type], [subject + details], [setting], [lighting], [mood]
 
 TEXT:
 - Use a blurred or abstract background from the same world anchor.
@@ -117,7 +120,9 @@ ALL TYPES:
 - Start each image_prompt with the shot type.
 - No two consecutive scenes may use the same shot type.
 - Never mention aspect ratio or resolution.
-- Keep style keywords consistent with the style spec and visual bible.
+- Weave style cues naturally into the description (lighting, texture, mood).
+- NEVER append raw style labels or tag lists at the end of a prompt (e.g. "Noir, Mystery, High contrast").
+  Instead, embed the style through concrete visual details throughout the description.
 
 ## OUTPUT
 Return ONLY valid JSON. No markdown. No code fences. No commentary. ENGLISH ONLY.

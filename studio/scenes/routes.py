@@ -208,6 +208,12 @@ def _apply_segmenter_timing(result, segments, full_segments=None):
         visual_duration = round(timeline_end - timeline_start, 3)
         speech_duration = round(seg["end"] - seg["start"], 3)
 
+        # Enforce minimum scene duration (too-short scenes produce unusable video)
+        MIN_SCENE_DURATION = 1.5
+        if visual_duration < MIN_SCENE_DURATION:
+            visual_duration = MIN_SCENE_DURATION
+            timeline_end = timeline_start + visual_duration
+
         original_duration = scene.get("duration")
         if original_duration is not None:
             scene["model_duration"] = original_duration

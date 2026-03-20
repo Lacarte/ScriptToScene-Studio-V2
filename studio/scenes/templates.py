@@ -752,6 +752,85 @@ SCENE_STYLE_TEMPLATES = [
             "Style: NASA photography meets Interstellar — scientifically grounded wonder, cosmic loneliness, infinite beauty."
         ),
     },
+    # ── Background Video styles ──
+    {
+        "id": "bg_abstract",
+        "type": "visual",
+        "category": None,
+        "name": "Background / Abstract",
+        "description": "Fluid gradients, particle systems, morphing shapes, ambient motion loops",
+        "color": "#818CF8",
+        "style_prompt": (
+            "Generate ambient background video prompts — NO characters, NO faces, NO text, NO literal scenes. "
+            "Every prompt must describe a seamless looping abstract visual that evokes the story's emotional tone. "
+            "ADAPT to the story category: "
+            "horror/thriller → dark swirling ink, blood-red particle clouds, glitch distortions; "
+            "motivation/philosophy → rising golden particles, expanding light fractals, ascending geometric shapes; "
+            "romance → soft floating petals, warm bokeh orbs drifting, silk fabric billowing in slow motion; "
+            "science/curiosity → neural network pulses, DNA strand rotations, microscopic cell divisions; "
+            "comedy/anecdote → bouncy color blobs, playful confetti physics, cartoon-style liquid morphs. "
+            "Visual elements: fluid simulations, particle systems, organic noise patterns, volumetric light shafts, "
+            "kaleidoscopic fractals, smoke tendrils, aurora waves, ink-in-water diffusion, crystalline growth. "
+            "Lighting: ethereal gradients, bioluminescent pulses, soft volumetric god rays, ambient color washes. "
+            "Color palette: match the emotional tone — warm golds for hope, cool blues for contemplation, "
+            "deep reds for tension, iridescent for wonder, monochrome for drama. "
+            "Motion: MANDATORY — every prompt must describe continuous ambient motion (flowing, pulsing, drifting, "
+            "morphing, expanding, contracting, swirling, rippling). These are VIDEO backgrounds, never static. "
+            "Composition: full-frame abstract fills, no ground plane, no horizon, no identifiable objects. "
+            "Style: high-end motion graphics meets generative art — Beeple, Refik Anadol, TeamLab installations."
+        ),
+    },
+    {
+        "id": "bg_cinematic",
+        "type": "visual",
+        "category": None,
+        "name": "Background / Cinematic Real",
+        "description": "Slow-motion real-world footage, atmospheric landscapes, textural close-ups",
+        "color": "#64748B",
+        "style_prompt": (
+            "Generate cinematic background video prompts — ambient real-world footage with NO characters or faces. "
+            "Every prompt must describe a slow, atmospheric shot of a real environment or texture that reinforces the story mood. "
+            "ADAPT to the story category: "
+            "horror/thriller → fog rolling through abandoned corridors, rain hammering cracked windows, flickering fluorescent lights; "
+            "motivation/philosophy → sunrise time-lapse over mountain ridges, ocean waves crashing in slow motion, wind through wheat fields; "
+            "romance → rain on cobblestone streets at golden hour, candlelight reflections on wine glasses, cherry blossoms falling; "
+            "crime/mystery → city traffic at night in long exposure, smoke curling under a desk lamp, rain streaking down car windshields; "
+            "nature/survival → storm clouds forming over plains, campfire embers floating upward, ice cracking in macro; "
+            "biblical/religion → sunbeams piercing cathedral windows, desert sand dunes shifting, still water reflecting sky. "
+            "Shot types: slow tracking shots, locked-off macro details, drone aerials, time-lapses, dolly zooms. "
+            "Lighting: natural and dramatic — golden hour, blue hour, storm light, dappled forest canopy, candlelight. "
+            "Textures: water ripples, rust patterns, wood grain, wet asphalt, condensation, fabric folds, smoke trails. "
+            "Motion: slow-motion (120fps feel), gentle camera drift, time-lapse compression, parallax depth. "
+            "Composition: shallow depth of field, negative space, rule-of-thirds framing, leading lines. "
+            "Style: stock footage premium tier meets Emmanuel Lubezki cinematography — The Tree of Life, Terrence Malick B-roll."
+        ),
+    },
+    {
+        "id": "bg_futuristic",
+        "type": "visual",
+        "category": None,
+        "name": "Background / Futuristic",
+        "description": "Sci-fi environments, holographic interfaces, neon architecture, digital landscapes",
+        "color": "#06B6D4",
+        "style_prompt": (
+            "Generate futuristic background video prompts — sci-fi environments and digital landscapes with NO characters or faces. "
+            "Every prompt must describe an immersive futuristic environment that moves and breathes as a living backdrop. "
+            "ADAPT to the story category: "
+            "horror/thriller → corrupted digital voids, red-lit server corridors with sparking cables, dying hologram static; "
+            "motivation/philosophy → ascending data streams, infinite library corridors of light, expanding universe simulations; "
+            "science/curiosity → holographic DNA models rotating, quantum field visualizations, particle accelerator tunnels; "
+            "psychology → neural pathway flythrough, brain-scan topography, fractal mirror corridors; "
+            "crime/mystery → surveillance grid overlays, data-breach cascades, neon-lit rain on smart glass; "
+            "space/cosmos → hyperspace tunnels, planetary ring flybys, nebula formations in time-lapse. "
+            "Visual elements: holographic HUD interfaces, wireframe cityscapes, light-trail highways, floating data nodes, "
+            "procedural architecture, volumetric neon fog, circuit-board landscapes, portal gateways. "
+            "Lighting: neon edge lighting, holographic ambient glow, LED strip accents, bioluminescent pulses. "
+            "Color palette: electric cyan, deep indigo, hot magenta, chrome silver, matrix green, void black. "
+            "Motion: camera flythrough, rotating structures, data flowing through conduits, pulsing energy grids, parallax depth layers. "
+            "Composition: extreme depth, vanishing-point corridors, isometric tech grids, orbital wide shots. "
+            "Style: Blade Runner 2049 environments meets Tron Legacy — Denis Villeneuve scale, GMUNK motion design."
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)

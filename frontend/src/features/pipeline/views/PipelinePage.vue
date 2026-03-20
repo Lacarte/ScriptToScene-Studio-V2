@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/shared/api/client.js'
 import { usePipeline } from '../composables/usePipeline.js'
@@ -88,6 +88,100 @@ async function detectStyle() {
     detecting.value = false
   }
 }
+
+// ── Audio preview (stream TTS) ──
+const previewing = ref(false)
+const previewLabel = ref('')
+let _previewAbort = null
+let _previewCtx = null
+
+async function previewAudio() {
+  const t = text.value.trim()
+  if (!t) { toast.error('Enter story text first'); return }
+  if (previewing.value) { stopPreview(); return }
+
+  previewing.value = true
+  previewLabel.value = 'Connecting...'
+  const ctrl = new AbortController()
+  _previewAbort = ctrl
+
+  try {
+    const resp = await fetch('/api/tts/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'kokoro',
+        voice: voice.value,
+        speed: speed.value,
+        prompt: t,
+      }),
+      signal: ctrl.signal,
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      throw new Error(err.error || `TTS failed (${resp.status})`)
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+    _previewCtx = audioCtx
+    let nextPlayTime = audioCtx.currentTime
+    let buf = ''
+    let chunks = 0
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const d = JSON.parse(line.slice(6))
+        if (d.phase === 'audio') {
+          chunks++
+          const pcm = Uint8Array.from(atob(d.samples), c => c.charCodeAt(0))
+          const float32 = new Float32Array(pcm.buffer)
+          const audioBuf = audioCtx.createBuffer(1, float32.length, d.sample_rate)
+          audioBuf.getChannelData(0).set(float32)
+          const source = audioCtx.createBufferSource()
+          source.buffer = audioBuf
+          source.connect(audioCtx.destination)
+          if (nextPlayTime < audioCtx.currentTime) nextPlayTime = audioCtx.currentTime
+          source.start(nextPlayTime)
+          nextPlayTime += audioBuf.duration
+          previewLabel.value = `Playing chunk ${chunks}...`
+        } else if (d.phase === 'done') {
+          previewLabel.value = `Playing (${chunks} chunks)`
+        } else if (d.phase === 'error') {
+          throw new Error(d.message)
+        }
+      }
+    }
+
+    // Wait for playback to finish
+    const remaining = nextPlayTime - audioCtx.currentTime
+    if (remaining > 0) {
+      await new Promise(r => setTimeout(r, remaining * 1000 + 300))
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') toast.error(e.message || 'Preview failed')
+  } finally {
+    stopPreview()
+  }
+}
+
+function stopPreview() {
+  if (_previewAbort) { _previewAbort.abort(); _previewAbort = null }
+  if (_previewCtx) { try { _previewCtx.close() } catch {} _previewCtx = null }
+  previewing.value = false
+  previewLabel.value = ''
+}
+
+onUnmounted(stopPreview)
 
 async function handleGenerateStory({ notifySuccess = true } = {}) {
   const previousText = text.value
@@ -684,13 +778,19 @@ function logStepLabel(step) {
         :placeholder="sourceMode === 'generate' ? 'Click Generate Story above, or type your own text...' : 'Paste your story, script, or narration text here...'"
       ></textarea>
 
-      <!-- Detect style bar -->
+      <!-- Detect style bar + audio preview -->
       <div v-if="text.trim()" class="detect-style-bar">
         <button class="detect-style-btn" :disabled="detecting" @click="detectStyle">
           <span v-if="detecting" class="detect-spinner"></span>
           <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           {{ detecting ? 'Detecting...' : 'Detect Style' }}
         </button>
+        <button class="detect-style-btn preview-audio-btn" :class="{ 'preview-audio-btn--active': previewing }" :disabled="running" @click="previewAudio">
+          <svg v-if="!previewing" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          {{ previewing ? 'Stop' : 'Preview Audio' }}
+        </button>
+        <span v-if="previewLabel" class="preview-status">{{ previewLabel }}</span>
         <span v-if="detectedStyle" class="detect-result">
           <span class="detect-dot" :style="{ background: styleColor(detectedStyle.style_id) }"></span>
           <span :style="{ color: styleColor(detectedStyle.style_id), fontWeight: 600 }">{{ styleLabel(detectedStyle.style_id) }}</span>
@@ -1098,6 +1198,18 @@ function logStepLabel(step) {
 .detect-style-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.preview-audio-btn--active {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  background: rgba(78, 205, 196, 0.1) !important;
+}
+
+.preview-status {
+  font-size: 11px;
+  color: var(--accent);
+  opacity: 0.8;
 }
 
 .detect-spinner {
