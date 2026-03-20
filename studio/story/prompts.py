@@ -1,28 +1,9 @@
 """Prompt templates for story generation."""
 
-from studio.scenes.templates import TEMPLATES_BY_ID
+from studio.scenes.templates import STORY_CATEGORIES, TEMPLATES_BY_ID  # noqa: F401 — re-exported
 
 # Approximate words per second for spoken narration at 1.0x speed
 WORDS_PER_SECOND = 2.5
-
-STORY_CATEGORIES = [
-    "motivation",
-    "horror",
-    "mystery",
-    "science",
-    "survival",
-    "psychology",
-    "history",
-    "curiosity",
-    "romance",
-    "comedy",
-    "dark_psychology",
-    "biblical",
-    "nature",
-    "space",
-    "anecdote",
-    "philosophy",
-]
 
 
 def compute_word_target(duration_seconds: int) -> int:

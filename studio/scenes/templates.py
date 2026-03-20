@@ -2,6 +2,9 @@
 
 Each template bundles a style_prompt (LLM instructions for generating image prompts)
 along with display metadata for the frontend picker.
+
+Templates with ``"category": True`` double as story-generation categories.
+``STORY_CATEGORIES`` is derived automatically — keep this file as the single source.
 """
 
 from studio.scenes.style_compiler import enrich_templates
@@ -622,9 +625,141 @@ SCENE_STYLE_TEMPLATES = [
             "Style: lo-fi hip hop stream backgrounds meets Stardew Valley — pixelated warmth, gentle nostalgia, quiet comfort."
         ),
     },
+    # ── Missing category templates ──
+    {
+        "id": "science_explainer",
+        "type": "topical",
+        "category": "science",
+        "name": "Science / Educational",
+        "description": "Diagrams, experiments, discoveries, explainer visuals",
+        "color": "#0EA5E9",
+        "style_prompt": (
+            "Generate science and educational image prompts with clarity, wonder, and visual explanations. "
+            "Include diagrams, cross-sections, microscopic views, laboratory setups, and infographic-style compositions. "
+            "Lighting: clean clinical lab lighting, bioluminescent glows, electron microscope aesthetics, soft educational gradients. "
+            "Visual motifs: DNA helixes, atom models, petri dishes, telescopes, chemical reactions, brain scans, equations on glass. "
+            "Environments: modern laboratories, observatories, lecture halls with projections, field research sites. "
+            "Color palette: clinical white, electric blue, neon green accents, deep space black, warm amber for discoveries. "
+            "Composition: centered subject with annotated callouts, split-view comparisons, zoom-in sequences, scale demonstrations. "
+            "Style: Kurzgesagt meets National Geographic — beautiful complexity made visually accessible and awe-inspiring."
+        ),
+    },
+    {
+        "id": "survival_adventure",
+        "type": "topical",
+        "category": "survival",
+        "name": "Survival / Adventure",
+        "description": "Wilderness danger, resourcefulness, extreme conditions, fight to live",
+        "color": "#65A30D",
+        "style_prompt": (
+            "Generate survival and adventure image prompts with raw, intense natural environments. "
+            "Show humans against nature: harsh weather, dangerous terrain, makeshift shelters, foraging, signal fires. "
+            "Lighting: harsh unfiltered sunlight, storm-dark skies, campfire warmth against cold blue night, dawn breaking after ordeal. "
+            "Visual motifs: compasses, torn maps, rope knots, animal tracks, improvised tools, scarred hands, distant rescue lights. "
+            "Environments: dense jungles, frozen tundra, open ocean, desert expanses, mountain ridges, caves, rushing rivers. "
+            "Color palette: earth brown, forest green, ice blue, storm grey, fire orange, dried blood red. "
+            "Composition: vast landscape dwarfing a lone figure, tight survival detail shots, POV looking up from a ravine. "
+            "Style: Bear Grylls meets The Revenant — primal stakes, beautiful hostility, human tenacity against the elements."
+        ),
+    },
+    {
+        "id": "curiosity_facts",
+        "type": "topical",
+        "category": "curiosity",
+        "name": "Curiosity / Did You Know",
+        "description": "Fascinating facts, quirky visuals, wonder-driven explainers",
+        "color": "#EC4899",
+        "style_prompt": (
+            "Generate curiosity-driven image prompts for 'did you know' and fascinating-fact content. "
+            "Use surprising juxtapositions, scale comparisons, and visual reveals that make viewers stop scrolling. "
+            "Lighting: bright, clean, attention-grabbing — studio-lit subjects, vibrant backlighting, spotlight on the surprising element. "
+            "Visual motifs: magnifying glasses, question marks, mind-blown expressions, before/after reveals, size comparisons. "
+            "Environments: clean studio backgrounds, contextual real-world settings, split-screen fact vs fiction layouts. "
+            "Color palette: vibrant coral, electric blue, bright yellow, clean white, pop of red for emphasis. "
+            "Composition: centered hero subject with negative space for text, side-by-side comparisons, zoom-in reveal sequences. "
+            "Style: Vsauce thumbnail energy meets infographic design — hook-worthy, visually punchy, instant intrigue."
+        ),
+    },
+    {
+        "id": "romance_love",
+        "type": "topical",
+        "category": "romance",
+        "name": "Romance / Love",
+        "description": "Intimate moments, heartbreak, passion, emotional connections",
+        "color": "#E11D48",
+        "style_prompt": (
+            "Generate romance-themed image prompts with emotional intimacy and cinematic warmth. "
+            "Show connection through body language: held hands, lingering glances, silhouettes almost touching, rain-soaked reunions. "
+            "Lighting: golden hour warmth, candlelit dinners, fairy lights, soft bokeh, moonlit balconies, sunrise through curtains. "
+            "Visual motifs: intertwined hands, love letters, wilting vs blooming roses, two coffee cups, empty chairs, shared umbrellas. "
+            "Environments: Parisian cafes, rain-soaked bridges, autumn parks, rooftop terraces at sunset, quiet bedroom mornings. "
+            "Color palette: blush pink, warm gold, deep rose, soft lavender, champagne cream, heartbreak blue-grey. "
+            "Composition: intimate close-ups, two-shots with meaningful space between subjects, reflections in rain puddles. "
+            "Style: Nicholas Sparks cinematography meets Wong Kar-wai — aching beauty, emotional resonance, love in every frame."
+        ),
+    },
+    {
+        "id": "comedy_humor",
+        "type": "topical",
+        "category": "comedy",
+        "name": "Comedy / Humor",
+        "description": "Funny situations, exaggerated expressions, absurd scenarios, visual gags",
+        "color": "#FBBF24",
+        "style_prompt": (
+            "Generate comedy-themed image prompts with exaggerated, funny, and visually absurd scenarios. "
+            "Use over-the-top expressions, impossible situations, and visual punchlines that tell the joke instantly. "
+            "Lighting: bright, flat, sitcom-style lighting OR dramatic lighting for comedic contrast with mundane subjects. "
+            "Visual motifs: exaggerated facial expressions, slapstick setups, ironic juxtapositions, cartoon-like reactions in real settings. "
+            "Environments: ordinary places with something hilariously wrong — offices, kitchens, parks, public transport. "
+            "Color palette: bright, saturated, cheerful — primary colors, warm yellows, comedic contrast of fancy vs messy. "
+            "Composition: reaction shot framing, before/after disaster, wide shots revealing the punchline, deadpan center-frame. "
+            "Style: meme-worthy absurdism meets sitcom staging — instant humor, shareable scenarios, visual comedy gold."
+        ),
+    },
+    {
+        "id": "biblical_scripture",
+        "type": "topical",
+        "category": "biblical",
+        "name": "Biblical / Scripture",
+        "description": "Biblical narratives, prophets, miracles, ancient Holy Land imagery",
+        "color": "#92400E",
+        "style_prompt": (
+            "Generate biblical narrative image prompts with reverent, epic visual storytelling. "
+            "Include scenes from scripture: parting seas, burning bushes, shepherd fields, ancient temples, desert wanderings. "
+            "Lighting: divine god rays breaking through clouds, pillar-of-fire glow, starlit Bethlehem skies, golden tabernacle light. "
+            "Visual motifs: stone tablets, shepherd staffs, olive branches, bread and wine, ark imagery, angelic wings, desert oases. "
+            "Environments: ancient Jerusalem, Egyptian palaces, wilderness deserts, fishing boats on Galilee, garden of Gethsemane. "
+            "Color palette: divine gold, desert sand, deep crimson, heavenly white, olive green, ancient stone grey. "
+            "Composition: epic wide shots of parting waters, intimate prayer scenes, towering figures against humble settings. "
+            "Style: Renaissance biblical painting meets The Chosen cinematography — reverent grandeur, human emotion, divine scale."
+        ),
+    },
+    {
+        "id": "space_cosmos",
+        "type": "topical",
+        "category": "space",
+        "name": "Space / Cosmos",
+        "description": "Galaxies, planets, astronauts, cosmic phenomena, deep space wonder",
+        "color": "#1D4ED8",
+        "style_prompt": (
+            "Generate space and cosmos image prompts with awe-inspiring celestial imagery. "
+            "Include galaxies, nebulae, planetary surfaces, astronauts, space stations, and cosmic phenomena. "
+            "Lighting: starfield illumination, planetary rim lighting, nebula glow, solar flare radiance, Earth-shine blue. "
+            "Visual motifs: astronaut helmets reflecting Earth, rocket launches, Saturn's rings, black holes, comet tails, lunar footprints. "
+            "Environments: ISS interiors, lunar surfaces, Mars landscapes, asteroid fields, deep space void, mission control rooms. "
+            "Color palette: deep space black, nebula purple, star white, Mars rust, Earth blue, solar gold. "
+            "Composition: vast cosmic scale with tiny human elements, helmet reflection POVs, orbital wide shots, launch sequences. "
+            "Style: NASA photography meets Interstellar — scientifically grounded wonder, cosmic loneliness, infinite beauty."
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
 
 # Quick lookup by ID
 TEMPLATES_BY_ID = {t["id"]: t for t in SCENE_STYLE_TEMPLATES}
+
+# Story categories — unique category strings derived from templates (single source of truth)
+STORY_CATEGORIES = sorted(set(
+    t["category"] for t in SCENE_STYLE_TEMPLATES if t.get("category")
+))

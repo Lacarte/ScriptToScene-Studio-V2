@@ -2113,15 +2113,36 @@ class VideoProcessor:
                 ]
 
             logger.debug("Caption cmd: {} ... (vf file={})", ' '.join(cmd[:6]), vf_file)
-            result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
-            if result.returncode != 0:
-                stderr_msg = (result.stderr or '').strip()
-                logger.error("Caption burn-in failed (rc={}):\nstdout: {}\nstderr: {}",
-                              result.returncode, (result.stdout or '')[:300], stderr_msg[-1500:] if stderr_msg else "(empty)")
+
+            # Stream FFmpeg stderr to report progress (90% → 98%) instead of blocking silently
+            total_dur = self._get_total_duration() or 0
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding='utf-8', errors='replace',
+            )
+            stderr_lines = []
+            _time_re = re.compile(r'time=(\d+):(\d+):(\d+)\.(\d+)')
+            try:
+                for line in proc.stderr:
+                    stderr_lines.append(line)
+                    if total_dur > 0:
+                        m = _time_re.search(line)
+                        if m:
+                            t = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 100
+                            pct = 90 + int(min(8, (t / total_dur) * 8))
+                            self._update_progress(pct, "Burning captions into video")
+            except Exception:
+                pass
+            proc.wait(timeout=600)
+
+            if proc.returncode != 0:
+                stderr_msg = ''.join(stderr_lines).strip()
+                logger.error("Caption burn-in failed (rc={}):\nstderr: {}",
+                              proc.returncode, stderr_msg[-1500:] if stderr_msg else "(empty)")
                 if not stderr_msg and vf_file and os.path.exists(vf_file):
                     logger.debug("Filter script preserved for debugging: {}", vf_file)
                     vf_file = None  # prevent cleanup so we can inspect
-                raise RuntimeError(f"Caption burn-in failed: {stderr_msg[-500:] if stderr_msg else f'ffmpeg exited with code {result.returncode}'}")
+                raise RuntimeError(f"Caption burn-in failed: {stderr_msg[-500:] if stderr_msg else f'ffmpeg exited with code {proc.returncode}'}")
         finally:
             if vf_file and os.path.exists(vf_file):
                 try:
