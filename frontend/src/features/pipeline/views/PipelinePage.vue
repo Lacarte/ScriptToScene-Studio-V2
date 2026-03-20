@@ -256,7 +256,6 @@ const canRun = computed(() => {
 const runLabel = computed(() => {
   if (stopping.value) return 'Stopping...'
   if (running.value) return 'Running...'
-  if (shouldGenerateBeforeRun.value) return 'Generate + Run'
   return 'Run Pipeline'
 })
 const runHintText = computed(() => {
