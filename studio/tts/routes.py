@@ -30,7 +30,7 @@ from studio.validation import validate_json
 from studio.ffmpeg_utils import find_ffmpeg
 from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
 from .normalize import (
-    normalize_for_tts, clean_for_tts, tts_breathing_blocks,
+    normalize_for_tts, clean_for_tts,
     format_breathing_blocks, validate_brackets,
     _protect_kokoro, _restore_kokoro,
 )
@@ -647,61 +647,10 @@ def generate(data: TtsGenerateRequest):
     logger.info("Generate  \033[1m{}\033[0m | {} | {} chars", model_id, voice_for_metadata, len(prompt))
 
     skip_clean = data.skip_clean
+    tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
 
-    # Match breathing-block brackets [text] but NOT Kokoro links [word](...)
-    # Protect Kokoro links first so their inner brackets don't break extraction
-    prompt_safe, kokoro_saved = _protect_kokoro(prompt)
-    pre_blocks = re.findall(r'\[([^\[\]]+)\](?!\()', prompt_safe)
-    if pre_blocks and len(pre_blocks) >= 2:
-        blocks = []
-        for b in pre_blocks:
-            b = _restore_kokoro(b, kokoro_saved)
-            if not skip_clean:
-                b = re.sub(r"[*_#`~]", "", b)
-                b = re.sub(r"https?://\S+", "link", b)
-            b = re.sub(r"\s+", " ", b).strip()
-            if b:
-                blocks.append(b)
-        tts_prompt = " ".join(blocks)
-    else:
-        tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
-        blocks = tts_breathing_blocks(tts_prompt)
-
-    if len(blocks) > 1:
-        logger.debug("Breathing blocks ({}): {}", len(blocks),
-                      [b[:60] + "..." if len(b) > 60 else b for b in blocks])
-
-    # Multi-block: chunked background generation with SSE progress
-    if len(blocks) > 1:
-        _cleanup_old_jobs()
-        job_id = uuid.uuid4().hex[:12]
-        basename = generate_filename(prompt)
-        with generation_jobs_lock:
-            generation_jobs[job_id] = {
-                "queue": Queue(),
-                "status": "running",
-                "metadata": None,
-                "created": time.time(),
-                "abort": False,
-            }
-        t = threading.Thread(
-            target=_background_chunked_generate,
-            args=(job_id, voice_param, voice, blocks, speed,
-                  max_silence_ms, prompt, basename, voice_for_metadata, blend_meta),
-            daemon=True,
-        )
-        t.start()
-        return jsonify({
-            "job_id": job_id,
-            "status": "chunking",
-            "total_chunks": len(blocks),
-            "sentences": blocks,
-        }), 202
-
-    # Single block: synchronous fast path
-    _cleanup_old_jobs()
-    single_block = blocks[0] if blocks else tts_prompt
-    phonemes, is_ph = _phonemize_with_misaki(single_block, lang)
+    # Kokoro handles internal chunking via _split_phonemes() — no need for breathing blocks
+    phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
     start = time.perf_counter()
     try:
         with generation_inference_lock:

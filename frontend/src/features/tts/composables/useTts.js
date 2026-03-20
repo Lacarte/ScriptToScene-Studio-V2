@@ -314,10 +314,7 @@ async function generate() {
     progressText.value = 'Generating audio...'
     const d = await api.post('/api/tts/generate', { body: payload })
 
-    if (d.job_id) {
-      currentJobId.value = d.job_id
-      await streamChunkedProgress(d.job_id)
-    } else if (d.error) {
+    if (d.error) {
       throw new Error(d.error)
     } else {
       progressText.value = 'Done!'

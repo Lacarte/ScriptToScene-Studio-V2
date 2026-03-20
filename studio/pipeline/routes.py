@@ -993,8 +993,8 @@ def _step_tts(config, project_id):
         load_model, _voice_to_lang, _phonemize_with_misaki,
         generation_inference_lock, _tts_job_dir,
     )
-    from studio.tts.normalize import clean_for_tts, tts_breathing_blocks
-    from studio.tts.audio import pad_audio, concatenate_chunks, run_loudnorm
+    from studio.tts.normalize import clean_for_tts
+    from studio.tts.audio import pad_audio, run_loudnorm
 
     text = config["text"]
     voice = config["voice"]
@@ -1004,27 +1004,15 @@ def _step_tts(config, project_id):
     lang = _voice_to_lang(voice)
 
     tts_prompt = clean_for_tts(text)
-    blocks = tts_breathing_blocks(tts_prompt)
+    phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
 
-    audio_chunks = []
-    total_inference = 0.0
-
-    for block in blocks:
-        phonemes, is_ph = _phonemize_with_misaki(block, lang)
-        start = time.perf_counter()
-        with generation_inference_lock:
-            chunk_audio, _sr = kokoro.create(
-                text=phonemes, voice=voice, speed=speed,
-                lang=lang, is_phonemes=is_ph,
-            )
-        total_inference += time.perf_counter() - start
-        audio_chunks.append(chunk_audio)
-
-    if len(audio_chunks) > 1:
-        audio = concatenate_chunks(audio_chunks, sample_rate=24000,
-                                   gap_ms=80, crossfade_ms=20)
-    else:
-        audio = audio_chunks[0]
+    start = time.perf_counter()
+    with generation_inference_lock:
+        audio, _sr = kokoro.create(
+            text=phonemes, voice=voice, speed=speed,
+            lang=lang, is_phonemes=is_ph,
+        )
+    total_inference = time.perf_counter() - start
     audio = pad_audio(audio, sample_rate=24000)
 
     job_dir = _tts_job_dir(project_id)

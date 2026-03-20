@@ -183,6 +183,65 @@ function stopPreview() {
 
 onUnmounted(stopPreview)
 
+// ── Saved Stories ──
+const SAVED_STORIES_KEY = 'sts-saved-stories'
+const savedStories = ref(JSON.parse(localStorage.getItem(SAVED_STORIES_KEY) || '[]'))
+const showSavedStories = ref(false)
+
+function _persistSavedStories() {
+  localStorage.setItem(SAVED_STORIES_KEY, JSON.stringify(savedStories.value))
+}
+
+function saveCurrentStory() {
+  const t = text.value.trim()
+  if (!t) { toast.error('No story text to save'); return }
+
+  const entry = {
+    id: Date.now(),
+    text: t,
+    title: t.slice(0, 60).replace(/\n/g, ' ') + (t.length > 60 ? '...' : ''),
+    style: style.value || '',
+    visualStyle: visualStyle.value || '',
+    storyTone: storyTone.value || '',
+    category: nicheCategory.value || '',
+    voice: voice.value || '',
+    speed: speed.value || 1.0,
+    savedAt: new Date().toISOString(),
+  }
+  savedStories.value.unshift(entry)
+  if (savedStories.value.length > 50) savedStories.value = savedStories.value.slice(0, 50)
+  _persistSavedStories()
+  toast.success('Story saved')
+}
+
+function loadSavedStory(entry) {
+  text.value = entry.text
+  if (entry.voice) voice.value = entry.voice
+  if (entry.speed) speed.value = entry.speed
+  if (entry.style) style.value = entry.style
+  if (entry.visualStyle) setVisualStyleOverride(entry.visualStyle)
+  if (entry.storyTone) setStoryTone(entry.storyTone)
+  if (entry.category) setNicheCategory(entry.category)
+  showSavedStories.value = false
+  toast.success('Story loaded')
+}
+
+function deleteSavedStory(id) {
+  savedStories.value = savedStories.value.filter(s => s.id !== id)
+  _persistSavedStories()
+}
+
+function savedStoryAge(entry) {
+  const ms = Date.now() - new Date(entry.savedAt).getTime()
+  const mins = Math.floor(ms / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
+
 async function handleGenerateStory({ notifySuccess = true } = {}) {
   const previousText = text.value
   try {
@@ -210,6 +269,7 @@ const {
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
   failedStep, failedProjectId, stoppedStep, stoppedProjectId,
   nichePreset, nichePresets, storyTone, storyTones, visualStyles, nicheCategories,
+  visualStyle, nicheCategory,
   start, stop, retry, resumeStopped, loadFromHistory, randomStory, resetProgress,
   selectNiche, clearNiche, saveNichePreset, deleteNichePreset,
   setVisualStyleOverride, setStoryTone, setNicheCategory,
@@ -579,6 +639,7 @@ function logStepLabel(step) {
 </script>
 
 <template>
+  <div class="pipeline-layout">
   <div class="pipeline-page">
 
     <!-- Header -->
@@ -587,7 +648,6 @@ function logStepLabel(step) {
         <h2 class="page-title">Pipeline</h2>
         <p class="page-subtitle">Run the full TTS &rarr; Alignment &rarr; Segment &rarr; Scenes pipeline</p>
       </div>
-      <!-- Stop/Resume moved to progress card -->
     </div>
 
     <!-- Input -->
@@ -1028,10 +1088,55 @@ function logStepLabel(step) {
     </div>
 
   </div>
+
+  <!-- Right sidebar: Saved Stories -->
+  <aside class="saved-sidebar" :class="{ 'saved-sidebar--open': showSavedStories }">
+    <button class="saved-sidebar-toggle" @click="showSavedStories = !showSavedStories">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      <span class="saved-sidebar-label">My Stories</span>
+      <span v-if="savedStories.length" class="saved-count">({{ savedStories.length }})</span>
+      <svg class="saved-sidebar-chevron" :class="{ rotated: showSavedStories }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+    </button>
+    <button v-if="showSavedStories && text.trim()" class="saved-sidebar-save" @click="saveCurrentStory">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save Current Story
+    </button>
+    <div v-if="showSavedStories" class="saved-sidebar-list">
+      <div v-if="!savedStories.length" class="saved-empty">No saved stories yet.</div>
+      <div v-for="entry in savedStories" :key="entry.id" class="saved-story-item" @click="loadSavedStory(entry)">
+        <div class="saved-story-main">
+          <span class="saved-story-title">{{ entry.title }}</span>
+          <span class="saved-story-meta">
+            <span v-if="entry.style" class="saved-tag">
+              <span class="saved-tag-dot" :style="{ background: styleColor(entry.visualStyle || entry.style) }"></span>
+              {{ styleLabel(entry.visualStyle || entry.style) }}
+            </span>
+            <span v-if="entry.storyTone" class="saved-tag saved-tag--tone">{{ formatOptionLabel(entry.storyTone) }}</span>
+            <span v-if="entry.category" class="saved-tag saved-tag--cat">{{ formatOptionLabel(entry.category) }}</span>
+            <span class="saved-story-age">{{ savedStoryAge(entry) }}</span>
+          </span>
+        </div>
+        <button class="saved-story-delete" title="Delete" @click.stop="deleteSavedStory(entry.id)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  </div>
 </template>
 
 <style scoped>
+.pipeline-layout {
+  display: flex;
+  gap: 0;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
 .pipeline-page {
+  flex: 1;
+  min-width: 0;
   max-width: 780px;
   margin: 0 auto;
   padding: 32px 24px;
@@ -1210,6 +1315,191 @@ function logStepLabel(step) {
   font-size: 11px;
   color: var(--accent);
   opacity: 0.8;
+}
+
+/* ── Saved Stories Sidebar ── */
+.saved-sidebar {
+  width: 52px;
+  flex-shrink: 0;
+  padding: 32px 0 32px 0;
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+.saved-sidebar--open {
+  width: 300px;
+  border-left: 1px solid var(--border);
+  padding: 32px 16px;
+}
+
+.saved-sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  width: 100%;
+}
+.saved-sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.saved-sidebar--open .saved-sidebar-toggle { margin-bottom: 8px; }
+
+.saved-sidebar-save {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  margin-bottom: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: rgba(78, 205, 196, 0.06);
+  border: 1px dashed rgba(78, 205, 196, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.saved-sidebar-save:hover {
+  background: rgba(78, 205, 196, 0.12);
+  border-color: var(--accent);
+}
+
+.saved-sidebar-label {
+  display: none;
+}
+.saved-sidebar--open .saved-sidebar-label { display: inline; }
+.saved-sidebar--open .saved-count { display: inline; }
+
+.saved-sidebar-chevron {
+  margin-left: auto;
+  transition: transform 0.2s;
+  display: none;
+}
+.saved-sidebar--open .saved-sidebar-chevron { display: block; }
+.saved-sidebar-chevron.rotated { transform: rotate(180deg); }
+
+.saved-count {
+  opacity: 0.6;
+  font-size: 10px;
+  display: none;
+}
+
+.saved-sidebar-list {
+  overflow-y: auto;
+  max-height: calc(100vh - 140px);
+}
+
+.saved-empty {
+  padding: 20px 8px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.saved-story-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+.saved-story-item:last-child { border-bottom: none; }
+.saved-story-item:hover { background: rgba(255, 255, 255, 0.04); }
+
+.saved-story-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.saved-story-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-story-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.saved-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.saved-tag-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.saved-tag--tone {
+  color: var(--accent);
+  border-color: rgba(78, 205, 196, 0.2);
+}
+
+.saved-tag--cat {
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.2);
+}
+
+.saved-story-age {
+  font-size: 9px;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.saved-story-delete {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.12s;
+}
+.saved-story-item:hover .saved-story-delete { opacity: 0.6; }
+.saved-story-delete:hover { opacity: 1 !important; color: #ef4444; }
+
+@media (max-width: 900px) {
+  .pipeline-layout { flex-direction: column; }
+  .saved-sidebar {
+    width: 100% !important;
+    border-left: none !important;
+    border-top: 1px solid var(--border);
+    padding: 16px 24px !important;
+  }
+  .saved-sidebar-label { display: inline !important; }
+  .saved-sidebar-chevron { display: block !important; }
+  .saved-count { display: inline !important; }
 }
 
 .detect-spinner {
