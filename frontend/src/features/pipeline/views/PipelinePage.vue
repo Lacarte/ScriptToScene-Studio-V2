@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/shared/api/client.js'
 import { usePipeline } from '../composables/usePipeline.js'
+import NichePicker from '../components/NichePicker.vue'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useAssets } from '@/features/assets/composables/useAssets.js'
 import { useStory } from '../composables/useStory.js'
@@ -15,24 +16,46 @@ defineOptions({ name: 'PipelinePage' })
 
 const toast = useToast()
 const story = useStory()
+const generateBeforeRun = ref(localStorage.getItem('sts-pipeline-generate-before-run') !== 'false')
 
 // Source mode: 'manual' (paste/random) or 'generate' (AI story)
 const sourceMode = ref(localStorage.getItem('sts-pipeline-source-mode') || 'manual')
 watch(sourceMode, (v) => localStorage.setItem('sts-pipeline-source-mode', v))
+watch(generateBeforeRun, (v) => localStorage.setItem('sts-pipeline-generate-before-run', String(v)))
 
 function applyRecommendedStyle(styleId) {
   const tmpl = templates.value.find(t => t.id === styleId)
-  if (tmpl) style.value = styleId
+  if (tmpl) setStyle(styleId)
 }
 
-// Link Category ↔ Style: they share the same template list
+// Category and Style are now independent (decoupled in Phase 3)
 function setCategory(id) {
   story.storyCategory.value = id
-  style.value = id  // sync style to match
+  setNicheCategory(id)
 }
 function setStyle(id) {
-  style.value = id
-  story.storyCategory.value = id  // sync category to match
+  setVisualStyleOverride(id)
+}
+
+function handleNicheSelect(preset) {
+  if (!preset) {
+    clearNiche()
+    return
+  }
+  selectNiche(preset)
+  story.storyCategory.value = preset.category || story.storyCategory.value
+}
+
+async function handleNicheSave(presetData) {
+  const result = await saveNichePreset(presetData)
+  if (result.ok) toast.success(`Niche "${presetData.label}" saved`)
+  else toast.error(result.error || 'Failed to save niche')
+}
+
+async function handleNicheDelete(presetId) {
+  const result = await deleteNichePreset(presetId)
+  if (result.ok) toast.success('Niche deleted')
+  else toast.error(result.error || 'Failed to delete niche')
 }
 
 const detecting = ref(false)
@@ -66,19 +89,22 @@ async function detectStyle() {
   }
 }
 
-async function handleGenerateStory() {
-  text.value = ''
+async function handleGenerateStory({ notifySuccess = true } = {}) {
+  const previousText = text.value
   try {
-    const data = await story.generateStory(style.value)
+    const data = await story.generateStory(style.value, { storyTone: storyTone.value || undefined })
     // Strip section labels for clean pipeline text
     const plain = data.story_text
       .replace(/^(Hook|Build|Climax|CTA):\s*/gim, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
     text.value = plain
-    toast.success('Story generated and applied')
+    if (notifySuccess) toast.success('Story generated and applied')
+    return { ok: true, data, text: plain }
   } catch (e) {
+    text.value = previousText
     toast.error(e.message || 'Story generation failed')
+    return { ok: false, error: e }
   }
 }
 
@@ -89,7 +115,10 @@ const {
   running, stopping, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
   failedStep, failedProjectId, stoppedStep, stoppedProjectId,
+  nichePreset, nichePresets, storyTone, storyTones, visualStyles, nicheCategories,
   start, stop, retry, resumeStopped, loadFromHistory, randomStory, resetProgress,
+  selectNiche, clearNiche, saveNichePreset, deleteNichePreset,
+  setVisualStyleOverride, setStoryTone, setNicheCategory,
   timeAgo,
 } = usePipeline()
 
@@ -103,6 +132,95 @@ const STEPS = computed(() => {
 })
 
 const { styleLabel, styleColor } = useScenes()
+
+function formatOptionLabel(value) {
+  return String(value || '')
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function firstSentence(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const match = text.match(/^[^.?!]+[.?!]?/)
+  return (match?.[0] || text).trim()
+}
+
+const CATEGORY_COLORS = {
+  psychology: '#8B5CF6',
+  crime: '#EF4444',
+  horror: '#FF6B6B',
+  motivation: '#FACC15',
+  philosophy: '#94A3B8',
+  religion: '#D4AF37',
+  mystery: '#7C3AED',
+  science: '#38BDF8',
+  history: '#C08457',
+  nature: '#22C55E',
+  romance: '#F472B6',
+  comedy: '#F97316',
+  children: '#F9A8D4',
+  anecdote: '#FB7185',
+  politics: '#DC2626',
+  survival: '#84CC16',
+  curiosity: '#2DD4BF',
+  space: '#60A5FA',
+}
+
+function withAlpha(hex, alpha = '18') {
+  if (!hex || typeof hex !== 'string') return `rgba(78, 205, 196, 0.${alpha})`
+  if (hex.startsWith('#') && hex.length === 7) return `${hex}${alpha}`
+  return hex
+}
+
+function categoryColor(categoryId) {
+  return CATEGORY_COLORS[categoryId] || '#4ECDC4'
+}
+
+const availableCategories = computed(() => {
+  const base = nicheCategories.value?.length
+    ? [...nicheCategories.value]
+    : [...(story.categories.value || [])]
+  const current = story.storyCategory.value
+  if (current && !base.includes(current)) base.unshift(current)
+  return base
+})
+const availableVisualStyles = computed(() => {
+  const base = visualStyles.value?.length ? [...visualStyles.value] : [...templates.value]
+  const current = style.value
+  if (current && !base.some(item => item.id === current)) {
+    const legacyTemplate = templates.value.find(item => item.id === current)
+    if (legacyTemplate) base.unshift(legacyTemplate)
+  }
+  return base
+})
+const selectedNicheConfig = computed(() => nichePresets.value?.[nichePreset.value] || null)
+const activeStyleTemplate = computed(() => (
+  templates.value.find(item => item.id === style.value)
+  || availableVisualStyles.value.find(item => item.id === style.value)
+  || null
+))
+const activeToneDescription = computed(() => storyTones.value?.[storyTone.value] || '')
+const activeToneHint = computed(() => firstSentence(activeToneDescription.value))
+const shouldGenerateBeforeRun = computed(() => sourceMode.value === 'generate' && generateBeforeRun.value)
+const currentCategoryColor = computed(() => categoryColor(story.storyCategory.value))
+const currentNicheConfig = computed(() => {
+  const selected = selectedNicheConfig.value
+  const derivedNiche = selected && selected.category === story.storyCategory.value
+    ? selected.niche
+    : story.storyCategory.value
+  return {
+    visual_style: style.value,
+    category: story.storyCategory.value,
+    niche: derivedNiche || '',
+    story_tone: storyTone.value || selected?.story_tone || '',
+    voice: voice.value,
+    speed: speed.value,
+  }
+})
+const currentCategoryLabel = computed(() => formatOptionLabel(story.storyCategory.value) || 'Select category')
 
 // -- Custom style dropdown logic --
 const openDropdown = ref('')  // '' | 'category' | 'style'
@@ -118,11 +236,6 @@ function onClickOutside(e) {
 onMounted(() => document.addEventListener('mousedown', onClickOutside))
 onBeforeUnmount(() => document.removeEventListener('mousedown', onClickOutside))
 
-// Keep category in sync with style (covers async init + later changes)
-watch(style, (val) => {
-  story.storyCategory.value = val || 'cinematic'
-}, { immediate: true })
-
 const logEl = ref(null)
 const activeProjectId = ref('')
 useProjectSync(activeProjectId)
@@ -135,13 +248,42 @@ watch(log, async () => {
   }
 })
 
-const canRun = computed(() => text.value.trim().length > 0 && !running.value)
+const canRun = computed(() => {
+  if (running.value || story.isGenerating.value) return false
+  if (shouldGenerateBeforeRun.value) return !!story.webhookUrl.value?.trim()
+  return text.value.trim().length > 0
+})
+const runLabel = computed(() => {
+  if (stopping.value) return 'Stopping...'
+  if (running.value) return 'Running...'
+  if (shouldGenerateBeforeRun.value) return 'Generate + Run'
+  return 'Run Pipeline'
+})
+const runHintText = computed(() => {
+  if (shouldGenerateBeforeRun.value) {
+    return story.webhookUrl.value?.trim()
+      ? 'Run Pipeline will generate fresh text first using your current setup'
+      : 'Configure the story webhook to generate text before running'
+  }
+  return sourceMode.value === 'generate'
+    ? 'Generate a story or type text to get started'
+    : 'Paste text or click Random to get started'
+})
 const canResumeStopped = computed(() => (
   globalStatus.value === 'stopped'
   && !!stoppedStep.value
   && !!stoppedProjectId.value
   && !running.value
 ))
+
+async function handleRunPipeline() {
+  if (!canRun.value) return
+  if (shouldGenerateBeforeRun.value) {
+    const generated = await handleGenerateStory({ notifySuccess: false })
+    if (!generated.ok) return
+  }
+  await start()
+}
 
 
 // Reset progress when form fields change
@@ -403,46 +545,119 @@ function logStepLabel(step) {
         </div>
       </div>
 
-      <!-- Generate mode: inline story form -->
-      <div v-if="sourceMode === 'generate'" class="source-generate">
-        <div class="gen-form">
-          <div class="gen-group">
-            <label class="control-label">Category / Style</label>
-            <div class="style-dropdown" :class="{ open: openDropdown === 'category' }">
-              <button class="style-dropdown-trigger input-field control-select" @click="toggleDropdown('category')">
+      <div class="creative-panel">
+        <div class="creative-panel-header">
+          <div class="creative-copy">
+            <span class="creative-kicker">Creative Setup</span>
+            <h3 class="creative-title">Set the creative direction</h3>
+            <p class="creative-note">Choose a niche preset or set the visual style, category, and tone yourself.</p>
+          </div>
+        </div>
+
+        <NichePicker
+          :presets="nichePresets"
+          :selected="nichePreset"
+          :templates="templates"
+          :current-config="currentNicheConfig"
+          @select="handleNicheSelect"
+          @save="handleNicheSave"
+          @delete="handleNicheDelete"
+        />
+
+        <div class="creative-grid">
+          <div class="creative-group creative-group--style">
+            <label class="control-label">Visual Style</label>
+            <div class="style-dropdown" :class="{ open: openDropdown === 'style' }">
+              <button class="style-dropdown-trigger input-field control-select creative-trigger" @click="toggleDropdown('style')">
                 <span class="style-dropdown-dot" :style="{ background: styleColor(style) }"></span>
                 <span class="style-dropdown-label">{{ styleLabel(style) || 'Select style' }}</span>
                 <svg class="style-dropdown-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
+              <div v-show="openDropdown === 'style'" class="style-dropdown-menu">
+                <div
+                  v-for="v in availableVisualStyles" :key="v.id"
+                  class="style-dropdown-item" :class="{ selected: v.id === style }"
+                  :style="v.id === style ? { background: v.color + '18', borderColor: v.color } : {}"
+                  @click="selectFromDropdown('style', v.id)"
+                >
+                  <span class="style-dropdown-dot" :style="{ background: v.color }"></span>
+                  <span class="style-dropdown-item-label">{{ v.name }}</span>
+                </div>
+              </div>
+            </div>
+            <p v-if="activeStyleTemplate?.description" class="creative-detail">{{ activeStyleTemplate.description }}</p>
+          </div>
+
+          <div class="creative-group">
+            <label class="control-label">Category</label>
+            <div class="style-dropdown" :class="{ open: openDropdown === 'category' }">
+              <button
+                class="style-dropdown-trigger input-field control-select"
+                :style="{ borderColor: withAlpha(currentCategoryColor, '66'), background: withAlpha(currentCategoryColor, '0A') }"
+                @click="toggleDropdown('category')"
+              >
+                <span class="style-dropdown-dot" :style="{ background: currentCategoryColor }"></span>
+                <span class="style-dropdown-label">{{ currentCategoryLabel }}</span>
+                <svg class="style-dropdown-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
               <div v-show="openDropdown === 'category'" class="style-dropdown-menu">
                 <div
-                  v-for="t in templates" :key="t.id"
-                  class="style-dropdown-item" :class="{ selected: t.id === style }"
-                  :style="t.id === style ? { background: t.color + '18', borderColor: t.color } : {}"
-                  @click="selectFromDropdown('category', t.id)"
+                  v-for="categoryId in availableCategories" :key="categoryId"
+                  class="style-dropdown-item" :class="{ selected: categoryId === story.storyCategory.value }"
+                  :style="categoryId === story.storyCategory.value ? { background: withAlpha(categoryColor(categoryId), '18'), borderColor: categoryColor(categoryId) } : {}"
+                  @click="selectFromDropdown('category', categoryId)"
                 >
-                  <span class="style-dropdown-dot" :style="{ background: t.color }"></span>
-                  <span class="style-dropdown-item-label">{{ t.name }}</span>
+                  <span class="style-dropdown-dot" :style="{ background: categoryColor(categoryId) }"></span>
+                  <span class="style-dropdown-item-label" :style="{ color: categoryId === story.storyCategory.value ? categoryColor(categoryId) : '' }">{{ formatOptionLabel(categoryId) }}</span>
                 </div>
               </div>
             </div>
           </div>
-          <div class="gen-group">
+
+          <div class="creative-group">
+            <label class="control-label">Story Tone</label>
+            <select v-model="storyTone" class="input-field control-select" @change="setStoryTone(storyTone)">
+              <option value="">Auto / None</option>
+              <option v-for="(description, toneId) in storyTones" :key="toneId" :value="toneId">
+                {{ formatOptionLabel(toneId) }}
+              </option>
+            </select>
+            <p class="creative-detail">{{ activeToneHint || 'How the narration should feel.' }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Generate mode: inline story form -->
+      <div v-if="sourceMode === 'generate'" class="source-generate">
+        <div class="story-generator-panel">
+          <div class="story-generator-header">
+            <div>
+              <span class="creative-kicker">Story Generator</span>
+              <h3 class="story-generator-title">Generate text from your current creative setup</h3>
+            </div>
+            <label class="generate-first-toggle">
+              <input v-model="generateBeforeRun" type="checkbox" class="generate-first-check">
+              <span class="generate-first-text">Run Pipeline generates first</span>
+            </label>
+          </div>
+          <div class="gen-form">
+            <div class="gen-group">
             <label class="control-label">Language</label>
             <select v-model="story.storyLanguage.value" class="input-field control-select">
               <option v-for="lang in story.LANGUAGES" :key="lang.id" :value="lang.id">{{ lang.label }}</option>
             </select>
-          </div>
-          <div class="gen-group">
+            </div>
+            <div class="gen-group">
             <label class="control-label">Duration</label>
             <input v-model.number="story.storyDuration.value" type="number" class="input-field control-number" min="15" max="180" step="5">
-          </div>
-          <div class="gen-group gen-group--action">
+            </div>
+            <div class="gen-group gen-group--action">
             <button class="gen-story-btn" :disabled="story.isGenerating.value" @click="handleGenerateStory">
               <span v-if="story.isGenerating.value" class="gen-spinner"></span>
               <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
               {{ story.isGenerating.value ? 'Generating...' : 'Generate Story' }}
             </button>
+            </div>
           </div>
         </div>
         <p v-if="story.error.value" class="gen-error">{{ story.error.value }}</p>
@@ -454,7 +669,7 @@ function logStepLabel(step) {
           <span class="gen-sep">&middot;</span>
           <span>~{{ story.result.value.estimated_duration }}s</span>
           <span class="gen-sep">&middot;</span>
-          <span>{{ styleLabel(story.result.value.story_category || story.result.value.preset_style || '') || story.result.value.story_category }}</span>
+          <span>{{ formatOptionLabel(story.result.value.story_category || story.result.value.preset_style || '') }}</span>
           <span class="gen-sep">&middot;</span>
           <span class="gen-result-muted">{{ (story.result.value.generation_time || 0).toFixed(1) }}s gen</span>
         </div>
@@ -505,27 +720,6 @@ function logStepLabel(step) {
           >
         </div>
         <div class="control-group">
-          <label class="control-label">Style</label>
-          <div class="style-dropdown" :class="{ open: openDropdown === 'style' }">
-            <button class="style-dropdown-trigger input-field control-select" @click="toggleDropdown('style')">
-              <span class="style-dropdown-dot" :style="{ background: styleColor(style) }"></span>
-              <span class="style-dropdown-label">{{ styleLabel(style) || 'Select style' }}</span>
-              <svg class="style-dropdown-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
-            <div v-show="openDropdown === 'style'" class="style-dropdown-menu">
-              <div
-                v-for="t in templates" :key="t.id"
-                class="style-dropdown-item" :class="{ selected: t.id === style }"
-                :style="t.id === style ? { background: t.color + '18', borderColor: t.color } : {}"
-                @click="selectFromDropdown('style', t.id)"
-              >
-                <span class="style-dropdown-dot" :style="{ background: t.color }"></span>
-                <span class="style-dropdown-item-label">{{ t.name }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="control-group">
           <label class="control-label">Run Until</label>
           <select v-model="stopAfter" class="input-field control-select control-select--sm">
             <option value="">All steps (→ Export)</option>
@@ -548,7 +742,7 @@ function logStepLabel(step) {
 
       <!-- Action row -->
       <div class="action-row">
-        <button class="run-btn" :class="{ 'run-btn--disabled': !canRun }" :disabled="!canRun" @click="start">
+        <button class="run-btn" :class="{ 'run-btn--disabled': !canRun }" :disabled="!canRun" @click="handleRunPipeline">
           <span class="run-icon" aria-hidden="true">
             <svg v-if="!running" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>
@@ -557,7 +751,7 @@ function logStepLabel(step) {
               <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
             </svg>
           </span>
-          <span class="run-label">{{ stopping ? 'Stopping...' : running ? 'Running...' : 'Run Pipeline' }}</span>
+          <span class="run-label">{{ runLabel }}</span>
         </button>
         <!-- Retry button — appears when pipeline failed -->
         <button
@@ -570,7 +764,7 @@ function logStepLabel(step) {
           </svg>
           Retry from {{ failedStep }}
         </button>
-        <span v-if="!text.trim() && !running && globalStatus !== 'error'" class="run-hint">{{ sourceMode === 'generate' ? 'Generate a story or type text to get started' : 'Paste text or click Random to get started' }}</span>
+        <span v-if="(!text.trim() || shouldGenerateBeforeRun) && !running && globalStatus !== 'error'" class="run-hint">{{ runHintText }}</span>
       </div>
     </section>
 
@@ -1083,8 +1277,127 @@ function logStepLabel(step) {
 }
 
 /* ---- Generate Mode ---- */
+.creative-panel {
+  margin: 12px 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(78, 205, 196, 0.12);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(78, 205, 196, 0.05), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+}
+
+.creative-panel-header {
+  margin-bottom: 10px;
+}
+
+.creative-copy {
+  min-width: 0;
+}
+
+.creative-kicker {
+  display: inline-block;
+  margin-bottom: 5px;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.creative-title {
+  margin: 0 0 3px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.creative-note {
+  margin: 0;
+  max-width: 560px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.creative-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.creative-group {
+  min-width: 0;
+}
+
+.creative-group--style {
+  grid-column: span 1;
+}
+
+.creative-trigger {
+  min-height: 38px;
+}
+
+.creative-detail {
+  margin: 6px 0 0;
+  min-height: 16px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .source-generate {
   margin-bottom: 10px;
+}
+
+.story-generator-panel {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.story-generator-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.generate-first-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.generate-first-check {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.generate-first-text {
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.story-generator-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .gen-form {
@@ -1184,6 +1497,7 @@ function logStepLabel(step) {
   display: flex;
   align-items: flex-end;
   gap: 14px;
+  flex-wrap: wrap;
 }
 .controls-strip-label {
   display: block;
@@ -1306,6 +1620,37 @@ function logStepLabel(step) {
   font-weight: 500;
   color: var(--text);
   white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .creative-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .creative-grid,
+  .gen-form,
+  .controls-strip {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .gen-group--action,
+  .control-group--auto {
+    margin-left: 0;
+    align-self: stretch;
+  }
+
+  .story-generator-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .generate-first-toggle {
+    width: fit-content;
+  }
 }
 
 /* ---- Auto-scenes ---- */

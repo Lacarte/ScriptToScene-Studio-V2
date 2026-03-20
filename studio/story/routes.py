@@ -32,6 +32,7 @@ from studio.story.prompts import (
 )
 from studio.story.engine import parse_story_sections
 from studio.scenes.templates import SCENE_STYLE_TEMPLATES
+from studio.niches.presets import CATEGORIES as NICHE_CATEGORIES
 
 story_bp = Blueprint("story", __name__)
 
@@ -140,7 +141,7 @@ def get_webhook_url():
 @story_bp.route("/api/story/categories")
 def get_categories():
     """Return available story categories."""
-    return jsonify(STORY_CATEGORIES)
+    return jsonify(list(dict.fromkeys([*STORY_CATEGORIES, *NICHE_CATEGORIES])))
 
 
 @story_bp.route("/api/story/generate", methods=["POST"])
@@ -163,6 +164,7 @@ def generate_story(data: StoryGenerateRequest):
 
     system_prompt = build_story_system_prompt(
         data.preset_style, data.story_category, data.duration, data.language,
+        story_tone=data.story_tone,
     )
     user_prompt = build_story_user_prompt(
         data.preset_style, data.story_category, data.duration, data.language,
@@ -174,6 +176,7 @@ def generate_story(data: StoryGenerateRequest):
         "user_prompt": user_prompt,
         "preset_style": data.preset_style,
         "story_category": data.story_category,
+        "story_tone": data.story_tone,
         "duration": data.duration,
         "language": data.language,
         "word_target": word_target,
@@ -219,6 +222,7 @@ def generate_story(data: StoryGenerateRequest):
             "estimated_duration": estimated_duration,
             "language": data.language,
             "story_category": data.story_category,
+            "story_tone": data.story_tone,
             "preset_style": data.preset_style,
             "provider": "gemini",
             "word_count": parsed["word_count"],
@@ -235,6 +239,7 @@ def generate_story(data: StoryGenerateRequest):
                 "preset_style": data.preset_style,
                 "language": data.language,
                 "story_category": data.story_category,
+                "story_tone": data.story_tone,
                 "duration": data.duration,
                 "word_count": parsed["word_count"],
                 "estimated_duration": estimated_duration,

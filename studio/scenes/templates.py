@@ -9,6 +9,8 @@ from studio.scenes.style_compiler import enrich_templates
 SCENE_STYLE_TEMPLATES = [
     {
         "id": "cinematic",
+        "type": "visual",
+        "category": None,
         "name": "Cinematic Realistic",
         "description": "Photorealistic, dramatic lighting, film grain",
         "color": "#4ECDC4",
@@ -23,6 +25,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "dark_horror",
+        "type": "hybrid",
+        "category": "horror",
         "name": "Dark / Horror",
         "description": "Eerie shadows, desaturated tones, unsettling atmosphere",
         "color": "#FF6B6B",
@@ -37,6 +41,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "reddit_story",
+        "type": "hybrid",
+        "category": "anecdote",
         "name": "Reddit Story",
         "description": "Everyday realism, relatable settings, subtle tension",
         "color": "#FF8A50",
@@ -52,6 +58,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "motivational",
+        "type": "hybrid",
+        "category": "motivation",
         "name": "Motivational",
         "description": "Bright, uplifting, high-contrast inspirational visuals",
         "color": "#FFD93D",
@@ -66,6 +74,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "nature_doc",
+        "type": "hybrid",
+        "category": "nature",
         "name": "Nature Documentary",
         "description": "BBC Earth aesthetics, macro detail, sweeping landscapes",
         "color": "#26DE81",
@@ -81,6 +91,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "anime",
+        "type": "visual",
+        "category": None,
         "name": "Anime / Manga",
         "description": "Japanese animation style, vivid colors, expressive characters",
         "color": "#A78BFA",
@@ -96,6 +108,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "surreal",
+        "type": "visual",
+        "category": None,
         "name": "Surreal / Dreamlike",
         "description": "Impossible geometry, floating objects, otherworldly scenes",
         "color": "#E879F9",
@@ -111,6 +125,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "noir",
+        "type": "visual",
+        "category": None,
         "name": "Noir / Mystery",
         "description": "High contrast B&W, venetian blinds, smoky atmosphere",
         "color": "#94A3B8",
@@ -125,6 +141,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "minimal",
+        "type": "visual",
+        "category": None,
         "name": "Minimalist",
         "description": "Clean compositions, negative space, simple shapes",
         "color": "#6B7F93",
@@ -140,6 +158,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "cyberpunk",
+        "type": "visual",
+        "category": None,
         "name": "Cyberpunk / Neon",
         "description": "Neon-soaked streets, futuristic tech, rain-slicked chrome",
         "color": "#00FFF7",
@@ -155,6 +175,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "vintage_retro",
+        "type": "visual",
+        "category": None,
         "name": "Vintage / Retro",
         "description": "70s-80s film stock, warm faded tones, analog nostalgia",
         "color": "#D4A574",
@@ -170,6 +192,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "fantasy_epic",
+        "type": "visual",
+        "category": None,
         "name": "Fantasy / Epic",
         "description": "Mythical worlds, dragons, castles, enchanted landscapes",
         "color": "#C084FC",
@@ -185,6 +209,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "sci_fi",
+        "type": "visual",
+        "category": None,
         "name": "Sci-Fi / Space",
         "description": "Spaceships, alien worlds, futuristic technology, cosmic scale",
         "color": "#38BDF8",
@@ -200,6 +226,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "watercolor",
+        "type": "visual",
+        "category": None,
         "name": "Watercolor / Painted",
         "description": "Soft washes, visible brushstrokes, artistic illustration",
         "color": "#FB923C",
@@ -215,6 +243,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "comic_book",
+        "type": "visual",
+        "category": None,
         "name": "Comic Book / Pop Art",
         "description": "Bold outlines, halftone dots, vibrant flat colors, action panels",
         "color": "#EF4444",
@@ -230,6 +260,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "gothic",
+        "type": "visual",
+        "category": None,
         "name": "Gothic / Victorian",
         "description": "Dark elegance, ornate architecture, candlelit atmosphere",
         "color": "#7C3AED",
@@ -245,6 +277,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "vaporwave",
+        "type": "visual",
+        "category": None,
         "name": "Vaporwave / Aesthetic",
         "description": "Pastel grids, retro-futurism, glitch art, digital nostalgia",
         "color": "#F472B6",
@@ -260,6 +294,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "documentary",
+        "type": "hybrid",
+        "category": "history",
         "name": "Documentary / Journalism",
         "description": "Raw authenticity, photojournalistic, handheld camera feel",
         "color": "#78716C",
@@ -276,6 +312,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "3d_render",
+        "type": "visual",
+        "category": None,
         "name": "3D Render / CGI",
         "description": "Clean 3D renders, soft studio lighting, Pixar-quality",
         "color": "#2DD4BF",
@@ -292,6 +330,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "dark_academia",
+        "type": "visual",
+        "category": None,
         "name": "Dark Academia",
         "description": "Old libraries, warm lamplight, scholarly atmosphere, autumn tones",
         "color": "#92400E",
@@ -308,6 +348,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "tropical",
+        "type": "visual",
+        "category": None,
         "name": "Tropical / Paradise",
         "description": "Lush jungles, turquoise waters, golden sunsets, vivid flora",
         "color": "#10B981",
@@ -324,6 +366,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "urban_street",
+        "type": "visual",
+        "category": None,
         "name": "Urban / Street",
         "description": "City grit, graffiti walls, street photography, raw energy",
         "color": "#F59E0B",
@@ -340,6 +384,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "dark_psychology",
+        "type": "topical",
+        "category": "psychology",
         "name": "Dark Psychology",
         "description": "Manipulation, mind games, shadowy figures, psychological tension",
         "color": "#6D28D9",
@@ -356,6 +402,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "religion_spiritual",
+        "type": "topical",
+        "category": "religion",
         "name": "Religion / Spiritual",
         "description": "Sacred imagery, divine light, temples, spiritual transcendence",
         "color": "#D4AF37",
@@ -372,6 +420,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "politics_power",
+        "type": "topical",
+        "category": "politics",
         "name": "Politics / Power",
         "description": "Podiums, crowds, propaganda, power dynamics, civic drama",
         "color": "#DC2626",
@@ -388,6 +438,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "true_crime",
+        "type": "topical",
+        "category": "crime",
         "name": "True Crime",
         "description": "Evidence boards, cold cases, forensic detail, investigative tension",
         "color": "#991B1B",
@@ -404,6 +456,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "conspiracy",
+        "type": "topical",
+        "category": "mystery",
         "name": "Conspiracy / Occult",
         "description": "Secret societies, hidden symbols, shadowy agendas, forbidden knowledge",
         "color": "#4A1D96",
@@ -420,6 +474,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "stoicism",
+        "type": "topical",
+        "category": "philosophy",
         "name": "Stoicism / Philosophy",
         "description": "Ancient wisdom, marble busts, contemplation, timeless truths",
         "color": "#78716C",
@@ -436,6 +492,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "wealth_luxury",
+        "type": "topical",
+        "category": "motivation",
         "name": "Wealth / Luxury",
         "description": "Opulence, designer interiors, supercars, gold accents, high life",
         "color": "#B8860B",
@@ -452,6 +510,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "mythology",
+        "type": "topical",
+        "category": "history",
         "name": "Mythology / Legends",
         "description": "Gods, heroes, mythical beasts, ancient epics, divine warfare",
         "color": "#CA8A04",
@@ -468,6 +528,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "children_storybook",
+        "type": "hybrid",
+        "category": "children",
         "name": "Children's Storybook",
         "description": "Whimsical characters, soft pastels, magical worlds, bedtime warmth",
         "color": "#F9A8D4",
@@ -484,6 +546,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "war_military",
+        "type": "hybrid",
+        "category": "history",
         "name": "War / Military",
         "description": "Battlefields, soldiers, strategy rooms, grit and sacrifice",
         "color": "#4B5320",
@@ -500,6 +564,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "stickman_animation",
+        "type": "visual",
+        "category": None,
         "name": "Stickman Animation",
         "description": "Stick figures, whiteboard doodles, simple line art, playful sketches",
         "color": "#E5E7EB",
@@ -517,6 +583,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "two_choices",
+        "type": "hybrid",
+        "category": "psychology",
         "name": "Two Things Can Happen",
         "description": "Branching choices, split-screen fates, \"what if\" storytelling",
         "color": "#F97316",
@@ -536,6 +604,8 @@ SCENE_STYLE_TEMPLATES = [
     },
     {
         "id": "lofi_pixel",
+        "type": "visual",
+        "category": None,
         "name": "Lo-Fi Cozy Pixel",
         "description": "Low-resolution pixel art, cozy scenes, retro game aesthetics, warm nostalgia",
         "color": "#7DD3FC",

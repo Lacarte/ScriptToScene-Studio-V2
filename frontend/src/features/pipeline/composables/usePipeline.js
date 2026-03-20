@@ -100,6 +100,17 @@ const autoScenes = ref(true)
 const stopAfter = ref('')  // '', 'tts', 'timing', 'segment'
 const templates = ref([])
 
+// ── Niche system state ──
+const nichePreset = ref(localStorage.getItem('sts-niche-preset') || '')
+const visualStyle = ref(localStorage.getItem('sts-visual-style') || '')
+const storyTone = ref(localStorage.getItem('sts-story-tone') || '')
+const nicheCategory = ref(localStorage.getItem('sts-niche-category') || '')
+const nichePresets = ref({})
+const storyTones = ref({})
+const nicheCategories = ref([])
+const visualStyles = ref([])
+const nichesLoaded = ref(false)
+
 const running = ref(false)
 const stopping = ref(false)
 const jobId = ref(null)
@@ -166,6 +177,127 @@ function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
   } catch {}
 }
 
+// ── Niche helpers ──
+
+function persistNicheState() {
+  const entries = [
+    ['sts-niche-preset', nichePreset.value],
+    ['sts-visual-style', visualStyle.value],
+    ['sts-story-tone', storyTone.value],
+    ['sts-niche-category', nicheCategory.value],
+  ]
+  for (const [key, value] of entries) {
+    if (value) localStorage.setItem(key, value)
+    else localStorage.removeItem(key)
+  }
+}
+
+function setVisualStyleOverride(styleId) {
+  visualStyle.value = styleId || ''
+  if (styleId) style.value = styleId
+  persistNicheState()
+}
+
+function setStoryTone(toneId) {
+  storyTone.value = toneId || ''
+  persistNicheState()
+}
+
+function setNicheCategory(categoryId) {
+  nicheCategory.value = categoryId || ''
+  persistNicheState()
+}
+
+function selectNiche(preset) {
+  nichePreset.value = preset.id || ''
+  visualStyle.value = preset.visual_style || ''
+  storyTone.value = preset.story_tone || ''
+  nicheCategory.value = preset.category || ''
+  voice.value = preset.voice || voice.value
+  speed.value = preset.speed || speed.value
+  // Sync legacy style field to visual_style for backward compat
+  style.value = preset.visual_style || style.value
+  persistNicheState()
+}
+
+function clearNiche() {
+  nichePreset.value = ''
+  visualStyle.value = ''
+  storyTone.value = ''
+  nicheCategory.value = ''
+  persistNicheState()
+}
+
+async function loadNiches() {
+  if (nichesLoaded.value) return
+  try {
+    const data = await api.get('/api/niches')
+    nichePresets.value = data.presets || {}
+    storyTones.value = data.story_tones || {}
+    nicheCategories.value = data.categories || []
+    visualStyles.value = data.visual_styles || []
+    nichesLoaded.value = true
+
+    if (nichePreset.value && nichePresets.value[nichePreset.value]) {
+      const preset = nichePresets.value[nichePreset.value]
+      if (!visualStyle.value) visualStyle.value = preset.visual_style || ''
+      if (!storyTone.value) storyTone.value = preset.story_tone || ''
+      if (!nicheCategory.value) nicheCategory.value = preset.category || ''
+      if (!style.value && preset.visual_style) style.value = preset.visual_style
+    } else if (nichePreset.value) {
+      clearNiche()
+    }
+
+    if (visualStyle.value && !visualStyles.value.some(v => v.id === visualStyle.value)) {
+      visualStyle.value = ''
+    }
+    if (storyTone.value && !Object.prototype.hasOwnProperty.call(storyTones.value, storyTone.value)) {
+      storyTone.value = ''
+    }
+    if (nicheCategory.value && !nicheCategories.value.includes(nicheCategory.value)) {
+      nicheCategory.value = ''
+    }
+    persistNicheState()
+  } catch (e) {
+    console.warn('[Pipeline] Failed to load niches:', e.message)
+  }
+}
+
+async function saveNichePreset(presetData) {
+  try {
+    const res = await api.post('/api/niches', { body: presetData })
+    nichePresets.value = res.presets || {}
+    const savedId = res.saved_id || presetData.id
+    const savedPreset = nichePresets.value[savedId]
+    if (savedPreset) selectNiche({ id: savedId, ...savedPreset })
+    return { ok: true, savedId }
+  } catch (e) {
+    console.warn('[Pipeline] Failed to save niche:', e.message)
+    return { ok: false, error: e.message || 'Failed to save niche' }
+  }
+}
+
+async function deleteNichePreset(presetId) {
+  try {
+    const res = await api.delete(`/api/niches/${presetId}`)
+    nichePresets.value = res.presets || {}
+    if (nichePreset.value === presetId) clearNiche()
+    return { ok: true }
+  } catch (e) {
+    console.warn('[Pipeline] Failed to delete niche:', e.message)
+    return { ok: false, error: e.message || 'Failed to delete niche' }
+  }
+}
+
+function _buildNicheConfig() {
+  const cfg = {}
+  if (nichePreset.value) cfg.niche_preset = nichePreset.value
+  if (visualStyle.value || style.value) cfg.visual_style = visualStyle.value || style.value
+  if (storyTone.value) cfg.story_tone = storyTone.value
+  if (nicheCategory.value) cfg.category = nicheCategory.value
+  return cfg
+}
+
 // ── Actions ──
 
 async function start() {
@@ -190,6 +322,7 @@ async function start() {
     voice: voice.value,
     speed: speed.value,
     style: style.value,
+    ..._buildNicheConfig(),
     auto_scenes: autoScenes.value,
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
@@ -334,11 +467,19 @@ function loadFromHistory(index) {
   if (j.text) text.value = j.text
   if (j.voice) voice.value = j.voice
   if (j.speed) speed.value = j.speed
+  if (j.niche_preset && nichePresets.value[j.niche_preset]) {
+    selectNiche({ id: j.niche_preset, ...nichePresets.value[j.niche_preset] })
+  } else {
+    clearNiche()
+  }
   if (j.style) {
     const tmpl = templates.value.find(t => t.id === j.style)
     if (tmpl) style.value = tmpl.id
     else style.value = j.style
   }
+  if (j.visual_style || j.style) setVisualStyleOverride(j.visual_style || j.style)
+  if (Object.prototype.hasOwnProperty.call(j, 'story_tone')) setStoryTone(j.story_tone || '')
+  if (Object.prototype.hasOwnProperty.call(j, 'category')) setNicheCategory(j.category || '')
   // Restore pipeline settings from step_statuses if available
   if (j.stop_after !== undefined) stopAfter.value = j.stop_after || ''
   if (j.auto_scenes !== undefined) autoScenes.value = j.auto_scenes
@@ -449,6 +590,7 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     voice: voice.value,
     speed: speed.value,
     style: style.value,
+    ..._buildNicheConfig(),
     auto_scenes: autoScenes.value,
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
@@ -542,6 +684,9 @@ async function init() {
     }
   }
 
+  // Load niche presets
+  await loadNiches()
+
   await loadHistory()
 }
 
@@ -582,6 +727,17 @@ export function usePipeline() {
     stoppedStep: readonly(stoppedStep),
     stoppedProjectId: readonly(stoppedProjectId),
 
+    // Niche state
+    nichePreset,
+    visualStyle,
+    storyTone,
+    nicheCategory,
+    nichePresets: readonly(nichePresets),
+    storyTones: readonly(storyTones),
+    nicheCategories: readonly(nicheCategories),
+    visualStyles: readonly(visualStyles),
+    nichesLoaded: readonly(nichesLoaded),
+
     // Actions
     start,
     stop,
@@ -592,6 +748,13 @@ export function usePipeline() {
     loadFromHistory,
     randomStory,
     resetProgress,
+    selectNiche,
+    clearNiche,
+    saveNichePreset,
+    deleteNichePreset,
+    setVisualStyleOverride,
+    setStoryTone,
+    setNicheCategory,
     init,
 
     // Helpers

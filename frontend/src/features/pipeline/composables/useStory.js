@@ -50,13 +50,20 @@ async function initStory() {
 
   // Restore saved form values
   const savedCat = localStorage.getItem('sts-story-category')
-  if (savedCat) storyCategory.value = savedCat
+  if (savedCat && categories.value.includes(savedCat)) {
+    storyCategory.value = savedCat
+  } else if (savedCat) {
+    localStorage.removeItem('sts-story-category')
+  }
 
   const savedLang = localStorage.getItem('sts-story-language')
   if (savedLang) storyLanguage.value = savedLang
 
   const savedDur = localStorage.getItem('sts-story-duration')
-  if (savedDur) storyDuration.value = parseInt(savedDur) || 45
+  if (savedDur) {
+    const parsedDuration = parseInt(savedDur, 10)
+    storyDuration.value = Number.isFinite(parsedDuration) ? Math.min(180, Math.max(15, parsedDuration)) : 45
+  }
 
   await loadHistory()
 }
@@ -71,7 +78,7 @@ function resetWebhookUrl() {
   localStorage.removeItem('sts-story-webhook-url')
 }
 
-async function generateStory(styleOverride) {
+async function generateStory(styleOverride, { storyTone } = {}) {
   const url = webhookUrl.value?.trim()
   if (!url) throw new Error('No story webhook URL configured')
 
@@ -91,6 +98,7 @@ async function generateStory(styleOverride) {
       duration: storyDuration.value,
       language: storyLanguage.value,
       webhook_url: url,
+      ...(storyTone ? { story_tone: storyTone } : {}),
     }
 
     const data = await api.post('/api/story/generate', {

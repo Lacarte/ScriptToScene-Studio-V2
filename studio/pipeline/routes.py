@@ -146,6 +146,10 @@ def run_pipeline(data: PipelineRunRequest):
         "voice": data.voice,
         "speed": data.speed,
         "style": data.style,
+        "niche_preset": data.niche_preset,
+        "visual_style": data.visual_style,
+        "story_tone": data.story_tone,
+        "category": data.category,
         "style_prompt": data.custom_style_notes or data.style_prompt,
         "segment_config": data.segment_config,
         "webhook_url": data.webhook_url,
@@ -161,6 +165,16 @@ def run_pipeline(data: PipelineRunRequest):
         "grok_quality": data.grok_quality,
         "grok_duration": data.grok_duration,
     }
+
+    from studio.niches.presets import resolve_niche as _resolve_niche
+    resolved_niche = _resolve_niche(config)
+    config["style"] = resolved_niche["visual_style"]
+    config["visual_style"] = resolved_niche["visual_style"]
+    config["story_tone"] = resolved_niche["story_tone"]
+    config["category"] = resolved_niche["category"]
+    config["niche"] = resolved_niche["niche"]
+    config["voice"] = resolved_niche["voice"]
+    config["speed"] = resolved_niche["speed"]
 
     # Compute which steps will run
     all_steps = ALL_PIPELINE_STEPS
@@ -296,6 +310,11 @@ def list_jobs():
                     "voice": cfg.get("voice", "af_heart"),
                     "speed": cfg.get("speed", 1.0),
                     "style": cfg.get("style", ""),
+                    "niche_preset": cfg.get("niche_preset", ""),
+                    "visual_style": cfg.get("visual_style", ""),
+                    "story_tone": cfg.get("story_tone", ""),
+                    "category": cfg.get("category", ""),
+                    "niche": cfg.get("niche", ""),
                     "provider": cfg.get("provider", "grok"),
                     "stop_after": cfg.get("stop_after") or "",
                     "auto_scenes": cfg.get("auto_scenes", True),
@@ -369,6 +388,11 @@ def list_jobs():
                 "voice": cfg.get("voice", "af_heart"),
                 "speed": cfg.get("speed", 1.0),
                 "style": cfg.get("style", ""),
+                "niche_preset": cfg.get("niche_preset", ""),
+                "visual_style": cfg.get("visual_style", ""),
+                "story_tone": cfg.get("story_tone", ""),
+                "category": cfg.get("category", ""),
+                "niche": cfg.get("niche", ""),
                 "provider": cfg.get("provider", "grok"),
                 "stop_after": cfg.get("stop_after") or "",
                 "auto_scenes": cfg.get("auto_scenes", True),
@@ -503,6 +527,11 @@ def _save_pipeline_json(project_id, job_id, config, status, step_statuses,
             "voice": config.get("voice", "af_heart"),
             "speed": config.get("speed", 1.0),
             "style": config.get("style", "cinematic"),
+            "niche_preset": config.get("niche_preset"),
+            "visual_style": config.get("visual_style"),
+            "story_tone": config.get("story_tone"),
+            "category": config.get("category"),
+            "niche": config.get("niche"),
             "provider": config.get("provider", "grok"),
             "auto_scenes": config.get("auto_scenes", True),
             "stop_after": config.get("stop_after") or None,
@@ -1124,8 +1153,11 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
 
     webhook_url = config.get("webhook_url") or N8N_WEBHOOK_URL
     script = config.get("text", "")
-    style_id = config.get("style", "cinematic")
     custom_style_notes = config.get("style_prompt", "") or ""
+    # Resolve visual_style via niche system (falls back to legacy "style" field)
+    from studio.niches.presets import resolve_niche as _resolve_niche
+    _resolved = _resolve_niche(config)
+    style_id = _resolved["visual_style"]
     bundle = resolve_template_bundle(style_id, TEMPLATES_BY_ID, custom_style_notes)
     planning_segments = [
         {**s, "index": i}

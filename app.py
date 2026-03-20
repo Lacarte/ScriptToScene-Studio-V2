@@ -63,6 +63,7 @@ from studio.captions import captions_bp
 from studio.music import music_bp
 from studio.thumbnails import thumbnails_bp
 from studio.story import story_bp
+from studio.niches import niches_bp
 app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
@@ -74,6 +75,7 @@ app.register_blueprint(captions_bp)
 app.register_blueprint(music_bp)
 app.register_blueprint(thumbnails_bp)
 app.register_blueprint(story_bp)
+app.register_blueprint(niches_bp)
 
 
 # ---------------------------------------------------------------------------

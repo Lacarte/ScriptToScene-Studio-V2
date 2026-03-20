@@ -35,6 +35,7 @@ def build_story_system_prompt(
     story_category: str,
     duration: int,
     language: str,
+    story_tone: str = None,
 ) -> str:
     """Build the system prompt for the LLM story generation call."""
     word_target = compute_word_target(duration)
@@ -44,10 +45,19 @@ def build_story_system_prompt(
     style_name = template.get("name", preset_style)
     style_desc = template.get("description", "")
 
+    # Resolve story tone (from niche system)
+    tone_line = ""
+    if story_tone:
+        from studio.niches.presets import STORY_TONES
+        tone_desc = STORY_TONES.get(story_tone, "")
+        if tone_desc:
+            tone_line = f"NARRATION TONE: {story_tone} — {tone_desc}\n"
+
     return (
         f"You are a viral short-form content writer specializing in {story_category} stories.\n"
         f"Your stories are designed for {duration}-second spoken narration videos.\n\n"
         f"VISUAL STYLE: {style_name} — {style_desc}\n"
+        f"{tone_line}"
         f"Match the emotional tone and vocabulary to this visual style.\n\n"
         f"Write in {language}. Target approximately {word_target} words total.\n\n"
         "OUTPUT STRUCTURE (mandatory — use these exact labels):\n"

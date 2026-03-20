@@ -2,9 +2,18 @@
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from studio.niches.presets import (
+    CATEGORIES as NICHE_CATEGORIES,
+    is_known_template,
+    is_valid_story_tone,
+    normalize_story_tone,
+)
+from studio.story.prompts import STORY_CATEGORIES
 
 SUPPORTED_LANGUAGES = ("english", "french", "spanish")
+VALID_STORY_CATEGORIES = tuple(dict.fromkeys([*STORY_CATEGORIES, *NICHE_CATEGORIES]))
 
 
 class StoryGenerateRequest(BaseModel):
@@ -13,6 +22,23 @@ class StoryGenerateRequest(BaseModel):
     story_category: str = "motivation"
     duration: int = Field(default=45, ge=15, le=180)
     language: Literal["english", "french", "spanish"] = "english"
+    story_tone: Optional[str] = None
     webhook_url: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _normalize_fields(self):
+        self.project_name_id = (self.project_name_id or "").strip() or None
+        self.preset_style = (self.preset_style or "").strip()
+        self.story_category = (self.story_category or "").strip().lower()
+        self.story_tone = normalize_story_tone(self.story_tone) or None
+        self.webhook_url = (self.webhook_url or "").strip() or None
+
+        if not is_known_template(self.preset_style):
+            raise ValueError(f"Unknown preset_style '{self.preset_style}'")
+        if self.story_category not in VALID_STORY_CATEGORIES:
+            raise ValueError(f"Unknown story_category '{self.story_category}'")
+        if self.story_tone and not is_valid_story_tone(self.story_tone):
+            raise ValueError(f"Unknown story_tone '{self.story_tone}'")
+        return self
 
     model_config = {"extra": "allow"}
