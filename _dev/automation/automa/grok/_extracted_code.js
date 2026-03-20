@@ -945,6 +945,14 @@ function resetTypingItem(item) {
   item.errorCount = 0;
   delete item.videoUrl;
   delete item.allVideoUrls;
+  delete S.sentScenes[item.scene];
+  var sc = S.scenes[item.scene];
+  if (sc) {
+    sc.status = 'pending';
+    sc.urls = [];
+    sc.fileCount = 0;
+    delete sc.previewUrl;
+  }
   return true;
 }
 
@@ -1401,7 +1409,17 @@ async function startTyping() {
   S.typing.stopRequested = false;
   S.typing.autoPaused = false;
   requeueTypingItems(['error', 'failed']);
-  const runItems = getSelectedTypingItems().filter(function(item) { return item.status !== 'typed'; });
+  let runItems = getSelectedTypingItems().filter(function(item) { return item.status !== 'typed'; });
+  if (!runItems.length) {
+    const rerunCount = getSelectedTypingItems().reduce(function(count, item) {
+      if (item.status !== 'typed') return count;
+      return resetTypingItem(item) ? count + 1 : count;
+    }, 0);
+    if (rerunCount) {
+      console.log('Re-queued', rerunCount, 'typed prompt(s) for re-run');
+      runItems = getSelectedTypingItems().filter(function(item) { return item.status !== 'typed'; });
+    }
+  }
   if (!runItems.length) {
     S.typing.starting = false;
     console.log('All checked prompts are already typed');
@@ -2678,5 +2696,4 @@ renderAutoType();
 })();
 
 automaNextBlock();
-
 
