@@ -1,4 +1,4 @@
-import { ref, readonly } from 'vue'
+import { ref, readonly, watch } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
@@ -97,7 +97,11 @@ const voice = ref('af_heart')
 const speed = ref(1.0)
 const style = ref('cinematic')
 const autoScenes = ref(true)
-const stopAfter = ref('')  // '', 'tts', 'timing', 'segment'
+const stopAfter = ref(localStorage.getItem('sts-pipeline-stop-after') || '')
+watch(stopAfter, (v) => {
+  if (v) localStorage.setItem('sts-pipeline-stop-after', v)
+  else localStorage.removeItem('sts-pipeline-stop-after')
+})
 const templates = ref([])
 
 // ── Niche system state ──

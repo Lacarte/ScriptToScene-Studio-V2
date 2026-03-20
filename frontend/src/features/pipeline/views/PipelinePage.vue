@@ -310,6 +310,7 @@ watch(globalStatus, (status) => {
       scenes: '/scenes',
       assets: '/assets',
       assemble: '/editor',
+      export: '/export-library',
     }
     const dest = destinations[stop] || '/export-library'
     const query = { project: pid }

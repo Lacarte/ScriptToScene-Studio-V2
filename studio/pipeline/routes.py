@@ -749,6 +749,9 @@ def _run_pipeline(job_id):
             })
         if stop_after == "tts":
             logger.info("[{}] Pipeline stopped after TTS (stop_after=tts)", project_id)
+            step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+            _save_pipeline_json(project_id, job_id, config, "done",
+                                job.get("step_statuses", {}), step_timings)
             _emit_done(job_id, project_id, results)
             return
 
@@ -773,6 +776,9 @@ def _run_pipeline(job_id):
             })
         if stop_after == "timing":
             logger.info("[{}] Pipeline stopped after Alignment (stop_after=timing)", project_id)
+            step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+            _save_pipeline_json(project_id, job_id, config, "done",
+                                job.get("step_statuses", {}), step_timings)
             _emit_done(job_id, project_id, results)
             return
 
@@ -798,6 +804,9 @@ def _run_pipeline(job_id):
             })
         if stop_after == "segment":
             logger.info("[{}] Pipeline stopped after Segment (stop_after=segment)", project_id)
+            step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+            _save_pipeline_json(project_id, job_id, config, "done",
+                                job.get("step_statuses", {}), step_timings)
             _emit_done(job_id, project_id, results)
             return
 
@@ -828,6 +837,9 @@ def _run_pipeline(job_id):
 
         if stop_after == "scenes":
             logger.info("[{}] Pipeline stopped after Scenes (stop_after=scenes)", project_id)
+            step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+            _save_pipeline_json(project_id, job_id, config, "done",
+                                job.get("step_statuses", {}), step_timings)
             _emit_done(job_id, project_id, results)
             return
 
@@ -857,6 +869,9 @@ def _run_pipeline(job_id):
         })
         if stop_after == "assets":
             logger.info("[{}] Pipeline stopped after Assets (stop_after=assets)", project_id)
+            step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+            _save_pipeline_json(project_id, job_id, config, "done",
+                                job.get("step_statuses", {}), step_timings)
             _emit_done(job_id, project_id, results)
             return
 
@@ -880,6 +895,9 @@ def _run_pipeline(job_id):
         })
         if stop_after == "assemble":
             logger.info("[{}] Pipeline stopped after Assemble (stop_after=assemble)", project_id)
+            step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+            _save_pipeline_json(project_id, job_id, config, "done",
+                                job.get("step_statuses", {}), step_timings)
             _emit_done(job_id, project_id, results)
             return
 
