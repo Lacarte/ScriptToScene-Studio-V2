@@ -120,11 +120,15 @@ async function previewAudio() {
     if (cacheData.cached) {
       // Play cached WAV directly — instant playback
       previewLabel.value = 'Playing (cached)'
-      const audio = new Audio(`/api/tts/cache/${cacheData.key}?t=${Date.now()}`)
+      const audio = new Audio(`/api/tts/cache/${cacheData.key}`)
       _previewAudioEl = audio
-      audio.onended = () => stopPreview()
-      audio.onerror = () => { toast.error('Cached audio playback failed'); stopPreview() }
-      await audio.play()
+      // Wait for playback to finish OR user stop (pause event)
+      await new Promise((resolve, reject) => {
+        audio.onended = resolve
+        audio.onpause = resolve
+        audio.onerror = () => reject(new Error('Cached audio playback failed'))
+        audio.play().catch(reject)
+      })
       return
     }
 
@@ -881,7 +885,7 @@ function logStepLabel(step) {
                   {{ story.isGenerating.value ? 'Generating...' : 'Generate' }}
                 </button>
                 <button v-if="text.trim()" class="gen-story-btn gen-idea-btn" :disabled="story.isGenerating.value" @click="handleGenerateFromIdea" title="Use current text as idea seed for a new story">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m6.34 6.34 2.83 2.83"/><path d="M2 12h4"/><path d="m17.66 6.34-2.83 2.83"/><path d="M22 12h-4"/><circle cx="12" cy="12" r="4"/></svg>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 5 11.9V16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1v-2.1A7 7 0 0 1 12 2z"/><path d="M9 21h6"/><path d="M10 17v1"/><path d="M14 17v1"/></svg>
                   from Idea
                 </button>
               </div>
