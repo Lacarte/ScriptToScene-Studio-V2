@@ -8,7 +8,7 @@ const props = defineProps({ collapsed: Boolean })
 const emit = defineEmits(['toggle'])
 const route = useRoute()
 const { playingSource, stopAll } = useAudioRegistry()
-const { stepStatus, globalStatus } = usePipeline()
+const { stepStatus, globalStatus, stopAfter } = usePipeline()
 
 const audioPlaying = computed(() => !!playingSource.value)
 
@@ -21,15 +21,22 @@ function isActive(path) {
   return route.path === path
 }
 
+// Map stopAfter value → sidebar path for the target step
+const STOP_TO_PATH = {
+  tts: '/tts', timing: '/alignment', segment: '/segmenter', scenes: '/scenes',
+  assets: '/assets', assemble: '/editor', export: '/export-library',
+}
+
 // Reactive pipeline class map — recomputes whenever stepStatus or globalStatus changes
 const pipelineClasses = computed(() => {
   const classes = {}
   const status = globalStatus.value
   const steps = stepStatus.value
+  const targetPath = STOP_TO_PATH[stopAfter.value] || '/export-library'
 
   for (const [path, step] of Object.entries(PATH_TO_STEP)) {
     if (status === 'done') {
-      if (path === '/export-library') { classes[path] = 'pipeline-done'; continue }
+      if (path === targetPath) { classes[path] = 'pipeline-done'; continue }
       if (steps[step] === 'done') { classes[path] = 'pipeline-step-done'; continue }
     }
     if (status === 'running') {

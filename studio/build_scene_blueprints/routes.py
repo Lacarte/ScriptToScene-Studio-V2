@@ -229,7 +229,11 @@ def _apply_segmenter_timing(result, segments, full_segments=None):
         ordered_scenes.append(scene)
 
     result["scenes"] = ordered_scenes
-    result["total_duration"] = round(total_end, 3)
+    final_end = max(
+        (_coerce_float(scene.get("timeline_end")) or 0.0)
+        for scene in ordered_scenes
+    )
+    result["total_duration"] = round(max(total_end, final_end), 3)
 
 
 # ---------------------------------------------------------------------------

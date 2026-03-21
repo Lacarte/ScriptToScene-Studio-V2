@@ -14,7 +14,7 @@ from loguru import logger
 from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR, KIE_AI_MODEL
 from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import safe_json_write
-from studio.security import sanitize_project_id
+from studio.security import is_loopback_remote, sanitize_project_id
 from studio.validation import validate_json
 from .schemas import GrabberStartRequest
 from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
@@ -363,6 +363,9 @@ def _kie_ai_generate_all(project_id, job):
 @assets_bp.route("/api/assets/grabber/pending")
 def grabber_pending():
     """Return the most recent pending grabber payload for Automa to consume."""
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
+
     latest = None
     with grabber_jobs_lock:
         jobs_snapshot = list(grabber_jobs.values())
@@ -382,6 +385,9 @@ def grabber_pending():
 @assets_bp.route("/api/assets/grabber/results", methods=["POST"])
 def grabber_results():
     """Receive scraped image URLs from Automa and download them."""
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
+
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -484,6 +490,9 @@ def grabber_upload():
       ]
     }
     """
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
+
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -911,6 +920,9 @@ def get_asset_project(project_id):
 @assets_bp.route("/api/assets/open-folder/<project_id>/<int:scene_index>", methods=["POST"])
 def open_asset_scene_folder(project_id, scene_index):
     """Open a specific scene's asset folder in the OS file explorer."""
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
+
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
     folder = os.path.join(ASSETS_DIR, safe_id, str(scene_index))
     if not os.path.isdir(folder):

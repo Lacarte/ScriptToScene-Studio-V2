@@ -14,6 +14,7 @@ const error = ref('')
 const storyCategory = ref('motivation')
 const storyDuration = ref(45)
 const storyLanguage = ref('english')
+const storyLanguageLevel = ref('')
 const storyStyle = ref('cinematic')
 
 let initialized = false
@@ -22,6 +23,14 @@ const LANGUAGES = [
   { id: 'english', label: 'English' },
   { id: 'french', label: 'French' },
   { id: 'spanish', label: 'Spanish' },
+]
+
+const LANGUAGE_LEVELS = [
+  { id: '', label: 'Auto' },
+  { id: 'beginner', label: 'Beginner' },
+  { id: 'intermediate', label: 'Intermediate' },
+  { id: 'advanced', label: 'Advanced' },
+  { id: 'native', label: 'Native' },
 ]
 
 // ── Actions ──
@@ -59,6 +68,9 @@ async function initStory() {
   const savedLang = localStorage.getItem('sts-story-language')
   if (savedLang) storyLanguage.value = savedLang
 
+  const savedLevel = localStorage.getItem('sts-story-language-level')
+  if (savedLevel) storyLanguageLevel.value = savedLevel
+
   const savedDur = localStorage.getItem('sts-story-duration')
   if (savedDur) {
     const parsedDuration = parseInt(savedDur, 10)
@@ -89,6 +101,7 @@ async function generateStory(styleOverride, { storyTone, idea } = {}) {
   // Persist form selections
   localStorage.setItem('sts-story-category', storyCategory.value)
   localStorage.setItem('sts-story-language', storyLanguage.value)
+  localStorage.setItem('sts-story-language-level', storyLanguageLevel.value)
   localStorage.setItem('sts-story-duration', String(storyDuration.value))
 
   try {
@@ -97,6 +110,7 @@ async function generateStory(styleOverride, { storyTone, idea } = {}) {
       story_category: storyCategory.value,
       duration: storyDuration.value,
       language: storyLanguage.value,
+      ...(storyLanguageLevel.value ? { language_level: storyLanguageLevel.value } : {}),
       webhook_url: url,
       ...(storyTone ? { story_tone: storyTone } : {}),
       ...(idea ? { idea } : {}),
@@ -152,6 +166,7 @@ export function useStory() {
   return {
     // Constants
     LANGUAGES,
+    LANGUAGE_LEVELS,
 
     // State
     webhookUrl: readonly(webhookUrl),
@@ -166,6 +181,7 @@ export function useStory() {
     storyCategory,
     storyDuration,
     storyLanguage,
+    storyLanguageLevel,
     storyStyle,
 
     // Actions

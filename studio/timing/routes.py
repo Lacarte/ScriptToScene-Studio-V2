@@ -229,6 +229,17 @@ def align_and_segment():
     if ext not in (".wav", ".mp3", ".flac", ".ogg"):
         return jsonify({"error": f"Unsupported format: {ext}"}), 400
 
+    seg_config_str = request.form.get("segment_config", "")
+    if seg_config_str:
+        try:
+            seg_config = json.loads(seg_config_str)
+        except json.JSONDecodeError:
+            return jsonify({"error": "segment_config must be valid JSON"}), 400
+        if seg_config is not None and not isinstance(seg_config, dict):
+            return jsonify({"error": "segment_config must be a JSON object"}), 400
+    else:
+        seg_config = None
+
     project_id = generate_project_id("pm")
     folder_name = project_id
     job_dir = os.path.join(ALIGN_DIR, folder_name)
@@ -274,9 +285,6 @@ def align_and_segment():
         safe_json_write(os.path.join(job_dir, "alignment.json"), align_data, indent=2)
 
         # ── Segmentation ──
-        seg_config_str = request.form.get("segment_config", "")
-        seg_config = json.loads(seg_config_str) if seg_config_str else None
-
         seg_metadata = {
             "project_id": project_id,
             "source_folder": folder_name,

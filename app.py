@@ -118,6 +118,9 @@ def serve_app_assets(filename):
 @app.route("/api/restart", methods=["POST"])
 def restart_server():
     """Restart the Flask server process."""
+    if not is_loopback_remote(request.remote_addr):
+        return jsonify({"error": "Forbidden"}), 403
+
     def _restart():
         import time as _t
         _t.sleep(0.5)

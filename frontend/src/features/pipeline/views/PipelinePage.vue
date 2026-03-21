@@ -16,7 +16,7 @@ defineOptions({ name: 'PipelinePage' })
 
 const toast = useToast()
 const story = useStory()
-const generateBeforeRun = ref(localStorage.getItem('sts-pipeline-generate-before-run') !== 'false')
+const generateBeforeRun = ref(localStorage.getItem('sts-pipeline-generate-before-run') === 'true')
 
 // Source mode: 'manual' (paste/random) or 'generate' (AI story)
 const sourceMode = ref(localStorage.getItem('sts-pipeline-source-mode') || 'manual')
@@ -871,6 +871,12 @@ function logStepLabel(step) {
             <label class="control-label">Language</label>
             <select v-model="story.storyLanguage.value" class="input-field control-select">
               <option v-for="lang in story.LANGUAGES" :key="lang.id" :value="lang.id">{{ lang.label }}</option>
+            </select>
+            </div>
+            <div class="gen-group">
+            <label class="control-label">Level</label>
+            <select v-model="story.storyLanguageLevel.value" class="input-field control-select">
+              <option v-for="lvl in story.LANGUAGE_LEVELS" :key="lvl.id" :value="lvl.id">{{ lvl.label }}</option>
             </select>
             </div>
             <div class="gen-group">

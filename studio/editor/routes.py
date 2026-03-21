@@ -543,7 +543,7 @@ def editor_list_projects():
                 "preview": preview,
             })
         except Exception as error:
-            logger.debug("Skipping project manifest {}: {}", json_path, error)
+            logger.debug("Skipping project manifest {}: {}", fpath, error)
 
     if os.path.isdir(PROJECTS_DIR):
         for entry in os.listdir(PROJECTS_DIR):
@@ -588,7 +588,7 @@ def _discover_projects() -> list[dict]:
                     "asset_count": 0,
                 }
             except Exception as error:
-                logger.debug("Skipping scenes manifest {}: {}", json_path, error)
+                logger.debug("Skipping scenes manifest {}: {}", scenes_path, error)
                 continue
 
     # 2. Check assets

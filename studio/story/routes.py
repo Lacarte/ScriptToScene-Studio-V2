@@ -123,6 +123,7 @@ def generate_story(data: StoryGenerateRequest):
     system_prompt = build_story_system_prompt(
         data.preset_style, data.story_category, data.duration, data.language,
         story_tone=data.story_tone,
+        language_level=data.language_level,
     )
     user_prompt = build_story_user_prompt(
         data.preset_style, data.story_category, data.duration, data.language,

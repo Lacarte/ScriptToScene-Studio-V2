@@ -25,7 +25,7 @@ from loguru import logger
 
 from config import (
     TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ASSETS_DIR, EXPORT_DIR,
-    PIPELINE_DIR, N8N_WEBHOOK_URL, generate_project_id,
+    PIPELINE_DIR, PROJECTS_DIR, N8N_WEBHOOK_URL, generate_project_id,
 )
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
@@ -653,6 +653,28 @@ def _load_prior_results(project_id, up_to_step):
             scenes_path = os.path.join(SCENES_DIR, project_id, "scenes.json")
             if os.path.isfile(scenes_path):
                 loaded["scenes"] = safe_json_read(scenes_path)
+        elif step == "assemble":
+            project_dir = os.path.join(PROJECTS_DIR, project_id)
+            project_candidates = (
+                os.path.join(project_dir, "work@in@progress.json"),
+                os.path.join(project_dir, "initial.json"),
+            )
+            for project_path in project_candidates:
+                if not os.path.isfile(project_path):
+                    continue
+                data = safe_json_read(project_path)
+                captions = data.get("captions") or {}
+                caption_entries = captions.get("entries")
+                if not isinstance(caption_entries, list):
+                    caption_entries = captions.get("captions", [])
+                loaded["assemble"] = {
+                    "scene_count": data.get("scene_count", len(data.get("scenes", []))),
+                    "total_duration": data.get("total_duration", 0),
+                    "has_audio": bool(data.get("audio_tracks")),
+                    "has_captions": bool(caption_entries),
+                    "assembled_data": data,
+                }
+                break
 
     return loaded
 
@@ -687,7 +709,7 @@ def _run_pipeline(job_id):
             "scenes": ["tts", "timing", "segment"],
             "assets": ["tts", "timing", "segment", "scenes"],
             "assemble": ["tts", "timing", "segment", "scenes"],
-            "export": ["tts", "timing", "segment", "scenes"],
+            "export": ["tts", "timing", "segment", "scenes", "assemble"],
         }
         missing = [s for s in required_chain.get(resume_from, []) if s not in prior]
         if missing:
@@ -812,7 +834,9 @@ def _run_pipeline(job_id):
 
         # ── Step 4: Scene Generation (webhook) — optional ────────────
         _raise_if_stop_requested(job_id, step_name="scenes")
-        if config.get("auto_scenes", True):
+        if _should_skip("scenes"):
+            scenes_result = results.get("scenes", {})
+        elif config.get("auto_scenes", True):
             logger.info("[{}] Step 4/7: Scenes starting (webhook)", project_id)
             _emit(job_id, {"step": "scenes", "status": "running",
                            "message": f"[{project_id}] Generating scene scripts..."})
@@ -845,28 +869,31 @@ def _run_pipeline(job_id):
 
         # ── Step 5: Asset Grabber ─────────────────────────────────
         _raise_if_stop_requested(job_id, step_name="assets")
-        provider_urls = {
-            "grok": "https://grok.com/imagine",
-            "midjourney": "https://www.midjourney.com/imagine",
-            "meta-ai": "https://www.meta.ai/",
-        }
-        logger.info("[{}] Step 5/7: Assets starting | provider={}", project_id, provider)
-        _emit(job_id, {
-            "step": "assets", "status": "running",
-            "message": f"[{project_id}] Starting asset grabber ({provider})...",
-            "open_url": provider_urls.get(provider, ""),
-        })
-        _t0 = time.perf_counter()
-        assets_result = _step_assets(results.get("scenes", {}), config, project_id, job_id)
-        step_timings["assets"] = round(time.perf_counter() - _t0, 2)
-        results["assets"] = assets_result
-        logger.success("[{}] Step 5/7: Assets done — {}/{} ready, {} errors",
-                       project_id, assets_result.get("ready", 0),
-                       assets_result.get("total", 0), assets_result.get("errors", 0))
-        _emit(job_id, {
-            "step": "assets", "status": "done",
-            "message": f"[{project_id}] {assets_result.get('ready', 0)}/{assets_result.get('total', 0)} assets ready",
-        })
+        if _should_skip("assets"):
+            assets_result = results.get("assets", {})
+        else:
+            provider_urls = {
+                "grok": "https://grok.com/imagine",
+                "midjourney": "https://www.midjourney.com/imagine",
+                "meta-ai": "https://www.meta.ai/",
+            }
+            logger.info("[{}] Step 5/7: Assets starting | provider={}", project_id, provider)
+            _emit(job_id, {
+                "step": "assets", "status": "running",
+                "message": f"[{project_id}] Starting asset grabber ({provider})...",
+                "open_url": provider_urls.get(provider, ""),
+            })
+            _t0 = time.perf_counter()
+            assets_result = _step_assets(results.get("scenes", {}), config, project_id, job_id)
+            step_timings["assets"] = round(time.perf_counter() - _t0, 2)
+            results["assets"] = assets_result
+            logger.success("[{}] Step 5/7: Assets done — {}/{} ready, {} errors",
+                           project_id, assets_result.get("ready", 0),
+                           assets_result.get("total", 0), assets_result.get("errors", 0))
+            _emit(job_id, {
+                "step": "assets", "status": "done",
+                "message": f"[{project_id}] {assets_result.get('ready', 0)}/{assets_result.get('total', 0)} assets ready",
+            })
         if stop_after == "assets":
             logger.info("[{}] Pipeline stopped after Assets (stop_after=assets)", project_id)
             step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
@@ -877,22 +904,25 @@ def _run_pipeline(job_id):
 
         # ── Step 6: Assemble Project ──────────────────────────────
         _raise_if_stop_requested(job_id, step_name="assemble")
-        logger.info("[{}] Step 6/7: Assemble starting", project_id)
-        _emit(job_id, {"step": "assemble", "status": "running",
-                       "message": f"[{project_id}] Assembling project..."})
-        _t0 = time.perf_counter()
-        assemble_result = _step_assemble(project_id)
-        step_timings["assemble"] = round(time.perf_counter() - _t0, 2)
-        results["assemble"] = assemble_result
-        logger.success("[{}] Step 6/7: Assemble done — {} scenes, {:.1f}s, audio={}, captions={}",
-                       project_id, assemble_result.get("scene_count", 0),
-                       assemble_result.get("total_duration", 0),
-                       assemble_result.get("has_audio", False),
-                       assemble_result.get("has_captions", False))
-        _emit(job_id, {
-            "step": "assemble", "status": "done",
-            "message": f"[{project_id}] {assemble_result.get('scene_count', 0)} scenes assembled",
-        })
+        if _should_skip("assemble"):
+            assemble_result = results.get("assemble", {})
+        else:
+            logger.info("[{}] Step 6/7: Assemble starting", project_id)
+            _emit(job_id, {"step": "assemble", "status": "running",
+                           "message": f"[{project_id}] Assembling project..."})
+            _t0 = time.perf_counter()
+            assemble_result = _step_assemble(project_id)
+            step_timings["assemble"] = round(time.perf_counter() - _t0, 2)
+            results["assemble"] = assemble_result
+            logger.success("[{}] Step 6/7: Assemble done — {} scenes, {:.1f}s, audio={}, captions={}",
+                           project_id, assemble_result.get("scene_count", 0),
+                           assemble_result.get("total_duration", 0),
+                           assemble_result.get("has_audio", False),
+                           assemble_result.get("has_captions", False))
+            _emit(job_id, {
+                "step": "assemble", "status": "done",
+                "message": f"[{project_id}] {assemble_result.get('scene_count', 0)} scenes assembled",
+            })
         if stop_after == "assemble":
             logger.info("[{}] Pipeline stopped after Assemble (stop_after=assemble)", project_id)
             step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)

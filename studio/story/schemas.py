@@ -13,6 +13,7 @@ from studio.niches.presets import (
 from studio.story.prompts import STORY_CATEGORIES
 
 SUPPORTED_LANGUAGES = ("english", "french", "spanish")
+LANGUAGE_LEVELS = ("beginner", "intermediate", "advanced", "native")
 VALID_STORY_CATEGORIES = tuple(dict.fromkeys([*STORY_CATEGORIES, *NICHE_CATEGORIES]))
 
 
@@ -22,6 +23,7 @@ class StoryGenerateRequest(BaseModel):
     story_category: str = "motivation"
     duration: int = Field(default=45, ge=15, le=180)
     language: Literal["english", "french", "spanish"] = "english"
+    language_level: Optional[str] = None
     story_tone: Optional[str] = None
     idea: Optional[str] = None
     webhook_url: Optional[str] = None
@@ -32,6 +34,10 @@ class StoryGenerateRequest(BaseModel):
         self.preset_style = (self.preset_style or "").strip()
         self.story_category = (self.story_category or "").strip().lower()
         self.story_tone = normalize_story_tone(self.story_tone) or None
+        if self.language_level:
+            self.language_level = self.language_level.strip().lower()
+            if self.language_level not in LANGUAGE_LEVELS:
+                self.language_level = None
         self.idea = (self.idea or "").strip() or None
         self.webhook_url = (self.webhook_url or "").strip() or None
 

@@ -253,6 +253,8 @@ def reconcile_project(assets_dir, project_id):
         if not files_on_disk:
             continue
 
+        scene_changed = False
+
         # --- Update metadata.json if scene missing or file list changed ---
         existing_meta = meta["scenes"].get(scene_key, {})
         existing_files = set(existing_meta.get("local_files", []))
@@ -263,7 +265,7 @@ def reconcile_project(assets_dir, project_id):
                 "local_files": files_on_disk,
                 "file_count": len(files_on_disk),
             }
-            updated += 1
+            scene_changed = True
 
         # --- Update grabber_job.json if scene missing or status stale ---
         existing_status = job["scene_statuses"].get(scene_key, {})
@@ -273,8 +275,10 @@ def reconcile_project(assets_dir, project_id):
                 "urls": existing_status.get("urls", existing_meta.get("source_urls", [])),
                 "local_files": files_on_disk,
             }
-            if scene_key not in job.get("scene_statuses", {}):
-                updated += 1  # only count as new update if truly new
+            scene_changed = True
+
+        if scene_changed:
+            updated += 1
 
     # --- Write back only if something changed ---
     if updated > 0:
