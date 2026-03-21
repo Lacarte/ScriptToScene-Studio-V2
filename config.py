@@ -38,6 +38,7 @@ FONTS_DIR = os.path.join(ROOT_DIR, "assets", "fonts")
 EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
 PROJECTS_DIR = os.path.join(OUTPUT_DIR, "projects")
 THUMBNAILS_DIR = os.path.join(OUTPUT_DIR, "thumbnails")
+TTS_CACHE_DIR = os.path.join(OUTPUT_DIR, "tmp", "tts")
 APP_ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
 APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app-config.json")
 # ---------------------------------------------------------------------------
@@ -45,7 +46,7 @@ APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app-config.json")
 # ---------------------------------------------------------------------------
 for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR,
            SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
-           EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR):
+           EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR, TTS_CACHE_DIR):
     os.makedirs(_d, exist_ok=True)
 
 # ---------------------------------------------------------------------------

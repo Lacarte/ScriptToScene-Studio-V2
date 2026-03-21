@@ -988,39 +988,75 @@ def _run_pipeline(job_id):
 # ===================================================================
 
 def _step_tts(config, project_id):
-    """Generate TTS audio and return metadata dict (includes wav_path)."""
+    """Generate TTS audio and return metadata dict (includes wav_path).
+
+    If a cached preview WAV exists for the same (text, voice, speed),
+    copies it instead of re-running inference — saves ~5-15s.
+    """
     from studio.tts.routes import (
         load_model, _voice_to_lang, _phonemize_with_misaki,
         generation_inference_lock, _tts_job_dir,
+        _cache_key, _cache_path,
     )
     from studio.tts.normalize import clean_for_tts
     from studio.tts.audio import pad_audio, run_loudnorm
+    import shutil
 
     text = config["text"]
     voice = config["voice"]
     speed = config["speed"]
 
-    kokoro = load_model()
-    lang = _voice_to_lang(voice)
-
-    tts_prompt = clean_for_tts(text)
-    phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
-
-    start = time.perf_counter()
-    with generation_inference_lock:
-        audio, _sr = kokoro.create(
-            text=phonemes, voice=voice, speed=speed,
-            lang=lang, is_phonemes=is_ph,
-        )
-    total_inference = time.perf_counter() - start
-    audio = pad_audio(audio, sample_rate=24000)
-
     job_dir = _tts_job_dir(project_id)
     os.makedirs(job_dir, exist_ok=True)
     wav_path = os.path.join(job_dir, "voice.wav")
-    sf.write(wav_path, audio, 24000)
 
-    run_loudnorm(wav_path)
+    # ── Try preview cache first ──
+    cache_hit = False
+    cache_key = _cache_key(text, voice, speed)
+    cached_wav = _cache_path(cache_key)
+
+    if os.path.isfile(cached_wav):
+        try:
+            info = sf.info(cached_wav)
+            if info.duration >= 0.5:  # sanity: not a corrupt/empty file
+                shutil.copy2(cached_wav, wav_path)
+                run_loudnorm(wav_path)
+                cache_hit = True
+                logger.success(
+                    "Pipeline TTS: cache hit ({}) — {:.1f}s audio, 0s inference",
+                    cache_key, info.duration,
+                )
+        except Exception:
+            logger.opt(exception=True).debug("Cache read failed, regenerating")
+
+    # ── Generate fresh if no cache ──
+    total_inference = 0.0
+    if not cache_hit:
+        kokoro = load_model()
+        lang = _voice_to_lang(voice)
+        tts_prompt = clean_for_tts(text)
+        phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
+
+        start = time.perf_counter()
+        with generation_inference_lock:
+            audio, _sr = kokoro.create(
+                text=phonemes, voice=voice, speed=speed,
+                lang=lang, is_phonemes=is_ph,
+            )
+        total_inference = time.perf_counter() - start
+        audio = pad_audio(audio, sample_rate=24000)
+        sf.write(wav_path, audio, 24000)
+        run_loudnorm(wav_path)
+
+        # Populate the cache for future runs
+        try:
+            shutil.copy2(wav_path, cached_wav)
+            logger.debug("Cached pipeline TTS → {}", cache_key)
+        except Exception:
+            pass
+
+        logger.success("Pipeline TTS: {:.1f}s audio in {:.2f}s",
+                       sf.info(wav_path).duration, total_inference)
 
     info = sf.info(wav_path)
     duration = info.duration
@@ -1044,6 +1080,7 @@ def _step_tts(config, project_id):
         "words": len(clean_prompt.split()),
         "approx_tokens": int(len(clean_prompt.split()) * 1.3),
         "wav_path": wav_path,
+        "cache_hit": cache_hit,
     }
 
     safe_json_write(
@@ -1052,8 +1089,6 @@ def _step_tts(config, project_id):
         indent=2,
     )
 
-    logger.success("Pipeline TTS: {:.1f}s audio in {:.2f}s",
-                   duration, total_inference)
     return metadata
 
 
@@ -1131,22 +1166,22 @@ def _step_segment(timing_result, config, project_id):
 
 def _step_scenes(segment_result, config, project_id, job_id=None):
     """Generate scene scripts via webhook (with chapter support)."""
-    from studio.scenes.chapters import (
+    from studio.build_scene_blueprints.chapters import (
         should_use_chapters,
     )
-    from studio.scenes.prompts import build_scene_system_prompt
-    from studio.scenes.style_compiler import resolve_template_bundle
-    from studio.scenes.planner import (
+    from studio.build_scene_blueprints.prompts import build_scene_system_prompt
+    from studio.build_scene_blueprints.style_compiler import resolve_template_bundle
+    from studio.build_scene_blueprints.planner import (
         build_scene_blueprints,
         build_visual_bible,
         summarize_blueprints,
     )
-    from studio.scenes.validators import ensure_analysis_payload, finalize_scene_result
-    from studio.scenes.routes import (
+    from studio.build_scene_blueprints.validators import ensure_analysis_payload, finalize_scene_result
+    from studio.build_scene_blueprints.routes import (
         _call_webhook, generate_with_chapters_chunked,
         _apply_segmenter_timing, _normalize_webhook_response,
     )
-    from studio.scenes.templates import TEMPLATES_BY_ID
+    from studio.build_scene_blueprints.templates import TEMPLATES_BY_ID
 
     all_segments = segment_result.get("segments", [])
     segments = [

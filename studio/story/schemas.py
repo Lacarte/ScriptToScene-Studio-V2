@@ -23,6 +23,7 @@ class StoryGenerateRequest(BaseModel):
     duration: int = Field(default=45, ge=15, le=180)
     language: Literal["english", "french", "spanish"] = "english"
     story_tone: Optional[str] = None
+    idea: Optional[str] = None
     webhook_url: Optional[str] = None
 
     @model_validator(mode="after")
@@ -31,6 +32,7 @@ class StoryGenerateRequest(BaseModel):
         self.preset_style = (self.preset_style or "").strip()
         self.story_category = (self.story_category or "").strip().lower()
         self.story_tone = normalize_story_tone(self.story_tone) or None
+        self.idea = (self.idea or "").strip() or None
         self.webhook_url = (self.webhook_url or "").strip() or None
 
         if not is_known_template(self.preset_style):

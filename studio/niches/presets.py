@@ -15,7 +15,7 @@ import json
 import re
 from pathlib import Path
 
-from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
+from studio.build_scene_blueprints.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "_data"
 _PRESETS_FILE = _DATA_DIR / "niche_presets.json"

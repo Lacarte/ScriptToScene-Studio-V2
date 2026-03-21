@@ -7,7 +7,7 @@ Templates with ``"category": True`` double as story-generation categories.
 ``STORY_CATEGORIES`` is derived automatically — keep this file as the single source.
 """
 
-from studio.scenes.style_compiler import enrich_templates
+from studio.build_scene_blueprints.style_compiler import enrich_templates
 
 SCENE_STYLE_TEMPLATES = [
     {

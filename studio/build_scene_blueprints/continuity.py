@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from studio.scenes.validators import extract_shot_type_from_prompt, scene_uses_anchor
+from studio.build_scene_blueprints.validators import extract_shot_type_from_prompt, scene_uses_anchor
 
 
 def build_progress_state(scenes: list[dict], visual_bible: dict, plan_summary: dict | None = None) -> dict:

@@ -13,19 +13,19 @@ from config import SCENES_DIR, ALIGN_DIR, N8N_WEBHOOK_URL, generate_project_id
 from studio.io_utils import safe_json_write
 from studio.security import is_safe_webhook_url, sanitize_folder_name, sanitize_project_id
 from studio.validation import validate_json
-from studio.scenes.schemas import SceneGenerateRequest
-from studio.scenes.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
-from studio.scenes.style_compiler import public_template_payload, resolve_template_bundle
-from studio.scenes.planner import (
+from studio.build_scene_blueprints.schemas import SceneGenerateRequest
+from studio.build_scene_blueprints.templates import SCENE_STYLE_TEMPLATES, TEMPLATES_BY_ID
+from studio.build_scene_blueprints.style_compiler import public_template_payload, resolve_template_bundle
+from studio.build_scene_blueprints.planner import (
     build_scene_blueprints,
     build_visual_bible,
     slice_scene_blueprints,
     summarize_blueprints,
 )
-from studio.scenes.prompts import build_scene_system_prompt
-from studio.scenes.continuity import build_progress_state
-from studio.scenes.validators import ensure_analysis_payload, finalize_scene_result
-from studio.scenes.chapters import (
+from studio.build_scene_blueprints.prompts import build_scene_system_prompt
+from studio.build_scene_blueprints.continuity import build_progress_state
+from studio.build_scene_blueprints.validators import ensure_analysis_payload, finalize_scene_result
+from studio.build_scene_blueprints.chapters import (
     should_use_chapters, group_into_chapters,
     build_chapter_system_prompt, merge_chapter_results,
     chunk_segments, build_script_window, validate_scene_indexes,

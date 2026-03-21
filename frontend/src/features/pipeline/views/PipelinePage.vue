@@ -89,11 +89,12 @@ async function detectStyle() {
   }
 }
 
-// ── Audio preview (stream TTS) ──
+// ── Audio preview (cached WAV or stream TTS) ──
 const previewing = ref(false)
 const previewLabel = ref('')
 let _previewAbort = null
 let _previewCtx = null
+let _previewAudioEl = null
 
 async function previewAudio() {
   const t = text.value.trim()
@@ -101,11 +102,33 @@ async function previewAudio() {
   if (previewing.value) { stopPreview(); return }
 
   previewing.value = true
-  previewLabel.value = 'Connecting...'
+  previewLabel.value = 'Checking cache...'
   const ctrl = new AbortController()
   _previewAbort = ctrl
 
   try {
+    // 1. Check if cached WAV exists
+    const cacheResp = await fetch('/api/tts/cache/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: t, voice: voice.value, speed: speed.value }),
+      signal: ctrl.signal,
+    })
+    const cacheData = await cacheResp.json()
+
+    if (cacheData.cached) {
+      // Play cached WAV directly — instant playback
+      previewLabel.value = 'Playing (cached)'
+      const audio = new Audio(`/api/tts/cache/${cacheData.key}`)
+      _previewAudioEl = audio
+      audio.onended = () => stopPreview()
+      audio.onerror = () => { toast.error('Cached audio playback failed'); stopPreview() }
+      await audio.play()
+      return
+    }
+
+    // 2. Not cached — stream from TTS and let backend cache it
+    previewLabel.value = 'Generating...'
     const resp = await fetch('/api/tts/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -177,6 +200,7 @@ async function previewAudio() {
 function stopPreview() {
   if (_previewAbort) { _previewAbort.abort(); _previewAbort = null }
   if (_previewCtx) { try { _previewCtx.close() } catch {} _previewCtx = null }
+  if (_previewAudioEl) { _previewAudioEl.pause(); _previewAudioEl.src = ''; _previewAudioEl = null }
   previewing.value = false
   previewLabel.value = ''
 }
@@ -258,6 +282,27 @@ async function handleGenerateStory({ notifySuccess = true } = {}) {
     text.value = previousText
     toast.error(e.message || 'Story generation failed')
     return { ok: false, error: e }
+  }
+}
+
+async function handleGenerateFromIdea() {
+  const idea = text.value.trim()
+  if (!idea) return
+  const previousText = text.value
+  try {
+    const data = await story.generateStory(style.value, {
+      storyTone: storyTone.value || undefined,
+      idea,
+    })
+    const plain = data.story_text
+      .replace(/^(Hook|Build|Climax|CTA):\s*/gim, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    text.value = plain
+    toast.success('Story generated from your idea')
+  } catch (e) {
+    text.value = previousText
+    toast.error(e.message || 'Story generation failed')
   }
 }
 
@@ -840,6 +885,11 @@ function logStepLabel(step) {
 
       <!-- Detect style bar + audio preview -->
       <div v-if="text.trim()" class="detect-style-bar">
+        <button class="detect-style-btn generate-idea-btn" :disabled="story.isGenerating.value" @click="handleGenerateFromIdea">
+          <span v-if="story.isGenerating.value" class="gen-spinner"></span>
+          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m6.34 6.34 2.83 2.83"/><path d="M2 12h4"/><path d="m17.66 6.34-2.83 2.83"/><path d="M22 12h-4"/><circle cx="12" cy="12" r="4"/></svg>
+          {{ story.isGenerating.value ? 'Generating...' : 'Generate from Idea' }}
+        </button>
         <button class="detect-style-btn" :disabled="detecting" @click="detectStyle">
           <span v-if="detecting" class="detect-spinner"></span>
           <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -1303,6 +1353,14 @@ function logStepLabel(step) {
 .detect-style-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.generate-idea-btn {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.generate-idea-btn:hover:not(:disabled) {
+  background: rgba(78, 205, 196, 0.1);
 }
 
 .preview-audio-btn--active {

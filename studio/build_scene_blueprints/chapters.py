@@ -8,7 +8,7 @@ per-chapter webhook payloads and merge the results.
 import json
 from loguru import logger
 
-from studio.scenes.prompts import (
+from studio.build_scene_blueprints.prompts import (
     build_scene_continuation_prompt,
     build_scene_system_prompt,
 )

@@ -55,7 +55,7 @@ CORS(app, origins=_cors_origins or None)
 from studio.tts import tts_bp
 from studio.timing import timing_bp
 from studio.segmenter import segmenter_bp
-from studio.scenes import scenes_bp
+from studio.build_scene_blueprints import scenes_bp
 from studio.assets import assets_bp
 from studio.editor import editor_bp
 from studio.pipeline import pipeline_bp

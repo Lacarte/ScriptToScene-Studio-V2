@@ -31,7 +31,7 @@ from studio.story.prompts import (
     WORDS_PER_SECOND,
 )
 from studio.story.engine import parse_story_sections
-from studio.scenes.templates import SCENE_STYLE_TEMPLATES
+from studio.build_scene_blueprints.templates import SCENE_STYLE_TEMPLATES
 from studio.niches.presets import CATEGORIES as NICHE_CATEGORIES
 
 story_bp = Blueprint("story", __name__)
@@ -126,6 +126,7 @@ def generate_story(data: StoryGenerateRequest):
     )
     user_prompt = build_story_user_prompt(
         data.preset_style, data.story_category, data.duration, data.language,
+        idea=data.idea,
     )
     word_target = compute_word_target(data.duration)
 

@@ -1,6 +1,6 @@
 """Prompt templates for story generation."""
 
-from studio.scenes.templates import STORY_CATEGORIES, TEMPLATES_BY_ID  # noqa: F401 — re-exported
+from studio.build_scene_blueprints.templates import STORY_CATEGORIES, TEMPLATES_BY_ID  # noqa: F401 — re-exported
 
 # Approximate words per second for spoken narration at 1.0x speed
 WORDS_PER_SECOND = 2.5
@@ -61,10 +61,14 @@ def build_story_user_prompt(
     story_category: str,
     duration: int,
     language: str,
+    idea: str = None,
 ) -> str:
     """Build the user prompt for the story generation call."""
     word_target = compute_word_target(duration)
-    return (
+    base = (
         f"Write a viral {story_category} story for a {duration}-second video. "
         f"Target: {word_target} words. Language: {language}. Style: {preset_style}."
     )
+    if idea:
+        base += f"\n\nBuild the story around this idea:\n{idea}"
+    return base

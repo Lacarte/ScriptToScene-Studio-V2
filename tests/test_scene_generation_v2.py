@@ -1,14 +1,14 @@
 import unittest
 
-from studio.scenes.planner import (
+from studio.build_scene_blueprints.planner import (
     build_scene_blueprints,
     build_visual_bible,
     summarize_blueprints,
 )
-from studio.scenes.prompts import build_scene_system_prompt
-from studio.scenes.style_compiler import public_template_payload, resolve_template_bundle
-from studio.scenes.templates import TEMPLATES_BY_ID
-from studio.scenes.validators import ensure_analysis_payload, finalize_scene_result
+from studio.build_scene_blueprints.prompts import build_scene_system_prompt
+from studio.build_scene_blueprints.style_compiler import public_template_payload, resolve_template_bundle
+from studio.build_scene_blueprints.templates import TEMPLATES_BY_ID
+from studio.build_scene_blueprints.validators import ensure_analysis_payload, finalize_scene_result
 
 
 class SceneGenerationV2Tests(unittest.TestCase):

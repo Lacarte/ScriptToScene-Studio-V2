@@ -23,7 +23,9 @@ import urllib.request
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import TTS_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR, generate_project_id
+import hashlib
+
+from config import TTS_DIR, TTS_CACHE_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR, generate_project_id
 from studio.io_utils import move_to_unique_path, safe_json_write
 from studio.security import safe_join, sanitize_project_id
 from studio.validation import validate_json
@@ -755,6 +757,46 @@ def abort_generation(job_id):
     return jsonify({"status": "aborting"})
 
 
+# --- TTS preview cache ---
+def _cache_key(text: str, voice: str, speed: float) -> str:
+    """Deterministic hash from (text, voice, speed)."""
+    raw = f"{text}|{voice}|{speed:.2f}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _cache_path(key: str) -> str:
+    return os.path.join(TTS_CACHE_DIR, f"{key}.wav")
+
+
+@tts_bp.route("/api/tts/cache/check", methods=["POST"])
+def cache_check():
+    """Check if a cached preview WAV exists for (text, voice, speed)."""
+    data = request.get_json(silent=True) or {}
+    text = (data.get("prompt") or "").strip()
+    voice = data.get("voice", "af_bella")
+    try:
+        speed = round(max(0.5, min(2.0, float(data.get("speed", 1.0)))), 2)
+    except (TypeError, ValueError):
+        speed = 1.0
+    if not text:
+        return jsonify({"cached": False})
+    key = _cache_key(text, voice, speed)
+    path = _cache_path(key)
+    if os.path.isfile(path):
+        return jsonify({"cached": True, "key": key})
+    return jsonify({"cached": False})
+
+
+@tts_bp.route("/api/tts/cache/<key>")
+def cache_serve(key):
+    """Serve a cached preview WAV file."""
+    key = re.sub(r'[^a-f0-9]', '', key)[:16]
+    path = _cache_path(key)
+    if not os.path.isfile(path):
+        return jsonify({"error": "Not found"}), 404
+    return send_from_directory(TTS_CACHE_DIR, f"{key}.wav", mimetype="audio/wav")
+
+
 # --- Stream audio (listen-only, no save) ---
 @tts_bp.route("/api/tts/stream", methods=["POST"])
 def stream_audio():
@@ -813,6 +855,10 @@ def stream_audio():
     skip_clean = data.get("skip_clean", False)
     tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
 
+    # Cache key for this exact (text, voice, speed) combo
+    cache_k = _cache_key(prompt, voice, speed)
+    cache_p = _cache_path(cache_k)
+
     logger.info("Stream  \033[1m{}\033[0m | {} | {} chars", model_id, voice, len(prompt))
 
     q = Queue()
@@ -822,18 +868,32 @@ def stream_audio():
     def _run_stream():
         _stream_active.set()
         loop = asyncio.new_event_loop()
+        all_samples = []
+        final_sr = 24000
         try:
             async def _produce():
+                nonlocal final_sr
                 with generation_inference_lock:
                     stream = kokoro.create_stream(
                         text=stream_phonemes, voice=voice_param,
                         speed=speed, lang=lang, is_phonemes=stream_is_ph,
                     )
                     async for samples, sr in stream:
+                        all_samples.append(samples)
+                        final_sr = sr
                         q.put(("audio", samples, sr))
                 q.put(("done", None, None))
 
             loop.run_until_complete(_produce())
+
+            # Save to cache as WAV
+            if all_samples:
+                try:
+                    combined = np.concatenate(all_samples)
+                    sf.write(cache_p, combined, final_sr, format="WAV")
+                    logger.debug("Cached preview → {}", cache_k)
+                except Exception:
+                    logger.opt(exception=True).debug("Cache write failed")
         except Exception as e:
             logger.exception("Stream generation failed")
             q.put(("error", str(e), None))

@@ -78,7 +78,7 @@ function resetWebhookUrl() {
   localStorage.removeItem('sts-story-webhook-url')
 }
 
-async function generateStory(styleOverride, { storyTone } = {}) {
+async function generateStory(styleOverride, { storyTone, idea } = {}) {
   const url = webhookUrl.value?.trim()
   if (!url) throw new Error('No story webhook URL configured')
 
@@ -99,6 +99,7 @@ async function generateStory(styleOverride, { storyTone } = {}) {
       language: storyLanguage.value,
       webhook_url: url,
       ...(storyTone ? { story_tone: storyTone } : {}),
+      ...(idea ? { idea } : {}),
     }
 
     const data = await api.post('/api/story/generate', {
