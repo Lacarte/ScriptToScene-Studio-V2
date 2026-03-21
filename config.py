@@ -4,6 +4,8 @@ Single source of truth for all directory paths, environment variables,
 and shared constants. Import from here instead of computing paths manually.
 """
 
+APP_VERSION = "0.1.0"
+
 import os
 from dotenv import load_dotenv
 

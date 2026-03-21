@@ -141,8 +141,10 @@ def health():
     from studio.ffmpeg_utils import find_ffmpeg
     from studio.timing.routes import _check_alignment_available
     from studio.tts.routes import _model_files_present
+    from config import APP_VERSION
     return jsonify({
         "status": "ok",
+        "version": APP_VERSION,
         "alignment": _check_alignment_available(),
         "ffmpeg": find_ffmpeg() is not None,
         "tts_model": _model_files_present(),
