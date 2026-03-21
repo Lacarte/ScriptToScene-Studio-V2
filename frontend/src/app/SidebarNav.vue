@@ -109,7 +109,7 @@ function toggleAudio() {
       <!-- Group 3: Visual Production -->
       <div class="nav-group">
         <span v-show="!collapsed" class="nav-group-label">VISUAL</span>
-        <router-link to="/scenes" class="nav-item" :class="[{ active: isActive('/scenes') }, pipelineClasses['/scenes']]" title="Scene Generator">
+        <router-link to="/scenes" class="nav-item" :class="[{ active: isActive('/scenes') }, pipelineClasses['/scenes']]" title="Scene Blueprint">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><path d="M4 11V7a2 2 0 012-2h12a2 2 0 012 2v4"/><path d="M4 11h16"/></svg>
           <span v-show="!collapsed" class="nav-label">SCENES</span>
         </router-link>

@@ -484,6 +484,50 @@ root.innerHTML = `
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
+  .sts-typing-tools {
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: rgba(255,255,255,0.02);
+  }
+  .sts-typing-tools.show { display: flex; }
+  .sts-typing-tools-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .sts-mini-btn {
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    color: var(--text-dim);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: var(--display);
+    line-height: 1;
+  }
+  .sts-mini-btn:hover:not(:disabled) {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: rgba(78,205,196,0.18);
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .sts-mini-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
 
   /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Scene / Typing Lists ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-list {
@@ -787,6 +831,11 @@ root.innerHTML = `
     <div class="sts-prog-bar"><div class="sts-prog-fill" id="sts-prog-fill" style="width:0%"></div></div>
   </div>
 
+  <div class="sts-typing-tools" id="sts-typing-tools">
+    <span class="sts-typing-tools-meta" id="sts-selection-meta">0 of 0 selected</span>
+    <button class="sts-mini-btn" id="sts-select-all-btn" type="button">Select All Prompts</button>
+  </div>
+
   <div class="sts-list" id="sts-list"></div>
 
   <div class="sts-foot">
@@ -863,6 +912,7 @@ function renderTabs() {
   $id('sts-tab-typing').classList.toggle('active', S.activeTab === 'typing');
   $id('sts-tab-sync').classList.toggle('active', S.activeTab === 'sync');
   $id('sts-typing-prog').classList.toggle('show', S.activeTab === 'typing');
+  $id('sts-typing-tools').classList.toggle('show', S.activeTab === 'typing');
 }
 
 // Action button
@@ -881,6 +931,20 @@ function isTypingSelected(item) {
 
 function getSelectedTypingItems() {
   return S.typing.queue.filter(isTypingSelected);
+}
+
+function areAllTypingItemsSelected() {
+  return S.typing.queue.length > 0 && S.typing.queue.every(isTypingSelected);
+}
+
+function selectAllTypingItems() {
+  let changed = 0;
+  S.typing.queue.forEach(item => {
+    if (!item) return;
+    if (!isTypingSelected(item)) changed++;
+    item.selected = true;
+  });
+  return changed;
 }
 
 function findGrokStopButton() {
@@ -994,6 +1058,15 @@ $id('sts-list').addEventListener('change', (e) => {
   const item = S.typing.queue[idx];
   if (!item) return;
   item.selected = !!checkbox.checked;
+  render();
+});
+
+$id('sts-select-all-btn').addEventListener('click', () => {
+  if (S.typing.active) return;
+  const changed = selectAllTypingItems();
+  if (changed > 0) {
+    console.log('Selected all prompts for typing');
+  }
   render();
 });
 
@@ -1273,6 +1346,17 @@ function render() {
       $id('sts-prog-label').textContent = 'No prompts queued';
       $id('sts-prog-cd').textContent = '';
     }
+  }
+
+  const selectionMeta = $id('sts-selection-meta');
+  const selectAllBtn = $id('sts-select-all-btn');
+  if (selectionMeta) {
+    selectionMeta.textContent = tq.length ? (selectedTotal + ' of ' + tq.length + ' selected') : 'No prompts queued';
+  }
+  if (selectAllBtn) {
+    const allSelected = areAllTypingItemsSelected();
+    selectAllBtn.textContent = allSelected ? 'All Prompts Selected' : 'Select All Prompts';
+    selectAllBtn.disabled = S.typing.active || !tq.length || allSelected;
   }
 
   // Action button + retry + redownload
@@ -2696,4 +2780,3 @@ renderAutoType();
 })();
 
 automaNextBlock();
-

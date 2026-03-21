@@ -649,12 +649,12 @@ async function handleRegenerateAssets(projectId) {
   try {
     sceneData = await api.get(`/api/scenes/${projectId}`)
   } catch {
-    toast.error('No scenes found — run the Scene Generator for this project first')
+    toast.error('No scenes found — run the Scene Blueprint for this project first')
     return
   }
 
   if (!sceneData?.scenes?.length) {
-    toast.error('No scenes found — run the Scene Generator for this project first')
+    toast.error('No scenes found — run the Scene Blueprint for this project first')
     return
   }
 
@@ -1178,7 +1178,7 @@ function logStepLabel(step) {
               <!-- Open in scenes -->
               <button
                 class="hist-open-btn"
-                title="Open in Scene Generator"
+                title="Open in Scene Blueprint"
                 @click.stop="openInScenes(j.project_id)"
               >
                 <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
@@ -2117,7 +2117,7 @@ function logStepLabel(step) {
   text-align: center;
 }
 
-/* ---- Custom style dropdown (matches Scene Generator StylePicker) ---- */
+/* ---- Custom style dropdown (matches Scene Blueprint StylePicker) ---- */
 .style-dropdown {
   position: relative;
   width: 100%;

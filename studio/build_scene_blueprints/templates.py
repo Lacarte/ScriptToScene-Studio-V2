@@ -831,6 +831,24 @@ SCENE_STYLE_TEMPLATES = [
             "Style: Blade Runner 2049 environments meets Tron Legacy — Denis Villeneuve scale, GMUNK motion design."
         ),
     },
+    {
+        "id": "bw_cartoon",
+        "type": "visual",
+        "category": None,
+        "name": "B&W Cartoon",
+        "description": "Black-and-white, high-contrast cartoon illustration",
+        "color": "#9CA3AF",
+        "style_prompt": (
+            "Generate image prompts as black-and-white, high-contrast cartoon illustrations. "
+            "Use bold black ink outlines with clean, confident strokes and solid fills — no greyscale gradients. "
+            "Shading is achieved through hatching, cross-hatching, and spot blacks only. "
+            "Characters should have expressive, slightly exaggerated features with clear silhouettes. "
+            "Backgrounds alternate between detailed ink environments and stark white negative space for impact. "
+            "Composition: strong figure-ground separation, dramatic use of shadow shapes, and high readability at any size. "
+            "Color palette: pure black and pure white only — no grey tones, no colour. "
+            "Style: classic newspaper editorial cartoon meets Mike Mignola ink work — bold, graphic, instantly readable."
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)

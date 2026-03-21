@@ -176,7 +176,7 @@ _CLEAR_MODULES = [
     {"page": "TTS", "module": "Text to Speech", "dir": TTS_DIR},
     {"page": "Alignment", "module": "Force Alignment", "dir": ALIGN_DIR},
     {"page": "Segmenter", "module": "Scene Segmenter", "dir": SEGMENTER_DIR},
-    {"page": "Scenes", "module": "Scene Generator", "dir": SCENES_DIR},
+    {"page": "Scenes", "module": "Scene Blueprint", "dir": SCENES_DIR},
     {"page": "Assets", "module": "Asset Manager", "dir": ASSETS_DIR},
     {"page": "Captions", "module": "Captions", "dir": CAPTIONS_DIR},
     {"page": "Editor", "module": "Timeline Editor", "dir": PROJECTS_DIR},

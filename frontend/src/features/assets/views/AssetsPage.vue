@@ -698,7 +698,7 @@ onMounted(async () => {
         <path d="m21 15-5-5L5 21" />
       </svg>
       <p class="empty-title">No scenes loaded</p>
-      <p class="empty-desc">Load scenes from the scene generator or pick from history to get started.</p>
+      <p class="empty-desc">Load scenes from the scene blueprint or pick from history to get started.</p>
     </section>
 
     <!-- History -->

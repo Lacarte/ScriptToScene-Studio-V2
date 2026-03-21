@@ -277,7 +277,7 @@ function truncate(str, len = 45) {
     <!-- Header -->
     <div class="page-header">
       <div class="page-header-row">
-        <h2 class="page-title">Scene Generator</h2>
+        <h2 class="page-title">Scene Blueprint</h2>
         <span v-if="projectBadge" class="project-badge">{{ projectBadge }}</span>
       </div>
       <p class="page-subtitle">

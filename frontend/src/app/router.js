@@ -37,7 +37,7 @@ const routes = [
     path: '/scenes',
     name: 'scenes',
     component: () => import('@/features/scenes/views/ScenesPage.vue'),
-    meta: { title: 'Scene Generator', icon: 'film' },
+    meta: { title: 'Scene Blueprint', icon: 'film' },
   },
   {
     path: '/assets',
