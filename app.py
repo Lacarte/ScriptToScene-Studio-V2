@@ -18,7 +18,7 @@ from config import (
     N8N_ASSET_WEBHOOK_URL, N8N_STORY_WEBHOOK_URL, OUTPUT_DIR,
     SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
-    EXPORT_DIR, APP_CONFIG_PATH, APP_ASSETS_DIR,
+    EXPORT_DIR, APP_CONFIG_PATH, APP_ASSETS_DIR, TMP_DIR,
 )
 from studio.security import is_loopback_remote
 
@@ -257,6 +257,14 @@ def clear_all_projects():
                         exports_deleted += 1
                 except Exception as e:
                     errors.append(f"{entry}: {e}")
+    # Also wipe tmp/ (preview cache, temp files)
+    if os.path.isdir(TMP_DIR):
+        try:
+            shutil.rmtree(TMP_DIR)
+            os.makedirs(TMP_DIR, exist_ok=True)
+            logger.info("Cleared tmp directory: {}", TMP_DIR)
+        except Exception as e:
+            errors.append(f"tmp: {e}")
     logger.info("Cleared {} project folders to {}", total, TRASH_DIR)
     result = {"status": "cleared", "count": total, "exports_deleted": exports_deleted}
     if errors:

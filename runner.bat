@@ -8,13 +8,30 @@ echo   ScriptToScene Studio
 echo   ====================
 echo.
 
-:: ── Connectivity check ──────────────────────────────────────────────────
+:: ── Git pull ──────────────────────────────────────────────────────────────
 ping -n 1 -w 1000 github.com >nul 2>&1
 if errorlevel 1 (
     echo   [WARN] No network — skipping git pull
     echo.
 ) else (
-    git pull
+    if not exist "tmp" mkdir "tmp"
+    git pull 2>"tmp\git_pull_err.txt"
+    if errorlevel 1 (
+        echo.
+        echo   [ERROR] git pull failed:
+        type "tmp\git_pull_err.txt"
+        echo.
+        echo   Fix the issue above before starting the server.
+        echo   Common fixes:
+        echo     - Merge conflicts : resolve them, then git add + git commit
+        echo     - Uncommitted changes : git stash, then re-run this script
+        echo     - Diverged branches : git pull --rebase
+        echo.
+        del "tmp\git_pull_err.txt" >nul 2>&1
+        pause
+        exit /b 1
+    )
+    del "tmp\git_pull_err.txt" >nul 2>&1
 )
 
 :: ── Virtual environment ─────────────────────────────────────────────────

@@ -17,3 +17,4 @@ working-assets/
 static/dist/
 *.bak
 claude-code-skills/
+tmp/
