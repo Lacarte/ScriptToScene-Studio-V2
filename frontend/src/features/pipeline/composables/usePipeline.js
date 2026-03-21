@@ -82,13 +82,20 @@ const ALL_STEPS = [
 
 // STEPS is now a computed exposed from the composable (see activeSteps below)
 
-const VOICES = [
+const VOICES = ref([
   { id: 'af_heart', label: 'af_heart' },
   { id: 'af_bella', label: 'af_bella' },
   { id: 'am_adam', label: 'am_adam' },
   { id: 'am_michael', label: 'am_michael' },
   { id: 'bf_emma', label: 'bf_emma' },
-]
+])
+
+// Load full voice list from TTS API (replaces hardcoded fallback)
+api.get('/api/tts/voices').then(voices => {
+  if (Array.isArray(voices) && voices.length) {
+    VOICES.value = voices.map(v => ({ id: v, label: v }))
+  }
+}).catch(() => {})
 
 // ── Singleton state ──
 
@@ -354,11 +361,15 @@ async function start() {
   }
 }
 
+function _closeSSE() {
+  if (eventSource) { eventSource.close(); eventSource = null }
+  running.value = false
+  stopping.value = false
+  jobId.value = null
+}
+
 function startSSE(id) {
-  if (eventSource) {
-    eventSource.close()
-    eventSource = null
-  }
+  _closeSSE()
   eventSource = new EventSource(`/api/pipeline/progress/${id}`)
 
   eventSource.onmessage = (e) => {
@@ -368,7 +379,6 @@ function startSSE(id) {
     const step = event.step
     const status = event.status
 
-    // Open provider URL if the backend requests it
     if (event.open_url) {
       try { _openInProviderTab(event.open_url) } catch {}
     }
@@ -376,11 +386,7 @@ function startSSE(id) {
     if (step === 'done') {
       const summary = event.summary || {}
       globalStatus.value = 'done'
-      eventSource.close()
-      eventSource = null
-      running.value = false
-      stopping.value = false
-      jobId.value = null
+      _closeSSE()
       stoppedStep.value = null
       stoppedProjectId.value = null
       lastCompletedProjectId.value = summary.scenes?.project_id || event.project_id || null
@@ -391,45 +397,31 @@ function startSSE(id) {
     }
     if (step === 'stopped') {
       globalStatus.value = 'stopped'
-      eventSource.close()
-      eventSource = null
-      running.value = false
-      stopping.value = false
-      jobId.value = null
+      _closeSSE()
       failedStep.value = null
       failedProjectId.value = null
-
-      const resumeStep = event.resume_from
+      stoppedStep.value = event.resume_from
         || event.stopped_step
         || inferResumeStep(stepStatus.value)
         || null
-      stoppedStep.value = resumeStep
-
       stoppedProjectId.value = event.project_id || stoppedProjectId.value || null
       setTimeout(() => loadHistory(), 500)
       return
     }
     if (step === 'error') {
       globalStatus.value = 'error'
-      eventSource.close()
-      eventSource = null
-      running.value = false
-      stopping.value = false
-      jobId.value = null
+      _closeSSE()
       stoppedStep.value = null
       stoppedProjectId.value = null
 
-      // Use error_step from backend (authoritative) with fallback to last running step
       const errorStep = event.error_step
         || Object.entries(stepStatus.value).find(([, s]) => s === 'running')?.[0]
         || null
       if (errorStep) {
         failedStep.value = errorStep
-        // Mark the failed step as 'error' in stepStatus
         stepStatus.value = { ...stepStatus.value, [errorStep]: 'error' }
       }
 
-      // Resolve project_id: prefer event field, then extract from message
       failedProjectId.value = event.project_id || failedProjectId.value || null
       if (!failedProjectId.value) {
         const pidMatch = (event.message || '').match(/\[(pp_\w+)\]/)
@@ -445,13 +437,9 @@ function startSSE(id) {
   }
 
   eventSource.onerror = () => {
-    eventSource.close()
-    eventSource = null
-    running.value = false
-    stopping.value = false
-    if (globalStatus.value === 'running') {
-      globalStatus.value = 'error'
-    }
+    const wasRunning = globalStatus.value === 'running'
+    _closeSSE()
+    if (wasRunning) globalStatus.value = 'error'
   }
 }
 

@@ -1,5 +1,6 @@
 import { ref, readonly, computed } from 'vue'
 import { api } from '@/shared/api/client.js'
+import { useAudioPlayback } from '@/shared/composables/useAudioPlayback.js'
 
 /* ── Singleton state ── */
 const alignment = ref([])
@@ -21,19 +22,29 @@ const result = ref(null)          // { metadata, config, segments, stats }
 const isRunning = ref(false)
 const history = ref([])
 
-/* Audio playback */
-const audioUrl = ref('')
-const isPlaying = ref(false)
-const currentTime = ref(0)
-const duration = ref(0)
-const activeSegmentIdx = ref(-1)
-
 /* Alignment history (for alignment picker) */
 const alignmentHistory = ref([])
 
 let historyLoaded = false
 
 export function useSegmenter() {
+  /* ── Audio (shared composable) ── */
+  const audio = useAudioPlayback({
+    label: 'Segmenter',
+    getAudioEndpoint: () => {
+      const sf = sourceFolder.value || result.value?.metadata?.source_folder
+      return sf ? `/api/scenes/audio/${encodeURIComponent(sf)}` : null
+    },
+    findActiveIdx: (t) => {
+      const segs = result.value?.segments
+      if (!segs) return -1
+      for (let i = 0; i < segs.length; i++) {
+        if (t >= segs[i].start && t < segs[i].end) return i
+      }
+      return -1
+    },
+  })
+
   /* ── Alignment source ── */
 
   function setAlignment(data) {
@@ -44,13 +55,10 @@ export function useSegmenter() {
     style.value = data.style || ''
     aspectRatio.value = data.aspect_ratio || ''
     alignmentSource.value = data.source_file || data.folder || 'Current result'
-    audioUrl.value = data.folder && data.source_file
+    audio.stopAudio()
+    audio.audioUrl.value = data.folder && data.source_file
       ? `/output/alignments/${data.folder}/${data.source_file}`
-      : ''
-    isPlaying.value = false
-    currentTime.value = 0
-    duration.value = 0
-    activeSegmentIdx.value = -1
+      : null
   }
 
   /* ── Config ── */
@@ -143,121 +151,20 @@ export function useSegmenter() {
 
   /* ── Audio ── */
 
-  let _audioEl = null
-  let _rafId = null
-
-  async function loadAudio() {
-    stopAudio()
-    const sf = sourceFolder.value || result.value?.metadata?.source_folder
-    if (!sf) { audioUrl.value = ''; return }
-    try {
-      const res = await api.get(`/api/scenes/audio/${encodeURIComponent(sf)}`)
-      if (res?.url) {
-        audioUrl.value = res.url
-        _audioEl = new Audio(res.url)
-        _audioEl.onended = () => {
-          isPlaying.value = false
-          currentTime.value = 0
-          activeSegmentIdx.value = -1
-          _stopRaf()
-        }
-        _audioEl.onerror = () => { audioUrl.value = '' }
-        _audioEl.onloadedmetadata = () => { duration.value = _audioEl.duration }
-      }
-    } catch {
-      audioUrl.value = ''
-    }
-  }
-
-  function _startRaf() {
-    _stopRaf()
-    const tick = () => {
-      if (_audioEl) {
-        currentTime.value = _audioEl.currentTime
-        updateActiveSegment(_audioEl.currentTime)
-      }
-      _rafId = requestAnimationFrame(tick)
-    }
-    _rafId = requestAnimationFrame(tick)
-  }
-
-  function _stopRaf() {
-    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null }
-  }
-
-  function togglePlay() {
-    if (!_audioEl) return
-    if (_audioEl.paused) {
-      if (_audioEl.duration && _audioEl.currentTime >= _audioEl.duration - 0.05) {
-        _audioEl.currentTime = 0
-        updateActiveSegment(0)
-      }
-      _audioEl.play().catch(() => {})
-      isPlaying.value = true
-      _startRaf()
-    } else {
-      _audioEl.pause()
-      isPlaying.value = false
-      _stopRaf()
-    }
-  }
-
   function playSegment(seg) {
-    if (!_audioEl) return
-    _audioEl.currentTime = seg.start
-    updateActiveSegment(seg.start)
-    _audioEl.play().catch(() => {})
-    isPlaying.value = true
-    _startRaf()
-  }
-
-  function seekTo(time) {
-    if (!_audioEl) return
-    _audioEl.currentTime = time
-    updateActiveSegment(time)
-    if (_audioEl.paused) {
-      _audioEl.play().catch(() => {})
-      isPlaying.value = true
-      _startRaf()
-    }
-  }
-
-  function stopAudio() {
-    if (_audioEl) {
-      _audioEl.pause()
-      _audioEl.src = ''
-      _audioEl = null
-    }
-    _stopRaf()
-    audioUrl.value = ''
-    isPlaying.value = false
-    currentTime.value = 0
-    activeSegmentIdx.value = -1
+    audio.playFrom(seg.start)
   }
 
   function updateActiveSegment(time) {
-    currentTime.value = time
-    const segs = result.value?.segments
-    if (!segs) {
-      activeSegmentIdx.value = -1
-      return
-    }
-    let idx = -1
-    for (let i = 0; i < segs.length; i++) {
-      if (time >= segs[i].start && time <= segs[i].end) {
-        idx = i
-        break
-      }
-    }
-    activeSegmentIdx.value = idx
+    audio.seekTo(time)
   }
 
   function setPlaying(val) {
-    isPlaying.value = val
+    audio.isPlaying.value = val
   }
 
   function setDuration(val) {
-    duration.value = val
+    audio.duration.value = val
   }
 
   /* ── Export ── */
@@ -313,12 +220,12 @@ export function useSegmenter() {
     alignmentHistory: readonly(alignmentHistory),
     timingHistory: readonly(alignmentHistory),
 
-    // Audio
-    audioUrl: readonly(audioUrl),
-    isPlaying: readonly(isPlaying),
-    currentTime: readonly(currentTime),
-    duration: readonly(duration),
-    activeSegmentIdx: readonly(activeSegmentIdx),
+    // Audio (shared composable)
+    audioUrl: audio.audioUrl,
+    isPlaying: audio.isPlaying,
+    currentTime: audio.currentTime,
+    duration: audio.duration,
+    activeSegmentIdx: audio.activeIdx,
 
     // Computed
     segments,
@@ -336,11 +243,11 @@ export function useSegmenter() {
     loadResult,
     loadAlignmentHistory,
     loadTimingHistory: loadAlignmentHistory,
-    loadAudio,
-    togglePlay,
+    loadAudio: audio.loadAudio,
+    togglePlay: audio.togglePlay,
     playSegment,
-    seekTo,
-    stopAudio,
+    seekTo: audio.seekTo,
+    stopAudio: audio.stopAudio,
     updateActiveSegment,
     setPlaying,
     setDuration,

@@ -1,6 +1,7 @@
 import { ref, readonly, computed } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useAudioRegistry } from '@/shared/composables/useAudioRegistry.js'
+import { useAudioPlayback } from '@/shared/composables/useAudioPlayback.js'
 
 const { register: audioRegister, unregister: audioUnregister } = useAudioRegistry()
 
@@ -16,14 +17,6 @@ const result = ref(null)
 const isGenerating = ref(false)
 const history = ref([])
 const forkPerStyle = ref(false)
-
-// Audio playback
-const audioUrl = ref(null)
-const audioEl = ref(null)
-const isPlaying = ref(false)
-const currentTime = ref(0)
-const activeSceneIdx = ref(-1)
-let animFrame = null
 
 // Segmenter history for picker
 const segHistory = ref([])
@@ -81,6 +74,27 @@ const selectedTemplate = computed(() => {
 })
 
 export function useScenes() {
+  // ---- Audio (shared composable) ----
+  const audio = useAudioPlayback({
+    label: 'Scenes',
+    getAudioEndpoint: () => {
+      const sf = result.value?.source_folder || segData.value?.metadata?.source_folder
+      return sf ? `/api/scenes/audio/${encodeURIComponent(sf)}` : null
+    },
+    findActiveIdx: (t) => {
+      for (const timing of segTimings.value) {
+        if (t >= timing.start && t < timing.end) return timing.sceneIdx
+      }
+      return -1
+    },
+    onRegister: (el) => audioRegister('Scenes', el),
+  })
+
+  function playBlock(idx) {
+    const timing = segTimings.value[idx]
+    if (timing) audio.playFrom(timing.start)
+  }
+
   // ---- Templates ----
   async function loadTemplates() {
     try {
@@ -273,117 +287,6 @@ export function useScenes() {
     return data
   }
 
-  // ---- Audio ----
-  async function loadAudio() {
-    stopAudio()
-    const sf = result.value?.source_folder || segData.value?.metadata?.source_folder
-    if (!sf) {
-      audioUrl.value = null
-      return
-    }
-    try {
-      const res = await api.get(`/api/scenes/audio/${encodeURIComponent(sf)}`)
-      if (res?.url) {
-        audioUrl.value = res.url
-        const audio = new Audio(res.url)
-        audio.onended = () => resetPlayback()
-        audio.onerror = () => { audioUrl.value = null }
-        audioEl.value = audio
-        audioRegister('Scenes', audio)
-      }
-    } catch (e) {
-      console.warn('[Scenes] Failed to load audio:', e.message)
-      audioUrl.value = null
-    }
-  }
-
-  function togglePlay() {
-    const audio = audioEl.value
-    if (!audio) return
-    if (audio.paused) {
-      audio.play().then(() => {
-        isPlaying.value = true
-        animFrame = requestAnimationFrame(tick)
-      }).catch(() => {})
-    } else {
-      audio.pause()
-      isPlaying.value = false
-      if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null }
-    }
-  }
-
-  function seekTo(time) {
-    const audio = audioEl.value
-    if (!audio) return
-    audio.currentTime = time
-    updatePlayhead()
-  }
-
-  function playBlock(idx) {
-    const audio = audioEl.value
-    if (!audio) return
-    const timing = segTimings.value[idx]
-    if (!timing) return
-    audio.currentTime = timing.start
-    updatePlayhead()
-    if (audio.paused) {
-      audio.play().then(() => {
-        isPlaying.value = true
-        animFrame = requestAnimationFrame(tick)
-      }).catch(() => {})
-    }
-  }
-
-  function stopAudio() {
-    const audio = audioEl.value
-    if (audio) {
-      audio.pause()
-      audio.currentTime = 0
-      audio.onended = null
-      audio.onerror = null
-    }
-    audioUnregister('Scenes')
-    audioEl.value = null
-    audioUrl.value = null
-    isPlaying.value = false
-    currentTime.value = 0
-    activeSceneIdx.value = -1
-    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null }
-  }
-
-  function resetPlayback() {
-    const audio = audioEl.value
-    if (audio) {
-      audio.pause()
-      audio.currentTime = 0
-    }
-    isPlaying.value = false
-    currentTime.value = 0
-    activeSceneIdx.value = -1
-    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null }
-  }
-
-  function tick() {
-    const audio = audioEl.value
-    if (!audio || audio.paused) return
-    updatePlayhead()
-    animFrame = requestAnimationFrame(tick)
-  }
-
-  function updatePlayhead() {
-    const audio = audioEl.value
-    if (!audio) return
-    const t = audio.currentTime
-    currentTime.value = t
-
-    // Find active scene
-    let idx = -1
-    for (const timing of segTimings.value) {
-      if (t >= timing.start && t < timing.end) { idx = timing.sceneIdx; break }
-    }
-    activeSceneIdx.value = idx
-  }
-
   // ---- Style helpers ----
   function styleLabel(styleId) {
     if (!styleId) return ''
@@ -419,11 +322,11 @@ export function useScenes() {
     forkPerStyle,
     segHistory: readonly(segHistory),
 
-    // Audio
-    audioUrl: readonly(audioUrl),
-    isPlaying: readonly(isPlaying),
-    currentTime: readonly(currentTime),
-    activeSceneIdx: readonly(activeSceneIdx),
+    // Audio (shared composable)
+    audioUrl: audio.audioUrl,
+    isPlaying: audio.isPlaying,
+    currentTime: audio.currentTime,
+    activeSceneIdx: audio.activeIdx,
     segTimings: readonly(segTimings),
     totalDuration,
 
@@ -440,11 +343,11 @@ export function useScenes() {
     setSegData,
     loadSegHistory,
     loadSegProject,
-    loadAudio,
-    togglePlay,
-    seekTo,
+    loadAudio: audio.loadAudio,
+    togglePlay: audio.togglePlay,
+    seekTo: audio.seekTo,
     playBlock,
-    stopAudio,
+    stopAudio: audio.stopAudio,
     styleLabel,
     styleColor,
   }

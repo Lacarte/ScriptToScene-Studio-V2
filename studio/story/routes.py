@@ -37,56 +37,14 @@ from studio.niches.presets import CATEGORIES as NICHE_CATEGORIES
 story_bp = Blueprint("story", __name__)
 
 # ---------------------------------------------------------------------------
-# Webhook helper (reuses pattern from scenes module)
+# Webhook helper — delegate to shared module
 # ---------------------------------------------------------------------------
 
-_MAX_RETRIES = 3
-_BASE_DELAY = 2
-_RETRYABLE_STATUS = {502, 503, 504, 429}
+from studio.webhooks import call_webhook  # noqa: E402
 
 
 def _call_story_webhook(webhook_url, payload, timeout=120):
-    """POST payload to story webhook with retry + exponential backoff."""
-    last_exc = None
-
-    for attempt in range(1, _MAX_RETRIES + 1):
-        try:
-            resp = http_requests.post(webhook_url, json=payload, timeout=timeout)
-
-            if resp.status_code in _RETRYABLE_STATUS:
-                body_text = resp.text[:300]
-                logger.warning(
-                    "Story webhook returned {} (attempt {}/{})",
-                    resp.status_code, attempt, _MAX_RETRIES,
-                )
-                last_exc = RuntimeError(f"Webhook returned {resp.status_code}: {body_text[:200]}")
-                if attempt < _MAX_RETRIES:
-                    time.sleep(_BASE_DELAY * (2 ** (attempt - 1)))
-                    continue
-                raise last_exc
-
-            if resp.status_code != 200:
-                body_text = resp.text[:500]
-                raise RuntimeError(f"Webhook returned {resp.status_code}: {body_text[:200]}")
-
-            body = resp.text.strip()
-            if not body:
-                raise RuntimeError("Webhook returned an empty response")
-
-            result = json.loads(body)
-            if isinstance(result, list):
-                result = result[0] if result else {}
-            return result
-
-        except (http_requests.ConnectionError, http_requests.Timeout) as e:
-            logger.warning("Story webhook {} (attempt {}/{}): {}", type(e).__name__, attempt, _MAX_RETRIES, e)
-            last_exc = e
-            if attempt < _MAX_RETRIES:
-                time.sleep(_BASE_DELAY * (2 ** (attempt - 1)))
-                continue
-            raise
-
-    raise last_exc
+    return call_webhook(webhook_url, payload, timeout=timeout, label="Story webhook")
 
 
 def _swap_webhook_suffix(webhook_url, source_suffix, target_suffix):

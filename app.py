@@ -9,7 +9,7 @@ import sys
 import threading
 import webbrowser
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory
 from flask_cors import CORS
 from loguru import logger
 
@@ -18,7 +18,7 @@ from config import (
     N8N_ASSET_WEBHOOK_URL, N8N_STORY_WEBHOOK_URL, OUTPUT_DIR,
     SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
-    EXPORT_DIR, APP_CONFIG_PATH,
+    EXPORT_DIR, APP_CONFIG_PATH, APP_ASSETS_DIR,
 )
 from studio.security import is_loopback_remote
 
@@ -85,7 +85,6 @@ app.register_blueprint(niches_bp)
 @app.route("/")
 def index():
     """Redirect root to Vue SPA."""
-    from flask import redirect
     return redirect("/vue/")
 
 
@@ -113,16 +112,12 @@ def serve_app_config():
 
 @app.route("/assets/<path:filename>")
 def serve_app_assets(filename):
-    from config import APP_ASSETS_DIR
     return send_from_directory(APP_ASSETS_DIR, filename)
 
 
 @app.route("/api/restart", methods=["POST"])
 def restart_server():
     """Restart the Flask server process."""
-    import sys
-    import subprocess
-    import threading
     def _restart():
         import time as _t
         _t.sleep(0.5)
