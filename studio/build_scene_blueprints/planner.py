@@ -26,6 +26,31 @@ CAMERA_GRAMMAR = {
     "cta": ["wide", "medium", "low-angle"],
 }
 
+VIDEO_CAMERA_MOVES = {
+    "hook": [
+        "slow push-in zoom toward subject over 4s; focal length ramps 24mm→55mm",
+        "rack focus shift from foreground to subject at 2s; shallow depth of field",
+    ],
+    "buildup": [
+        "slow left-to-right pan with 10° upward tilt; constant speed",
+        "gentle pull-back from close-up to wide shot over 5s; subtle parallax",
+        "handheld style with slight micro-jitter; naturalistic feel",
+    ],
+    "peak": [
+        "180° orbit around subject at eye level over 6s; keep subject centered",
+        "rapid push-in zoom over 2s; dramatic focal compression",
+        "handheld style with slight micro-jitter; urgent energy",
+    ],
+    "transition": [
+        "gentle pull-back from close-up to wide shot over 5s; reveal new environment",
+        "slow left-to-right pan with subtle downward drift; contemplative pace",
+    ],
+    "cta": [
+        "slow push-in zoom toward subject over 4s; focal length ramps 24mm→55mm",
+        "rack focus shift from background to subject at 2.5s; draw focus to message",
+    ],
+}
+
 
 def _tokenize(text: str) -> list[str]:
     return re.findall(r"[A-Za-z][A-Za-z'-]+", (text or "").lower())
@@ -164,6 +189,7 @@ def build_scene_blueprints(segments: list[dict], visual_bible: dict, style_spec:
 
     blueprints = []
     prev_shot = ""
+    prev_camera_move = ""
     image_count = 0
 
     for order, segment in enumerate(segments):
@@ -208,7 +234,13 @@ def build_scene_blueprints(segments: list[dict], visual_bible: dict, style_spec:
         anchor_required = role in {"hook", "buildup", "peak", "text_accent", "cta"}
         continuity_priority = "high" if role in {"hook", "peak", "cta", "text_accent"} else "medium"
 
-        blueprints.append({
+        camera_move = None
+        if scene_type == "video":
+            moves = VIDEO_CAMERA_MOVES.get(role, VIDEO_CAMERA_MOVES["buildup"])
+            camera_move = next((m for m in moves if m != prev_camera_move), moves[0])
+            prev_camera_move = camera_move
+
+        blueprint = {
             "index": idx,
             "segment_words": segment.get("words", ""),
             "narrative_role": role,
@@ -220,7 +252,10 @@ def build_scene_blueprints(segments: list[dict], visual_bible: dict, style_spec:
             "continuity_priority": continuity_priority,
             "world_anchor": visual_bible.get("world_anchor", ""),
             "style_keywords": visual_bible.get("style_keywords", [])[:4],
-        })
+        }
+        if camera_move:
+            blueprint["camera_move"] = camera_move
+        blueprints.append(blueprint)
 
     return blueprints
 

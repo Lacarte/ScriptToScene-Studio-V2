@@ -78,10 +78,11 @@ The viewer hears the transcript while seeing the image. The image should deepen 
 - If you change environment, it must still feel part of the same world anchor.
 
 ## BLUEPRINT RULES
-- Each scene blueprint tells you the target narrative role, preferred scene type, target shot type, and continuity priority.
+- Each scene blueprint tells you the target narrative role, preferred scene type, target shot type, camera move, and continuity priority.
 - Follow the blueprint unless the segment would become nonsensical.
 - Prefer exact blueprint role/type/shot matches.
 - If a blueprint marks anchor_required=true, include the anchor subject or one of the anchor motifs.
+- For video scenes with a camera_move field, incorporate that exact camera direction into the image_prompt as the primary camera motion cue.
 
 ## Scene object keys (output ONLY these — no extra fields)
 - index: integer (match input index exactly)
@@ -100,10 +101,10 @@ The viewer hears the transcript while seeing the image. The image should deepen 
 
 VIDEO:
 - Must feel like a living moment with motion — never a static pose.
-- Format: [shot type], [subject + action], [setting], [lighting], [mood], [2-3 motion cues]
-- MANDATORY: include at least TWO motion cues from different categories:
-  body (gesturing, walking, turning), environment (wind, rain, flickering lights),
-  camera (slow pan, tracking, dolly), atmosphere (smoke drifting, dust particles, shadows shifting).
+- Format: [shot type], [subject + action], [setting], [lighting], [mood], [camera move], [1-2 ambient motion cues]
+- Use the blueprint's camera_move as the primary camera direction (e.g. "slow push-in zoom", "180° orbit").
+- Add at least ONE ambient motion cue from: body (gesturing, walking, turning),
+  environment (wind, rain, flickering lights), atmosphere (smoke drifting, dust particles, shadows shifting).
 - If no obvious action exists, use subtle ambient motion (swaying fabric, breathing, light flicker).
 
 IMAGE:
