@@ -181,9 +181,9 @@ async function previewAudio() {
           if (nextPlayTime < audioCtx.currentTime) nextPlayTime = audioCtx.currentTime
           source.start(nextPlayTime)
           nextPlayTime += audioBuf.duration
-          previewLabel.value = `Playing chunk ${chunks}...`
+          previewLabel.value = `Playing · chunk ${chunks}`
         } else if (d.phase === 'done') {
-          previewLabel.value = `Playing (${chunks} chunks)`
+          previewLabel.value = `Playing · ${chunks} chunks`
         } else if (d.phase === 'error') {
           throw new Error(d.message)
         }
@@ -1415,7 +1415,12 @@ function logStepLabel(step) {
 .preview-status {
   font-size: 11px;
   color: var(--accent);
-  opacity: 0.8;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(78, 205, 196, 0.08);
+  white-space: nowrap;
 }
 
 /* ── Saved Stories Sidebar ── */

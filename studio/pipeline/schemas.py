@@ -53,7 +53,8 @@ class PipelineRunRequest(BaseModel):
         self.custom_style_notes = (self.custom_style_notes or "").strip() or None
 
         if self.style and not is_known_template(self.style):
-            raise ValueError(f"Unknown style '{self.style}'")
+            # style might be a category name — fall back to cinematic
+            self.style = "cinematic"
         if self.niche_preset and not preset_exists(self.niche_preset):
             raise ValueError(f"Unknown niche_preset '{self.niche_preset}'")
         if self.visual_style and not is_valid_visual_style(self.visual_style):

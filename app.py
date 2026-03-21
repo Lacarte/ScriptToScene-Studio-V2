@@ -38,9 +38,9 @@ def _console_format(record):
     return f"<dim>{ts}</dim> <{c}>{icon}</{c}> {{message}}\n"
 
 
-logger.add(sys.stderr, format=_console_format, level="DEBUG", colorize=True)
+logger.add(sys.stderr, format=_console_format, level="INFO", colorize=True)
 logger.add(os.path.join(LOG_DIR, "studio_{time:YYYY-MM-DD}.log"),
-           level="DEBUG", rotation="1 day", retention="7 days", compression="zip",
+           level="INFO", rotation="1 day", retention="7 days", compression="zip",
            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {name}:{function}:{line} - {message}")
 
 # ---------------------------------------------------------------------------

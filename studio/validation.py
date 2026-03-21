@@ -21,7 +21,7 @@ def validate_json(schema: type[BaseModel]):
             try:
                 validated = schema.model_validate(raw)
             except ValidationError as e:
-                errors = e.errors(include_url=False)
+                errors = e.errors(include_url=False, include_context=False)
                 return jsonify({"error": "Validation failed", "details": errors}), 400
             return f(validated, *args, **kwargs)
         return wrapper
