@@ -74,11 +74,12 @@ if errorlevel 1 (
     exit /b 0
 )
 if not exist "tmp" mkdir "tmp"
-echo   Pulling latest changes...
+echo   [SYNC] git pull ...
 git pull >"tmp\git_pull_out.txt" 2>&1
 if errorlevel 1 goto :git_pull_failed
 findstr /i /c:"CONFLICT" /c:"error:" /c:"fatal:" /c:"Cannot" /c:"refusing" /c:"Please commit" /c:"not possible" "tmp\git_pull_out.txt" >nul 2>&1
 if not errorlevel 1 goto :git_pull_failed
+echo   [SYNC] OK
 type "tmp\git_pull_out.txt"
 del "tmp\git_pull_out.txt" >nul 2>&1
 echo.
