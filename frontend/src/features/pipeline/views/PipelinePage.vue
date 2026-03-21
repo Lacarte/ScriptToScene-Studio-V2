@@ -60,6 +60,7 @@ async function handleNicheDelete(presetId) {
 
 const detecting = ref(false)
 const detectedStyle = ref(null) // { style_id, confidence, reason }
+const showGenHistory = ref(false)
 
 async function detectStyle() {
   const t = text.value.trim()
@@ -119,7 +120,7 @@ async function previewAudio() {
     if (cacheData.cached) {
       // Play cached WAV directly — instant playback
       previewLabel.value = 'Playing (cached)'
-      const audio = new Audio(`/api/tts/cache/${cacheData.key}`)
+      const audio = new Audio(`/api/tts/cache/${cacheData.key}?t=${Date.now()}`)
       _previewAudioEl = audio
       audio.onended = () => stopPreview()
       audio.onerror = () => { toast.error('Cached audio playback failed'); stopPreview() }
@@ -200,7 +201,12 @@ async function previewAudio() {
 function stopPreview() {
   if (_previewAbort) { _previewAbort.abort(); _previewAbort = null }
   if (_previewCtx) { try { _previewCtx.close() } catch {} _previewCtx = null }
-  if (_previewAudioEl) { _previewAudioEl.pause(); _previewAudioEl.src = ''; _previewAudioEl = null }
+  if (_previewAudioEl) {
+    _previewAudioEl.pause()
+    _previewAudioEl.removeAttribute('src')
+    _previewAudioEl.load()  // release the connection
+    _previewAudioEl = null
+  }
   previewing.value = false
   previewLabel.value = ''
 }
@@ -303,6 +309,23 @@ async function handleGenerateFromIdea() {
   } catch (e) {
     text.value = previousText
     toast.error(e.message || 'Story generation failed')
+  }
+}
+
+async function loadFromGenHistory(h) {
+  try {
+    const data = await story.loadStory(h.project_id)
+    const plain = (data.story_text || '')
+      .replace(/^(Hook|Build|Climax|CTA):\s*/gim, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    text.value = plain
+    if (h.preset_style) style.value = h.preset_style
+    if (h.story_category) story.storyCategory.value = h.story_category
+    showGenHistory.value = false
+    toast.success(`Loaded story ${h.project_id}`)
+  } catch (e) {
+    toast.error(e.message || 'Failed to load story')
   }
 }
 
@@ -851,11 +874,17 @@ function logStepLabel(step) {
             <input v-model.number="story.storyDuration.value" type="number" class="input-field control-number" min="15" max="180" step="5">
             </div>
             <div class="gen-group gen-group--action">
-            <button class="gen-story-btn" :disabled="story.isGenerating.value" @click="handleGenerateStory">
-              <span v-if="story.isGenerating.value" class="gen-spinner"></span>
-              <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-              {{ story.isGenerating.value ? 'Generating...' : 'Generate Story' }}
-            </button>
+              <div class="gen-btn-group">
+                <button class="gen-story-btn" :disabled="story.isGenerating.value" @click="handleGenerateStory">
+                  <span v-if="story.isGenerating.value" class="gen-spinner"></span>
+                  <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  {{ story.isGenerating.value ? 'Generating...' : 'Generate' }}
+                </button>
+                <button v-if="text.trim()" class="gen-story-btn gen-idea-btn" :disabled="story.isGenerating.value" @click="handleGenerateFromIdea" title="Use current text as idea seed for a new story">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m6.34 6.34 2.83 2.83"/><path d="M2 12h4"/><path d="m17.66 6.34-2.83 2.83"/><path d="M22 12h-4"/><circle cx="12" cy="12" r="4"/></svg>
+                  from Idea
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -874,6 +903,28 @@ function logStepLabel(step) {
         </div>
       </div>
 
+      <!-- Generate History (collapsible) -->
+      <div v-if="sourceMode === 'generate'" class="gen-history-section">
+        <button class="gen-history-toggle" @click="showGenHistory = !showGenHistory">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Generate History
+          <span v-if="story.history.value.length" class="gen-history-count">({{ story.history.value.length }})</span>
+          <svg class="gen-history-chevron" :class="{ rotated: showGenHistory }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div v-if="showGenHistory && story.history.value.length" class="gen-history-list">
+          <div v-for="h in story.history.value" :key="h.project_id" class="gen-history-item" @click="loadFromGenHistory(h)">
+            <span class="gen-history-preview">{{ h.preview || h.project_id }}</span>
+            <span class="gen-history-meta">
+              <span v-if="h.preset_style" class="gen-history-tag" :style="{ color: styleColor(h.preset_style) }">{{ styleLabel(h.preset_style) }}</span>
+              <span v-if="h.story_category" class="gen-history-tag gen-history-tag--cat">{{ formatOptionLabel(h.story_category) }}</span>
+              <span class="gen-history-words">{{ h.word_count || '?' }}w</span>
+              <span class="gen-history-age">{{ timeAgo(h.timestamp) }}</span>
+            </span>
+          </div>
+        </div>
+        <p v-else-if="showGenHistory" class="gen-history-empty">No generated stories yet</p>
+      </div>
+
       <!-- Textarea (always visible) -->
       <textarea
         v-model="text"
@@ -885,11 +936,6 @@ function logStepLabel(step) {
 
       <!-- Detect style bar + audio preview -->
       <div v-if="text.trim()" class="detect-style-bar">
-        <button class="detect-style-btn generate-idea-btn" :disabled="story.isGenerating.value" @click="handleGenerateFromIdea">
-          <span v-if="story.isGenerating.value" class="gen-spinner"></span>
-          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m6.34 6.34 2.83 2.83"/><path d="M2 12h4"/><path d="m17.66 6.34-2.83 2.83"/><path d="M22 12h-4"/><circle cx="12" cy="12" r="4"/></svg>
-          {{ story.isGenerating.value ? 'Generating...' : 'Generate from Idea' }}
-        </button>
         <button class="detect-style-btn" :disabled="detecting" @click="detectStyle">
           <span v-if="detecting" class="detect-spinner"></span>
           <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -1355,13 +1401,6 @@ function logStepLabel(step) {
   cursor: not-allowed;
 }
 
-.generate-idea-btn {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.generate-idea-btn:hover:not(:disabled) {
-  background: rgba(78, 205, 196, 0.1);
-}
 
 .preview-audio-btn--active {
   color: var(--accent) !important;
@@ -1877,12 +1916,18 @@ function logStepLabel(step) {
   margin-left: auto;
 }
 
+.gen-btn-group {
+  display: inline-flex;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(167, 139, 250, 0.2);
+}
+
 .gen-story-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 16px;
-  border-radius: 8px;
+  gap: 5px;
+  padding: 7px 14px;
   font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
@@ -1890,20 +1935,31 @@ function logStepLabel(step) {
   cursor: pointer;
   color: white;
   background: linear-gradient(135deg, #A78BFA, #7C3AED);
-  box-shadow: 0 2px 12px rgba(167, 139, 250, 0.25);
-  transition: all 0.2s;
+  transition: all 0.15s;
   white-space: nowrap;
+  border-radius: 0;
 }
 
+.gen-btn-group .gen-story-btn:first-child { border-radius: 8px 0 0 8px; }
+.gen-btn-group .gen-story-btn:last-child { border-radius: 0 8px 8px 0; }
+.gen-btn-group .gen-story-btn:only-child { border-radius: 8px; }
+
 .gen-story-btn:hover:not(:disabled) {
-  box-shadow: 0 4px 16px rgba(167, 139, 250, 0.4);
-  transform: translateY(-1px);
+  filter: brightness(1.15);
 }
 
 .gen-story-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
+}
+
+.gen-idea-btn {
+  background: rgba(124, 58, 237, 0.15);
+  border-left: 1px solid rgba(167, 139, 250, 0.3);
+  color: #C4B5FD;
+}
+.gen-idea-btn:hover:not(:disabled) {
+  background: rgba(124, 58, 237, 0.3);
 }
 
 .gen-spinner {
@@ -1921,6 +1977,48 @@ function logStepLabel(step) {
   font-size: 11px;
   color: #FF6B6B;
   font-family: var(--font-mono);
+}
+
+/* Generate History */
+.gen-history-section { margin-top: 8px; }
+.gen-history-toggle {
+  display: flex; align-items: center; gap: 6px;
+  background: none; border: none; color: var(--text-muted, #8892b0);
+  font-size: 11px; font-family: var(--font-mono); cursor: pointer;
+  padding: 4px 0; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.gen-history-toggle:hover { color: var(--text-primary, #ccd6f6); }
+.gen-history-count { color: var(--accent, #64ffda); font-weight: 600; }
+.gen-history-chevron { transition: transform 0.2s; }
+.gen-history-chevron.rotated { transform: rotate(180deg); }
+.gen-history-list {
+  max-height: 180px; overflow-y: auto; margin-top: 4px;
+  border: 1px solid var(--border, #1e2d3d); border-radius: 6px;
+  background: var(--bg-surface, #112240);
+}
+.gen-history-item {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 10px; cursor: pointer;
+  border-bottom: 1px solid var(--border, #1e2d3d);
+  transition: background 0.15s;
+}
+.gen-history-item:last-child { border-bottom: none; }
+.gen-history-item:hover { background: var(--bg-hover, #1a3a5c); }
+.gen-history-preview {
+  font-size: 11px; color: var(--text-primary, #ccd6f6);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gen-history-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: var(--text-muted, #8892b0);
+}
+.gen-history-tag { font-weight: 600; }
+.gen-history-tag--cat { color: var(--accent, #64ffda); }
+.gen-history-words { opacity: 0.7; }
+.gen-history-age { opacity: 0.5; margin-left: auto; }
+.gen-history-empty {
+  font-size: 11px; color: var(--text-muted, #8892b0);
+  padding: 8px 10px; margin: 0;
 }
 
 .gen-result-bar {
