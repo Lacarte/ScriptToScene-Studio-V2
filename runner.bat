@@ -8,30 +8,11 @@ echo   ScriptToScene Studio
 echo   ====================
 echo.
 
-:: ── Git pull ──────────────────────────────────────────────────────────────
-ping -n 1 -w 1000 github.com >nul 2>&1
+:: ── Git pull (must succeed before anything else) ─────────────────────────
+call :do_git_pull
 if errorlevel 1 (
-    echo   [WARN] No network — skipping git pull
-    echo.
-) else (
-    if not exist "tmp" mkdir "tmp"
-    git pull 2>"tmp\git_pull_err.txt"
-    if errorlevel 1 (
-        echo.
-        echo   [ERROR] git pull failed:
-        type "tmp\git_pull_err.txt"
-        echo.
-        echo   Fix the issue above before starting the server.
-        echo   Common fixes:
-        echo     - Merge conflicts : resolve them, then git add + git commit
-        echo     - Uncommitted changes : git stash, then re-run this script
-        echo     - Diverged branches : git pull --rebase
-        echo.
-        del "tmp\git_pull_err.txt" >nul 2>&1
-        pause
-        exit /b 1
-    )
-    del "tmp\git_pull_err.txt" >nul 2>&1
+    pause
+    exit /b 1
 )
 
 :: ── Virtual environment ─────────────────────────────────────────────────
@@ -82,3 +63,37 @@ echo.
 echo   Server stopped.
 pause
 endlocal
+goto :eof
+
+:: ── Subroutine: git pull with validation ────────────────────────────────
+:do_git_pull
+ping -n 1 -w 1000 github.com >nul 2>&1
+if errorlevel 1 (
+    echo   [WARN] No network — skipping git pull
+    echo.
+    exit /b 0
+)
+if not exist "tmp" mkdir "tmp"
+echo   Pulling latest changes...
+git pull >"tmp\git_pull_out.txt" 2>&1
+if errorlevel 1 goto :git_pull_failed
+findstr /i /c:"CONFLICT" /c:"error:" /c:"fatal:" /c:"Cannot" /c:"refusing" /c:"Please commit" /c:"not possible" "tmp\git_pull_out.txt" >nul 2>&1
+if not errorlevel 1 goto :git_pull_failed
+type "tmp\git_pull_out.txt"
+del "tmp\git_pull_out.txt" >nul 2>&1
+echo.
+exit /b 0
+:git_pull_failed
+echo.
+echo   [ERROR] git pull failed:
+echo.
+type "tmp\git_pull_out.txt"
+echo.
+echo   Fix the issue above before starting the server.
+echo   Common fixes:
+echo     - Merge conflicts : resolve them, then git add + git commit
+echo     - Uncommitted changes : git stash, then re-run this script
+echo     - Diverged branches : git pull --rebase
+echo.
+del "tmp\git_pull_out.txt" >nul 2>&1
+exit /b 1
