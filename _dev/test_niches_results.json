@@ -1,0 +1,360 @@
+{
+  "anime_romance": {
+    "verdict": "WARN",
+    "elapsed": 22.3,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 5.3,
+      "tts_info": "[pp_KH6K99] 5.5s audio, 19 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_KH6K99"
+  },
+  "biblical_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 11.8,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 5.0,
+      "tts_info": "[pp_6O4X26] 5.3s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_6O4X26"
+  },
+  "biblical_gothic": {
+    "verdict": "WARN",
+    "elapsed": 14.5,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 5.0,
+      "tts_info": "[pp_J1GR3K] 5.3s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_J1GR3K"
+  },
+  "children_storybook_wholesome": {
+    "verdict": "WARN",
+    "elapsed": 13.4,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 5.7,
+      "tts_info": "[pp_RVATT6] 6.0s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_RVATT6"
+  },
+  "conspiracy_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 14.5,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 6.5,
+      "tts_info": "[pp_J02KN8] 6.6s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_J02KN8"
+  },
+  "conspiracy_noir": {
+    "verdict": "WARN",
+    "elapsed": 12.2,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 6.5,
+      "tts_info": "[pp_K0NAQY] 6.6s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_K0NAQY"
+  },
+  "dark_psychology_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 15.0,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 8.1,
+      "tts_info": "[pp_DD9JRP] 8.4s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_DD9JRP"
+  },
+  "dark_psychology_noir": {
+    "verdict": "WARN",
+    "elapsed": 15.2,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 8.1,
+      "tts_info": "[pp_XUOBAI] 8.4s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_XUOBAI"
+  },
+  "dark_psychology_stickman": {
+    "verdict": "WARN",
+    "elapsed": 15.2,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 8.1,
+      "tts_info": "[pp_FHBBCN] 8.4s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_FHBBCN"
+  },
+  "horror_anime": {
+    "verdict": "WARN",
+    "elapsed": 12.8,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 5.8,
+      "tts_info": "[pp_AWPCK4] 6.0s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_AWPCK4"
+  },
+  "horror_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 12.0,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 5.8,
+      "tts_info": "[pp_GRNQ0Z] 6.0s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_GRNQ0Z"
+  },
+  "horror_stickman": {
+    "verdict": "WARN",
+    "elapsed": 13.5,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 5.8,
+      "tts_info": "[pp_7M5TL7] 6.0s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_7M5TL7"
+  },
+  "motivation_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 15.3,
+    "scores": {
+      "scene_count": 3,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 3,
+      "total_duration": 8.1,
+      "tts_info": "[pp_345WGN] 7.8s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}",
+      "Scene 2: missing {'type'}"
+    ],
+    "project_id": "pp_345WGN"
+  },
+  "motivation_stickman": {
+    "verdict": "WARN",
+    "elapsed": 15.9,
+    "scores": {
+      "scene_count": 3,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 3,
+      "total_duration": 8.1,
+      "tts_info": "[pp_LRNCHA] 7.8s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}",
+      "Scene 2: missing {'type'}"
+    ],
+    "project_id": "pp_LRNCHA"
+  },
+  "reddit_story_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 13.5,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 6.3,
+      "tts_info": "[pp_OKJTWB] 6.4s audio, 23 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_OKJTWB"
+  },
+  "scifi_cyberpunk": {
+    "verdict": "WARN",
+    "elapsed": 14.4,
+    "scores": {
+      "scene_count": 3,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 3,
+      "total_duration": 7.2,
+      "tts_info": "[pp_NQQLLN] 7.4s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}",
+      "Scene 2: missing {'type'}"
+    ],
+    "project_id": "pp_NQQLLN"
+  },
+  "stoicism_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 11.6,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 4.3,
+      "tts_info": "[pp_XNEYXU] 4.6s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_XNEYXU"
+  },
+  "stoicism_stickman": {
+    "verdict": "WARN",
+    "elapsed": 11.6,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 4.3,
+      "tts_info": "[pp_5MP65B] 4.6s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_5MP65B"
+  },
+  "true_crime_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 15.0,
+    "scores": {
+      "scene_count": 3,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 3,
+      "total_duration": 6.6,
+      "tts_info": "[pp_42TMJN] 6.7s audio, 21 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}",
+      "Scene 2: missing {'type'}"
+    ],
+    "project_id": "pp_42TMJN"
+  },
+  "true_crime_noir": {
+    "verdict": "WARN",
+    "elapsed": 14.3,
+    "scores": {
+      "scene_count": 3,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 3,
+      "total_duration": 6.6,
+      "tts_info": "[pp_WWYDKB] 6.7s audio, 21 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}",
+      "Scene 2: missing {'type'}"
+    ],
+    "project_id": "pp_WWYDKB"
+  },
+  "two_choices_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 15.2,
+    "scores": {
+      "scene_count": 2,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 2,
+      "total_duration": 8.1,
+      "tts_info": "[pp_Y3HIMP] 8.4s audio, 20 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}"
+    ],
+    "project_id": "pp_Y3HIMP"
+  },
+  "wealth_cinematic": {
+    "verdict": "WARN",
+    "elapsed": 15.1,
+    "scores": {
+      "scene_count": 3,
+      "valid_scenes": 0,
+      "scenes_with_prompts": 3,
+      "total_duration": 8.1,
+      "tts_info": "[pp_UVNS7M] 7.8s audio, 17 words"
+    },
+    "issues": [
+      "Scene 0: missing {'type'}",
+      "Scene 1: missing {'type'}",
+      "Scene 2: missing {'type'}"
+    ],
+    "project_id": "pp_UVNS7M"
+  }
+}
