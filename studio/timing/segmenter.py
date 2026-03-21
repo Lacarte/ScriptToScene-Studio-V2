@@ -22,8 +22,8 @@ from studio.io_utils import safe_json_write
 # ---------------------------------------------------------------------------
 DEFAULT_CONFIG = {
     "target_min": 1.5,
-    "target_max": 3.0,
-    "hard_max": 4.0,
+    "target_max": 4.0,
+    "hard_max": 5.0,
     "hard_min": 0.8,
     "gap_filler": 0.3,
 }
