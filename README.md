@@ -573,6 +573,10 @@ ScriptToScene-Studio/
 ├── assets/                 # App assets (fonts, sounds, caption presets)
 ├── bin/                    # FFmpeg binaries (not in repo)
 ├── models/                 # TTS model cache (auto-downloaded)
+├── tmp/                    # Temporary files (preview cache, gitignored)
+├── _dev/                   # Development tools and automation
+│   └── automation/automa/grok/
+│       └── Grok Assets Synchronizer.automa.json  # Browser automation workflow (see below)
 └── output/                 # All generated data (gitignored)
     ├── tts/                # {id}/voice.wav + voice.json
     ├── alignments/         # {id}/alignment.json
@@ -743,6 +747,25 @@ curl -X POST http://localhost:5050/api/tts/generate \
 - **Loopback-only endpoints** — sensitive operations (folder open, data wipe) restricted to 127.0.0.1
 - **Atomic JSON writes** — `safe_json_write()` uses fsync + `.bak` backups to prevent corruption
 - **Soft deletion** — projects are moved to `TRASH/`, not permanently deleted
+
+---
+
+## Browser Automation — Grok Assets Synchronizer
+
+**Location:** `_dev/automation/automa/grok/Grok Assets Synchronizer.automa.json`
+
+The Grok Assets Synchronizer is an [Automa](https://www.automa.site/) browser extension workflow that bridges ScriptToScene Studio with Grok's AI image/video generation on the web. It runs as an injected script on the Grok website and provides:
+
+- **Scene prompt typing** — automatically types each scene's `image_prompt` into Grok's input field, one scene at a time, simulating human keystrokes to bypass paste restrictions
+- **Asset polling** — polls the Studio backend (`/api/assets/grabber/pending`) for scenes that still need assets, then queues them for generation
+- **Auto-sync** — continuously syncs generated assets back to the Studio backend, matching Grok's output to the correct scene index
+- **CSP bypass** — uses Automa's `automaFetch()` to reach `localhost:5050` from Grok's page, which blocks standard `fetch()` via Content Security Policy
+- **Floating control panel** — injects a draggable UI overlay on the Grok page with start/stop, batch settings, typing queue status, and connection indicator
+- **Configurable** — aspect ratio (`9:16`, `16:9`, `1:1`), quality (`360p`–`720p`), duration (`6s`), and typing speed are adjustable from the overlay panel
+
+### How it fits in the pipeline
+
+During **Step 5 (Asset Grabbing)**, when the provider is set to `grok`, the pipeline writes pending scene prompts to the grabber queue. The Automa workflow running in the browser picks up those prompts, types them into Grok, waits for generation, and syncs the resulting media files back to `output/assets/{project_id}/`.
 
 ---
 
