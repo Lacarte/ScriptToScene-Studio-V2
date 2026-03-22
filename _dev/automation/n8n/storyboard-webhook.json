@@ -4,7 +4,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "image-generator",
+        "path": "storyboard-generator",
         "responseMode": "responseNode",
         "options": {}
       },

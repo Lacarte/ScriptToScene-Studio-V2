@@ -8,7 +8,6 @@ bin/
 models/
 exports/
 working-assets/
-.env
 .claude/
 !.claude/settings.json
 !.claude/skills/

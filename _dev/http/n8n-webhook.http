@@ -1,4 +1,4 @@
-POST https://n8n-production-6197.up.railway.app/webhook-test/scene-generator HTTP/1.1
+POST https://n8n-production-6197.up.railway.app/webhook-test/scene-blueprint-generator HTTP/1.1
 content-type: application/json
 
 {

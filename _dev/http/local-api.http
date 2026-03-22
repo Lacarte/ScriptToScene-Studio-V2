@@ -61,8 +61,8 @@
 ### ============================================================
 
 @base = http://localhost:5000
-@webhook = https://n8n-production-6197.up.railway.app/webhook/scene-generator
-@webhook_test = https://n8n-production-6197.up.railway.app/webhook-test/scene-generator
+@webhook = https://n8n-production-6197.up.railway.app/webhook/scene-blueprint-generator
+@webhook_test = https://n8n-production-6197.up.railway.app/webhook-test/scene-blueprint-generator
 
 ### ----------------------------------------------------------
 ### 1. Health check — GET webhook URL config

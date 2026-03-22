@@ -19,3 +19,13 @@ class StoryboardGenerateRequest(BaseModel):
     webhook_url: Optional[str] = None
 
     model_config = {"extra": "allow"}
+
+
+class StoryboardGrabOneRequest(BaseModel):
+    project_id: str
+    scene: int
+    prompt: str = Field(min_length=1)
+    aspect_ratio: str = "9:16"
+    webhook_url: Optional[str] = None
+
+    model_config = {"extra": "allow"}

@@ -20,12 +20,12 @@ import requests as http_requests
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import STORYBOARD_DIR, N8N_ASSET_WEBHOOK_URL
+from config import STORYBOARD_DIR, N8N_STORYBOARD_WEBHOOK_URL
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.security import sanitize_project_id
 from studio.validation import validate_json
 from studio.webhooks import call_webhook
-from .schemas import StoryboardGenerateRequest
+from .schemas import StoryboardGenerateRequest, StoryboardGrabOneRequest
 
 storyboard_bp = Blueprint("storyboard", __name__)
 
@@ -116,7 +116,7 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
 
     project_dir = _storyboard_dir(project_id)
     os.makedirs(project_dir, exist_ok=True)
-    url = webhook_url or N8N_ASSET_WEBHOOK_URL
+    url = webhook_url or N8N_STORYBOARD_WEBHOOK_URL
 
     total = len(scenes)
     ready = 0
@@ -303,6 +303,127 @@ def serve_image(project_id, filename):
         return jsonify({"error": "Image not found"}), 404
 
     return send_from_directory(project_dir, filename)
+
+
+@storyboard_bp.route("/api/storyboard/grab", methods=["POST"])
+@validate_json(StoryboardGrabOneRequest)
+def grab_one(data: StoryboardGrabOneRequest):
+    """Grab a single scene's storyboard image — sends to n8n and downloads result.
+
+    Creates or updates the job for this project, generating only the requested scene.
+    """
+    project_id = sanitize_project_id(data.project_id)
+    scene_key = str(data.scene)
+    webhook_url = data.webhook_url or N8N_STORYBOARD_WEBHOOK_URL
+
+    # Load or create job
+    job = _get_job(project_id)
+    if not job:
+        json_path = _storyboard_json_path(project_id)
+        if os.path.isfile(json_path):
+            try:
+                job = safe_json_read(json_path)
+                _set_job(project_id, job)
+            except Exception:
+                pass
+    if not job:
+        job = {
+            "project_id": project_id,
+            "status": "running",
+            "total": 0,
+            "ready": 0,
+            "errors": 0,
+            "aspect_ratio": data.aspect_ratio,
+            "created_at": _now_iso(),
+            "completed_at": None,
+            "scene_statuses": {},
+        }
+
+    # Mark this scene as generating
+    job["status"] = "running"
+    job["scene_statuses"][scene_key] = {"status": "generating", "image_url": None, "local_path": None}
+    _set_job(project_id, job)
+    _save_storyboard_json(project_id, job)
+
+    def _grab_single(pid, sk, prompt, ar, url):
+        j = _get_job(pid)
+        if not j:
+            return
+        project_dir = _storyboard_dir(pid)
+        os.makedirs(project_dir, exist_ok=True)
+
+        try:
+            logger.info("[{}] Storyboard grab scene {} — calling webhook", pid, sk)
+            result = call_webhook(
+                url,
+                {"image_prompt": prompt, "aspect_ratio": ar},
+                timeout=300,
+                label=f"Storyboard grab scene {sk}",
+            )
+            image_url = result.get("image_url")
+            if not image_url:
+                raise RuntimeError(f"Webhook returned no image_url: {result}")
+
+            j["scene_statuses"][sk]["status"] = "downloading"
+            _save_storyboard_json(pid, j)
+
+            ext = ".jpg"
+            if image_url.lower().endswith(".png"):
+                ext = ".png"
+            elif image_url.lower().endswith(".webp"):
+                ext = ".webp"
+            dest = os.path.join(project_dir, f"{sk}{ext}")
+
+            if _download_image(image_url, dest):
+                local_path = f"/output/storyboard/{pid}/{sk}{ext}"
+                j["scene_statuses"][sk] = {
+                    "status": "ready",
+                    "image_url": image_url,
+                    "local_path": local_path,
+                }
+                logger.success("[{}] Storyboard grab scene {} ready", pid, sk)
+            else:
+                j["scene_statuses"][sk] = {
+                    "status": "error",
+                    "image_url": image_url,
+                    "local_path": None,
+                    "error": "Download failed after retries",
+                }
+        except Exception as e:
+            logger.error("[{}] Storyboard grab scene {} failed: {}", pid, sk, e)
+            j["scene_statuses"][sk] = {
+                "status": "error",
+                "image_url": None,
+                "local_path": None,
+                "error": str(e),
+            }
+
+        # Update totals
+        statuses = j["scene_statuses"]
+        j["total"] = len(statuses)
+        j["ready"] = sum(1 for s in statuses.values() if s.get("status") == "ready")
+        j["errors"] = sum(1 for s in statuses.values() if s.get("status") == "error")
+        all_done = all(s["status"] in ("ready", "error") for s in statuses.values())
+        if all_done:
+            j["status"] = "done"
+            j["completed_at"] = _now_iso()
+        _save_storyboard_json(pid, j)
+        _set_job(pid, j)
+
+    threading.Thread(
+        target=_grab_single,
+        args=(project_id, scene_key, data.prompt, data.aspect_ratio, webhook_url),
+        daemon=True,
+    ).start()
+
+    logger.info("[{}] Storyboard grab started — scene {}", project_id, scene_key)
+    return jsonify({"status": "generating", "project_id": project_id, "scene": data.scene}), 202
+
+
+@storyboard_bp.route("/api/storyboard/webhook-url")
+def get_webhook_url():
+    """Return the configured storyboard webhook URL (image-generator)."""
+    return jsonify({"url": N8N_STORYBOARD_WEBHOOK_URL})
 
 
 @storyboard_bp.route("/output/storyboard/<path:filename>")

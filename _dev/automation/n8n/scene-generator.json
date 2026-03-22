@@ -52,7 +52,7 @@
         {
             "parameters": {
                 "httpMethod": "POST",
-                "path": "scene-generator",
+                "path": "scene-blueprint-generator",
                 "responseMode": "responseNode",
                 "options": {}
             },
@@ -304,7 +304,7 @@
             {
                 "parameters": {
                     "httpMethod": "POST",
-                    "path": "scene-generator",
+                    "path": "scene-blueprint-generator",
                     "responseMode": "responseNode",
                     "options": {}
                 },

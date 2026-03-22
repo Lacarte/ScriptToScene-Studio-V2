@@ -57,13 +57,16 @@ for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR,
 # External service URLs (env-overridable)
 # ---------------------------------------------------------------------------
 N8N_WEBHOOK_URL = os.environ.get(
-    "N8N_WEBHOOK_URL", "http://localhost:5678/webhook/scene-generator"
+    "N8N_WEBHOOK_URL", "http://localhost:5678/webhook/scene-blueprint-generator"
 )
 N8N_ASSET_WEBHOOK_URL = os.environ.get(
     "N8N_ASSET_WEBHOOK_URL", "http://localhost:5678/webhook/image-generator"
 )
 N8N_STORY_WEBHOOK_URL = os.environ.get(
     "N8N_STORY_WEBHOOK_URL", "http://localhost:5678/webhook/story-generator"
+)
+N8N_STORYBOARD_WEBHOOK_URL = os.environ.get(
+    "N8N_STORYBOARD_WEBHOOK_URL", "http://localhost:5678/webhook/storyboard-generator"
 )
 N8N_CLASSIFY_WEBHOOK_URL = os.environ.get(
     "N8N_CLASSIFY_WEBHOOK_URL", "http://localhost:5678/webhook/classify-style"
