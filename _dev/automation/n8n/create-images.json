@@ -1,0 +1,317 @@
+{
+  "name": "Create Images",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ce438410-7e4f-4b54-960b-8be5bb835d4e",
+              "leftValue": "={{ $json.data.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        528,
+        -128
+      ],
+      "id": "ee8e0bc8-a38e-405d-a3d1-a9a437c602cc",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.wavespeed.ai/api/v3/wavespeed-ai/flux-dev-lora-ultra-fast",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enable_base64_output\": false,\n  \"guidance_scale\": 3.5,\n  \"image\": \"\",\n  \"loras\": [\n    {\n      \"path\": \"strangerzonehf/Flux-Super-Realism-LoRA\",\n      \"scale\": 1\n    }\n  ],\n  \"num_images\": 1,\n  \"num_inference_steps\": 28,\n  \"output_format\": \"jpeg\",\n  \"prompt\": \"{{ $json.image_prompt.replace(/\\n/g,'\\\\n') }}\",\n  \"seed\": -1,\n  \"size\": \"1024*576\",\n  \"strength\": 0.8\n}",
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -144,
+        -128
+      ],
+      "id": "7b846009-a044-4a39-a5af-b3ea0dc0daeb",
+      "name": "Generate Images",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "1DbB9b0aFBg2Le6J",
+          "name": "Wavespeed API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        80,
+        -128
+      ],
+      "id": "8de2fce3-4914-4f52-84d8-696692e46050",
+      "name": "Wait for Images",
+      "webhookId": "cc27518d-e985-4fa4-a51d-4c07c0dd9839"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.wavespeed.ai/api/v3/predictions/{{ $json.data.id }}/result",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        304,
+        -128
+      ],
+      "id": "2904f544-21bc-4d0d-b6ef-8b0e5ecdaa63",
+      "name": "Get Images",
+      "retryOnFail": true,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "1DbB9b0aFBg2Le6J",
+          "name": "Wavespeed API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4e79599e-ae55-4793-9cf7-710ba0c71478",
+              "name": "image_url",
+              "value": "={{ $('Get Images').item.json.data.outputs[0] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        752,
+        -128
+      ],
+      "id": "6f9e7eb8-0ecb-4b2a-8e63-cab086690353",
+      "name": "Return"
+    },
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n  \"image_prompt\": \"\",\n  \"image_reference\": \"\",\n  \"aspect_ration\": \"\"\n}"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -368,
+        -128
+      ],
+      "id": "5c7a5f7d-b710-41b5-b934-d77049f3d545",
+      "name": "Start"
+    }
+  ],
+  "pinData": {
+    "Start": [
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [What if the tiny habit you shrugged off as “I outgrew it” is actually a silent signal from childhood that still hijacks your love, work and sense of safety?]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: thin puppet-strings extend from the stick figure's shoulders into a dark vignette, a tiny childhood toy silhouette sits in the corner as a symbolic anchor, heavy grain and stark rim light emphasize tension.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [You hear that and think it’s personal drama — but science, evolution and psychology say otherwise.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: thought-bubble collage behind the figure showing schematic brain lines, an evolutionary spiral silhouette, and a tiny textbook icon; unequal lighting separates 'emotion' foreground from 'science' background.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [Studies show our brains encode early threats into reflexes we cannot consciously control, and that’s a biological reality.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: a silhouetted brain behind the figure with radiating jagged reflex-lines connecting to the stick figure's spine, small calendar pages fluttering to symbolize 'years ago' encoding, dramatic chiaroscuro.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [But here’s what most don’t realize.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: small crack of light appears behind a closed door in the scene, hinting at revelation; negative space used to create a feeling of withheld knowledge, subtle texture variations.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [Maybe you freeze when someone raises their voice, or you back out of a promotion because of a single skeptical look.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: jagged sound-wave lines close to the figure's head showing 'raised voice', and a looming shadow of a suited silhouette with a single piercing eyebrow representing the skeptical look; frozen posture, frosted texture around limbs.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [People think that’s just fear or preference, but those are subconscious signals — micro-tells wired into the amygdala by years ago.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: close-up of the stick figure's chest with tiny wires running into a small labeled 'amygdala' icon, micro-tell icons (a twitch, a bead of sweat, a clenched hand) orbiting like satellites, stark contrast between label and texture.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [Evolution made that efficient; psychology calls it attachment and learned threat response.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: layered silhouettes showing an ancestral figure handing a shield to a child-figure (evolution), while a psychologist’s clipboard silhouette overlays with labels 'attachment' and 'learned response'; overlapping shadow layers show continuity across time.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [But here’s what most don’t realize.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: a small, almost-hidden doorway of light appears at the edge of frame with subtle footprints leading toward it—an invitation to new insight, high-contrast shadow framing.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [Left unchecked, these tiny cues scale: missed opportunities, relationship spirals, chronic anxiety — high-stakes consequences that feel like bad luck but aren’t.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: cascading tiles or dominoes made of tiny cue-icons (a door closing, a phone ignored, spiraling speech bubble) tumble from the figure into a dark pit labeled 'consequences', stark rim lighting dramatizes the fall.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [You can spot it: flinches, over-explaining, need for constant reassurance, avoidance of mirrors in meetings.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: a line-up of small vignettes around the main figure showing each micro-behavior (a startled flinch, a long speech bubble labeled 'over-explaining', a tiny hand offering a heart labeled 'reassurance', a meeting table with a dark mirror pushed away), stark contrast and negative space separate each vignette.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [These are things you cannot consciously control in the moment, yet they rule outcomes.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: the stick figure sits center with translucent hands (to indicate lack of control) while bold outcome-words (OPPORTUNITY, RELATIONSHIP, ANXIETY) loom as large shadow-words overhead; dramatic contrast highlights helplessness.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [But here’s what most don’t realize.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: a subtle, small wrench or tool appears near the figure's shadow (symbolizing tools/agency), careful negative space hints that change is possible though not obvious.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      },
+      {
+        "json": {
+          "image_prompt": "A black-and-white, high-contrast cartoon illustration in the style of a dark stick-figure comic. The main character is a simple stick figure with a round head and large expressive eyes and [If you want tools to recognize and change this biological reality, hit like and subscribe — because missing these signals can cost you more than you think.]. The atmosphere is moody, introspective, and emotional, with strong shadows and exaggerated expressions. Composition: the stick figure reaches toward a small toolkit labeled 'TOOLS' illuminated by a thin shaft of light; subtle subscribe/like icons rendered as simple hand-drawn symbols sit nearby, hopeful negative space, textured contrast.",
+          "image_reference": null,
+          "aspect_ration": "16:9"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Return",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Images": {
+      "main": [
+        [
+          {
+            "node": "Wait for Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Images": {
+      "main": [
+        [
+          {
+            "node": "Get Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Images": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Generate Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ad508198-4230-4c60-89cf-fcf3f9fce01a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fafc928dde8f633403f51a6bfcc81e50ba7a633996af48d59b01532a329b13fe"
+  },
+  "id": "FaPKbPV3in6ctCGx",
+  "tags": []
+}
