@@ -40,10 +40,16 @@ const routes = [
     meta: { title: 'Scene Blueprint', icon: 'film' },
   },
   {
+    path: '/storyboard',
+    name: 'storyboard',
+    component: () => import('@/features/storyboard/views/StoryboardPage.vue'),
+    meta: { title: 'Storyboard', icon: 'grid' },
+  },
+  {
     path: '/assets',
     name: 'assets',
     component: () => import('@/features/assets/views/AssetsPage.vue'),
-    meta: { title: 'Asset Manager', icon: 'image' },
+    meta: { title: 'Animator', icon: 'image' },
   },
   {
     path: '/editor',

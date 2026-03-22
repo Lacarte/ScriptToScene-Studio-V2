@@ -513,10 +513,10 @@ onMounted(async () => {
   <div class="assets-page">
     <!-- Header -->
     <div class="page-header">
-      <h2 class="page-title">Asset Manager</h2>
+      <h2 class="page-title">Animator</h2>
       <span v-if="projectId" class="project-badge">{{ projectId }}</span>
     </div>
-    <p class="page-subtitle">Generate and manage visual assets for each scene</p>
+    <p class="page-subtitle">Generate and animate visual assets for each scene</p>
 
     <!-- Source Info -->
     <section class="card source-card">
@@ -571,7 +571,7 @@ onMounted(async () => {
     <div v-if="scenePickerOpen" class="modal-backdrop" @click.self="scenePickerOpen = false">
       <div class="modal-panel">
         <div class="modal-header">
-          <h3>Pick Scenes</h3>
+          <h3>Pick Storyboard</h3>
           <button class="modal-close" @click="scenePickerOpen = false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />

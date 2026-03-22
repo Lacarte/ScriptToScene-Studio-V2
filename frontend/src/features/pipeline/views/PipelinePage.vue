@@ -336,7 +336,7 @@ async function loadFromGenHistory(h) {
 const router = useRouter()
 const {
   ALL_STEPS, VOICES,
-  text, voice, speed, style, autoScenes, stopAfter, templates,
+  text, voice, speed, style, autoScenes, autoStoryboard, stopAfter, templates,
   running, stopping, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
   failedStep, failedProjectId, stoppedStep, stoppedProjectId,
@@ -534,6 +534,7 @@ watch(globalStatus, (status) => {
       timing: '/alignment',
       segment: '/segmenter',
       scenes: '/scenes',
+      storyboard: '/storyboard',
       assets: '/assets',
       assemble: '/editor',
       export: '/export-library',
@@ -993,7 +994,8 @@ function logStepLabel(step) {
             <option value="timing">→ Alignment</option>
             <option value="segment">→ Segment</option>
             <option value="scenes">→ Scenes</option>
-            <option value="assets">→ Assets</option>
+            <option value="storyboard">→ Storyboard</option>
+            <option value="assets">→ Animator</option>
             <option value="assemble">→ Assemble</option>
             <option value="export">→ Export</option>
           </select>
@@ -1002,6 +1004,10 @@ function logStepLabel(step) {
           <label class="auto-toggle" for="pipeline-auto-scenes" :class="{ disabled: stopAfter }">
             <input id="pipeline-auto-scenes" v-model="autoScenes" type="checkbox" class="auto-check" :disabled="!!stopAfter">
             <span class="auto-text">Auto-scenes</span>
+          </label>
+          <label class="auto-toggle" for="pipeline-auto-storyboard" :class="{ disabled: stopAfter }">
+            <input id="pipeline-auto-storyboard" v-model="autoStoryboard" type="checkbox" class="auto-check" :disabled="!!stopAfter">
+            <span class="auto-text">Storyboard</span>
           </label>
         </div>
       </div>

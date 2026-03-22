@@ -1,4 +1,4 @@
-"""Pipeline Module — Orchestrates the full TTS → Alignment → Segment → Scenes pipeline.
+"""Pipeline Module — Orchestrates the full TTS → Alignment → Segment → Scenes → Storyboard → Animator → Build → Export pipeline.
 
 Provides:
   POST /api/pipeline/run           — start a pipeline job (returns job_id + project_id)
@@ -25,7 +25,7 @@ from loguru import logger
 
 from config import (
     TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ASSETS_DIR, EXPORT_DIR,
-    PIPELINE_DIR, PROJECTS_DIR, N8N_WEBHOOK_URL, generate_project_id,
+    PIPELINE_DIR, PROJECTS_DIR, STORYBOARD_DIR, N8N_WEBHOOK_URL, generate_project_id,
 )
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
@@ -38,7 +38,7 @@ pipeline_bp = Blueprint("pipeline", __name__)
 # ---------------------------------------------------------------------------
 _jobs = {}
 _jobs_lock = threading.Lock()
-ALL_PIPELINE_STEPS = ["tts", "timing", "segment", "scenes", "assets", "assemble", "export"]
+ALL_PIPELINE_STEPS = ["tts", "timing", "segment", "scenes", "storyboard", "assets", "assemble", "export"]
 
 
 class PipelineStopped(RuntimeError):
@@ -154,6 +154,7 @@ def run_pipeline(data: PipelineRunRequest):
         "segment_config": data.segment_config,
         "webhook_url": data.webhook_url,
         "auto_scenes": data.auto_scenes,
+        "auto_storyboard": data.auto_storyboard,
         "stop_after": stop_after,
         "project_id": project_id,
         "resume_from": resume_from,
@@ -534,6 +535,7 @@ def _save_pipeline_json(project_id, job_id, config, status, step_statuses,
             "niche": config.get("niche"),
             "provider": config.get("provider", "grok"),
             "auto_scenes": config.get("auto_scenes", True),
+            "auto_storyboard": config.get("auto_storyboard", True),
             "stop_after": config.get("stop_after") or None,
             "aspect_ratio": config.get("aspect_ratio", "9:16"),
             "grok_mode": config.get("grok_mode", "video"),
@@ -570,6 +572,7 @@ def _emit_done(job_id, project_id, results):
             } if "timing" in results else None,
             "segment": results.get("segment"),
             "scenes": results.get("scenes"),
+            "storyboard": results.get("storyboard"),
             "assets": results.get("assets"),
             "assemble": results.get("assemble"),
             "export": results.get("export"),
@@ -653,6 +656,10 @@ def _load_prior_results(project_id, up_to_step):
             scenes_path = os.path.join(SCENES_DIR, project_id, "scenes.json")
             if os.path.isfile(scenes_path):
                 loaded["scenes"] = safe_json_read(scenes_path)
+        elif step == "storyboard":
+            sb_path = os.path.join(STORYBOARD_DIR, project_id, "storyboard.json")
+            if os.path.isfile(sb_path):
+                loaded["storyboard"] = safe_json_read(sb_path)
         elif step == "assemble":
             project_dir = os.path.join(PROJECTS_DIR, project_id)
             project_candidates = (
@@ -707,6 +714,7 @@ def _run_pipeline(job_id):
             "timing": ["tts"],
             "segment": ["tts", "timing"],
             "scenes": ["tts", "timing", "segment"],
+            "storyboard": ["tts", "timing", "segment", "scenes"],
             "assets": ["tts", "timing", "segment", "scenes"],
             "assemble": ["tts", "timing", "segment", "scenes"],
             "export": ["tts", "timing", "segment", "scenes", "assemble"],
@@ -754,14 +762,14 @@ def _run_pipeline(job_id):
         if _should_skip("tts"):
             tts_result = results.get("tts", {})
         else:
-            logger.info("[{}] Step 1/7: TTS starting", project_id)
+            logger.info("[{}] Step 1/8: TTS starting", project_id)
             _emit(job_id, {"step": "tts", "status": "running",
                            "message": f"[{project_id}] Generating audio..."})
             _t0 = time.perf_counter()
             tts_result = _step_tts(config, project_id)
             step_timings["tts"] = round(time.perf_counter() - _t0, 2)
             results["tts"] = tts_result
-            logger.success("[{}] Step 1/7: TTS done — {:.1f}s audio, {} words",
+            logger.success("[{}] Step 1/8: TTS done — {:.1f}s audio, {} words",
                            project_id, tts_result["duration_seconds"], tts_result["words"])
             _emit(job_id, {
                 "step": "tts", "status": "done",
@@ -782,14 +790,14 @@ def _run_pipeline(job_id):
         if _should_skip("timing"):
             timing_result = results.get("timing", {})
         else:
-            logger.info("[{}] Step 2/7: Alignment starting", project_id)
+            logger.info("[{}] Step 2/8: Alignment starting", project_id)
             _emit(job_id, {"step": "timing", "status": "running",
                            "message": f"[{project_id}] Aligning words..."})
             _t0 = time.perf_counter()
             timing_result = _step_timing(tts_result, config, project_id)
             step_timings["timing"] = round(time.perf_counter() - _t0, 2)
             results["timing"] = timing_result
-            logger.success("[{}] Step 2/7: Alignment done — {} words in {:.2f}s",
+            logger.success("[{}] Step 2/8: Alignment done — {} words in {:.2f}s",
                            project_id, timing_result["word_count"], timing_result["inference_time"])
             _emit(job_id, {
                 "step": "timing", "status": "done",
@@ -809,7 +817,7 @@ def _run_pipeline(job_id):
         if _should_skip("segment"):
             segment_result = results.get("segment", {})
         else:
-            logger.info("[{}] Step 3/7: Segment starting", project_id)
+            logger.info("[{}] Step 3/8: Segment starting", project_id)
             _emit(job_id, {"step": "segment", "status": "running",
                            "message": f"[{project_id}] Splitting into scenes..."})
             _t0 = time.perf_counter()
@@ -817,7 +825,7 @@ def _run_pipeline(job_id):
             step_timings["segment"] = round(time.perf_counter() - _t0, 2)
             results["segment"] = segment_result
             stats = segment_result.get("stats", {})
-            logger.success("[{}] Step 3/7: Segment done — {} scenes, avg {:.1f}s",
+            logger.success("[{}] Step 3/8: Segment done — {} scenes, avg {:.1f}s",
                            project_id, stats.get("segment_count", 0), stats.get("avg_duration", 0))
             _emit(job_id, {
                 "step": "segment", "status": "done",
@@ -837,7 +845,7 @@ def _run_pipeline(job_id):
         if _should_skip("scenes"):
             scenes_result = results.get("scenes", {})
         elif config.get("auto_scenes", True):
-            logger.info("[{}] Step 4/7: Scenes starting (webhook)", project_id)
+            logger.info("[{}] Step 4/8: Scenes starting (webhook)", project_id)
             _emit(job_id, {"step": "scenes", "status": "running",
                            "message": f"[{project_id}] Generating scene scripts..."})
             _t0 = time.perf_counter()
@@ -845,7 +853,7 @@ def _run_pipeline(job_id):
             step_timings["scenes"] = round(time.perf_counter() - _t0, 2)
             results["scenes"] = scenes_result
             scene_count = len(scenes_result.get("scenes", []))
-            logger.success("[{}] Step 4/7: Scenes done — {} scenes generated",
+            logger.success("[{}] Step 4/8: Scenes done — {} scenes generated",
                            project_id, scene_count)
             _emit(job_id, {
                 "step": "scenes", "status": "done",
@@ -853,7 +861,7 @@ def _run_pipeline(job_id):
                 "data": scenes_result,
             })
         else:
-            logger.info("[{}] Step 4/7: Scenes skipped (auto_scenes=false)", project_id)
+            logger.info("[{}] Step 4/8: Scenes skipped (auto_scenes=false)", project_id)
             _emit(job_id, {
                 "step": "scenes", "status": "skipped",
                 "message": f"[{project_id}] Scene generation skipped",
@@ -867,7 +875,41 @@ def _run_pipeline(job_id):
             _emit_done(job_id, project_id, results)
             return
 
-        # ── Step 5: Asset Grabber ─────────────────────────────────
+        # ── Step 5: Storyboard (reference images) ─────────────────
+        _raise_if_stop_requested(job_id, step_name="storyboard")
+        if _should_skip("storyboard"):
+            storyboard_result = results.get("storyboard", {})
+        elif config.get("auto_storyboard", True):
+            logger.info("[{}] Step 5/8: Storyboard starting", project_id)
+            _emit(job_id, {"step": "storyboard", "status": "running",
+                           "message": f"[{project_id}] Generating reference images..."})
+            _t0 = time.perf_counter()
+            storyboard_result = _step_storyboard(results.get("scenes", {}), config, project_id, job_id)
+            step_timings["storyboard"] = round(time.perf_counter() - _t0, 2)
+            results["storyboard"] = storyboard_result
+            logger.success("[{}] Step 5/8: Storyboard done — {}/{} images",
+                           project_id, storyboard_result.get("ready", 0),
+                           storyboard_result.get("total", 0))
+            _emit(job_id, {
+                "step": "storyboard", "status": "done",
+                "message": f"[{project_id}] {storyboard_result.get('ready', 0)}/{storyboard_result.get('total', 0)} reference images ready",
+            })
+        else:
+            logger.info("[{}] Step 5/8: Storyboard skipped (auto_storyboard=false)", project_id)
+            _emit(job_id, {
+                "step": "storyboard", "status": "skipped",
+                "message": f"[{project_id}] Storyboard generation skipped",
+            })
+
+        if stop_after == "storyboard":
+            logger.info("[{}] Pipeline stopped after Storyboard (stop_after=storyboard)", project_id)
+            step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
+            _save_pipeline_json(project_id, job_id, config, "done",
+                                job.get("step_statuses", {}), step_timings)
+            _emit_done(job_id, project_id, results)
+            return
+
+        # ── Step 6: Asset Grabber ─────────────────────────────────
         _raise_if_stop_requested(job_id, step_name="assets")
         if _should_skip("assets"):
             assets_result = results.get("assets", {})
@@ -877,7 +919,7 @@ def _run_pipeline(job_id):
                 "midjourney": "https://www.midjourney.com/imagine",
                 "meta-ai": "https://www.meta.ai/",
             }
-            logger.info("[{}] Step 5/7: Assets starting | provider={}", project_id, provider)
+            logger.info("[{}] Step 6/8: Assets starting | provider={}", project_id, provider)
             _emit(job_id, {
                 "step": "assets", "status": "running",
                 "message": f"[{project_id}] Starting asset grabber ({provider})...",
@@ -887,7 +929,7 @@ def _run_pipeline(job_id):
             assets_result = _step_assets(results.get("scenes", {}), config, project_id, job_id)
             step_timings["assets"] = round(time.perf_counter() - _t0, 2)
             results["assets"] = assets_result
-            logger.success("[{}] Step 5/7: Assets done — {}/{} ready, {} errors",
+            logger.success("[{}] Step 6/8: Assets done — {}/{} ready, {} errors",
                            project_id, assets_result.get("ready", 0),
                            assets_result.get("total", 0), assets_result.get("errors", 0))
             _emit(job_id, {
@@ -907,14 +949,14 @@ def _run_pipeline(job_id):
         if _should_skip("assemble"):
             assemble_result = results.get("assemble", {})
         else:
-            logger.info("[{}] Step 6/7: Assemble starting", project_id)
+            logger.info("[{}] Step 7/8: Assemble starting", project_id)
             _emit(job_id, {"step": "assemble", "status": "running",
                            "message": f"[{project_id}] Assembling project..."})
             _t0 = time.perf_counter()
             assemble_result = _step_assemble(project_id)
             step_timings["assemble"] = round(time.perf_counter() - _t0, 2)
             results["assemble"] = assemble_result
-            logger.success("[{}] Step 6/7: Assemble done — {} scenes, {:.1f}s, audio={}, captions={}",
+            logger.success("[{}] Step 7/8: Assemble done — {} scenes, {:.1f}s, audio={}, captions={}",
                            project_id, assemble_result.get("scene_count", 0),
                            assemble_result.get("total_duration", 0),
                            assemble_result.get("has_audio", False),
@@ -933,14 +975,14 @@ def _run_pipeline(job_id):
 
         # ── Step 7: Export Video ──────────────────────────────────
         _raise_if_stop_requested(job_id, step_name="export")
-        logger.info("[{}] Step 7/7: Export starting", project_id)
+        logger.info("[{}] Step 8/8: Export starting", project_id)
         _emit(job_id, {"step": "export", "status": "running",
                        "message": f"[{project_id}] Exporting video..."})
         _t0 = time.perf_counter()
         export_result = _step_export(assemble_result, project_id, job_id)
         step_timings["export"] = round(time.perf_counter() - _t0, 2)
         results["export"] = export_result
-        logger.success("[{}] Step 7/7: Export done — {} ({})",
+        logger.success("[{}] Step 8/8: Export done — {} ({})",
                        project_id, export_result.get("filename", "?"),
                        export_result.get("resolution", "?"))
         _emit(job_id, {
@@ -1312,8 +1354,81 @@ def _step_scenes(segment_result, config, project_id, job_id=None):
     return result
 
 
+def _step_storyboard(scenes_result, config, project_id, job_id):
+    """Step 5: Generate one reference image per scene via n8n webhook."""
+    scenes = scenes_result.get("scenes", [])
+    if not scenes:
+        raise RuntimeError("No scenes to generate storyboard images for")
+
+    scenes_payload = [
+        {"scene": s.get("index", i), "prompt": s.get("image_prompt", "")}
+        for i, s in enumerate(scenes)
+        if s.get("image_prompt")
+    ]
+    if not scenes_payload:
+        raise RuntimeError("No scenes have image prompts for storyboard")
+
+    aspect_ratio = config.get("aspect_ratio", "9:16")
+
+    # Start storyboard generation via internal API
+    base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
+    if _stop_requested(job_id):
+        raise PipelineStopped(step_name="storyboard")
+
+    payload = {
+        "project_id": project_id,
+        "scenes": scenes_payload,
+        "aspect_ratio": aspect_ratio,
+    }
+    resp = http_requests.post(f"{base_url}/api/storyboard/generate",
+                              json=payload, timeout=30)
+    resp.raise_for_status()
+    logger.info("Pipeline Storyboard: generation started for {}", project_id)
+
+    # Poll until all scenes are ready (timeout 30 minutes)
+    max_wait = 30 * 60
+    poll_interval = 10
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        if _stop_requested(job_id):
+            raise PipelineStopped(step_name="storyboard")
+        time.sleep(poll_interval)
+        if _stop_requested(job_id):
+            raise PipelineStopped(step_name="storyboard")
+        try:
+            status_resp = http_requests.get(
+                f"{base_url}/api/storyboard/status/{project_id}", timeout=10)
+            if status_resp.status_code != 200:
+                continue
+            status_data = status_resp.json()
+
+            total = status_data.get("total", 0)
+            ready = status_data.get("ready", 0)
+            errors = status_data.get("errors", 0)
+            pending = total - ready - errors
+
+            _emit(job_id, {
+                "step": "storyboard", "status": "running",
+                "message": f"Generating storyboard ({project_id})... {ready}/{total} images ready"
+                           + (f", {errors} errors" if errors else ""),
+            })
+
+            if status_data.get("status") == "done" or pending == 0:
+                logger.success("Pipeline Storyboard: {}/{} ready, {} errors",
+                               ready, total, errors)
+                return {
+                    "total": total, "ready": ready, "errors": errors,
+                    "scene_statuses": status_data.get("scene_statuses", {}),
+                }
+        except Exception as e:
+            logger.debug("Pipeline Storyboard poll error: {}", e)
+
+    raise RuntimeError(f"Storyboard generation timed out after {max_wait // 60} minutes")
+
+
 def _step_assets(scenes_result, config, project_id, job_id):
-    """Step 5: Start asset grabber and poll until all scenes are ready."""
+    """Step 6: Start asset grabber and poll until all scenes are ready."""
     from studio.assets.routes import grabber_start, _get_job, _set_job
     from studio.assets.schemas import GrabberStartRequest
 

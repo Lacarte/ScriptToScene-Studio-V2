@@ -75,7 +75,8 @@ const ALL_STEPS = [
   { id: 'timing', label: 'Alignment', icon: '\u23F1' },
   { id: 'segment', label: 'Segment', icon: '\u2702' },
   { id: 'scenes', label: 'Scenes', icon: '\uD83C\uDFAC' },
-  { id: 'assets', label: 'Assets', icon: '\uD83D\uDDBC' },
+  { id: 'storyboard', label: 'Storyboard', icon: '\uD83D\uDDBC' },
+  { id: 'assets', label: 'Animator', icon: '\uD83C\uDFA5' },
   { id: 'assemble', label: 'Build', icon: '\uD83D\uDD27' },
   { id: 'export', label: 'Export', icon: '\uD83D\uDCE4' },
 ]
@@ -104,6 +105,8 @@ const voice = ref('af_heart')
 const speed = ref(1.0)
 const style = ref('cinematic')
 const autoScenes = ref(true)
+const autoStoryboard = ref(localStorage.getItem('sts-pipeline-auto-storyboard') !== 'false')
+watch(autoStoryboard, (v) => localStorage.setItem('sts-pipeline-auto-storyboard', String(v)))
 const stopAfter = ref(localStorage.getItem('sts-pipeline-stop-after') || '')
 watch(stopAfter, (v) => {
   if (v) localStorage.setItem('sts-pipeline-stop-after', v)
@@ -335,6 +338,7 @@ async function start() {
     style: style.value,
     ..._buildNicheConfig(),
     auto_scenes: autoScenes.value,
+    auto_storyboard: autoStoryboard.value,
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     // Asset grabber options
@@ -475,6 +479,7 @@ function loadFromHistory(index) {
   // Restore pipeline settings from step_statuses if available
   if (j.stop_after !== undefined) stopAfter.value = j.stop_after || ''
   if (j.auto_scenes !== undefined) autoScenes.value = j.auto_scenes
+  if (j.auto_storyboard !== undefined) autoStoryboard.value = j.auto_storyboard
 
   // Restore step statuses for progress display
   if (j.step_statuses && Object.keys(j.step_statuses).length) {
@@ -584,6 +589,7 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     style: style.value,
     ..._buildNicheConfig(),
     auto_scenes: autoScenes.value,
+    auto_storyboard: autoStoryboard.value,
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     provider: localStorage.getItem('sts-asset-provider') || 'grok',
@@ -701,6 +707,7 @@ export function usePipeline() {
     speed,
     style,
     autoScenes,
+    autoStoryboard,
     stopAfter,
     templates: readonly(templates),
 

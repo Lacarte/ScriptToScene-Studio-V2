@@ -1,0 +1,106 @@
+{
+  "name": "Storyboard Image Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "image-generator",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [400, 300],
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Input Validator ─────────────────────────────────────────────\n// Validates the incoming webhook payload for storyboard image generation.\n// Expects: { image_prompt: string, aspect_ratio?: string }\n\nconst body = $input.first().json.body || $input.first().json;\n\nconst image_prompt = (body.image_prompt || '').trim();\nconst aspect_ratio = (body.aspect_ratio || '16:9').trim();\n\n// ── Validate required fields ────────────────────────────────────\nif (!image_prompt) {\n  return [{\n    json: {\n      valid: false,\n      error: 'Missing or empty \"image_prompt\"',\n      image_prompt: null,\n      image_reference: null,\n      aspect_ration: null\n    }\n  }];\n}\n\n// ── Map aspect_ratio to WaveSpeed size format ───────────────────\n// The sub-workflow handles the actual API call; we just pass through.\n// Note: the sub-workflow field is \"aspect_ration\" (typo preserved).\n\nreturn [{\n  json: {\n    valid: true,\n    error: null,\n    image_prompt: image_prompt,\n    image_reference: null,\n    aspect_ration: aspect_ratio\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [620, 300],
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "input_validator"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 3,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "val-check-001",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [840, 300],
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": "8hVHh30VB4k339sQ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [1060, 200],
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Create Image"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1280, 400],
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "input_validator", "type": "main", "index": 0}]]
+    },
+    "input_validator": {
+      "main": [[{"node": "If", "type": "main", "index": 0}]]
+    },
+    "If": {
+      "main": [
+        [{"node": "Create Image", "type": "main", "index": 0}],
+        [{"node": "Respond to Webhook", "type": "main", "index": 0}]
+      ]
+    },
+    "Create Image": {
+      "main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "id": "1W7OiNFVzKw5QMwh",
+  "tags": []
+}

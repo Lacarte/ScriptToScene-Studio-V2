@@ -16,7 +16,7 @@ from studio.niches.presets import (
     preset_exists,
 )
 
-_VALID_STEPS = ("tts", "timing", "alignment", "segment", "scenes", "assets", "assemble", "export")
+_VALID_STEPS = ("tts", "timing", "alignment", "segment", "scenes", "storyboard", "assets", "assemble", "export")
 
 
 class PipelineRunRequest(BaseModel):
@@ -33,6 +33,7 @@ class PipelineRunRequest(BaseModel):
     style_prompt: Optional[str] = None
     custom_style_notes: Optional[str] = None
     auto_scenes: bool = True
+    auto_storyboard: bool = True
     stop_after: Optional[str] = None
     resume_from: Optional[str] = None
     resume_project_id: Optional[str] = None

@@ -16,7 +16,7 @@ from loguru import logger
 from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, N8N_STORY_WEBHOOK_URL, OUTPUT_DIR,
-    SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR,
+    SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, STORYBOARD_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR, APP_CONFIG_PATH, APP_ASSETS_DIR, TMP_DIR,
 )
@@ -64,6 +64,7 @@ from studio.music import music_bp
 from studio.thumbnails import thumbnails_bp
 from studio.story import story_bp
 from studio.niches import niches_bp
+from studio.storyboard import storyboard_bp
 app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
@@ -76,6 +77,7 @@ app.register_blueprint(music_bp)
 app.register_blueprint(thumbnails_bp)
 app.register_blueprint(story_bp)
 app.register_blueprint(niches_bp)
+app.register_blueprint(storyboard_bp)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +182,7 @@ _CLEAR_MODULES = [
     {"page": "Segmenter", "module": "Scene Segmenter", "dir": SEGMENTER_DIR},
     {"page": "Scenes", "module": "Scene Blueprint", "dir": SCENES_DIR},
     {"page": "Assets", "module": "Asset Manager", "dir": ASSETS_DIR},
+    {"page": "Storyboard", "module": "Storyboard Images", "dir": STORYBOARD_DIR},
     {"page": "Captions", "module": "Captions", "dir": CAPTIONS_DIR},
     {"page": "Editor", "module": "Timeline Editor", "dir": PROJECTS_DIR},
     {"page": "Music", "module": "Music Library", "dir": MUSIC_DIR},
@@ -188,8 +191,8 @@ _CLEAR_MODULES = [
     {"page": "Pipeline", "module": "Pipeline Data", "dir": PIPELINE_DIR},
 ]
 _PROJECT_DIRS = [
-    ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, SEGMENTER_DIR,
-    CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
+    ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, STORYBOARD_DIR,
+    SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR,
 ]
 

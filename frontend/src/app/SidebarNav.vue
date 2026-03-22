@@ -14,7 +14,7 @@ const audioPlaying = computed(() => !!playingSource.value)
 
 const PATH_TO_STEP = {
   '/tts': 'tts', '/alignment': 'timing', '/segmenter': 'segment', '/scenes': 'scenes',
-  '/assets': 'assets', '/editor': 'assemble', '/export-library': 'export',
+  '/storyboard': 'storyboard', '/assets': 'assets', '/editor': 'assemble', '/export-library': 'export',
 }
 
 function isActive(path) {
@@ -24,7 +24,7 @@ function isActive(path) {
 // Map stopAfter value → sidebar path for the target step
 const STOP_TO_PATH = {
   tts: '/tts', timing: '/alignment', segment: '/segmenter', scenes: '/scenes',
-  assets: '/assets', assemble: '/editor', export: '/export-library',
+  storyboard: '/storyboard', assets: '/assets', assemble: '/editor', export: '/export-library',
 }
 
 // Reactive pipeline class map — recomputes whenever stepStatus or globalStatus changes
@@ -114,9 +114,14 @@ function toggleAudio() {
           <span v-show="!collapsed" class="nav-label">SCENES</span>
         </router-link>
 
-        <router-link to="/assets" class="nav-item" :class="[{ active: isActive('/assets') }, pipelineClasses['/assets']]" title="Asset Manager">
+        <router-link to="/storyboard" class="nav-item" :class="[{ active: isActive('/storyboard') }, pipelineClasses['/storyboard']]" title="Storyboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span v-show="!collapsed" class="nav-label">STORYBOARD</span>
+        </router-link>
+
+        <router-link to="/assets" class="nav-item" :class="[{ active: isActive('/assets') }, pipelineClasses['/assets']]" title="Animator">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-          <span v-show="!collapsed" class="nav-label">ASSETS</span>
+          <span v-show="!collapsed" class="nav-label">ANIMATOR</span>
         </router-link>
 
         <router-link to="/editor" class="nav-item" :class="[{ active: isActive('/editor') }, pipelineClasses['/editor']]" title="Timeline Editor">
