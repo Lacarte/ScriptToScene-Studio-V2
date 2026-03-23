@@ -291,13 +291,19 @@ onBeforeUnmount(() => {
       <p class="page-subtitle">Align audio to text with word-level timestamps</p>
     </div>
 
-    <section class="card legacy-card">
-      <label class="section-label">From TTS</label>
-      <div class="tts-source-row">
-        <button class="action-btn action-btn-lg hover-accent" @click="useTtsResult">Use Current Result</button>
-        <button class="action-btn action-btn-lg hover-accent" @click="openTtsPicker">Pick from History</button>
+    <section class="card source-card">
+      <div class="source-row">
+        <div class="source-info-left">
+          <span class="source-label">
+            <template v-if="timing.sourceFile.value">{{ timing.sourceFile.value }}</template>
+            <template v-else>No TTS source loaded</template>
+          </span>
+        </div>
+        <div class="source-actions">
+          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="useTtsResult">Use Current Result</button>
+          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="openTtsPicker">Pick from History</button>
+        </div>
       </div>
-      <p v-if="timing.sourceFile.value" class="source-info">{{ timing.sourceFile.value }}</p>
     </section>
 
     <div v-if="showTtsPicker" class="modal-backdrop" @click.self="showTtsPicker = false">
@@ -318,7 +324,21 @@ onBeforeUnmount(() => {
             class="tts-item"
             @click="loadTtsGeneration(gen)"
           >
-            <span class="tts-item-name">{{ gen.filename || gen.text?.slice(0, 50) || 'Untitled' }}</span>
+            <svg class="tts-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            <div class="tts-item-body">
+              <span class="tts-item-name">{{ gen.project_id || gen.folder || gen.filename || 'Untitled' }}</span>
+              <span class="tts-item-detail">
+                <span style="color:var(--accent)">{{ gen.filename }}</span>
+                <template v-if="gen.duration_seconds">
+                  <span class="meta-dot">&middot;</span>
+                  <span style="color:var(--accent-secondary)">{{ gen.duration_seconds.toFixed(1) }}s</span>
+                </template>
+                <template v-if="gen.words">
+                  <span class="meta-dot">&middot;</span>
+                  <span style="color:var(--text-secondary)">{{ gen.words }} words</span>
+                </template>
+              </span>
+            </div>
             <span class="tts-item-meta">{{ formatDate(gen.timestamp) }}</span>
           </div>
         </div>
@@ -502,6 +522,26 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.source-card { padding: 16px; }
+.source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.source-info-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.source-label {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.source-actions { display: flex; gap: 6px; }
+
 .legacy-card {
   padding: 20px;
   margin-bottom: 16px;
@@ -509,12 +549,6 @@ onBeforeUnmount(() => {
 
 .section-label--inline {
   margin-bottom: 0;
-}
-
-.tts-source-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
 }
 
 .action-btn-lg {
@@ -906,25 +940,57 @@ onBeforeUnmount(() => {
 .tts-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   padding: 10px 8px;
   cursor: pointer;
   border-radius: 8px;
   transition: background 0.15s;
 }
 
+.tts-item-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.tts-item:hover .tts-item-icon {
+  color: var(--accent);
+  opacity: 0.8;
+}
+
 .tts-item:hover {
   background: rgba(78, 205, 196, 0.06);
+}
+
+.tts-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tts-item-name {
   font-size: 13px;
   color: var(--text);
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 280px;
+}
+
+.tts-item-detail {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tts-item-detail .meta-dot {
+  color: var(--text-muted);
+  opacity: 0.4;
 }
 
 .tts-item-meta {

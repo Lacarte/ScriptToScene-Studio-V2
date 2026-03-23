@@ -207,19 +207,16 @@ const relativeTime = timeAgo
       </p>
     </div>
 
-    <section class="card p-5 mb-4">
-      <label class="block text-[10px] font-bold uppercase tracking-[0.15em] mb-2.5" style="color: var(--text-muted)">
-        Alignment Source
-      </label>
-      <div class="flex gap-3 mb-3 flex-wrap">
-        <button class="action-btn hover-accent" style="padding: 6px 14px; font-size: 11px" @click="useCurrentResult">
-          Use Current Result
-        </button>
-        <button class="action-btn hover-accent" style="padding: 6px 14px; font-size: 11px" @click="openPicker">
-          Pick from History
-        </button>
+    <section class="card source-card">
+      <div class="source-row">
+        <div class="source-info-left">
+          <span class="source-label font-mono" :class="{ empty: !hasAlignment }">{{ sourceInfoText }}</span>
+        </div>
+        <div class="source-actions">
+          <button class="action-btn hover-accent" style="padding:6px 14px;font-size:11px" @click="useCurrentResult">Use Current Result</button>
+          <button class="action-btn hover-accent" style="padding:6px 14px;font-size:11px" @click="openPicker">Pick from History</button>
+        </div>
       </div>
-      <div class="font-mono source-info" :class="{ empty: !hasAlignment }">{{ sourceInfoText }}</div>
     </section>
 
     <section class="card p-5 mb-4">
@@ -426,14 +423,27 @@ const relativeTime = timeAgo
   width: 100%;
 }
 
-.source-info {
-  font-size: 12px;
-  color: var(--accent);
+.source-card { padding: 16px; margin-bottom: 16px; }
+.source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-
-.source-info.empty {
+.source-info-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.source-label {
+  font-size: 13px;
   color: var(--text-muted);
 }
+.source-label.empty {
+  color: var(--text-muted);
+}
+.source-actions { display: flex; gap: 6px; }
 
 .config-row {
   display: flex;

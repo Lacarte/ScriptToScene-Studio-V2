@@ -20,7 +20,8 @@ import requests as http_requests
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import STORYBOARD_DIR, N8N_STORYBOARD_WEBHOOK_URL
+from config import STORYBOARD_DIR, THUMBNAILS_DIR, N8N_STORYBOARD_WEBHOOK_URL, WAVESPEED_API_KEY
+from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.security import sanitize_project_id
 from studio.validation import validate_json
@@ -79,6 +80,55 @@ def _save_storyboard_json(project_id, job):
 # Image download
 # ---------------------------------------------------------------------------
 
+THUMB_SIZE = "480:-1"
+THUMB_QUALITY = "4"
+
+
+def _thumb_path(project_id, scene_num):
+    """Return the thumbnail path: output/thumbnails/{project_id}/storyboard/{scene}.jpg"""
+    return os.path.join(THUMBNAILS_DIR, project_id, "storyboard", f"{scene_num}.jpg")
+
+
+def _generate_thumbnail(src_path, project_id, scene_num):
+    """Generate a JPEG thumbnail into the thumbnails directory."""
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        logger.warning("ffmpeg not found — skipping thumbnail for {}", src_path)
+        return None
+    dest_path = _thumb_path(project_id, scene_num)
+    try:
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        import subprocess
+        subprocess.run(
+            [ffmpeg, "-y", "-i", src_path,
+             "-vf", f"scale={THUMB_SIZE}",
+             "-q:v", THUMB_QUALITY, dest_path],
+            capture_output=True, timeout=15,
+        )
+        if os.path.isfile(dest_path):
+            return f"/api/thumbnails/{project_id}/storyboard/{scene_num}.jpg"
+        return None
+    except Exception as e:
+        logger.debug("Thumbnail generation failed for {}: {}", src_path, e)
+        return None
+
+
+def _version_existing_image(scene_dir):
+    """If image.* exists in scene_dir, rename it to image_v{N}.* to keep history."""
+    import glob
+    for ext in (".jpeg", ".jpg", ".png", ".webp"):
+        current = os.path.join(scene_dir, f"image{ext}")
+        if not os.path.isfile(current):
+            continue
+        # Find next version number
+        pattern = os.path.join(scene_dir, f"image_v*{ext}")
+        existing = glob.glob(pattern)
+        next_v = len(existing) + 1
+        versioned = os.path.join(scene_dir, f"image_v{next_v}{ext}")
+        os.rename(current, versioned)
+        logger.info("Versioned {} → {}", current, versioned)
+
+
 def _download_image(url, dest_path):
     """Download an image URL to a local file with retries."""
     parsed = urlparse(url)
@@ -109,7 +159,14 @@ def _download_image(url, dest_path):
 # ---------------------------------------------------------------------------
 
 def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
-    """Background thread: generate one image per scene sequentially via n8n webhook."""
+    """Background thread: generate one image per scene sequentially via n8n webhook.
+
+    Style consistency: a fixed seed is used for all scenes, and each scene
+    receives the *previous* scene's output URL as an image-to-image reference
+    (with low strength) so the visual style chains naturally.
+    """
+    import random
+
     job = _get_job(project_id)
     if not job:
         return
@@ -117,6 +174,13 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
     project_dir = _storyboard_dir(project_id)
     os.makedirs(project_dir, exist_ok=True)
     url = webhook_url or N8N_STORYBOARD_WEBHOOK_URL
+
+    # Fixed seed for the whole batch — keeps palette/texture consistent
+    batch_seed = random.randint(0, 2_147_483_647)
+    # Reference image chain: each scene uses the previous scene's output
+    prev_image_url = None
+    # Strength for image-to-image reference (low = subtle style influence)
+    REFERENCE_STRENGTH = 0.3
 
     total = len(scenes)
     ready = 0
@@ -132,11 +196,24 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
         _save_storyboard_json(project_id, job)
 
         try:
-            logger.info("[{}] Storyboard scene {} — calling webhook", project_id, scene_num)
+            payload = {
+                "image_prompt": prompt,
+                "aspect_ratio": aspect_ratio,
+                "wavespeed_api_key": WAVESPEED_API_KEY,
+                "project_id": project_id,
+                "scene": scene_num,
+                "seed": batch_seed,
+            }
+            # Chain: pass previous scene's image as style reference
+            if prev_image_url:
+                payload["image"] = prev_image_url
+                payload["strength"] = REFERENCE_STRENGTH
+
+            logger.info("[{}] Storyboard scene {} — calling webhook (seed={}, ref={})",
+                        project_id, scene_num, batch_seed,
+                        "prev" if prev_image_url else "none")
             result = call_webhook(
-                url,
-                {"image_prompt": prompt, "aspect_ratio": aspect_ratio},
-                timeout=300,
+                url, payload, timeout=300,
                 label=f"Storyboard scene {scene_num}",
             )
 
@@ -144,25 +221,33 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
             if not image_url:
                 raise RuntimeError(f"Webhook returned no image_url: {result}")
 
-            # Download
+            # Download into scene subfolder
             job["scene_statuses"][scene_key]["status"] = "downloading"
             _save_storyboard_json(project_id, job)
 
-            ext = ".jpg"
+            ext = ".jpeg"
             if image_url.lower().endswith(".png"):
                 ext = ".png"
             elif image_url.lower().endswith(".webp"):
                 ext = ".webp"
-            dest = os.path.join(project_dir, f"{scene_num}{ext}")
+            scene_dir = os.path.join(project_dir, str(scene_num))
+            os.makedirs(scene_dir, exist_ok=True)
+            _version_existing_image(scene_dir)
+            dest = os.path.join(scene_dir, f"image{ext}")
 
             if _download_image(image_url, dest):
-                local_path = f"/output/storyboard/{project_id}/{scene_num}{ext}"
+                local_path = f"/output/storyboard/{project_id}/{scene_num}/image{ext}"
+                thumb_url = _generate_thumbnail(dest, project_id, scene_num)
+
                 job["scene_statuses"][scene_key] = {
                     "status": "ready",
                     "image_url": image_url,
                     "local_path": local_path,
+                    "thumb_path": thumb_url,
                 }
                 ready += 1
+                # Chain: next scene will use this image as reference
+                prev_image_url = image_url
                 logger.success("[{}] Storyboard scene {} ready", project_id, scene_num)
             else:
                 job["scene_statuses"][scene_key] = {
@@ -282,14 +367,54 @@ def list_images(project_id):
         return jsonify({"error": "No storyboard found for this project"}), 404
 
     images = []
+    image_exts = (".jpg", ".jpeg", ".png", ".webp")
+    import re
     for entry in sorted(os.scandir(project_dir), key=lambda e: e.name):
-        if entry.is_file() and entry.name.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        # New structure: {project_id}/{scene_num}/image.jpeg + image_v1.jpeg etc.
+        if entry.is_dir() and entry.name.isdigit():
+            scene_dir = entry.path
+            scene_num = int(entry.name)
+            thumb_file = _thumb_path(project_id, scene_num)
+            thumb_url = (f"/api/thumbnails/{project_id}/storyboard/{entry.name}.jpg"
+                         if os.path.isfile(thumb_file) else None)
+            versions = []
+            for f in sorted(os.scandir(scene_dir), key=lambda e: e.name):
+                if not f.is_file() or f.name == "thumb.jpg":
+                    continue
+                if not f.name.lower().endswith(image_exts):
+                    continue
+                # Determine version: image.ext = current, image_v1.ext = version 1
+                m = re.match(r"image_v(\d+)", f.name)
+                version = int(m.group(1)) if m else None
+                is_current = f.name.startswith("image.") or f.name.startswith("image.")
+                versions.append({
+                    "filename": f.name,
+                    "path": f"/output/storyboard/{project_id}/{entry.name}/{f.name}",
+                    "version": version,
+                    "is_current": version is None and f.name.startswith("image."),
+                    "size_bytes": f.stat().st_size,
+                })
+            # Sort: current last (newest), versions ascending
+            versions.sort(key=lambda v: (v["version"] if v["version"] is not None else 9999))
             images.append({
-                "filename": entry.name,
+                "scene": scene_num,
+                "path": next((v["path"] for v in versions if v["is_current"]), versions[-1]["path"] if versions else None),
+                "thumb_path": thumb_url,
+                "versions": versions,
+                "version_count": len(versions),
+            })
+        # Legacy flat structure: {project_id}/{scene_num}.jpg
+        elif entry.is_file() and entry.name.lower().endswith(image_exts):
+            base = os.path.splitext(entry.name)[0]
+            images.append({
+                "scene": int(base) if base.isdigit() else None,
                 "path": f"/output/storyboard/{project_id}/{entry.name}",
-                "size_bytes": entry.stat().st_size,
+                "thumb_path": None,
+                "versions": [{"filename": entry.name, "path": f"/output/storyboard/{project_id}/{entry.name}", "version": None, "is_current": True, "size_bytes": entry.stat().st_size}],
+                "version_count": 1,
             })
 
+    images.sort(key=lambda x: x.get("scene") if x.get("scene") is not None else 0)
     return jsonify({"project_id": project_id, "images": images, "count": len(images)})
 
 
@@ -356,7 +481,9 @@ def grab_one(data: StoryboardGrabOneRequest):
             logger.info("[{}] Storyboard grab scene {} — calling webhook", pid, sk)
             result = call_webhook(
                 url,
-                {"image_prompt": prompt, "aspect_ratio": ar},
+                {"image_prompt": prompt, "aspect_ratio": ar,
+                 "wavespeed_api_key": WAVESPEED_API_KEY,
+                 "project_id": pid, "scene": int(sk)},
                 timeout=300,
                 label=f"Storyboard grab scene {sk}",
             )
@@ -367,19 +494,25 @@ def grab_one(data: StoryboardGrabOneRequest):
             j["scene_statuses"][sk]["status"] = "downloading"
             _save_storyboard_json(pid, j)
 
-            ext = ".jpg"
+            ext = ".jpeg"
             if image_url.lower().endswith(".png"):
                 ext = ".png"
             elif image_url.lower().endswith(".webp"):
                 ext = ".webp"
-            dest = os.path.join(project_dir, f"{sk}{ext}")
+            scene_dir = os.path.join(project_dir, sk)
+            os.makedirs(scene_dir, exist_ok=True)
+            _version_existing_image(scene_dir)
+            dest = os.path.join(scene_dir, f"image{ext}")
 
             if _download_image(image_url, dest):
-                local_path = f"/output/storyboard/{pid}/{sk}{ext}"
+                local_path = f"/output/storyboard/{pid}/{sk}/image{ext}"
+                thumb_url = _generate_thumbnail(dest, pid, int(sk))
+
                 j["scene_statuses"][sk] = {
                     "status": "ready",
                     "image_url": image_url,
                     "local_path": local_path,
+                    "thumb_path": thumb_url,
                 }
                 logger.success("[{}] Storyboard grab scene {} ready", pid, sk)
             else:

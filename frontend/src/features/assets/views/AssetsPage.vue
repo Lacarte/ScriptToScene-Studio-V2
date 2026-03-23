@@ -72,6 +72,50 @@ const analysisOpen = ref(true)
 const historyVisible = ref(true)
 const scenePickerOpen = ref(false)
 const scenePickerData = ref([])
+
+// Storyboard thumbnails
+const storyboardThumbs = ref({})
+
+async function loadStoryboardThumbs(pid) {
+  if (!pid) return
+  try {
+    const data = await api.get(`/api/storyboard/images/${pid}`)
+    const map = {}
+    for (const img of data.images || []) {
+      if (img.scene != null) map[img.scene] = img.thumb_path || img.path
+    }
+    storyboardThumbs.value = map
+  } catch {
+    storyboardThumbs.value = {}
+  }
+}
+
+const hasStoryboardImages = computed(() => Object.keys(storyboardThumbs.value).length > 0)
+const animatingStoryboard = ref(false)
+
+async function onAnimateStoryboard() {
+  if (!projectId.value) return
+  animatingStoryboard.value = true
+  try {
+    const result = await api.post('/api/animator/submit-storyboard', {
+      body: {
+        project_id: projectId.value,
+        mode: 'imageToVideo',
+        duration: providerOptions.value?.grok_duration || '6s',
+        aspect_ratio: aspectRatio.value,
+      },
+    })
+    toast.success(`Sent ${result.total} scenes to Grok extension`)
+  } catch (e) {
+    toast.error(`Storyboard animation failed: ${e.message}`)
+  } finally {
+    animatingStoryboard.value = false
+  }
+}
+
+watch(projectId, (pid) => {
+  if (pid) loadStoryboardThumbs(pid)
+}, { immediate: true })
 const audioRef = ref(null)
 const assemblingProject = ref(null)
 const buildSteps = ref([])
@@ -670,6 +714,27 @@ onMounted(async () => {
       @validate-and-build="onValidateAndBuild"
     />
 
+    <!-- Animate with Storyboard -->
+    <div v-if="sceneCount && hasStoryboardImages" class="storyboard-animate-bar">
+      <div class="storyboard-animate-info">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <span class="font-mono" style="font-size:11px">{{ Object.keys(storyboardThumbs).length }} storyboard images available</span>
+      </div>
+      <button
+        class="btn-animate-storyboard"
+        :disabled="animatingStoryboard"
+        @click="onAnimateStoryboard"
+      >
+        <template v-if="animatingStoryboard">
+          <span class="spinner-sm" style="margin-right:4px"></span> Sending...
+        </template>
+        <template v-else>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Animate with Storyboard
+        </template>
+      </button>
+    </div>
+
     <!-- Asset Grid -->
     <section v-if="sceneCount" class="asset-grid">
       <AssetCard
@@ -680,6 +745,7 @@ onMounted(async () => {
         :status="sceneStatuses[scene.index] || {}"
         :selected="selectedScenes.has(scene.index)"
         :provider="provider"
+        :storyboard-thumb="storyboardThumbs[scene.index] || null"
         @toggle-select="toggleSelect"
         @edit-prompt="editPrompt"
         @save-prompt="onSavePrompt"
@@ -1511,5 +1577,51 @@ onMounted(async () => {
 
 @keyframes build-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ---- Storyboard Animate Bar ---- */
+.storyboard-animate-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  background: rgba(78, 205, 196, 0.05);
+  border: 1px solid rgba(78, 205, 196, 0.2);
+  border-radius: 10px;
+}
+.storyboard-animate-info {
+  color: var(--text-secondary);
+}
+.btn-animate-storyboard {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--bg-darkest, #0a0e13);
+  background: var(--accent, #4ecdc4);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-animate-storyboard:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.35);
+  transform: translateY(-1px);
+}
+.btn-animate-storyboard:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.spinner-sm {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(0,0,0,0.2);
+  border-top-color: var(--bg-darkest);
+  border-radius: 50%;
+  animation: build-spin 0.6s linear infinite;
 }
 </style>

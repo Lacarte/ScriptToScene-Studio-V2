@@ -66,7 +66,7 @@ N8N_STORY_WEBHOOK_URL = os.environ.get(
     "N8N_STORY_WEBHOOK_URL", "http://localhost:5678/webhook/story-generator"
 )
 N8N_STORYBOARD_WEBHOOK_URL = os.environ.get(
-    "N8N_STORYBOARD_WEBHOOK_URL", "http://localhost:5678/webhook/storyboard-generator"
+    "N8N_STORYBOARD_WEBHOOK_URL", "https://n8n-production-6197.up.railway.app/webhook/storyboard-generator"
 )
 N8N_CLASSIFY_WEBHOOK_URL = os.environ.get(
     "N8N_CLASSIFY_WEBHOOK_URL", "http://localhost:5678/webhook/classify-style"
@@ -78,6 +78,11 @@ N8N_CLASSIFY_WEBHOOK_URL = os.environ.get(
 KIE_AI_API_KEY = os.environ.get("KIE_AI_API_KEY", "")
 KIE_AI_BASE_URL = os.environ.get("KIE_AI_BASE_URL", "https://api.kie.ai/api/v1")
 KIE_AI_MODEL = os.environ.get("KIE_AI_MODEL", "google/nano-banana")
+
+# ---------------------------------------------------------------------------
+# WaveSpeed AI (Storyboard image generation)
+# ---------------------------------------------------------------------------
+WAVESPEED_API_KEY = os.environ.get("WAVESPEED_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Project ID generator

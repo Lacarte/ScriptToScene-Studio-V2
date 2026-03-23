@@ -6,6 +6,7 @@ import { useToast } from '@/shared/composables/useToast.js'
 import { useStagingStore } from '@/shared/stores/stagingStore.js'
 import { timeAgo, formatElapsed } from '@/shared/utils/format.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
+import { api } from '@/shared/api/client.js'
 import StylePicker from '../components/StylePicker.vue'
 import SceneCard from '../components/SceneCard.vue'
 import SceneTimeline from '../components/SceneTimeline.vue'
@@ -50,6 +51,33 @@ const payloadJson = computed(() => {
 })
 
 const resultScenes = computed(() => scenes.result.value?.scenes || [])
+
+// Storyboard thumbnails
+const storyboardThumbs = ref({})
+
+async function loadStoryboardThumbs(pid) {
+  if (!pid) return
+  try {
+    const data = await api.get(`/api/storyboard/images/${pid}`)
+    const map = {}
+    for (const img of data.images || []) {
+      if (img.scene != null) {
+        map[img.scene] = img.thumb_path || img.path
+      }
+    }
+    storyboardThumbs.value = map
+  } catch {
+    storyboardThumbs.value = {}
+  }
+}
+
+function getStoryboardThumb(sceneIndex) {
+  return storyboardThumbs.value[sceneIndex] || null
+}
+
+watch(projectBadge, (pid) => {
+  if (pid) loadStoryboardThumbs(pid)
+}, { immediate: true })
 
 const resultStats = computed(() => {
   const r = scenes.result.value
@@ -286,16 +314,19 @@ function truncate(str, len = 45) {
     </div>
 
     <!-- Segmentation Source -->
-    <section class="card">
-      <label class="section-label">Segmentation Source</label>
-
-      <div class="source-buttons">
-        <button class="action-btn action-btn-lg" @click="useCurrent">Use Current Result</button>
-        <button class="action-btn action-btn-lg" @click="openSegPicker">Pick from History</button>
+    <section class="card source-card">
+      <div class="source-row">
+        <div class="source-info-left">
+          <span class="source-label">
+            <template v-if="sourceInfo">{{ sourceInfo }}</template>
+            <template v-else>No segmentation selected</template>
+          </span>
+        </div>
+        <div class="source-actions">
+          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="useCurrent">Use Current Result</button>
+          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="openSegPicker">Pick from History</button>
+        </div>
       </div>
-
-      <p v-if="sourceInfo" class="source-info accent">{{ sourceInfo }}</p>
-      <p v-else class="source-info muted">No segmentation selected</p>
 
       <!-- Payload preview collapse -->
       <div v-if="scenes.payload.value" class="collapse-section">
@@ -483,6 +514,7 @@ function truncate(str, len = 45) {
           :index="idx"
           :is-active="scenes.activeSceneIdx.value === idx"
           :segment-words="segWordsByIndex[scene.index] || ''"
+          :storyboard-thumb="getStoryboardThumb(scene.index)"
           @play="scenes.playBlock"
         />
       </div>
@@ -562,11 +594,17 @@ function truncate(str, len = 45) {
               class="picker-item"
               @click="pickSegItem(item.folder)"
             >
+              <svg class="picker-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
               <div class="picker-item-info">
                 <p class="picker-item-source">{{ truncate(item.source_folder || '') }}</p>
                 <p class="picker-item-meta">
-                  {{ item.project_id ? item.project_id + ' \u00b7 ' : '' }}{{ item.segment_count }} segments &middot;
-                  {{ item.total_duration.toFixed(1) }}s &middot; avg {{ item.avg_duration.toFixed(2) }}s
+                  <span v-if="item.project_id" style="color:var(--accent)">{{ item.project_id }}</span>
+                  <span v-if="item.project_id" class="meta-dot">&middot;</span>
+                  <span style="color:var(--accent)">{{ item.segment_count }} segments</span>
+                  <span class="meta-dot">&middot;</span>
+                  <span style="color:var(--accent-secondary)">{{ item.total_duration.toFixed(1) }}s</span>
+                  <span class="meta-dot">&middot;</span>
+                  <span style="color:var(--text-secondary)">avg {{ item.avg_duration.toFixed(2) }}s</span>
                 </p>
               </div>
               <span class="picker-item-time">{{ timeAgo(item.segmented_at) }}</span>
@@ -624,26 +662,25 @@ function truncate(str, len = 45) {
 }
 
 /* ---- Source ---- */
-.source-buttons {
+.source-card { padding: 16px; }
+.source-row {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
 }
-
-.source-info {
+.source-info-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.source-label {
   font-size: 13px;
-  margin: 0 0 8px;
   font-family: var(--font-mono);
-}
-
-.source-info.accent {
-  color: var(--accent);
-}
-
-.source-info.muted {
   color: var(--text-muted);
 }
+.source-actions { display: flex; gap: 6px; }
 
 .upload-label {
   cursor: pointer;
@@ -1355,6 +1392,17 @@ function truncate(str, len = 45) {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.picker-item-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.picker-item:hover .picker-item-icon {
+  color: var(--accent);
+  opacity: 0.8;
+}
+
 .picker-item-info {
   flex: 1;
   min-width: 0;
@@ -1374,6 +1422,14 @@ function truncate(str, len = 45) {
   font-size: 10px;
   color: var(--text-muted);
   margin: 2px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.picker-item-meta .meta-dot {
+  color: var(--text-muted);
+  opacity: 0.4;
 }
 
 .picker-item-time {

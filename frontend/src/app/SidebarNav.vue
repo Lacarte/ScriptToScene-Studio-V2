@@ -125,7 +125,7 @@ function toggleAudio() {
         </router-link>
 
         <router-link to="/editor" class="nav-item" :class="[{ active: isActive('/editor') }, pipelineClasses['/editor']]" title="Timeline Editor">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><path d="M7 2v20"/><path d="M17 2v20"/><path d="M2 12h20"/></svg>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="8.5" y1="7.5" x2="20" y2="18"/><line x1="8.5" y1="16.5" x2="20" y2="6"/></svg>
           <span v-show="!collapsed" class="nav-label">EDITOR</span>
         </router-link>
       </div>

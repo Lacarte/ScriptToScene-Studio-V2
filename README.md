@@ -574,9 +574,7 @@ ScriptToScene-Studio/
 ├── bin/                    # FFmpeg binaries (not in repo)
 ├── models/                 # TTS model cache (auto-downloaded)
 ├── tmp/                    # Temporary files (preview cache, gitignored)
-├── _dev/                   # Development tools and automation
-│   └── automation/automa/grok/
-│       └── Grok Assets Synchronizer.automa.json  # Browser automation workflow (see below)
+├── _dev/                   # Development tools, automation, and docs (see _dev/TODO.md)
 └── output/                 # All generated data (gitignored)
     ├── tts/                # {id}/voice.wav + voice.json
     ├── alignments/         # {id}/alignment.json

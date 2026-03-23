@@ -9,6 +9,7 @@ const props = defineProps({
   status: { type: Object, default: () => ({}) },
   selected: { type: Boolean, default: false },
   provider: { type: String, default: 'grok' },
+  storyboardThumb: { type: String, default: null },
 })
 
 const emit = defineEmits([
@@ -164,6 +165,23 @@ function isVideoFile(file) {
 
       <!-- File count -->
       <span v-if="files.length" class="file-count">{{ files.length }} file{{ files.length !== 1 ? 's' : '' }}</span>
+
+      <!-- Storyboard thumbnail -->
+      <img
+        v-if="storyboardThumb"
+        class="sb-thumb"
+        :src="storyboardThumb"
+        alt="Storyboard"
+        loading="lazy"
+        @click.stop
+      />
+      <div v-else class="sb-thumb sb-thumb--empty" @click.stop>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <path d="M21 15l-5-5L5 21" />
+        </svg>
+      </div>
     </div>
 
     <!-- Header -->
@@ -407,6 +425,43 @@ function isVideoFile(file) {
   color: #fff;
   padding: 2px 8px;
   border-radius: 8px;
+}
+
+/* ---- Storyboard thumbnail ---- */
+.sb-thumb {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.15);
+  opacity: 0.8;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 1;
+}
+.sb-thumb:hover {
+  opacity: 1;
+  transform: scale(2.5);
+  transform-origin: bottom left;
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  z-index: 10;
+}
+.sb-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.5);
+  color: var(--text-muted);
+  opacity: 0.35;
+}
+.sb-thumb--empty:hover {
+  transform: none;
+  box-shadow: none;
+  opacity: 0.5;
+  border-color: rgba(255,255,255,0.15);
 }
 
 /* ---- Header ---- */

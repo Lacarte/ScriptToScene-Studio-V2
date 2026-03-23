@@ -28,11 +28,70 @@ const webhookUrl = ref('')
 const defaultWebhookUrl = ref('')
 let webhookLoaded = false
 
+// Image settings
+const aspectRatio = ref(localStorage.getItem('sts-storyboard-aspect-ratio') || '9:16')
+const aspectRatioOptions = [
+  { value: '9:16', label: '9:16 (Vertical)',   size: '576×1024' },
+  { value: '16:9', label: '16:9 (Landscape)',   size: '1024×576' },
+  { value: '1:1',  label: '1:1 (Square)',       size: '1024×1024' },
+  { value: '4:3',  label: '4:3 (Standard)',     size: '1024×768' },
+  { value: '3:4',  label: '3:4 (Portrait)',     size: '768×1024' },
+  { value: '3:2',  label: '3:2 (Landscape)',    size: '1024×683' },
+  { value: '2:3',  label: '2:3 (Portrait)',     size: '683×1024' },
+]
+
+function setAspectRatio(val) {
+  aspectRatio.value = val
+  localStorage.setItem('sts-storyboard-aspect-ratio', val)
+}
+
 // Scene data for grabber
 const scenes = ref([])
 const sceneStatuses = ref({})
 const grabbing = ref(false)
 let pollTimer = null
+
+// Lightbox with arrow navigation
+const lightboxSrc = ref(null)
+const lightboxIndex = ref(-1)
+
+const lightboxScenes = computed(() =>
+  scenes.value
+    .map(s => ({ index: s.index, src: sceneImage(s.index) }))
+    .filter(s => s.src)
+)
+
+function openLightbox(sceneIndex) {
+  const src = sceneImage(sceneIndex)
+  if (!src) return
+  lightboxSrc.value = src
+  lightboxIndex.value = sceneIndex
+}
+
+function closeLightbox() {
+  lightboxSrc.value = null
+  lightboxIndex.value = -1
+}
+
+function lightboxNav(dir) {
+  const list = lightboxScenes.value
+  if (list.length === 0) return
+  const curPos = list.findIndex(s => s.index === lightboxIndex.value)
+  const next = curPos + dir
+  if (next < 0 || next >= list.length) return
+  lightboxIndex.value = list[next].index
+  lightboxSrc.value = list[next].src
+}
+
+function onLightboxKey(e) {
+  if (!lightboxSrc.value) return
+  if (e.key === 'ArrowLeft') lightboxNav(-1)
+  else if (e.key === 'ArrowRight') lightboxNav(1)
+  else if (e.key === 'Escape') closeLightbox()
+}
+
+onMounted(() => window.addEventListener('keydown', onLightboxKey))
+onUnmounted(() => window.removeEventListener('keydown', onLightboxKey))
 
 // ── Webhook ──
 
@@ -105,17 +164,37 @@ async function loadScenes() {
   } catch {
     scenes.value = []
   }
+
+  // Fallback: if no scene data but we have storyboard images or status, build from those
+  if (!scenes.value.length) {
+    const fallbackScenes = []
+    // From storyboard status (scene keys)
+    if (status.value?.scene_statuses) {
+      for (const key of Object.keys(status.value.scene_statuses).sort((a, b) => Number(a) - Number(b))) {
+        fallbackScenes.push({ index: Number(key), prompt: '', description: '' })
+      }
+    }
+    // From downloaded images
+    if (!fallbackScenes.length && images.value.length) {
+      for (const img of images.value) {
+        const idx = parseInt(img.filename.replace(/\.\w+$/, ''), 10)
+        if (!isNaN(idx)) fallbackScenes.push({ index: idx, prompt: '', description: '' })
+      }
+    }
+    scenes.value = fallbackScenes
+  }
 }
 
 async function loadProject() {
-  await Promise.all([loadImages(), loadStatus(), loadScenes()])
+  await Promise.all([loadImages(), loadStatus()])
+  await loadScenes()
 }
 
 async function loadHistory() {
   try {
     const jobs = await api.get('/api/pipeline/jobs')
     history.value = (jobs || [])
-      .filter(j => j.project_id)
+      .filter(j => j.project_id && j.scene_count > 0)
       .sort((a, b) => (b.created || 0) - (a.created || 0))
   } catch {}
 }
@@ -142,7 +221,7 @@ async function pickFromHistory() {
   try {
     const jobs = await api.get('/api/pipeline/jobs')
     scenePickerData.value = (jobs || [])
-      .filter(j => j.project_id)
+      .filter(j => j.project_id && j.scene_count > 0)
       .sort((a, b) => (b.created || 0) - (a.created || 0))
     scenePickerOpen.value = true
   } catch {
@@ -150,16 +229,16 @@ async function pickFromHistory() {
   }
 }
 
-function pickProject(entry) {
+async function pickProject(entry) {
   scenePickerOpen.value = false
   projectId.value = entry.project_id
-  loadProject()
+  await loadProject()
   toast.success(`Loaded ${entry.project_id}`)
 }
 
-function loadFromHistory(pid) {
+async function loadFromHistory(pid) {
   projectId.value = pid
-  loadProject()
+  await loadProject()
 }
 
 function statusColor(s) {
@@ -167,6 +246,26 @@ function statusColor(s) {
   if (s === 'running') return '#f0c674'
   if (s === 'error') return '#ff6b6b'
   return '#64748b'
+}
+
+async function copyPrompt(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success('Prompt copied')
+  } catch {
+    toast.error('Failed to copy')
+  }
+}
+
+function downloadImage(scene) {
+  const src = sceneImage(scene.index)
+  if (!src) return
+  const a = document.createElement('a')
+  a.href = src
+  a.download = `${projectId.value || 'storyboard'}_scene_${scene.index}.jpg`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 // ── Grabber ──
@@ -178,9 +277,39 @@ function sceneStatus(idx) {
 function sceneImage(idx) {
   const st = sceneStatuses.value[String(idx)]
   if (st?.local_path) return st.local_path
-  // Check in loaded images
-  const img = images.value.find(i => i.filename.replace(/\.\w+$/, '') === String(idx))
+  const img = images.value.find(i => i.scene === idx)
   return img?.path || null
+}
+
+function sceneVersions(idx) {
+  const img = images.value.find(i => i.scene === idx)
+  return img?.versions || []
+}
+
+function sceneVersionCount(idx) {
+  const img = images.value.find(i => i.scene === idx)
+  return img?.version_count || 0
+}
+
+// Prompt editing
+const editingIndex = ref(null)
+const editingPrompt = ref('')
+
+function startEdit(scene) {
+  editingIndex.value = scene.index
+  editingPrompt.value = scene.prompt || ''
+}
+
+function cancelEdit() {
+  editingIndex.value = null
+  editingPrompt.value = ''
+}
+
+function saveEdit(scene) {
+  scene.prompt = editingPrompt.value.trim()
+  editingIndex.value = null
+  editingPrompt.value = ''
+  toast.success(`Scene ${scene.index} prompt updated`)
 }
 
 async function grabScene(scene) {
@@ -203,7 +332,7 @@ async function grabScene(scene) {
         project_id: projectId.value,
         scene: scene.index,
         prompt: scene.prompt,
-        aspect_ratio: '9:16',
+        aspect_ratio: aspectRatio.value,
         webhook_url: url,
       },
     })
@@ -237,7 +366,7 @@ async function grabAll() {
       body: {
         project_id: projectId.value,
         scenes: scenesPayload,
-        aspect_ratio: '9:16',
+        aspect_ratio: aspectRatio.value,
         webhook_url: url,
       },
     })
@@ -370,6 +499,16 @@ onUnmounted(() => {
         </div>
         <p v-else class="setting-hint" style="font-style:italic">Webhook disabled — grabber won't send to n8n</p>
       </div>
+
+      <!-- Aspect Ratio -->
+      <div class="aspect-ratio-section">
+        <span class="webhook-label">Aspect Ratio</span>
+        <select class="aspect-select" :value="aspectRatio" @change="setAspectRatio($event.target.value)">
+          <option v-for="opt in aspectRatioOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }} — {{ opt.size }}
+          </option>
+        </select>
+      </div>
     </section>
 
     <!-- Scene Picker Modal -->
@@ -390,6 +529,7 @@ onUnmounted(() => {
             class="picker-row"
             @click="pickProject(entry)"
           >
+            <svg class="picker-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><path d="M4 11V7a2 2 0 012-2h12a2 2 0 012 2v4"/><path d="M4 11h16"/></svg>
             <div class="picker-info">
               <span class="picker-label">{{ entry.project_id }}</span>
               <div class="picker-meta font-mono">
@@ -411,32 +551,37 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Grabber Controls -->
-    <section v-if="scenes.length && projectId" class="card grabber-card">
-      <div class="grabber-header">
-        <div class="grabber-header-left">
+    <!-- Storyboard Gallery + Grabber -->
+    <section v-if="scenes.length && projectId" class="gallery-section">
+      <div class="gallery-header">
+        <div class="gallery-header-left">
           <svg width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="1.5" viewBox="0 0 24 24">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
           </svg>
-          <span class="grabber-title">Image Grabber</span>
-          <span class="grabber-count font-mono">{{ scenes.length }} scenes</span>
+          <span class="gallery-title">Storyboard</span>
+          <span class="gallery-count font-mono">{{ imageCount }}/{{ scenes.length }} images</span>
         </div>
-        <div class="grabber-actions">
-          <button
-            class="gen-btn btn-grab-all"
-            :disabled="grabbing || !webhookEnabled"
-            @click="grabAll"
-          >
+        <button
+          class="gen-btn btn-grab-all"
+          :disabled="grabbing || !webhookEnabled"
+          @click="grabAll"
+        >
+          <template v-if="grabbing">
+            <span class="spinner-sm" style="margin-right:4px"></span>
+            Generating...
+          </template>
+          <template v-else>
             <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="vertical-align:-1px;margin-right:4px">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="M21 15l-5-5L5 21" />
             </svg>
-            Grab All
-          </button>
-        </div>
+            Generate All
+          </template>
+        </button>
       </div>
 
       <!-- Progress bar -->
@@ -447,76 +592,105 @@ onUnmounted(() => {
         <span class="progress-text font-mono">{{ readyCount }}/{{ totalCount }} ready</span>
       </div>
 
-      <!-- Scene list -->
-      <div class="scene-list">
-        <div
-          v-for="scene in scenes"
-          :key="scene.index"
-          class="scene-row"
-          :class="{ 'scene-row--ready': sceneStatus(scene.index) === 'ready' }"
-        >
-          <div class="scene-thumb">
-            <img v-if="sceneImage(scene.index)" :src="sceneImage(scene.index)" :alt="`Scene ${scene.index}`" />
-            <div v-else class="scene-thumb-empty">
-              <span class="scene-num font-mono">{{ scene.index }}</span>
-            </div>
-          </div>
-          <div class="scene-info">
-            <div class="scene-title-row">
-              <span class="scene-label font-mono">Scene {{ scene.index }}</span>
-              <span
-                class="scene-status-badge font-mono"
-                :class="`badge--${sceneStatus(scene.index)}`"
-              >{{ sceneStatus(scene.index) }}</span>
-            </div>
-            <p class="scene-prompt">{{ scene.prompt }}</p>
-          </div>
-          <button
-            class="action-btn btn-grab-one"
-            :disabled="sceneStatus(scene.index) === 'generating' || sceneStatus(scene.index) === 'downloading'"
-            @click="grabScene(scene)"
-          >
-            <template v-if="sceneStatus(scene.index) === 'generating' || sceneStatus(scene.index) === 'downloading'">
-              <span class="spinner-sm"></span>
-            </template>
-            <template v-else-if="sceneStatus(scene.index) === 'ready'">
-              Regrab
-            </template>
-            <template v-else>
-              Grab
-            </template>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Gallery Preview -->
-    <section v-if="imageCount" class="gallery-section">
-      <div class="gallery-header">
-        <svg width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="1.5" viewBox="0 0 24 24">
-          <rect x="3" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="3" width="7" height="7" rx="1" />
-          <rect x="3" y="14" width="7" height="7" rx="1" />
-          <rect x="14" y="14" width="7" height="7" rx="1" />
-        </svg>
-        <span class="gallery-title">Gallery Preview</span>
-        <span class="gallery-count font-mono">{{ imageCount }} images</span>
-      </div>
+      <!-- Image cards with prompts -->
       <div class="image-grid">
-        <div v-for="img in images" :key="img.filename" class="image-card">
-          <div class="image-preview">
-            <img :src="img.path" :alt="img.filename" loading="lazy" />
+        <div v-for="scene in scenes" :key="scene.index" class="image-card" :class="{ 'image-card--empty': !sceneImage(scene.index) }">
+          <div class="image-preview" :class="{ clickable: !!sceneImage(scene.index) }" @click="openLightbox(scene.index)">
+            <img v-if="sceneImage(scene.index)" :src="sceneImage(scene.index)" :alt="`Scene ${scene.index}`" loading="lazy" />
+            <div v-else class="image-placeholder" :class="{ 'is-loading': sceneStatus(scene.index) === 'generating' || sceneStatus(scene.index) === 'downloading' }">
+              <template v-if="sceneStatus(scene.index) === 'generating' || sceneStatus(scene.index) === 'downloading'">
+                <div class="loading-visual">
+                  <div class="pulse-ring"></div>
+                  <div class="pulse-ring delay-1"></div>
+                  <div class="pulse-ring delay-2"></div>
+                  <svg class="loading-icon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+                    <path d="M5 18l1 2.5L8.5 22l-2.5 0L5 18z" opacity="0.6" />
+                    <path d="M19 16l.5 1.5L21 18l-1.5.5L19 20l-.5-1.5L17 18l1.5-.5L19 16z" opacity="0.6" />
+                  </svg>
+                </div>
+                <span class="loading-label">{{ sceneStatus(scene.index) === 'downloading' ? 'Downloading...' : 'Generating...' }}</span>
+              </template>
+              <svg v-else width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="opacity:0.2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
+              </svg>
+            </div>
+            <!-- Version count badge -->
+            <span v-if="sceneVersionCount(scene.index) > 1" class="version-badge">
+              {{ sceneVersionCount(scene.index) }}
+            </span>
           </div>
-          <div class="image-footer">
-            <span class="image-scene">Scene {{ img.filename.replace(/\.\w+$/, '') }}</span>
-            <span class="image-size">{{ (img.size_bytes / 1024).toFixed(0) }} KB</span>
+
+          <!-- Version strip (previous versions) -->
+          <div v-if="sceneVersions(scene.index).length > 1" class="version-strip">
+            <div
+              v-for="(ver, vi) in sceneVersions(scene.index)"
+              :key="vi"
+              class="version-thumb"
+              :class="{ 'version-thumb--current': ver.is_current }"
+              @click="lightboxSrc = ver.path"
+            >
+              <img :src="ver.path" loading="lazy" :alt="ver.is_current ? 'Current' : `v${ver.version}`" />
+              <span class="version-label">{{ ver.is_current ? 'Current' : `v${ver.version}` }}</span>
+            </div>
+          </div>
+          <div class="image-body">
+            <div class="image-footer">
+              <span class="image-scene">Scene {{ scene.index }}</span>
+              <span class="image-status font-mono" :class="`status--${sceneStatus(scene.index)}`">{{ sceneStatus(scene.index) }}</span>
+            </div>
+
+            <!-- Editing mode -->
+            <template v-if="editingIndex === scene.index">
+              <textarea
+                class="prompt-edit-area"
+                v-model="editingPrompt"
+                rows="4"
+                @keydown.escape="cancelEdit"
+              ></textarea>
+              <div class="edit-actions">
+                <button class="btn-edit-save" @click="saveEdit(scene)">Save</button>
+                <button class="btn-edit-cancel" @click="cancelEdit">Cancel</button>
+              </div>
+            </template>
+
+            <!-- Display mode -->
+            <template v-else>
+              <p v-if="scene.prompt" class="image-prompt">{{ scene.prompt }}</p>
+              <div class="image-actions">
+                <button v-if="scene.prompt" class="btn-copy" title="Copy prompt" @click="copyPrompt(scene.prompt)">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                  <span>Copy</span>
+                </button>
+                <button class="btn-copy" title="Edit prompt" @click="startEdit(scene)">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  <span>Edit</span>
+                </button>
+                <button v-if="sceneImage(scene.index)" class="btn-copy btn-download" title="Download image" @click="downloadImage(scene)">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+                <button
+                  class="btn-grab-one"
+                  :disabled="!scene.prompt || sceneStatus(scene.index) === 'generating' || sceneStatus(scene.index) === 'downloading'"
+                  @click="grabScene(scene)"
+                >
+                  <template v-if="sceneStatus(scene.index) === 'generating' || sceneStatus(scene.index) === 'downloading'">
+                    <span class="spinner-sm"></span>
+                  </template>
+                  <template v-else-if="sceneStatus(scene.index) === 'ready'">Regrab</template>
+                  <template v-else>Grab</template>
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </div>
     </section>
 
     <!-- Empty State -->
-    <section v-else-if="!scenes.length" class="empty-state">
+    <section v-else class="empty-state">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" class="empty-icon">
         <rect x="3" y="3" width="7" height="7" rx="1" />
         <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -589,6 +763,35 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+
+    <!-- Lightbox -->
+    <Teleport to="body">
+      <div v-if="lightboxSrc" class="lightbox-overlay" @click.self="closeLightbox">
+        <button class="lightbox-close" @click="closeLightbox">&times;</button>
+
+        <!-- Left arrow -->
+        <button
+          v-if="lightboxScenes.findIndex(s => s.index === lightboxIndex) > 0"
+          class="lightbox-arrow lightbox-arrow--left"
+          @click.stop="lightboxNav(-1)"
+        >&#8249;</button>
+
+        <img :src="lightboxSrc" class="lightbox-img" />
+
+        <!-- Right arrow -->
+        <button
+          v-if="lightboxScenes.findIndex(s => s.index === lightboxIndex) < lightboxScenes.length - 1"
+          class="lightbox-arrow lightbox-arrow--right"
+          @click.stop="lightboxNav(1)"
+        >&#8250;</button>
+
+        <!-- Scene indicator -->
+        <div class="lightbox-info">
+          <span class="lightbox-badge">Scene {{ lightboxIndex }}</span>
+          <span class="lightbox-counter">{{ lightboxScenes.findIndex(s => s.index === lightboxIndex) + 1 }} / {{ lightboxScenes.length }}</span>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -746,35 +949,41 @@ onUnmounted(() => {
   margin: 0;
 }
 
-/* ---- Grabber ---- */
-.grabber-card {
-  margin-top: 16px;
-  padding: 16px 20px;
-}
-.grabber-header {
+/* ---- Aspect Ratio ---- */
+.aspect-ratio-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
 }
-.grabber-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.aspect-select {
+  padding: 5px 28px 5px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: var(--bg-darkest, #0a0e13);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.15s;
 }
-.grabber-title {
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--text-primary);
+.aspect-select:hover,
+.aspect-select:focus {
+  border-color: var(--accent);
+  outline: none;
 }
-.grabber-count {
-  font-size: 11px;
-  color: var(--accent);
+.aspect-select option {
+  background: var(--bg-card, #141a22);
+  color: var(--text);
 }
-.grabber-actions {
-  display: flex;
-  gap: 8px;
-}
+
+/* ---- Grab All button ---- */
 .gen-btn.btn-grab-all {
   padding: 8px 16px;
   border-radius: 8px;
@@ -826,95 +1035,123 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* ---- Scene list ---- */
-.scene-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* ---- Image card body (prompt + actions) ---- */
+.image-body {
+  padding: 10px 14px;
 }
-.scene-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  transition: background 0.15s;
-}
-.scene-row:hover {
-  background: rgba(78, 205, 196, 0.04);
-}
-.scene-row--ready {
-  background: rgba(78, 205, 196, 0.06);
-}
-.scene-thumb {
-  width: 64px;
-  height: 44px;
-  border-radius: 6px;
-  background: var(--bg-darkest);
-  border: 1px solid var(--border);
+.image-prompt {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-style: italic;
+  line-height: 1.4;
+  margin: 6px 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  flex-shrink: 0;
 }
-.scene-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.scene-thumb-empty {
-  width: 100%;
-  height: 100%;
+.image-actions {
   display: flex;
+  gap: 6px;
   align-items: center;
-  justify-content: center;
+  margin-top: 8px;
 }
-.scene-num {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-.scene-info {
-  flex: 1;
-  min-width: 0;
-}
-.scene-title-row {
-  display: flex;
+.btn-copy {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
-}
-.scene-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.scene-status-badge {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1px 6px;
+  gap: 4px;
+  padding: 3px 8px;
   border-radius: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.badge--pending { color: var(--text-muted); background: rgba(100, 116, 139, 0.1); }
-.badge--generating { color: #f0c674; background: rgba(240, 198, 116, 0.12); }
-.badge--downloading { color: #82aaff; background: rgba(130, 170, 255, 0.12); }
-.badge--ready { color: var(--accent); background: rgba(78, 205, 196, 0.12); }
-.badge--error { color: #ff6b6b; background: rgba(255, 107, 107, 0.12); }
-.scene-prompt {
-  font-size: 11px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
   color: var(--text-muted);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 600px;
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-download {
+  padding: 5px 7px;
+}
+.btn-download:hover {
+  border-color: #82aaff;
+  color: #82aaff;
 }
 .btn-grab-one {
-  padding: 6px 14px !important;
-  font-size: 11px !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
   white-space: nowrap;
-  flex-shrink: 0;
+}
+.btn-grab-one:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-grab-one:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Prompt editing ---- */
+.prompt-edit-area {
+  width: 100%;
+  padding: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: var(--bg-darkest, #0a0e13);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+}
+.edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.btn-edit-save {
+  padding: 3px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--bg-darkest);
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-edit-save:hover {
+  filter: brightness(1.1);
+}
+.btn-edit-cancel {
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-edit-cancel:hover {
+  border-color: var(--text-secondary);
+  color: var(--text);
 }
 .spinner-sm {
   display: inline-block;
@@ -936,8 +1173,14 @@ onUnmounted(() => {
 .gallery-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   margin-bottom: 14px;
+}
+.gallery-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .gallery-title {
   font-weight: 700;
@@ -992,6 +1235,151 @@ onUnmounted(() => {
   font-size: 10px;
   color: var(--text-muted, #4a5568);
 }
+.image-card--empty {
+  opacity: 0.6;
+}
+.image-card--empty:hover {
+  opacity: 1;
+}
+/* ---- Version badge ---- */
+.version-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  min-width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #fff;
+  background: rgba(78, 205, 196, 0.85);
+  border-radius: 10px;
+  padding: 0 6px;
+  z-index: 2;
+}
+
+/* ---- Version strip ---- */
+.version-strip {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg-darkest, #0a0e13);
+  overflow-x: auto;
+}
+.version-thumb {
+  flex-shrink: 0;
+  width: 48px;
+  cursor: pointer;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1.5px solid transparent;
+  transition: border-color 0.15s;
+  position: relative;
+}
+.version-thumb:hover {
+  border-color: var(--accent);
+}
+.version-thumb--current {
+  border-color: var(--accent);
+}
+.version-thumb img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  display: block;
+}
+.version-label {
+  display: block;
+  text-align: center;
+  font-size: 8px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  padding: 1px 0;
+  background: var(--bg-darkest, #0a0e13);
+}
+.version-thumb--current .version-label {
+  color: var(--accent);
+}
+
+.image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+}
+.image-placeholder.is-loading {
+  background: linear-gradient(135deg, rgba(240, 198, 116, 0.03) 0%, rgba(240, 198, 116, 0.08) 50%, rgba(240, 198, 116, 0.03) 100%);
+  background-size: 200% 200%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.loading-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+}
+.loading-icon {
+  position: relative;
+  z-index: 1;
+  color: #f0c674;
+  opacity: 0.6;
+  animation: icon-breathe 2s ease-in-out infinite;
+}
+@keyframes icon-breathe {
+  0%, 100% { opacity: 0.4; transform: scale(1) rotate(0deg); }
+  50% { opacity: 0.9; transform: scale(1.1) rotate(15deg); }
+}
+.pulse-ring {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid #f0c674;
+  border-radius: 50%;
+  opacity: 0;
+  animation: pulse-expand 2.4s ease-out infinite;
+}
+.pulse-ring.delay-1 { animation-delay: 0.8s; }
+.pulse-ring.delay-2 { animation-delay: 1.6s; }
+@keyframes pulse-expand {
+  0% { transform: scale(0.5); opacity: 0.5; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.loading-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #f0c674;
+  opacity: 0.8;
+  animation: label-pulse 1.5s ease-in-out infinite;
+}
+@keyframes label-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+.image-status {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.status--pending { color: var(--text-muted); }
+.status--generating { color: #f0c674; }
+.status--downloading { color: #82aaff; }
+.status--ready { color: var(--accent); }
+.status--error { color: #ff6b6b; }
 
 /* ---- Empty State ---- */
 .empty-state {
@@ -1207,6 +1595,8 @@ onUnmounted(() => {
   transition: background 0.15s;
 }
 .picker-row:hover { background: rgba(78,205,196,0.06); }
+.picker-icon { flex-shrink: 0; color: var(--text-muted); opacity: 0.5; margin-right: 10px; }
+.picker-row:hover .picker-icon { color: var(--accent); opacity: 0.8; }
 .picker-info { flex: 1; min-width: 0; }
 .picker-label {
   font-size: 13px;
@@ -1228,5 +1618,100 @@ onUnmounted(() => {
   padding: 24px;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* Image preview clickable */
+.image-preview.clickable {
+  cursor: pointer;
+}
+.image-preview.clickable:hover img {
+  filter: brightness(1.1);
+  transition: filter 0.2s;
+}
+
+/* Lightbox */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 32px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  line-height: 1;
+}
+.lightbox-close:hover {
+  opacity: 1;
+}
+.lightbox-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 36px;
+  width: 44px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 8px;
+  opacity: 0.6;
+  transition: all 0.2s;
+  backdrop-filter: blur(4px);
+  line-height: 1;
+  padding: 0;
+}
+.lightbox-arrow:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.15);
+}
+.lightbox-arrow--left { left: 16px; }
+.lightbox-arrow--right { right: 16px; }
+.lightbox-info {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.lightbox-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #4ECDC4);
+}
+.lightbox-counter {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'JetBrains Mono', monospace;
 }
 </style>

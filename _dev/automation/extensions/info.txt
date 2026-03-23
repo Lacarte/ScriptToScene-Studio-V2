@@ -1,0 +1,2 @@
+
+%LOCALAPPDATA%\Google\Chrome\User Data\Default\Extensions

@@ -11,6 +11,7 @@ import webbrowser
 
 from flask import Flask, jsonify, redirect, request, send_from_directory
 from flask_cors import CORS
+from flask_sock import Sock
 from loguru import logger
 
 from config import (
@@ -51,6 +52,7 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB max request body
 _cors_env = os.environ.get("STS_CORS_ORIGINS", "http://localhost:5050,http://127.0.0.1:5050,http://localhost:5174,http://localhost:5175")
 _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
 CORS(app, origins=_cors_origins or None)
+sock = Sock(app)
 
 from studio.tts import tts_bp
 from studio.timing import timing_bp
@@ -65,6 +67,7 @@ from studio.thumbnails import thumbnails_bp
 from studio.story import story_bp
 from studio.niches import niches_bp
 from studio.storyboard import storyboard_bp
+from studio.animator import animator_bp, init_animator_ws
 app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
@@ -78,6 +81,8 @@ app.register_blueprint(thumbnails_bp)
 app.register_blueprint(story_bp)
 app.register_blueprint(niches_bp)
 app.register_blueprint(storyboard_bp)
+app.register_blueprint(animator_bp)
+init_animator_ws(sock)
 
 
 # ---------------------------------------------------------------------------

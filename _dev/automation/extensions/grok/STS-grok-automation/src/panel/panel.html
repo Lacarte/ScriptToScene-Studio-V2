@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STS Grok</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <!-- Blocked overlay — shown on unsupported pages -->
+  <div id="blocked-overlay" class="blocked" style="display:none;">
+    <div class="blocked-content">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".3">
+        <circle cx="12" cy="12" r="10"/><path d="M4.93 4.93l14.14 14.14"/>
+      </svg>
+      <span class="blocked-title">Not available on this page</span>
+      <span class="blocked-msg">Open <a href="#" id="open-grok">grok.com/imagine</a> or <a href="#" id="open-blank">about:blank</a></span>
+    </div>
+  </div>
+
+  <div id="app">
+    <header>
+      <div class="hdr-left">
+        <div id="header-dot" class="dot off"></div>
+        <span class="hdr-title">STS Grok</span>
+        <span id="project-badge" class="pid"></span>
+      </div>
+      <span id="status" class="badge offline">Offline</span>
+    </header>
+
+    <!-- Dual status -->
+    <div class="status-row">
+      <div id="conn-bar" class="pill err"><span id="conn-text">No Grok tab</span></div>
+      <div id="ws-bar" class="pill err"><span id="ws-text">WS offline</span></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat"><span class="sv" id="stat-queued">0</span><span class="sl">Queue</span></div>
+      <div class="stat"><span class="sv text-accent" id="stat-active">0</span><span class="sl">Active</span></div>
+      <div class="stat"><span class="sv text-green" id="stat-done">0</span><span class="sl">Done</span></div>
+      <div class="stat"><span class="sv text-red" id="stat-errors">0</span><span class="sl">Fail</span></div>
+    </div>
+
+    <!-- Overall progress -->
+    <div id="overall-wrap" class="overall" style="display:none;">
+      <div class="overall-track"><div class="overall-fill" id="overall-fill"></div></div>
+      <span class="overall-lbl" id="overall-lbl">0/0</span>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="queue">Queue</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </div>
+
+    <!-- Queue -->
+    <div id="tab-queue" class="tab-content">
+      <div id="job-list" class="list">
+        <div class="empty">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          <span>Waiting for jobs...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="tab-settings" class="tab-content" style="display:none;">
+      <section class="card">
+        <h2>Backend</h2>
+        <label class="flbl">WebSocket URL</label>
+        <input type="text" id="ws-url" value="ws://localhost:5050/ws/animator" />
+        <div class="btn-row">
+          <button id="btn-connect" class="btn-sm btn-primary">Connect</button>
+          <button id="btn-disconnect" class="btn-sm btn-ghost">Disconnect</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>Content Script</h2>
+        <p id="connection-info" class="text-muted sm">Click to test.</p>
+        <button id="btn-ping" class="btn-sm btn-ghost">Ping</button>
+      </section>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span class="text-muted mono-xs">v0.2</span>
+      <div class="fbtn">
+        <button id="btn-retry-all" class="btn-xs btn-warn" style="display:none;">Retry All</button>
+        <button id="btn-stop" class="btn-xs btn-danger" style="display:none;">Stop</button>
+        <button id="btn-clear" class="btn-xs btn-ghost">Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="panel.js" type="module"></script>
+</body>
+</html>

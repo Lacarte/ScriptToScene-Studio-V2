@@ -63,6 +63,7 @@
 @base = http://localhost:5000
 @webhook = https://n8n-production-6197.up.railway.app/webhook/scene-blueprint-generator
 @webhook_test = https://n8n-production-6197.up.railway.app/webhook-test/scene-blueprint-generator
+@storyboard_webhook = https://n8n-production-6197.up.railway.app/webhook/storyboard-generator
 
 ### ----------------------------------------------------------
 ### 1. Health check — GET webhook URL config
@@ -185,3 +186,51 @@ GET {{base}}/api/alignment/history
 ### ----------------------------------------------------------
 
 GET {{base}}/api/segmenter/history
+
+### ----------------------------------------------------------
+### 10. Storyboard — webhook URL config
+### ----------------------------------------------------------
+
+GET {{base}}/api/storyboard/webhook-url
+
+### ----------------------------------------------------------
+### 11. Storyboard — grab single scene (smoke test)
+### ----------------------------------------------------------
+
+POST {{base}}/api/storyboard/grab
+Content-Type: application/json
+
+{
+  "project_id": "pp_EB66Z3",
+  "scene": 0,
+  "prompt": "wide shot, a stoic hero knight with a tattered cloak, being escorted out of a grand, gilded castle gate by two stern-faced royal guards, while the kingdom's banner flutters in the background, rim lighting, dramatic backlighting, mournful, slow pan out revealing vast kingdom, Anime, Manga, Japanese, animation",
+  "aspect_ratio": "16:9",
+  "webhook_url": "{{storyboard_webhook}}"
+}
+
+### ----------------------------------------------------------
+### 11b. Storyboard — direct n8n webhook (bypass Flask)
+### ----------------------------------------------------------
+
+POST {{storyboard_webhook}}
+Content-Type: application/json
+
+{
+  "image_prompt": "wide shot, a stoic hero knight with a tattered cloak, being escorted out of a grand gilded castle gate, rim lighting, dramatic backlighting, mournful, Anime, Manga, Japanese, animation",
+  "aspect_ratio": "9:16",
+  "wavespeed_api_key": "{{$dotenv WAVESPEED_API_KEY}}"
+}
+
+### ----------------------------------------------------------
+### 12. Storyboard — check status
+### ----------------------------------------------------------
+
+GET {{base}}/api/storyboard/status/pp_EB66Z3
+
+### ----------------------------------------------------------
+### 13. Storyboard — list images
+### ----------------------------------------------------------
+
+GET {{base}}/api/storyboard/images/pp_EB66Z3
+
+

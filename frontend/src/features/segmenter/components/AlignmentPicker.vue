@@ -44,20 +44,21 @@ function truncate(str, max = 60) {
             class="picker-item"
             @click="emit('select', item)"
           >
+            <svg class="item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="19" cy="17" r="2"/></svg>
             <div class="item-body">
               <p v-if="item.transcript" class="item-transcript">{{ truncate(item.transcript) }}</p>
               <div class="item-meta">
                 <span class="item-project">{{ item.project_id || item.folder }}</span>
                 <span class="meta-dot">&middot;</span>
-                <span v-if="item.word_count != null">{{ item.word_count }} words</span>
-                <span v-else-if="item.alignment">{{ item.alignment.length }} words</span>
+                <span v-if="item.word_count != null" style="color:var(--accent)">{{ item.word_count }} words</span>
+                <span v-else-if="item.alignment" style="color:var(--accent)">{{ item.alignment.length }} words</span>
                 <template v-if="item.duration != null">
                   <span class="meta-dot">&middot;</span>
-                  <span>{{ formatDuration(item.duration) }}</span>
+                  <span style="color:var(--accent-secondary)">{{ formatDuration(item.duration) }}</span>
                 </template>
                 <template v-if="item.timestamp || item.created_at">
                   <span class="meta-dot">&middot;</span>
-                  <span>{{ relativeTime(item.timestamp || item.created_at) }}</span>
+                  <span style="color:var(--text-secondary)">{{ relativeTime(item.timestamp || item.created_at) }}</span>
                 </template>
               </div>
             </div>
@@ -161,6 +162,17 @@ function truncate(str, max = 60) {
 .picker-item:hover {
   background: rgba(255, 255, 255, 0.03);
   border-color: var(--border);
+}
+
+.item-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.picker-item:hover .item-icon {
+  color: var(--accent);
+  opacity: 0.8;
 }
 
 .item-body {

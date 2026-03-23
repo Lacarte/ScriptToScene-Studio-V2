@@ -6,9 +6,16 @@ const props = defineProps({
   index: { type: Number, required: true },
   isActive: { type: Boolean, default: false },
   segmentWords: { type: String, default: '' },
+  storyboardThumb: { type: String, default: null },
 })
 
 const emit = defineEmits(['play'])
+
+async function copyPrompt(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {}
+}
 
 const typeColorMap = {
   video: '#4ECDC4',
@@ -40,6 +47,20 @@ function typeBg(type) {
     :style="{ borderLeftColor: typeColor(scene.type_of_scene) }"
     @click="emit('play', index)"
   >
+    <img
+      v-if="storyboardThumb"
+      class="storyboard-thumb"
+      :src="storyboardThumb"
+      :alt="`Storyboard ${index}`"
+      loading="lazy"
+    />
+    <div v-else class="storyboard-thumb storyboard-thumb--empty">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <path d="M21 15l-5-5L5 21" />
+      </svg>
+    </div>
     <div class="scene-card-top">
       <span class="scene-card-index" :style="{ color: typeColor(scene.type_of_scene) }">
         #{{ index }}
@@ -76,11 +97,16 @@ function typeBg(type) {
       "{{ scene.text_content }}"
     </p>
     <p v-if="scene.image_prompt" class="scene-card-prompt">{{ scene.image_prompt }}</p>
+    <button v-if="scene.image_prompt" class="btn-copy" @click.stop="copyPrompt(scene.image_prompt)" title="Copy prompt">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+      <span>Copy</span>
+    </button>
   </div>
 </template>
 
 <style scoped>
 .scene-card {
+  position: relative;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-left-width: 4px;
@@ -88,6 +114,41 @@ function typeBg(type) {
   padding: 14px 16px;
   cursor: pointer;
   transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.storyboard-thumb {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  opacity: 0.85;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 1;
+}
+.storyboard-thumb:hover {
+  opacity: 1;
+  transform: scale(2.5);
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  z-index: 10;
+}
+.storyboard-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-darkest, #0a0e13);
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+.storyboard-thumb--empty:hover {
+  transform: none;
+  box-shadow: none;
+  opacity: 0.6;
+  border-color: var(--border);
 }
 
 .scene-card:hover {
@@ -172,5 +233,25 @@ function typeBg(type) {
   font-style: italic;
   line-height: 1.5;
   margin: 0;
+}
+.btn-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 </style>

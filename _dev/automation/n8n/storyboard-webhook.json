@@ -16,7 +16,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ── Input Validator ─────────────────────────────────────────────\n// Validates the incoming webhook payload for storyboard image generation.\n// Expects: { image_prompt: string, aspect_ratio?: string }\n\nconst body = $input.first().json.body || $input.first().json;\n\nconst image_prompt = (body.image_prompt || '').trim();\nconst aspect_ratio = (body.aspect_ratio || '16:9').trim();\n\n// ── Validate required fields ────────────────────────────────────\nif (!image_prompt) {\n  return [{\n    json: {\n      valid: false,\n      error: 'Missing or empty \"image_prompt\"',\n      image_prompt: null,\n      image_reference: null,\n      aspect_ration: null\n    }\n  }];\n}\n\n// ── Map aspect_ratio to WaveSpeed size format ───────────────────\n// The sub-workflow handles the actual API call; we just pass through.\n// Note: the sub-workflow field is \"aspect_ration\" (typo preserved).\n\nreturn [{\n  json: {\n    valid: true,\n    error: null,\n    image_prompt: image_prompt,\n    image_reference: null,\n    aspect_ration: aspect_ratio\n  }\n}];"
+        "jsCode": "// ── Input Validator ─────────────────────────────────────────────\n// Validates the incoming webhook payload and builds the full WaveSpeed\n// API payload with generation parameters.\n// Supports style chaining: seed, image (reference URL), strength\n\nconst body = $input.first().json.body || $input.first().json;\nconst image_prompt = (body.image_prompt || '').trim();\nconst wavespeed_api_key = (body.wavespeed_api_key || '').trim();\nconst aspect_ratio = (body.aspect_ratio || '9:16').trim();\nconst project_id = body.project_id || null;\nconst scene = body.scene ?? null;\nconst seed = body.seed ?? -1;\nconst ref_image = (body.image || '').trim();\nconst strength = body.strength ?? 0.8;\n\nif (!image_prompt) {\n  return [{ json: { valid: false, error: 'Missing or empty \"image_prompt\"' } }];\n}\nif (!wavespeed_api_key) {\n  return [{ json: { valid: false, error: 'Missing or empty \"wavespeed_api_key\"' } }];\n}\n\nconst sizeMap = {\n  '9:16': '576*1024', '16:9': '1024*576', '1:1': '1024*1024',\n  '4:3': '1024*768', '3:4': '768*1024', '3:2': '1024*683', '2:3': '683*1024'\n};\nconst size = sizeMap[aspect_ratio] || '576*1024';\n\nreturn [{\n  json: {\n    valid: true,\n    error: null,\n    project_id,\n    scene,\n    wavespeed_api_key,\n    wavespeed_payload: {\n      enable_base64_output: false,\n      guidance_scale: 3.5,\n      image: ref_image,\n      loras: [{ path: 'strangerzonehf/Flux-Super-Realism-LoRA', scale: 1 }],\n      num_images: 1,\n      num_inference_steps: 28,\n      output_format: 'jpeg',\n      prompt: image_prompt.replace(/\\n/g, '\\\\n'),\n      seed: seed,\n      size: size,\n      strength: strength\n    }\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -57,15 +57,125 @@
     },
     {
       "parameters": {
-        "source": "database",
-        "workflowId": "8hVHh30VB4k339sQ",
+        "method": "POST",
+        "url": "https://api.wavespeed.ai/api/v3/wavespeed-ai/flux-dev-lora-ultra-fast",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.wavespeed_api_key }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.wavespeed_payload) }}",
         "options": {}
       },
-      "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1.2,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [1060, 200],
       "id": "a1b2c3d4-0004-4000-8000-000000000004",
-      "name": "Create Image"
+      "name": "Generate Image"
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1280, 200],
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Wait"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.wavespeed.ai/api/v3/predictions/{{ $('Generate Image').item.json.data.id }}/result",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('input_validator').item.json.wavespeed_api_key }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 200],
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Get Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "status-check-001",
+              "leftValue": "={{ $json.data.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1720, 200],
+      "id": "a1b2c3d4-0008-4000-8000-000000000008",
+      "name": "Is Completed"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "img-url-001",
+              "name": "image_url",
+              "value": "={{ $json.data.outputs[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "proj-id-001",
+              "name": "project_id",
+              "value": "={{ $('input_validator').item.json.project_id }}",
+              "type": "string"
+            },
+            {
+              "id": "scene-001",
+              "name": "scene",
+              "value": "={{ $('input_validator').item.json.scene }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1940, 100],
+      "id": "a1b2c3d4-0009-4000-8000-000000000009",
+      "name": "Extract URL"
     },
     {
       "parameters": {
@@ -74,7 +184,7 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
-      "position": [1280, 400],
+      "position": [2160, 300],
       "id": "a1b2c3d4-0005-4000-8000-000000000005",
       "name": "Respond to Webhook"
     }
@@ -88,11 +198,26 @@
     },
     "If": {
       "main": [
-        [{"node": "Create Image", "type": "main", "index": 0}],
+        [{"node": "Generate Image", "type": "main", "index": 0}],
         [{"node": "Respond to Webhook", "type": "main", "index": 0}]
       ]
     },
-    "Create Image": {
+    "Generate Image": {
+      "main": [[{"node": "Wait", "type": "main", "index": 0}]]
+    },
+    "Wait": {
+      "main": [[{"node": "Get Result", "type": "main", "index": 0}]]
+    },
+    "Get Result": {
+      "main": [[{"node": "Is Completed", "type": "main", "index": 0}]]
+    },
+    "Is Completed": {
+      "main": [
+        [{"node": "Extract URL", "type": "main", "index": 0}],
+        [{"node": "Wait", "type": "main", "index": 0}]
+      ]
+    },
+    "Extract URL": {
       "main": [[{"node": "Respond to Webhook", "type": "main", "index": 0}]]
     }
   },
