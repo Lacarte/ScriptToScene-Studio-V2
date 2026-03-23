@@ -182,6 +182,16 @@ def _handle_ws_message(msg):
         _handle_asset_result(msg)
     elif msg_type == "PONG":
         pass  # heartbeat response
+    elif msg_type == "RATE_LIMITED":
+        wait_ms = msg.get("waitMs", 0)
+        retry_count = msg.get("retryCount", 0)
+        mins = int(wait_ms / 60000)
+        if retry_count:
+            logger.warning("Grok rate limited — retry #{}, waiting {}m", retry_count, mins)
+        else:
+            logger.warning("Grok rate limited — waiting {}m", mins)
+    elif msg_type == "RATE_LIMIT_CLEARED":
+        logger.success("Grok rate limit cleared, resuming")
     else:
         logger.warning("Unknown animator WS message type: {}", msg_type)
 

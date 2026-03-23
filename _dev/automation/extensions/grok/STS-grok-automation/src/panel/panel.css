@@ -89,6 +89,15 @@ header {
   color:var(--acc);
 }
 
+.btn-pipeline.rate-limited {
+  background:rgba(255,107,107,0.1); border-color:rgba(255,107,107,0.3);
+  color:#ff6b6b; animation: rate-pulse 2s ease-in-out infinite;
+}
+@keyframes rate-pulse {
+  0%,100% { opacity:1; }
+  50% { opacity:0.6; }
+}
+
 .pipeline-icon {
   display:flex; align-items:center; justify-content:center;
   width:22px; height:22px; border-radius:50%;

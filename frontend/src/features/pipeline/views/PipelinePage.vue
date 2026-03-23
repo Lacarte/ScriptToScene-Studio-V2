@@ -1014,7 +1014,7 @@ function logStepLabel(step) {
 
       <!-- Action row -->
       <div class="action-row">
-        <button class="run-btn" :class="{ 'run-btn--disabled': !canRun }" :disabled="!canRun" @click="handleRunPipeline">
+        <button class="run-btn" :class="{ 'run-btn--disabled': !canRun, 'run-btn--running': running }" :disabled="!canRun" @click="handleRunPipeline">
           <span class="run-icon" aria-hidden="true">
             <svg v-if="!running" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>
@@ -1024,6 +1024,16 @@ function logStepLabel(step) {
             </svg>
           </span>
           <span class="run-label">{{ runLabel }}</span>
+        </button>
+        <!-- Stop button — appears when pipeline is running -->
+        <button
+          v-if="running || stopping"
+          class="stop-btn"
+          :disabled="stopping"
+          @click="stop"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          {{ stopping ? 'Stopping...' : 'Stop' }}
         </button>
         <!-- Retry button — appears when pipeline failed -->
         <button
@@ -2399,6 +2409,58 @@ function logStepLabel(step) {
 
 .run-btn--disabled .run-icon {
   background: rgba(255, 255, 255, 0.05);
+}
+
+/* ---- Running state ---- */
+.run-btn--running {
+  border-color: rgba(0, 200, 150, 0.5);
+  background:
+    linear-gradient(135deg, rgba(0, 200, 150, 0.15), rgba(0, 150, 200, 0.15));
+  pointer-events: none;
+  cursor: wait;
+}
+
+.run-btn--running::before {
+  background: linear-gradient(135deg, rgba(0, 200, 150, 0.08), transparent);
+}
+
+.run-btn--running .run-icon {
+  background: rgba(0, 200, 150, 0.2);
+}
+
+.run-btn--running .spinner-svg {
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Stop Button ---- */
+.stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  background: rgba(255, 60, 60, 0.12);
+  color: #ff6b6b;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.stop-btn:hover:not(:disabled) {
+  background: rgba(255, 60, 60, 0.25);
+  border-color: rgba(255, 80, 80, 0.6);
+}
+
+.stop-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .spinner-svg {

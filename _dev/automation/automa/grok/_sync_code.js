@@ -189,6 +189,130 @@ function handleWSMessage(msg) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+const RATE_LIMIT_INITIAL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const RATE_LIMIT_RETRY_MS = 30 * 60 * 1000; // 30 minutes
+
+function checkRateLimit() {
+  // Method 1: Sonner toast with data-type="error"
+  var toasts = document.querySelectorAll('[data-sonner-toast][data-type="error"]');
+  for (var i = 0; i < toasts.length; i++) {
+    if (toasts[i].textContent && toasts[i].textContent.indexOf('Rate limit reached') !== -1) {
+      return true;
+    }
+  }
+  // Method 2: Any element containing "Rate limit reached" text (broader fallback)
+  var allLis = document.querySelectorAll('li[data-type="error"], section ol li');
+  for (var j = 0; j < allLis.length; j++) {
+    if (allLis[j].textContent && allLis[j].textContent.indexOf('Rate limit reached') !== -1) {
+      return true;
+    }
+  }
+  // Method 3: Direct text search in body (last resort)
+  var body = document.body;
+  if (body) {
+    var walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
+    while (walker.nextNode()) {
+      if (walker.currentNode.textContent.indexOf('Rate limit reached') !== -1) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+var rateLimitOverlay = null;
+
+function showRateLimitOverlay(endAt) {
+  if (rateLimitOverlay) rateLimitOverlay.remove();
+
+  // Find the "Featured Templates" header area
+  var header = document.querySelector('h1.text-base.font-semibold');
+  var target = header ? header.closest('.h-12, .flex') : null;
+  if (!target) target = header;
+  if (!target) return;
+
+  rateLimitOverlay = document.createElement('div');
+  rateLimitOverlay.id = 'sts-rate-limit-overlay';
+  rateLimitOverlay.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+    'background:rgba(255,60,60,0.15);backdrop-filter:blur(2px);' +
+    'border-bottom:2px solid rgba(255,80,80,0.5);padding:12px 20px;' +
+    'display:flex;align-items:center;justify-content:center;gap:12px;' +
+    'font-family:Inter,system-ui,sans-serif;color:#ff6b6b;font-size:14px;font-weight:600;';
+  rateLimitOverlay.innerHTML = '<span style="font-size:18px">⚠</span>' +
+    '<span>Rate limit reached</span>' +
+    '<span id="sts-rate-timer" style="font-family:monospace;font-size:16px;color:#fff;' +
+    'background:rgba(255,60,60,0.3);padding:4px 10px;border-radius:6px;min-width:80px;text-align:center"></span>';
+  document.body.appendChild(rateLimitOverlay);
+
+  function updateTimer() {
+    var el = document.getElementById('sts-rate-timer');
+    if (!el) return;
+    var rem = Math.max(0, endAt - Date.now());
+    if (rem <= 0) { el.textContent = 'Checking...'; return; }
+    var h = Math.floor(rem / 3600000);
+    var m = Math.floor((rem % 3600000) / 60000);
+    var s = Math.floor((rem % 60000) / 1000);
+    el.textContent = (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
+  }
+  updateTimer();
+  S.typing.rateLimitTimerInterval = setInterval(updateTimer, 1000);
+}
+
+function hideRateLimitOverlay() {
+  if (rateLimitOverlay) { rateLimitOverlay.remove(); rateLimitOverlay = null; }
+  if (S.typing.rateLimitTimerInterval) {
+    clearInterval(S.typing.rateLimitTimerInterval);
+    S.typing.rateLimitTimerInterval = null;
+  }
+}
+
+async function handleRateLimitCooldown() {
+  console.warn('[STS] Rate limit detected! Waiting 2 hours...');
+  S.typing.rateLimited = true;
+  S.typing.rateLimitEndAt = Date.now() + RATE_LIMIT_INITIAL_MS;
+  showRateLimitOverlay(S.typing.rateLimitEndAt);
+  updateRateLimitPanelUI();
+  await sleep(RATE_LIMIT_INITIAL_MS);
+
+  var retryCount = 0;
+  while (checkRateLimit()) {
+    retryCount++;
+    console.warn('[STS] Still rate limited, retry #' + retryCount + '. Waiting 30 min...');
+    S.typing.rateLimitEndAt = Date.now() + RATE_LIMIT_RETRY_MS;
+    showRateLimitOverlay(S.typing.rateLimitEndAt);
+    updateRateLimitPanelUI();
+    await sleep(RATE_LIMIT_RETRY_MS);
+  }
+
+  console.log('[STS] Rate limit cleared, resuming.');
+  S.typing.rateLimited = false;
+  S.typing.rateLimitEndAt = 0;
+  hideRateLimitOverlay();
+  updateRateLimitPanelUI();
+}
+
+function updateRateLimitPanelUI() {
+  var pipelineEl = document.querySelector('#sts-pipeline-btn');
+  if (!pipelineEl) return;
+  if (S.typing.rateLimited) {
+    pipelineEl.classList.add('sts-rate-limited');
+    pipelineEl.querySelector('.sts-pipeline-label').textContent =
+      'Rate limited — ' + formatCountdown(S.typing.rateLimitEndAt);
+  } else {
+    pipelineEl.classList.remove('sts-rate-limited');
+    pipelineEl.querySelector('.sts-pipeline-label').textContent =
+      S.pipelineEnabled ? 'Pipeline On' : 'Pipeline Off';
+  }
+}
+
+function formatCountdown(endAt) {
+  var rem = Math.max(0, endAt - Date.now());
+  var h = Math.floor(rem / 3600000);
+  var m = Math.floor((rem % 3600000) / 60000);
+  var s = Math.floor((rem % 60000) / 1000);
+  return (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
+}
+
 function shouldStopTyping(runId) {
   if (typeof runId === 'number') {
     return !S.typing.active || S.typing.stopRequested || S.typing.runId !== runId;
@@ -958,6 +1082,15 @@ root.innerHTML = `
     animation: sts-pipeline-pulse 2s ease-in-out infinite;
   }
   .sts-pipeline-btn.active .sts-pipeline-icon svg { stroke: var(--accent); }
+  .sts-pipeline-btn.sts-rate-limited {
+    background: rgba(255,80,80,0.1); border-color: rgba(255,80,80,0.3);
+    color: #ff6b6b; animation: sts-rate-pulse 2s ease-in-out infinite;
+  }
+  .sts-pipeline-btn.sts-rate-limited .sts-pipeline-icon {
+    background: rgba(255,80,80,0.15); border-color: rgba(255,80,80,0.3);
+  }
+  .sts-pipeline-btn.sts-rate-limited .sts-pipeline-icon svg { stroke: #ff6b6b; }
+  @keyframes sts-rate-pulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
   @keyframes sts-pipeline-pulse {
     0%,100% { box-shadow: 0 0 0 0 rgba(78,205,196,0); }
     50% { box-shadow: 0 0 0 4px rgba(78,205,196,0.2); }
@@ -1889,12 +2022,38 @@ async function startTyping() {
       // Type the prompt and submit
       await typeIntoGrok(item.fullPrompt);
       console.log('Submitted scene', item.scene, '- waiting for generation...');
+
+      // Check for rate limit after submission (toast appears ~1-2s after submit)
+      await sleep(2000);
+      if (checkRateLimit()) {
+        item.status = 'queued';
+        render();
+        await handleRateLimitCooldown();
+        // Re-type after cooldown
+        await typeIntoGrok(item.fullPrompt);
+        await sleep(2000);
+        if (checkRateLimit()) {
+          item.status = 'error';
+          item.errorCount = (item.errorCount || 0) + 1;
+          item.error = 'Rate limit persists after cooldown';
+          render();
+          continue;
+        }
+      }
+
       item.status = 'generating';
       render();
 
       const genResult = await waitForGeneration(item.scene, seenVideoUrls, undefined, runId);
 
       if (shouldStopTyping(runId)) { item.status = item.status === 'generating' ? 'queued' : item.status; break; }
+      // Rate limit returned null — re-queue and retry this scene
+      if (!genResult && S.typing.rateLimited) {
+        item.status = 'queued';
+        render();
+        i--; // Retry same scene
+        continue;
+      }
       if (genResult) {
         const videoUrl = genResult.primary;
         const allVideoUrls = genResult.allUrls || [videoUrl];
@@ -2221,6 +2380,13 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs, runId) {
   for (var a = 0; a < 30; a++) {
     if (shouldStopTyping(runId)) return null;
 
+    // Check for rate limit during wait-to-start
+    if (checkRateLimit()) {
+      console.warn('[STS] Rate limit hit during generation start wait');
+      await handleRateLimitCooldown();
+      return null; // Caller will re-queue this scene
+    }
+
     // Multiple signals that generation has begun
     var videoGone = !document.getElementById('sd-video');
     var hasCanvas = !!document.querySelector('canvas');
@@ -2245,6 +2411,13 @@ async function waitForGeneration(sceneId, seenUrls, timeoutMs, runId) {
   // --- Phase 2: Wait for generation to FINISH (max 5min) ---
   for (var p = 0; p < maxPolls; p++) {
     if (shouldStopTyping(runId)) return null;
+
+    // Check for rate limit during generation
+    if (checkRateLimit()) {
+      console.warn('[STS] Rate limit hit during generation');
+      await handleRateLimitCooldown();
+      return null;
+    }
 
     // Detect active generation: "Generating" text, spinner, canvas, SVG progress
     var isActive = false;

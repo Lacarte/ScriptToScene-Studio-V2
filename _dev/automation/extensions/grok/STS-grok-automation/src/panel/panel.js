@@ -472,6 +472,9 @@ async function processQueue() {
 }
 
 // ── Progress from content script ────────────────────────
+let rateLimitTimer = null;
+let rateLimitEndAt = 0;
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "ANIMATE_PROGRESS") {
     const job = jobs.find((j) => j.jobId === msg.jobId && j.sceneIndex === msg.sceneIndex);
@@ -480,6 +483,33 @@ chrome.runtime.onMessage.addListener((msg) => {
       renderJobs();
       sendToBackend({ type: "ANIMATE_PROGRESS", jobId: msg.jobId, sceneIndex: msg.sceneIndex, percentage: msg.percentage });
     }
+  }
+
+  if (msg.type === "RATE_LIMITED") {
+    const waitMs = msg.retryCount ? msg.retryWaitMs : msg.initialWaitMs;
+    rateLimitEndAt = Date.now() + waitMs;
+    const label = msg.retryCount ? `Retry #${msg.retryCount} — waiting 30m` : "Rate limited — waiting 2h";
+    pipelineLabel.textContent = label;
+    btnPipeline.classList.add("rate-limited");
+    sendToBackend({ type: "RATE_LIMITED", waitMs, retryCount: msg.retryCount || 0 });
+
+    clearInterval(rateLimitTimer);
+    rateLimitTimer = setInterval(() => {
+      const remaining = Math.max(0, rateLimitEndAt - Date.now());
+      if (remaining <= 0) { clearInterval(rateLimitTimer); return; }
+      const h = Math.floor(remaining / 3600000);
+      const m = Math.floor((remaining % 3600000) / 60000);
+      const s = Math.floor((remaining % 60000) / 1000);
+      pipelineLabel.textContent = `Rate limited — ${h > 0 ? h + "h " : ""}${m}m ${s}s`;
+    }, 1000);
+  }
+
+  if (msg.type === "RATE_LIMIT_CLEARED") {
+    clearInterval(rateLimitTimer);
+    rateLimitEndAt = 0;
+    btnPipeline.classList.remove("rate-limited");
+    pipelineLabel.textContent = pipelineEnabled ? "Pipeline On" : "Pipeline Off";
+    sendToBackend({ type: "RATE_LIMIT_CLEARED" });
   }
 });
 

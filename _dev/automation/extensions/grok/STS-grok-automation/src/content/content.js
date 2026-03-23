@@ -7,6 +7,9 @@ console.log("[STS Grok] Content script loaded on", window.location.href);
 const PRE_TYPE_DELAY_MS = 10000;
 const RECENT_RESULT_TTL_MS = 30000;
 
+const RATE_LIMIT_INITIAL_WAIT_MS = 2 * 60 * 60 * 1000; // 2 hours
+const RATE_LIMIT_RETRY_WAIT_MS = 30 * 60 * 1000; // 30 minutes
+
 const SEL = {
   promptDropUiTextarea: '[data-testid="drop-ui"] textarea',
   promptEditable: '[contenteditable="true"]',
@@ -28,7 +31,54 @@ const SEL = {
   downloadButton: 'button[aria-label="Download"], button:has(svg path[d*="M12 3v12"])',
   imagineNavLink: 'a[href="/imagine"], a[href*="/imagine"]',
   removeImageBtn: 'button[aria-label="Remove image"]',
+  rateLimitToast: '[data-type="error"]',
 };
+
+// ── Rate Limit Detection ──
+
+function isRateLimited() {
+  const toasts = document.querySelectorAll(SEL.rateLimitToast);
+  for (const toast of toasts) {
+    if (toast.textContent?.includes("Rate limit reached")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function waitForRateLimitCooldown() {
+  console.warn("[STS Grok] Rate limit detected! Waiting 2 hours...");
+
+  // Notify panel via runtime message
+  try {
+    chrome.runtime.sendMessage({
+      type: "RATE_LIMITED",
+      initialWaitMs: RATE_LIMIT_INITIAL_WAIT_MS,
+    });
+  } catch {}
+
+  await sleep(RATE_LIMIT_INITIAL_WAIT_MS);
+
+  // Retry loop: check every 30 minutes if still limited
+  let retryCount = 0;
+  while (isRateLimited()) {
+    retryCount++;
+    console.warn(`[STS Grok] Still rate limited after retry ${retryCount}. Waiting 30 minutes...`);
+    try {
+      chrome.runtime.sendMessage({
+        type: "RATE_LIMITED",
+        retryCount,
+        retryWaitMs: RATE_LIMIT_RETRY_WAIT_MS,
+      });
+    } catch {}
+    await sleep(RATE_LIMIT_RETRY_WAIT_MS);
+  }
+
+  console.log("[STS Grok] Rate limit cleared, resuming.");
+  try {
+    chrome.runtime.sendMessage({ type: "RATE_LIMIT_CLEARED" });
+  } catch {}
+}
 
 let activeAnimateKey = null;
 let activeAnimatePromise = null;
@@ -482,6 +532,11 @@ async function waitForVideoResult(jobId, sceneIndex, articleCountBefore = 0) {
 
   let generationStarted = false;
   for (let i = 0; i < 60; i++) {
+    if (isRateLimited()) {
+      console.warn("[STS Grok] Rate limit hit while waiting for generation to start");
+      await waitForRateLimitCooldown();
+      return { success: false, error: "Rate limited — re-queue" };
+    }
     const hasNewArticle = $$(SEL.mainArticle).length > articleCountBefore;
     if (hasNewArticle || isStillGenerating() || parseSvgProgress() >= 0) {
       generationStarted = true;
@@ -500,6 +555,12 @@ async function waitForVideoResult(jobId, sceneIndex, articleCountBefore = 0) {
   let idleCount = 0;
 
   for (let i = 0; i < maxIterations; i++) {
+    if (isRateLimited()) {
+      console.warn("[STS Grok] Rate limit hit during generation");
+      await waitForRateLimitCooldown();
+      return { success: false, error: "Rate limited — re-queue" };
+    }
+
     let percentage = parseSvgProgress();
     if (percentage < 0) percentage = readTextProgress();
 
@@ -622,6 +683,22 @@ async function runAnimate(msg) {
   const submitted = await fillPromptAndSubmit(prompt);
   if (!submitted) {
     return { success: false, error: "Failed to type/submit prompt" };
+  }
+
+  // Check for rate limit after submission (toast appears ~1-2s after submit)
+  await sleep(2000);
+  if (isRateLimited()) {
+    await waitForRateLimitCooldown();
+    // Re-submit the prompt after cooldown
+    const resubmitted = await fillPromptAndSubmit(prompt);
+    if (!resubmitted) {
+      return { success: false, error: "Failed to re-submit prompt after rate limit" };
+    }
+    await sleep(2000);
+    // If still rate limited after retry, fail
+    if (isRateLimited()) {
+      return { success: false, error: "Rate limit persists after cooldown" };
+    }
   }
 
   if (isVideoMode(mode) || String(mode || "").toLowerCase() === "imagetovideo") {
