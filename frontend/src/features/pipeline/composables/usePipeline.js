@@ -375,7 +375,9 @@ function _closeSSE() {
 }
 
 function startSSE(id) {
-  _closeSSE()
+  if (eventSource) { eventSource.close(); eventSource = null }
+  running.value = true
+  jobId.value = id
   eventSource = new EventSource(`/api/pipeline/progress/${id}`)
 
   eventSource.onmessage = (e) => {
