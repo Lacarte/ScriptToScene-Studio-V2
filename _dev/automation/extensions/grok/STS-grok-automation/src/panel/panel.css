@@ -68,6 +68,63 @@ header {
 .sv { font-family:var(--mono); font-size:16px; font-weight:600; line-height:1; }
 .sl { font-size:8px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--tx3); margin-top:3px; }
 
+/* ── Pipeline bar ─── */
+.pipeline-bar {
+  display:flex; align-items:center; gap:6px;
+  padding:6px 14px; border-bottom:1px solid var(--bdr);
+}
+
+.btn-pipeline {
+  flex:1; display:flex; align-items:center; gap:8px;
+  padding:6px 12px; border-radius:var(--r2);
+  background:var(--bg3); border:1px solid var(--bdr);
+  color:var(--tx3); font-size:10px; font-weight:700;
+  text-transform:uppercase; letter-spacing:0.04em;
+  transition:all 0.3s;
+}
+.btn-pipeline:hover { border-color:var(--bdr2); color:var(--tx2); }
+
+.btn-pipeline.active {
+  background:rgba(78,205,196,0.08); border-color:rgba(78,205,196,0.25);
+  color:var(--acc);
+}
+
+.pipeline-icon {
+  display:flex; align-items:center; justify-content:center;
+  width:22px; height:22px; border-radius:50%;
+  background:var(--bg2); border:1px solid var(--bdr);
+  transition:all 0.3s; flex-shrink:0;
+}
+.btn-pipeline.active .pipeline-icon {
+  background:rgba(78,205,196,0.15); border-color:rgba(78,205,196,0.3);
+  animation:pipeline-pulse 2s ease-in-out infinite;
+}
+.btn-pipeline.active .pipeline-icon svg { stroke:var(--acc); }
+
+@keyframes pipeline-pulse {
+  0%,100% { box-shadow:0 0 0 0 rgba(78,205,196,0); }
+  50% { box-shadow:0 0 0 4px rgba(78,205,196,0.2); }
+}
+
+.pipeline-label { flex:1; text-align:left; }
+
+.btn-stop-pipeline {
+  display:flex; align-items:center; justify-content:center;
+  width:30px; height:30px; border-radius:var(--r2);
+  background:rgba(255,107,107,0.1); border:1px solid rgba(255,107,107,0.2);
+  color:var(--red); transition:all 0.2s; flex-shrink:0;
+}
+.btn-stop-pipeline:hover {
+  background:rgba(255,107,107,0.2); border-color:rgba(255,107,107,0.4);
+}
+.btn-stop-pipeline.stopping {
+  animation:stop-blink 0.6s ease-in-out infinite;
+}
+@keyframes stop-blink {
+  0%,100% { opacity:1; }
+  50% { opacity:0.4; }
+}
+
 /* ── Overall progress ─── */
 .overall { display:flex; align-items:center; gap:8px; padding:6px 14px; border-bottom:1px solid var(--bdr); }
 .overall-track { flex:1; height:3px; background:rgba(255,255,255,0.04); border-radius:3px; overflow:hidden; }

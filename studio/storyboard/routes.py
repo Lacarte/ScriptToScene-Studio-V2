@@ -161,12 +161,11 @@ def _download_image(url, dest_path):
 def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
     """Background thread: generate one image per scene sequentially via n8n webhook.
 
-    Style consistency: a fixed seed is used for all scenes, and each scene
-    receives the *previous* scene's output URL as an image-to-image reference
-    (with low strength) so the visual style chains naturally.
+    Style consistency comes from prompt engineering — the scene blueprint
+    generator appends a shared style/palette suffix to every scene prompt.
+    No seed or image-to-image chaining is used, as testing showed those
+    techniques freeze composition rather than unifying style.
     """
-    import random
-
     job = _get_job(project_id)
     if not job:
         return
@@ -174,13 +173,6 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
     project_dir = _storyboard_dir(project_id)
     os.makedirs(project_dir, exist_ok=True)
     url = webhook_url or N8N_STORYBOARD_WEBHOOK_URL
-
-    # Fixed seed for the whole batch — keeps palette/texture consistent
-    batch_seed = random.randint(0, 2_147_483_647)
-    # Reference image chain: each scene uses the previous scene's output
-    prev_image_url = None
-    # Strength for image-to-image reference (low = subtle style influence)
-    REFERENCE_STRENGTH = 0.3
 
     total = len(scenes)
     ready = 0
@@ -202,16 +194,9 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
                 "wavespeed_api_key": WAVESPEED_API_KEY,
                 "project_id": project_id,
                 "scene": scene_num,
-                "seed": batch_seed,
             }
-            # Chain: pass previous scene's image as style reference
-            if prev_image_url:
-                payload["image"] = prev_image_url
-                payload["strength"] = REFERENCE_STRENGTH
 
-            logger.info("[{}] Storyboard scene {} — calling webhook (seed={}, ref={})",
-                        project_id, scene_num, batch_seed,
-                        "prev" if prev_image_url else "none")
+            logger.info("[{}] Storyboard scene {} — calling webhook", project_id, scene_num)
             result = call_webhook(
                 url, payload, timeout=300,
                 label=f"Storyboard scene {scene_num}",
@@ -246,8 +231,6 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
                     "thumb_path": thumb_url,
                 }
                 ready += 1
-                # Chain: next scene will use this image as reference
-                prev_image_url = image_url
                 logger.success("[{}] Storyboard scene {} ready", project_id, scene_num)
             else:
                 job["scene_statuses"][scene_key] = {

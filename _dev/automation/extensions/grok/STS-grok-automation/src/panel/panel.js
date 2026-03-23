@@ -13,8 +13,10 @@ const btnPing = document.getElementById("btn-ping");
 const btnConnect = document.getElementById("btn-connect");
 const btnDisconnect = document.getElementById("btn-disconnect");
 const btnClear = document.getElementById("btn-clear");
-const btnStop = document.getElementById("btn-stop");
 const btnRetryAll = document.getElementById("btn-retry-all");
+const btnPipeline = document.getElementById("btn-pipeline");
+const btnStopPipeline = document.getElementById("btn-stop-pipeline");
+const pipelineLabel = document.getElementById("pipeline-label");
 const wsUrlInput = document.getElementById("ws-url");
 const jobList = document.getElementById("job-list");
 const statQueued = document.getElementById("stat-queued");
@@ -78,9 +80,10 @@ let reconnectTimer = null;
 let reconnectDelay = 1000;
 let autoReconnect = true;
 let stopRequested = false;
+let pipelineEnabled = false;
 const MAX_RECONNECT_DELAY = 30000;
-const MAX_RETRIES = 2;
-const RETRY_DELAY = 5000;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 8000;
 const BETWEEN_JOBS_DELAY = 3000;
 const jobs = [];
 const pendingMessages = [];
@@ -277,9 +280,8 @@ function enqueueJob(msg) {
     projectBadge.textContent = msg.projectId;
     projectBadge.classList.add("show");
   }
-  // Show stop button
-  btnStop.style.display = "";
-  stopRequested = false;
+  // Auto-enable pipeline when jobs arrive
+  if (!pipelineEnabled) setPipelineState(true);
   updateUI();
   processQueue();
 }
@@ -366,7 +368,7 @@ async function navigateToImagine(tabId) {
 }
 
 async function processQueue() {
-  if (processing || stopRequested) return;
+  if (processing || stopRequested || !pipelineEnabled) return;
   const next = jobs.find((j) => j.status === "queued");
   if (!next) return;
 
@@ -386,9 +388,28 @@ async function processQueue() {
   let result = null;
   let error = null;
 
-  // ── Step 1: Generate — send ANIMATE to content script ──
+  // ── Step 1: Verify content script is alive, reset, then ANIMATE ──
   try {
     if (!tab?.id) throw new Error("No grok.com tab");
+
+    // Verify content script responds before sending job
+    let alive = false;
+    for (let probe = 0; probe < 5; probe++) {
+      try {
+        const check = await chrome.tabs.sendMessage(tab.id, { type: "CHECK_PAGE" });
+        if (check?.isImaginePage) { alive = true; break; }
+      } catch {}
+      console.log(`[STS] Content script not ready, waiting... (${probe + 1}/5)`);
+      await sleep(2000);
+      // Re-fetch tab in case it changed
+      tab = await getPreferredGrokTab();
+      if (!tab?.id) { tab = await ensureContentScript(true); }
+    }
+    if (!alive) throw new Error("Content script not responding after 10s");
+
+    // Clear any stale busy lock from previous job
+    try { await chrome.tabs.sendMessage(tab.id, { type: "RESET" }); } catch {}
+    await sleep(300);
 
     result = await chrome.tabs.sendMessage(tab.id, {
       type: "ANIMATE", jobId: next.jobId, sceneIndex: next.sceneIndex,
@@ -412,6 +433,8 @@ async function processQueue() {
     if (hasMoreQueued && !stopRequested) {
       contentScriptReady = false;
       await sleep(2000);
+      await navigateToImagine(tab.id);
+      await sleep(1000);
     }
   } else {
     const errMsg = error || result?.error || "Unknown error";
@@ -441,12 +464,11 @@ async function processQueue() {
   // Check if batch complete
   const remaining = jobs.filter((j) => j.status === "queued").length;
   if (remaining === 0) {
-
-    btnStop.style.display = "none";
+    setPipelineState(false);
   }
 
   // ── Step 4: Proceed to next job ──
-  if (!stopRequested && remaining > 0) processQueue();
+  if (!stopRequested && pipelineEnabled && remaining > 0) processQueue();
 }
 
 // ── Progress from content script ────────────────────────
@@ -461,15 +483,32 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
-// ── Stop handler ────────────────────────────────────────
-btnStop.addEventListener("click", () => {
+// ── Pipeline toggle ──────────────────────────────────────
+function setPipelineState(enabled) {
+  pipelineEnabled = enabled;
+  btnPipeline.classList.toggle("active", enabled);
+  pipelineLabel.textContent = enabled ? "Pipeline On" : "Pipeline Off";
+  btnStopPipeline.style.display = enabled ? "" : "none";
+  btnStopPipeline.classList.remove("stopping");
+
+  if (enabled) {
+    stopRequested = false;
+    processQueue();
+  }
+}
+
+btnPipeline.addEventListener("click", () => {
+  setPipelineState(!pipelineEnabled);
+});
+
+btnStopPipeline.addEventListener("click", () => {
   stopRequested = true;
+  btnStopPipeline.classList.add("stopping");
   // Mark all queued as cancelled
   jobs.forEach((j) => {
     if (j.status === "queued") { j.status = "error"; j.error = "Stopped by user"; }
   });
-  stopElapsed();
-  btnStop.style.display = "none";
+  setPipelineState(false);
   updateUI();
 });
 
@@ -568,8 +607,7 @@ function retryJob(jobId, sceneIndex) {
   job.percentage = 0;
   job.retries = 0;
   job.startedAt = null;
-  stopRequested = false;
-  btnStop.style.display = "";
+  setPipelineState(true);
   updateUI();
   processQueue();
 }
@@ -584,9 +622,7 @@ function retryAllFailed() {
     job.retries = 0;
     job.startedAt = null;
   }
-  stopRequested = false;
-  btnStop.style.display = "";
-
+  setPipelineState(true);
   updateUI();
   processQueue();
 }

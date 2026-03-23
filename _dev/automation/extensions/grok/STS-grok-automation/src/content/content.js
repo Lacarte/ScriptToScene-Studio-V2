@@ -687,11 +687,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ pong: true, from: "content" });
       return false;
 
+    case "RESET":
+      // Force-clear busy state between jobs
+      activeAnimateKey = null;
+      activeAnimatePromise = null;
+      sendResponse({ success: true });
+      return false;
+
     case "ANIMATE":
       handleAnimate(msg, sendResponse);
       return true;
 
     case "NAVIGATE_IMAGINE": {
+      // Clear busy state — previous job is done
+      activeAnimateKey = null;
+      activeAnimatePromise = null;
       const link = $(SEL.imagineNavLink);
       if (!link) {
         sendResponse({ success: false, error: "Imagine nav link not found" });
