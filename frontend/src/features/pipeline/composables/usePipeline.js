@@ -165,14 +165,21 @@ let _providerWin = null
 function _openInProviderTab(url) {
   // Reuse existing tab if still open, otherwise open a new one
   if (_providerWin && !_providerWin.closed) {
-    _providerWin.location.href = url
-    _providerWin.focus()
+    try {
+      _providerWin.location.href = url
+      _providerWin.focus()
+    } catch {
+      // Cross-origin or closed — open fresh
+      _providerWin = window.open(url, '_blank')
+    }
   } else {
     _providerWin = window.open(url, '_blank')
   }
 }
 
 function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
+  // Pre-open the tab during user click so popup blocker allows it.
+  // The tab stays on about:blank with a loading animation until the assets step starts.
   const stepIds = ALL_STEPS.map(step => step.id)
   const assetsIdx = stepIds.indexOf('assets')
   const stopIdx = stopValue ? stepIds.indexOf(stopValue) : -1
@@ -181,13 +188,8 @@ function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
   const startsBeforeAssets = resumeStep == null || resumeIdx <= assetsIdx
   if (!reachesAssets || !startsBeforeAssets) return
   try {
-    // Always open a fresh tab with the loading animation
-    _providerWin = window.open('about:blank', '_blank')
-    if (_providerWin) {
-      _providerWin.document.open()
-      _providerWin.document.write(providerTabLoadingHTML)
-      _providerWin.document.close()
-    }
+    // Open the tab to grok.com/imagine directly so Automa can load
+    _providerWin = window.open('https://grok.com/imagine', '_blank')
   } catch {}
 }
 

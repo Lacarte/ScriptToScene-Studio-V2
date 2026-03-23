@@ -71,11 +71,11 @@ def _send_to_extension(msg):
 
 
 def queue_grabber_start(msg):
-    """Queue a GRABBER_START message. Sends immediately if clients connected, else queues for next connect."""
+    """Queue a GRABBER_START message. Sends immediately AND keeps queued for late-connecting clients."""
     global _pending_grabber
     with _pending_grabber_lock:
         _pending_grabber = msg
-    # Try to send immediately
+    # Try to send immediately to already-connected clients
     sent = False
     with _ws_lock:
         if _ws_clients:
@@ -86,10 +86,9 @@ def queue_grabber_start(msg):
                     sent = True
                 except Exception:
                     pass
+    # Don't clear _pending_grabber — keep it for late-connecting clients (e.g. Automa)
     if sent:
-        with _pending_grabber_lock:
-            _pending_grabber = None
-        logger.info("GRABBER_START sent immediately to connected client(s)")
+        logger.info("GRABBER_START sent to connected client(s), still queued for new connections")
     else:
         logger.info("GRABBER_START queued — waiting for client to connect")
 
