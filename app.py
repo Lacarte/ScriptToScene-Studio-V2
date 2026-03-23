@@ -308,14 +308,23 @@ if __name__ == "__main__":
 
     url = f"http://localhost:{port}"
 
+    C, G, Y, D, B, X = "\033[36m", "\033[32m", "\033[33m", "\033[90m", "\033[1m", "\033[0m"
+
+    tts_ok = _model_files_present()
+    align_ok = _check_alignment_available()
+
     print()
-    print(f"  \033[1mScriptToScene Studio\033[0m")
-    print(f"  \033[92m>\033[0m {url}")
-    print(f"  \033[90m-\033[0m TTS model: {'cached' if _model_files_present() else 'not downloaded'}")
-    print(f"  \033[90m-\033[0m Alignment: {'available' if _check_alignment_available() else 'unavailable'}")
-    print(f"  \033[90m-\033[0m Scene webhook: {N8N_WEBHOOK_URL}")
-    print(f"  \033[90m-\033[0m Asset webhook: {N8N_ASSET_WEBHOOK_URL}")
-    print(f"  \033[90m-\033[0m Story webhook: {N8N_STORY_WEBHOOK_URL}")
+    print(f"  {C}{B}ScriptToScene Studio{X}")
+    print(f"  {D}{'-' * 28}{X}")
+    print()
+    print(f"  {G}>{X} {B}{url}{X}")
+    print()
+    print(f"  {G if tts_ok else Y}{'+'if tts_ok else '!'}{X} TTS model    {D}{'cached' if tts_ok else 'not downloaded'}{X}")
+    print(f"  {G if align_ok else Y}{'+'if align_ok else '!'}{X} Alignment    {D}{'available' if align_ok else 'unavailable'}{X}")
+    print(f"  {D}-{X} Scene hook   {D}{N8N_WEBHOOK_URL}{X}")
+    print(f"  {D}-{X} Asset hook   {D}{N8N_ASSET_WEBHOOK_URL}{X}")
+    print(f"  {D}-{X} Story hook   {D}{N8N_STORY_WEBHOOK_URL}{X}")
+    print(f"  {D}{'-' * 28}{X}")
     print()
 
     if not os.environ.get("STS_NO_BROWSER"):

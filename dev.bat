@@ -1,21 +1,33 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 title ScriptToScene Studio [DEV]
 cd /d "%~dp0"
 
+:: ── ANSI escape ─────────────────────────────────────────────────────────
+for /f %%a in ('echo prompt $E ^| cmd') do set "E=%%a"
+
+set "C=%E%[36m"
+set "G=%E%[32m"
+set "Y=%E%[33m"
+set "R=%E%[31m"
+set "D=%E%[90m"
+set "B=%E%[1m"
+set "X=%E%[0m"
+
+:: ── Header ──────────────────────────────────────────────────────────────
 echo.
-echo   ScriptToScene Studio [DEV]
-echo   ==========================
+echo   %C%%B%ScriptToScene Studio%X%  %D%[DEV]%X%
+echo   %D%----------------------------%X%
 echo.
 
-:: ── Git pull (must succeed before anything else) ─────────────────────────
+:: ── Git pull ────────────────────────────────────────────────────────────
 call :do_git_pull
 if errorlevel 1 (
     pause
     exit /b 1
 )
 
-:: ── Kill leftover dev processes ───────────────────────────────────────
+:: ── Kill leftover dev processes ─────────────────────────────────────────
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5050 " ^| findstr LISTENING 2^>nul') do (
     taskkill /F /PID %%a >nul 2>&1
 )
@@ -25,57 +37,58 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5174 " ^| findstr LISTENING
 
 :: ── Virtual environment ─────────────────────────────────────────────────
 if not exist "venv\Scripts\activate.bat" (
-    echo   [ERROR] Virtual environment not found.
-    echo           Run setup.bat first.
+    echo   %R%x%X% Virtual environment not found. Run %B%setup.bat%X% first.
     echo.
     pause
     exit /b 1
 )
 call venv\Scripts\activate.bat
 
-:: ── Python dependency sync ────────────────────────────────────────────
+:: ── Python dependency sync ──────────────────────────────────────────────
 set "STAMP=venv\.requirements_stamp"
 set "REQS=requirements.txt"
 
 if not exist "%STAMP%" (
-    echo   Syncing Python dependencies...
+    echo   %D%~%X% Syncing Python dependencies...
     pip install -r "%REQS%" --quiet && copy /y "%REQS%" "%STAMP%" >nul
+    echo   %G%+%X% Python dependencies synced
     echo.
 ) else (
     fc /b "%REQS%" "%STAMP%" >nul 2>&1
     if errorlevel 1 (
-        echo   Requirements changed — syncing Python dependencies...
+        echo   %Y%~%X% Requirements changed — syncing...
         pip install -r "%REQS%" --quiet && copy /y "%REQS%" "%STAMP%" >nul
+        echo   %G%+%X% Python dependencies synced
         echo.
     )
 )
 
-:: ── Frontend dependency sync ──────────────────────────────────────────
+:: ── Frontend dependency sync ────────────────────────────────────────────
 if not exist "frontend\node_modules" (
-    echo   Installing frontend dependencies...
+    echo   %D%~%X% Installing frontend dependencies...
     pushd frontend
     call npm install
     popd
+    echo   %G%+%X% Frontend dependencies installed
     echo.
 )
 
-:: ── .env sanity check ─────────────────────────────────────────────────
+:: ── .env sanity check ───────────────────────────────────────────────────
 if not exist ".env" (
     if exist ".env.example" (
-        echo   [WARN] No .env file found. Copying .env.example to .env
+        echo   %Y%!%X% No .env found — copied from .env.example
         copy .env.example .env >nul
-        echo           Edit .env with your API keys before using webhooks.
+        echo   %D%  Edit .env with your API keys before using webhooks%X%
         echo.
     )
 )
 
-:: ── Launch Flask (background, minimized) ──────────────────────────────
-echo   Starting Flask server...
+:: ── Launch Flask (background, minimized) ────────────────────────────────
+echo   %D%~%X% Starting Flask server...
 set "STS_NO_BROWSER=1"
 start "STS Flask" /min cmd /c "cd /d "%~dp0" && venv\Scripts\activate.bat && python app.py"
 
-:: ── Wait for Flask to be ready ────────────────────────────────────────
-echo   Waiting for Flask on :5050...
+:: ── Wait for Flask ──────────────────────────────────────────────────────
 set "RETRIES=0"
 :wait_flask
 timeout /t 1 /nobreak >nul
@@ -83,51 +96,54 @@ set /a RETRIES+=1
 powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',5050)" >nul 2>&1
 if errorlevel 1 (
     if %RETRIES% LSS 30 goto wait_flask
-    echo   [ERROR] Flask did not start within 30 seconds.
+    echo   %R%x%X% Flask did not start within 30 seconds.
     pause
     exit /b 1
 )
-echo   Flask ready.
+echo   %G%+%X% Flask ready
 echo.
 
-:: ── Launch Vite dev server (opens browser when ready) ─────────────────
-echo   Flask  :  http://localhost:5050  (API, minimized)
-echo   Vite   :  http://localhost:5174  (UI)
+:: ── Info ────────────────────────────────────────────────────────────────
+echo   %D%----------------------------%X%
+echo   %B%Flask%X%  %D%:%X%  http://localhost:5050  %D%(API, minimized)%X%
+echo   %B%Vite%X%   %D%:%X%  http://localhost:5174  %D%(UI)%X%
+echo   %D%----------------------------%X%
 echo.
+
+:: ── Launch Vite dev server ──────────────────────────────────────────────
 cd /d "%~dp0frontend"
 npm run dev
 goto :eof
 
-:: ── Subroutine: git pull with validation ────────────────────────────────
+:: ── Subroutine: git pull ────────────────────────────────────────────────
 :do_git_pull
 ping -n 1 -w 1000 github.com >nul 2>&1
 if errorlevel 1 (
-    echo   [WARN] No network — skipping git pull
+    echo   %Y%!%X% No network — skipping git pull
     echo.
     exit /b 0
 )
 if not exist "tmp" mkdir "tmp"
-echo   [SYNC] git pull ...
+echo   %D%~%X% git pull...
 git pull >"tmp\git_pull_out.txt" 2>&1
 if errorlevel 1 goto :git_pull_failed
 findstr /i /c:"CONFLICT" /c:"error:" /c:"fatal:" /c:"Cannot" /c:"refusing" /c:"Please commit" /c:"not possible" "tmp\git_pull_out.txt" >nul 2>&1
 if not errorlevel 1 goto :git_pull_failed
-echo   [SYNC] OK
-type "tmp\git_pull_out.txt"
+echo   %G%+%X% git pull OK
+for /f "usebackq delims=" %%l in ("tmp\git_pull_out.txt") do echo   %D%  %%l%X%
 del "tmp\git_pull_out.txt" >nul 2>&1
 echo.
 exit /b 0
 :git_pull_failed
 echo.
-echo   [ERROR] git pull failed:
+echo   %R%x%X% git pull failed:
 echo.
 type "tmp\git_pull_out.txt"
 echo.
-echo   Fix the issue above before starting the server.
-echo   Common fixes:
-echo     - Merge conflicts : resolve them, then git add + git commit
-echo     - Uncommitted changes : git stash, then re-run this script
-echo     - Diverged branches : git pull --rebase
+echo   %D%Common fixes:%X%
+echo   %D%  - Merge conflicts  : resolve, then git add + git commit%X%
+echo   %D%  - Uncommitted changes : git stash, then re-run%X%
+echo   %D%  - Diverged branches   : git pull --rebase%X%
 echo.
 del "tmp\git_pull_out.txt" >nul 2>&1
 exit /b 1

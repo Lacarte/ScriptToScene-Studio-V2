@@ -1,14 +1,26 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 title ScriptToScene Studio
 cd /d "%~dp0"
 
+:: ── ANSI escape ─────────────────────────────────────────────────────────
+for /f %%a in ('echo prompt $E ^| cmd') do set "E=%%a"
+
+set "C=%E%[36m"
+set "G=%E%[32m"
+set "Y=%E%[33m"
+set "R=%E%[31m"
+set "D=%E%[90m"
+set "B=%E%[1m"
+set "X=%E%[0m"
+
+:: ── Header ──────────────────────────────────────────────────────────────
 echo.
-echo   ScriptToScene Studio
-echo   ====================
+echo   %C%%B%ScriptToScene Studio%X%
+echo   %D%----------------------------%X%
 echo.
 
-:: ── Git pull (must succeed before anything else) ─────────────────────────
+:: ── Git pull ────────────────────────────────────────────────────────────
 call :do_git_pull
 if errorlevel 1 (
     pause
@@ -17,8 +29,7 @@ if errorlevel 1 (
 
 :: ── Virtual environment ─────────────────────────────────────────────────
 if not exist "venv\Scripts\activate.bat" (
-    echo   [ERROR] Virtual environment not found.
-    echo           Run setup.bat first.
+    echo   %R%x%X% Virtual environment not found. Run %B%setup.bat%X% first.
     echo.
     pause
     exit /b 1
@@ -29,16 +40,17 @@ call venv\Scripts\activate.bat
 set "STAMP=venv\.requirements_stamp"
 set "REQS=requirements.txt"
 
-:: Reinstall when requirements.txt is newer than last-synced stamp
 if not exist "%STAMP%" (
-    echo   Syncing dependencies...
+    echo   %D%~%X% Syncing dependencies...
     pip install -r "%REQS%" --quiet && copy /y "%REQS%" "%STAMP%" >nul
+    echo   %G%+%X% Dependencies synced
     echo.
 ) else (
     fc /b "%REQS%" "%STAMP%" >nul 2>&1
     if errorlevel 1 (
-        echo   Requirements changed — syncing dependencies...
+        echo   %Y%~%X% Requirements changed — syncing...
         pip install -r "%REQS%" --quiet && copy /y "%REQS%" "%STAMP%" >nul
+        echo   %G%+%X% Dependencies synced
         echo.
     )
 )
@@ -46,55 +58,54 @@ if not exist "%STAMP%" (
 :: ── .env sanity check ───────────────────────────────────────────────────
 if not exist ".env" (
     if exist ".env.example" (
-        echo   [WARN] No .env file found. Copying .env.example to .env
+        echo   %Y%!%X% No .env found — copied from .env.example
         copy .env.example .env >nul
-        echo           Edit .env with your API keys before using webhooks.
+        echo   %D%  Edit .env with your API keys before using webhooks%X%
         echo.
     )
 )
 
-:: ── Launch ───────────────────────────────────────────────────────────────
-echo   Starting server...
+:: ── Launch ──────────────────────────────────────────────────────────────
+echo   %D%~%X% Starting server...
 echo.
 python app.py %*
 
-:: ── Exit ─────────────────────────────────────────────────────────────────
+:: ── Exit ────────────────────────────────────────────────────────────────
 echo.
-echo   Server stopped.
+echo   %D%Server stopped.%X%
 pause
 endlocal
 goto :eof
 
-:: ── Subroutine: git pull with validation ────────────────────────────────
+:: ── Subroutine: git pull ────────────────────────────────────────────────
 :do_git_pull
 ping -n 1 -w 1000 github.com >nul 2>&1
 if errorlevel 1 (
-    echo   [WARN] No network — skipping git pull
+    echo   %Y%!%X% No network — skipping git pull
     echo.
     exit /b 0
 )
 if not exist "tmp" mkdir "tmp"
-echo   [SYNC] git pull ...
+echo   %D%~%X% git pull...
 git pull >"tmp\git_pull_out.txt" 2>&1
 if errorlevel 1 goto :git_pull_failed
 findstr /i /c:"CONFLICT" /c:"error:" /c:"fatal:" /c:"Cannot" /c:"refusing" /c:"Please commit" /c:"not possible" "tmp\git_pull_out.txt" >nul 2>&1
 if not errorlevel 1 goto :git_pull_failed
-echo   [SYNC] OK
-type "tmp\git_pull_out.txt"
+echo   %G%+%X% git pull OK
+for /f "usebackq delims=" %%l in ("tmp\git_pull_out.txt") do echo   %D%  %%l%X%
 del "tmp\git_pull_out.txt" >nul 2>&1
 echo.
 exit /b 0
 :git_pull_failed
 echo.
-echo   [ERROR] git pull failed:
+echo   %R%x%X% git pull failed:
 echo.
 type "tmp\git_pull_out.txt"
 echo.
-echo   Fix the issue above before starting the server.
-echo   Common fixes:
-echo     - Merge conflicts : resolve them, then git add + git commit
-echo     - Uncommitted changes : git stash, then re-run this script
-echo     - Diverged branches : git pull --rebase
+echo   %D%Common fixes:%X%
+echo   %D%  - Merge conflicts  : resolve, then git add + git commit%X%
+echo   %D%  - Uncommitted changes : git stash, then re-run%X%
+echo   %D%  - Diverged branches   : git pull --rebase%X%
 echo.
 del "tmp\git_pull_out.txt" >nul 2>&1
 exit /b 1
