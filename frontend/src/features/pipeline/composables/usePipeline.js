@@ -178,8 +178,8 @@ function _openInProviderTab(url) {
 }
 
 function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
-  // Pre-open the tab during user click so popup blocker allows it.
-  // The tab stays on about:blank with a loading animation until the assets step starts.
+  // Pre-open about:blank during user click (bypasses popup blocker).
+  // When the assets step starts, the SSE open_url event navigates it to grok.com/imagine.
   const stepIds = ALL_STEPS.map(step => step.id)
   const assetsIdx = stepIds.indexOf('assets')
   const stopIdx = stopValue ? stepIds.indexOf(stopValue) : -1
@@ -188,8 +188,12 @@ function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
   const startsBeforeAssets = resumeStep == null || resumeIdx <= assetsIdx
   if (!reachesAssets || !startsBeforeAssets) return
   try {
-    // Open the tab to grok.com/imagine directly so Automa can load
-    _providerWin = window.open('https://grok.com/imagine', '_blank')
+    _providerWin = window.open('about:blank', '_blank')
+    if (_providerWin) {
+      _providerWin.document.open()
+      _providerWin.document.write(providerTabLoadingHTML)
+      _providerWin.document.close()
+    }
   } catch {}
 }
 
