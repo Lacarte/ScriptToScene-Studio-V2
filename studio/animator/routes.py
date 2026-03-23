@@ -176,6 +176,8 @@ def _handle_ws_message(msg):
         with _ws_lock:
             if _ws_clients:
                 _flush_pending_grabber(_ws_clients[-1])
+    elif msg_type == "ASSET_UPLOAD":
+        _handle_asset_upload_ws(msg)
     elif msg_type == "ASSET_UPLOADED":
         _handle_asset_uploaded(msg)
     elif msg_type == "ASSET_RESULT":
@@ -253,6 +255,61 @@ def _handle_progress(msg):
             scene["percentage"] = percentage
 
 
+def _handle_asset_upload_ws(msg):
+    """Handle base64 asset data sent via WebSocket — save to disk.
+
+    Message format:
+        { type: "ASSET_UPLOAD", projectId, scene, images: [{data, source_url, ext, filename}] }
+    """
+    project_id = sanitize_project_id(msg.get("projectId", ""))
+    scene_num = msg.get("scene")
+    images = msg.get("images", [])
+
+    if not project_id or scene_num is None or not images:
+        logger.warning("ASSET_UPLOAD missing required fields")
+        return
+
+    scene_num = str(scene_num)
+    total_kb = sum(len(img.get("data", "")) * 3 // 4 // 1024 for img in images)
+    logger.info("ASSET_UPLOAD via WS: {} scene {} — {} file(s), ~{} KB",
+                project_id, scene_num, len(images), total_kb)
+
+    from config import ASSETS_DIR
+    from studio.assets.organizer import save_base64_assets
+
+    def _save():
+        try:
+            local_files = save_base64_assets(
+                project_id=project_id,
+                scene_num=scene_num,
+                images=images,
+                assets_dir=ASSETS_DIR,
+            )
+            logger.success("ASSET_UPLOAD: {} scene {} — {} files saved", project_id, scene_num, len(local_files))
+
+            # Update grabber job status
+            from studio.assets.routes import _get_job, _save_job, _mark_job_done
+            job = _get_job(project_id)
+            if job and scene_num in job.get("scene_statuses", {}):
+                job["scene_statuses"][scene_num]["status"] = "ready"
+                job["scene_statuses"][scene_num]["local_files"] = local_files
+                job["scene_statuses"][scene_num]["urls"] = [
+                    img.get("source_url", "") for img in images
+                ]
+                job["updated_at"] = datetime.now().isoformat()
+                all_done = all(
+                    s.get("status") in ("ready", "error", "downloaded")
+                    for s in job["scene_statuses"].values()
+                )
+                if all_done:
+                    _mark_job_done(job)
+                _save_job(job)
+        except Exception as e:
+            logger.error("ASSET_UPLOAD save failed for {} scene {}: {}", project_id, scene_num, e)
+
+    threading.Thread(target=_save, daemon=True).start()
+
+
 def _handle_asset_uploaded(msg):
     """Handle notification that Automa uploaded assets for a scene."""
     project_id = msg.get("projectId")
@@ -276,6 +333,21 @@ def _handle_asset_result(msg):
         return
 
     scene_num = str(scene_num)
+
+    # Grok CDN (assets.grok.com) requires auth — server-side download returns 403.
+    # Log warning and skip; Automa should use ASSET_UPLOAD with base64 data instead.
+    grok_urls = [u for u in urls if "assets.grok.com" in u]
+    if grok_urls:
+        logger.warning(
+            "ASSET_RESULT: {} scene {} — {} Grok CDN URL(s) cannot be downloaded "
+            "server-side (403). Client should use ASSET_UPLOAD with base64 data.",
+            project_id, scene_num, len(grok_urls),
+        )
+        # Filter out Grok URLs, only download non-Grok URLs
+        urls = [u for u in urls if "assets.grok.com" not in u]
+        if not urls:
+            return
+
     logger.info("ASSET_RESULT: downloading {} URL(s) for {} scene {}", len(urls), project_id, scene_num)
 
     from config import ASSETS_DIR

@@ -2013,6 +2013,13 @@ async function startTyping() {
         var s = v.src || v.getAttribute('src') || '';
         if (s) addSeen(s);
       });
+      // Reset input (clear old images + text) before each prompt
+      await resetGrokInput();
+      await sleep(500);
+
+      // Re-setup mode (Video, aspect ratio, etc.) after reset
+      try { await setupGrokMode(); } catch(e) { console.warn('Mode setup failed:', e.message); }
+
       // Upload storyboard image if available (before typing prompt)
       if (item.imageUrl && item.imageUrl.startsWith('data:')) {
         console.log('Uploading storyboard image for scene', item.scene);
@@ -2763,6 +2770,82 @@ async function doCountdown(seconds, type, runId) {
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Grok Mode Setup (Video, 480p, 6s, aspect ratio) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
+async function resetGrokInput() {
+  console.log('[STS] Resetting Grok input...');
+
+  // Step 1: Remove ALL uploaded images first (click every "Remove image" button)
+  for (var pass = 0; pass < 10; pass++) {
+    var removeBtns = document.querySelectorAll('button[aria-label="Remove image"]');
+    if (removeBtns.length === 0) break;
+    console.log('[STS] Removing', removeBtns.length, 'uploaded image(s), pass', pass + 1);
+    for (var ri = 0; ri < removeBtns.length; ri++) {
+      var btn = removeBtns[ri];
+      // Make visible (they're opacity:0 until hover)
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = 'auto';
+      simulateClick(btn);
+      await sleep(300);
+    }
+    await sleep(500);
+  }
+
+  // Step 2: Clear the text input
+  var editor = findGrokInputElement();
+  if (editor) {
+    if (editor.contentEditable === 'true') {
+      editor.innerHTML = '';
+      editor.textContent = '';
+    } else {
+      editor.value = '';
+    }
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    console.log('[STS] Cleared text input');
+  }
+
+  // Step 3: Click the Imagine nav link to fully reset page state
+  var imagineLink = document.querySelector('a[href="/imagine"], a[href*="/imagine"]');
+  // Fallback: XPath for sidebar Imagine link
+  if (!imagineLink) {
+    try {
+      var xr = document.evaluate('/html/body/div[2]/div/div[1]/div/div[1]/div[2]/div[4]/ul/li/a', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      if (xr.singleNodeValue) imagineLink = xr.singleNodeValue;
+    } catch(e) {}
+  }
+  if (imagineLink) {
+    var events = ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+    for (var ei = 0; ei < events.length; ei++) {
+      imagineLink.dispatchEvent(new MouseEvent(events[ei], {
+        bubbles: true, cancelable: true, composed: true, view: window, detail: 1
+      }));
+    }
+    console.log('[STS] Clicked Imagine link');
+
+    // Wait for page to be ready
+    for (var wi = 0; wi < 20; wi++) {
+      await sleep(500);
+      if (window.location.pathname.includes('/imagine')) {
+        var ed2 = findGrokInputElement();
+        if (ed2) {
+          console.log('[STS] /imagine page ready');
+          break;
+        }
+      }
+    }
+    await sleep(500);
+  }
+
+  // Verify images are cleared
+  var remaining = document.querySelectorAll('button[aria-label="Remove image"]');
+  if (remaining.length > 0) {
+    console.warn('[STS] Still', remaining.length, 'images after reset — force removing');
+    for (var fi = 0; fi < remaining.length; fi++) {
+      remaining[fi].style.opacity = '1';
+      simulateClick(remaining[fi]);
+      await sleep(300);
+    }
+  }
+}
+
 async function setupGrokMode() {
   console.log('Setting up Grok mode:', S.grokMode + ',', S.grokQuality + ',', S.grokDuration + ', aspect=' + S.aspectRatio);
 
@@ -3116,16 +3199,6 @@ async function sendResults(num, urls) {
     urls = filteredUrls;
   }
 
-  // Fast path: send URLs via WebSocket — backend downloads server-side
-  if (S.wsConnected && urls && urls.length) {
-    sendWS({ type: 'ASSET_RESULT', projectId: S.projectId, scene: parseInt(num), urls: urls });
-    console.log('Scene', num, '- sent', urls.length, 'URL(s) to backend via WebSocket for server-side download');
-    if (sc) sc.status = 'sent';
-    S.sentScenes[num] = true;
-    render();
-    return;
-  }
-
   if (!urls || !urls.length) {
     console.error('Scene', num, '- no valid assets to upload for current mode:', S.grokMode);
     if (sc) sc.status = 'error';
@@ -3222,7 +3295,26 @@ async function sendResults(num, urls) {
     return;
   }
 
-  try {
+  // Send via WebSocket (faster, no HTTP size limits) or fall back to HTTP
+  if (S.wsConnected) {
+    try {
+      sendWS({
+        type: 'ASSET_UPLOAD',
+        projectId: S.projectId,
+        scene: parseInt(num),
+        images: images,
+      });
+      if (sc) sc.status = 'sent';
+      S.sentScenes[num] = true;
+      console.log('Scene', num, '- sent', images.length, 'file(s) via WebSocket (' +
+        images.reduce(function(t, i) { return t + (i.data || '').length; }, 0) + ' chars)');
+    } catch (wsErr) {
+      console.warn('WS upload failed, falling back to HTTP:', wsErr.message);
+      S.wsConnected = false; // Force HTTP fallback below
+    }
+  }
+
+  if (!S.wsConnected) try {
     const r = await _fetch(S.studioUrl + '/api/assets/grabber/upload', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId: S.projectId, scenes: [{ scene: parseInt(num), images }] })
@@ -3230,9 +3322,7 @@ async function sendResults(num, urls) {
     if (r.ok) {
       if (sc) sc.status = 'sent';
       S.sentScenes[num] = true;
-      console.log('Scene', num, 'uploaded:', images.length, 'images');
-      // Notify backend via WebSocket too
-      sendWS({ type: 'ASSET_UPLOADED', projectId: S.projectId, scene: parseInt(num), count: images.length });
+      console.log('Scene', num, 'uploaded:', images.length, 'images via HTTP');
     } else {
       console.error('Upload failed for scene', num, r.status);
       if (sc) sc.status = 'error';
