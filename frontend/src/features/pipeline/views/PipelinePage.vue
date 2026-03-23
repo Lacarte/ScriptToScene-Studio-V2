@@ -1025,16 +1025,6 @@ function logStepLabel(step) {
           </span>
           <span class="run-label">{{ runLabel }}</span>
         </button>
-        <!-- Stop button — appears when pipeline is running -->
-        <button
-          v-if="running || stopping"
-          class="stop-btn"
-          :disabled="stopping"
-          @click="stop"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-          {{ stopping ? 'Stopping...' : 'Stop' }}
-        </button>
         <!-- Retry button — appears when pipeline failed -->
         <button
           v-if="globalStatus === 'error' && failedStep && failedProjectId && !running"

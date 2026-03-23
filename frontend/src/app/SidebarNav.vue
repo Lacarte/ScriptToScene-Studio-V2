@@ -198,7 +198,7 @@ function toggleAudio() {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 20px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -241,10 +241,10 @@ function toggleAudio() {
 
 .nav-list {
   flex: 1;
-  padding: 12px 0;
+  padding: 8px 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   overflow-y: auto;
 }
 
@@ -259,7 +259,7 @@ function toggleAudio() {
   text-transform: uppercase;
   letter-spacing: 0.15em;
   color: var(--text-muted);
-  padding: 4px 20px 2px;
+  padding: 3px 20px 2px;
   opacity: 0.5;
 }
 
@@ -272,8 +272,8 @@ function toggleAudio() {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 20px;
-  margin: 2px 8px;
+  padding: 9px 20px;
+  margin: 1px 8px;
   border-radius: 10px;
   cursor: pointer;
   color: var(--text-secondary);
@@ -319,16 +319,16 @@ function toggleAudio() {
 .nav-divider {
   height: 1px;
   background: var(--border);
-  margin: 6px 16px;
+  margin: 5px 16px;
   opacity: 0.5;
 }
 
 .nav-bottom {
   border-top: 1px solid var(--border);
-  padding: 8px 12px;
+  padding: 6px 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .nav-bottom .nav-item {
