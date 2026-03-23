@@ -114,12 +114,17 @@ function handleWSMessage(msg) {
       const exists = S.typing.queue.find(q => q.jobId === msg.jobId);
       if (!exists) {
         S.typing.queue.push({
+          scene: String(msg.sceneIndex),
+          displayPrompt: msg.prompt,
+          fullPrompt: msg.prompt,
           prompt: msg.prompt,
+          selected: true,
           status: 'queued',
           jobId: msg.jobId,
           sceneIndex: msg.sceneIndex,
           projectId: msg.projectId,
           image: msg.image || null,
+          imageUrl: msg.image || null,
           mode: msg.mode || S.grokMode,
           duration: msg.duration || S.grokDuration,
           aspectRatio: msg.aspectRatio || S.aspectRatio,
@@ -127,6 +132,53 @@ function handleWSMessage(msg) {
       }
       render();
       console.log(`[STS WS] Job received: ${msg.projectId} scene ${msg.sceneIndex}`);
+      break;
+    }
+    case 'GRABBER_START': {
+      // Receive full grabber batch from backend
+      S.projectId = msg.projectId;
+      S.aspectRatio = msg.aspectRatio || S.aspectRatio;
+      S.grokMode = msg.grokMode || S.grokMode;
+      S.grokDuration = msg.grokDuration || S.grokDuration;
+      if (msg.autoType !== undefined) S.autoType = !!msg.autoType;
+      renderAutoType();
+
+      const scenes = msg.scenes || [];
+      console.log(`[STS WS] Grabber started: ${msg.projectId} — ${scenes.length} scenes`);
+
+      scenes.forEach(sc => {
+        const k = String(sc.scene);
+        // Image: prefer base64 data, fall back to URL
+        const imgData = sc.image || (sc.image_url ? S.studioUrl + sc.image_url : null);
+        // Sync tab
+        if (!S.scenes[k]) {
+          S.scenes[k] = { prompt: sc.prompt, status: 'pending', urls: [], fileCount: 0, imageUrl: imgData };
+        } else if (imgData && !S.scenes[k].imageUrl) {
+          S.scenes[k].imageUrl = imgData;
+        }
+        // Typing queue — add or update existing with image
+        const existing = S.typing.queue.find(q => q.scene === k);
+        if (!existing) {
+          S.typing.queue.push({
+            scene: k,
+            displayPrompt: sc.prompt,
+            fullPrompt: sc.prompt + ' [' + msg.projectId + '|' + sc.scene + ']',
+            selected: true,
+            status: 'queued',
+            imageUrl: imgData,
+          });
+        } else if (imgData && !existing.imageUrl) {
+          existing.imageUrl = imgData;
+        }
+      });
+
+      render();
+
+      // Auto-start typing if enabled
+      if (S.autoType && !S.typing.active && !S.typing.starting) {
+        console.log('[STS WS] Auto-starting typing from grabber push');
+        setTimeout(() => startTyping(), 1000);
+      }
       break;
     }
     case 'PING':
@@ -362,14 +414,14 @@ root.innerHTML = `
   }
   .sts-pill-counts { display: flex; gap: 10px; font-family: var(--mono); font-size: 11px; font-weight: 500; }
   .sts-pill-counts span { opacity: 0.8; }
-  .sts-c-pend { color: var(--text-dim); }
+  .sts-c-pend { color: #ffffff; }
   .sts-c-proc { color: var(--amber); }
   .sts-c-rdy { color: var(--green); }
   .sts-c-sent { color: var(--accent); }
 
   /* ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Expanded Panel ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ */
   .sts-panel {
-    width: 505px;
+    width: 525px;
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -409,7 +461,7 @@ root.innerHTML = `
   }
   .sts-head-dot.on { background: var(--green); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
   .sts-head h3 {
-    font-size: 14px; font-weight: 700; color: var(--text);
+    font-size: 16px; font-weight: 700; color: #ffffff;
     letter-spacing: -0.02em; font-family: var(--display);
   }
   .sts-head-proj {
@@ -682,6 +734,15 @@ root.innerHTML = `
   .sts-row-check:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+  .sts-row-thumb {
+    width: 36px; height: 36px; border-radius: 6px; object-fit: cover;
+    border: 1px solid var(--border); flex-shrink: 0;
+  }
+  .sts-row-thumb-empty {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-raised); color: var(--text-muted); font-family: var(--mono);
+    font-size: 10px; font-weight: 600;
   }
   .sts-row-info { flex: 1; min-width: 0; }
   .sts-row-prompt {
@@ -1048,10 +1109,7 @@ root.innerHTML = `
   </div>
 
   <div class="sts-foot">
-    <div class="sts-toggle" id="sts-toggle">
-      <div class="sts-toggle-track on" id="sts-toggle-track"><div class="sts-toggle-thumb"></div></div>
-      <span class="sts-toggle-label">Auto-sync</span>
-    </div>
+    <div style="display:none" id="sts-toggle"></div>
     <div class="sts-foot-btns">
       <button class="sts-btn sts-btn-ghost" id="sts-retry-btn" style="display:none">Retry</button>
       <button class="sts-btn sts-btn-ghost" id="sts-redownload-btn" style="display:none">Redownload</button>
@@ -1065,9 +1123,7 @@ document.body.appendChild(root);
 const $id = (id) => document.getElementById(id);
 
 // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Settings ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
-$id('sts-url').value = S.studioUrl;
-$id('sts-scroll-rows').value = S.scrollRows;
-
+// Old settings inputs removed — now in Settings tab
 // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Event Listeners ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
 $id('sts-pill').addEventListener('click', () => {
   S.collapsed = false;
@@ -1080,25 +1136,11 @@ $id('sts-collapse').addEventListener('click', () => {
   $id('sts-pill').style.display = 'flex';
 });
 $id('sts-gear').addEventListener('click', () => {
-  S.showSettings = !S.showSettings;
-  $id('sts-settings').classList.toggle('open', S.showSettings);
-  $id('sts-gear').classList.toggle('active', S.showSettings);
+  S.activeTab = S.activeTab === 'settings' ? 'typing' : 'settings';
+  renderTabs();
+  render();
 });
-$id('sts-url-save').addEventListener('click', () => {
-  const url = $id('sts-url').value.replace(/\/+$/, '');
-  if (!url) return;
-  S.studioUrl = url;
-  localStorage.setItem('sts-url', url);
-  const rows = Math.max(1, Math.min(50, parseInt($id('sts-scroll-rows').value) || 15));
-  S.scrollRows = rows;
-  $id('sts-scroll-rows').value = rows;
-  localStorage.setItem('sts-scroll-rows', rows);
-  S.showSettings = false;
-  $id('sts-settings').classList.remove('open');
-  $id('sts-gear').classList.remove('active');
-  console.log('Settings saved ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â URL:', url, '| Scroll rows:', rows);
-  poll();
-});
+// Old sts-url-save removed — settings now in Settings tab
 $id('sts-toggle').addEventListener('click', () => {
   S.autoSync = !S.autoSync;
   $id('sts-toggle-track').classList.toggle('on', S.autoSync);
@@ -1681,7 +1723,8 @@ function render() {
       if (!isSelected) meta = 'unchecked' + (meta ? ' \u00b7 ' + meta : '');
       var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + ((q.status === 'error' || q.status === 'failed') ? ' error-clickable' : '');
       var checkboxHtml = '<label class="sts-row-check-wrap"><input type="checkbox" class="sts-row-check" data-role="typing-checkbox" data-idx="' + i + '"' + (isSelected ? ' checked' : '') + (S.typing.active ? ' disabled' : '') + '></label>';
-      return '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + pr.replace(/</g, '&lt;') + '</div><div class="sts-row-meta">' + meta + '</div></div><div class="sts-row-status">' + sHTML + '</div></div>';
+      var thumbHtml = q.imageUrl ? '<img class="sts-row-thumb" src="' + q.imageUrl + '" alt="">' : '<div class="sts-row-thumb sts-row-thumb-empty">' + q.scene + '</div>';
+      return '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + pr.replace(/</g, '&lt;') + '</div><div class="sts-row-meta">' + meta + '</div></div><div class="sts-row-status">' + sHTML + '</div></div>';
     }).join('');
   } else {
     const keys = Object.keys(S.scenes).sort((a, b) => parseInt(a) - parseInt(b));
@@ -1837,6 +1880,12 @@ async function startTyping() {
         var s = v.src || v.getAttribute('src') || '';
         if (s) addSeen(s);
       });
+      // Upload storyboard image if available (before typing prompt)
+      if (item.imageUrl && item.imageUrl.startsWith('data:')) {
+        console.log('Uploading storyboard image for scene', item.scene);
+        var imgOk = await uploadImageToGrok(item.imageUrl);
+        if (!imgOk) console.warn('Image upload failed for scene', item.scene, '- continuing with prompt only');
+      }
       // Type the prompt and submit
       await typeIntoGrok(item.fullPrompt);
       console.log('Submitted scene', item.scene, '- waiting for generation...');
@@ -1927,6 +1976,11 @@ async function startTyping() {
           if (s) addSeen(s);
         });
 
+        // Upload storyboard image on retry too
+        if (item.imageUrl && item.imageUrl.startsWith('data:')) {
+          var imgOk = await uploadImageToGrok(item.imageUrl);
+          if (!imgOk) console.warn('Retry image upload failed for scene', item.scene);
+        }
         await typeIntoGrok(item.fullPrompt);
         console.log('Retry: submitted scene', item.scene);
         item.status = 'generating';
@@ -2685,6 +2739,58 @@ async function tryRegenerate() {
   } catch(e) { console.log('No regenerate button found'); }
 }
 
+async function uploadImageToGrok(base64Data) {
+  if (!base64Data) return false;
+
+  // Decode base64 to File object
+  var raw = base64Data.includes(',') ? base64Data.split(',').pop() : base64Data;
+  var binaryString = atob(raw);
+  var bytes = new Uint8Array(binaryString.length);
+  for (var i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  var mimeMatch = base64Data.match(/data:([^;]+);/);
+  var mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  var blob = new Blob([bytes], { type: mimeType });
+  var file = new File([blob], 'sts-input-' + Date.now() + '.jpg', { type: mimeType });
+
+  // Find Grok's hidden file input
+  var fileInput = document.querySelector('input[type="file"]');
+  if (!fileInput) {
+    // Wait for it
+    for (var attempt = 0; attempt < 20; attempt++) {
+      await sleep(500);
+      fileInput = document.querySelector('input[type="file"]');
+      if (fileInput) break;
+    }
+  }
+  if (!fileInput) {
+    console.error('[STS] File input not found on page');
+    return false;
+  }
+
+  // Inject via DataTransfer API
+  var dataTransfer = new DataTransfer();
+  dataTransfer.items.add(file);
+  fileInput.files = dataTransfer.files;
+  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+  console.log('[STS] Image injected, waiting for upload...');
+
+  // Wait for upload spinner to disappear
+  await sleep(1000);
+  for (var w = 0; w < 60; w++) {
+    var spinner = document.querySelector('.animate-spin, [class*="uploading"], [class*="loading"]');
+    if (!spinner) break;
+    await sleep(500);
+  }
+  await sleep(500);
+
+  console.log('[STS] Image upload complete');
+  return true;
+}
+
 async function typeIntoGrok(text) {
   var inputEl = findGrokInputElement();
   if (!inputEl) throw new Error('Grok input not found');
@@ -2770,12 +2876,17 @@ async function fetchPending() {
 
     d.scenes.forEach(sc => {
       const k = String(sc.scene);
+      // Image: prefer base64 data already in payload
+      const imgData = sc.image || null;
       // Sync tab scenes
       if (!S.scenes[k]) {
-        S.scenes[k] = { prompt: sc.prompt, status: 'pending', urls: [], fileCount: 0 };
+        S.scenes[k] = { prompt: sc.prompt, status: 'pending', urls: [], fileCount: 0, imageUrl: imgData };
+      } else if (imgData && !S.scenes[k].imageUrl) {
+        S.scenes[k].imageUrl = imgData;
       }
-      // Typing queue
-      if (!S.typing.queue.find(q => q.scene === k)) {
+      // Typing queue — add or update existing with image
+      const existing = S.typing.queue.find(q => q.scene === k);
+      if (!existing) {
         const args = S.arguments ? ' ' + S.arguments : '';
         S.typing.queue.push({
           scene: k,
@@ -2783,9 +2894,13 @@ async function fetchPending() {
           fullPrompt: sc.prompt + ' [' + d.projectId + '|' + sc.scene + ']' + args,
           selected: true,
           status: 'queued',
+          imageUrl: imgData,
         });
+      } else if (imgData && !existing.imageUrl) {
+        existing.imageUrl = imgData;
       }
     });
+
   } catch (e) { S.connected = false; }
 }
 
@@ -2826,6 +2941,16 @@ async function sendResults(num, urls) {
       console.warn('Scene', num, '- ignoring', (urls || []).length - filteredUrls.length, 'non-video URL(s) in video mode');
     }
     urls = filteredUrls;
+  }
+
+  // Fast path: send URLs via WebSocket — backend downloads server-side
+  if (S.wsConnected && urls && urls.length) {
+    sendWS({ type: 'ASSET_RESULT', projectId: S.projectId, scene: parseInt(num), urls: urls });
+    console.log('Scene', num, '- sent', urls.length, 'URL(s) to backend via WebSocket for server-side download');
+    if (sc) sc.status = 'sent';
+    S.sentScenes[num] = true;
+    render();
+    return;
   }
 
   if (!urls || !urls.length) {

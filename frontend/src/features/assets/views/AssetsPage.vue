@@ -91,27 +91,6 @@ async function loadStoryboardThumbs(pid) {
 }
 
 const hasStoryboardImages = computed(() => Object.keys(storyboardThumbs.value).length > 0)
-const animatingStoryboard = ref(false)
-
-async function onAnimateStoryboard() {
-  if (!projectId.value) return
-  animatingStoryboard.value = true
-  try {
-    const result = await api.post('/api/animator/submit-storyboard', {
-      body: {
-        project_id: projectId.value,
-        mode: 'imageToVideo',
-        duration: providerOptions.value?.grok_duration || '6s',
-        aspect_ratio: aspectRatio.value,
-      },
-    })
-    toast.success(`Sent ${result.total} scenes to Grok extension`)
-  } catch (e) {
-    toast.error(`Storyboard animation failed: ${e.message}`)
-  } finally {
-    animatingStoryboard.value = false
-  }
-}
 
 watch(projectId, (pid) => {
   if (pid) loadStoryboardThumbs(pid)
@@ -430,11 +409,35 @@ const PROVIDER_URLS = {
 async function onStart() {
   if (!projectId.value) projectId.value = `project_${Date.now()}`
   try {
+    // For Grok: open the page first so Automa can load and connect
+    if (provider.value === 'grok') {
+      window.open('https://grok.com/imagine', 'sts-provider-tab')
+    }
+
     await startGrabber(projectId.value)
-    toast.success('Grabber started.')
-    // Open the provider website
-    const url = PROVIDER_URLS[provider.value]
-    if (url) window.open(url, 'sts-provider-tab')
+
+    // For Grok with storyboard: also submit animation via WebSocket
+    if (provider.value === 'grok' && hasStoryboardImages.value) {
+      try {
+        const result = await api.post('/api/animator/submit-storyboard', {
+          body: {
+            project_id: projectId.value,
+            mode: 'imageToVideo',
+            duration: providerOptions.value?.grok_duration || '6s',
+            aspect_ratio: aspectRatio.value,
+          },
+        })
+        toast.success(`Sent ${result.total} scenes to Grok`)
+      } catch (e) {
+        toast.warn(`Grabber started but storyboard animation failed: ${e.message}`)
+      }
+    } else if (provider.value !== 'grok') {
+      toast.success('Grabber started.')
+      const url = PROVIDER_URLS[provider.value]
+      if (url) window.open(url, 'sts-provider-tab')
+    } else {
+      toast.success('Grabber started — waiting for Grok to connect')
+    }
   } catch {
     toast.error('Failed to start grabber.')
   }
@@ -714,26 +717,7 @@ onMounted(async () => {
       @validate-and-build="onValidateAndBuild"
     />
 
-    <!-- Animate with Storyboard -->
-    <div v-if="sceneCount && hasStoryboardImages" class="storyboard-animate-bar">
-      <div class="storyboard-animate-info">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-        <span class="font-mono" style="font-size:11px">{{ Object.keys(storyboardThumbs).length }} storyboard images available</span>
-      </div>
-      <button
-        class="btn-animate-storyboard"
-        :disabled="animatingStoryboard"
-        @click="onAnimateStoryboard"
-      >
-        <template v-if="animatingStoryboard">
-          <span class="spinner-sm" style="margin-right:4px"></span> Sending...
-        </template>
-        <template v-else>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Animate with Storyboard
-        </template>
-      </button>
-    </div>
+    <!-- Removed: separate Animate with Storyboard button — merged into Start Grabber -->
 
     <!-- Asset Grid -->
     <section v-if="sceneCount" class="asset-grid">

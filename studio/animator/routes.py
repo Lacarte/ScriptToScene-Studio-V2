@@ -40,6 +40,8 @@ _ws_clients = []
 _ws_lock = threading.Lock()
 _jobs = {}
 _jobs_lock = threading.Lock()
+_pending_grabber = None  # Queued GRABBER_START message to send on next WS connect
+_pending_grabber_lock = threading.Lock()
 
 
 def _broadcast(msg):
@@ -66,6 +68,45 @@ def _send_to_extension(msg):
             return True
         except Exception:
             return False
+
+
+def queue_grabber_start(msg):
+    """Queue a GRABBER_START message. Sends immediately if clients connected, else queues for next connect."""
+    global _pending_grabber
+    with _pending_grabber_lock:
+        _pending_grabber = msg
+    # Try to send immediately
+    sent = False
+    with _ws_lock:
+        if _ws_clients:
+            data = json.dumps(msg)
+            for ws in _ws_clients:
+                try:
+                    ws.send(data)
+                    sent = True
+                except Exception:
+                    pass
+    if sent:
+        with _pending_grabber_lock:
+            _pending_grabber = None
+        logger.info("GRABBER_START sent immediately to connected client(s)")
+    else:
+        logger.info("GRABBER_START queued — waiting for client to connect")
+
+
+def _flush_pending_grabber(ws):
+    """Send any queued GRABBER_START to a newly connected client."""
+    global _pending_grabber
+    with _pending_grabber_lock:
+        msg = _pending_grabber
+        if not msg:
+            return
+        _pending_grabber = None
+    try:
+        ws.send(json.dumps(msg))
+        logger.info("Flushed queued GRABBER_START to new client")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +171,15 @@ def _handle_ws_message(msg):
     elif msg_type == "ANIMATE_PROGRESS":
         _handle_progress(msg)
     elif msg_type == "EXTENSION_READY":
-        logger.info("Chrome extension reported ready")
+        logger.info("Extension reported ready (source: {})", msg.get("source", "unknown"))
+        # Send any queued grabber data to this client
+        with _ws_lock:
+            if _ws_clients:
+                _flush_pending_grabber(_ws_clients[-1])
+    elif msg_type == "ASSET_UPLOADED":
+        _handle_asset_uploaded(msg)
+    elif msg_type == "ASSET_RESULT":
+        _handle_asset_result(msg)
     elif msg_type == "PONG":
         pass  # heartbeat response
     else:
@@ -192,6 +241,66 @@ def _handle_progress(msg):
         if scene:
             scene["status"] = "processing"
             scene["percentage"] = percentage
+
+
+def _handle_asset_uploaded(msg):
+    """Handle notification that Automa uploaded assets for a scene."""
+    project_id = msg.get("projectId")
+    scene = msg.get("scene")
+    count = msg.get("count", 0)
+    logger.info("Asset upload notification: {} scene {} ({} files)", project_id, scene, count)
+
+
+def _handle_asset_result(msg):
+    """Handle video/image URL results from Automa — download to assets folder.
+
+    Message format:
+        { type: "ASSET_RESULT", projectId, scene, urls: ["https://..."] }
+    """
+    project_id = sanitize_project_id(msg.get("projectId", ""))
+    scene_num = msg.get("scene")
+    urls = msg.get("urls", [])
+
+    if not project_id or scene_num is None or not urls:
+        logger.warning("ASSET_RESULT missing required fields: {}", msg)
+        return
+
+    scene_num = str(scene_num)
+    logger.info("ASSET_RESULT: downloading {} URL(s) for {} scene {}", len(urls), project_id, scene_num)
+
+    from config import ASSETS_DIR
+    from studio.assets.organizer import organize_grabber_assets
+
+    def _download():
+        try:
+            local_files = organize_grabber_assets(
+                project_id=project_id,
+                scene_num=scene_num,
+                urls=urls,
+                assets_dir=ASSETS_DIR,
+            )
+            logger.success("ASSET_RESULT: {} scene {} — {} files saved", project_id, scene_num, len(local_files))
+
+            # Update grabber job status if one exists
+            from studio.assets.routes import _get_job, _save_job, _mark_job_done
+            job = _get_job(project_id)
+            if job and scene_num in job.get("scene_statuses", {}):
+                job["scene_statuses"][scene_num]["status"] = "ready"
+                job["scene_statuses"][scene_num]["urls"] = urls
+                job["scene_statuses"][scene_num]["local_files"] = local_files
+                job["updated_at"] = datetime.now().isoformat()
+                # Check if all scenes are now done
+                all_done = all(
+                    s.get("status") in ("ready", "error", "downloaded")
+                    for s in job["scene_statuses"].values()
+                )
+                if all_done:
+                    _mark_job_done(job)
+                _save_job(job)
+        except Exception as e:
+            logger.error("ASSET_RESULT download failed for {} scene {}: {}", project_id, scene_num, e)
+
+    threading.Thread(target=_download, daemon=True).start()
 
 
 def _download_video(project_id, job_id, scene_key, video_url):

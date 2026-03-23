@@ -221,14 +221,36 @@ def grabber_start(data: GrabberStartRequest):
             logger.info("Applying consistency prefix to {} scene prompts", len(scenes))
 
     # Build Automa-compatible payload (prepend consistency prefix to each prompt)
+    # Include storyboard images as base64 for display in Automa/extension
+    import base64 as b64_mod
+    from config import STORYBOARD_DIR
+    image_exts = (".jpg", ".jpeg", ".png", ".webp")
+    scene_list = []
+    for s in scenes:
+        if not s.get("prompt"):
+            continue
+        entry = {"prompt": consistency_prefix + s["prompt"], "scene": s["scene"]}
+        # Read storyboard image and encode as base64
+        scene_img_dir = os.path.join(STORYBOARD_DIR, project_id, str(s["scene"]))
+        if os.path.isdir(scene_img_dir):
+            for fname in os.listdir(scene_img_dir):
+                if fname.startswith("image") and fname.lower().endswith(image_exts):
+                    img_path = os.path.join(scene_img_dir, fname)
+                    try:
+                        with open(img_path, "rb") as img_f:
+                            raw = img_f.read()
+                        ext = os.path.splitext(fname)[1].lstrip(".")
+                        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(ext, "jpeg")
+                        entry["image"] = f"data:image/{mime};base64,{b64_mod.b64encode(raw).decode()}"
+                    except Exception:
+                        pass
+                    break
+        scene_list.append(entry)
     automa_payload = {
         "projectId": project_id,
         "arguments": arguments if provider == "midjourney" else "",
         "aspect_ratio": data.aspect_ratio or "9:16",
-        "scenes": [
-            {"prompt": consistency_prefix + s["prompt"], "scene": s["scene"]}
-            for s in scenes if s.get("prompt")
-        ],
+        "scenes": scene_list,
     }
 
     # Pass Grok-specific options for Automa to configure the UI
@@ -275,6 +297,26 @@ def grabber_start(data: GrabberStartRequest):
     _save_job(job)
 
     logger.info("Grabber job created: {} ({} scenes, provider={})", grabber_id, len(automa_payload["scenes"]), provider)
+
+    # Push to connected WebSocket clients (Automa / STS extension)
+    # Payload already contains base64 images from the scene_list build above
+    if provider == "grok":
+        try:
+            from studio.animator.routes import queue_grabber_start
+            queue_grabber_start({
+                "type": "GRABBER_START",
+                "projectId": project_id,
+                "scenes": automa_payload["scenes"],
+                "aspectRatio": automa_payload.get("aspect_ratio", "9:16"),
+                "grokMode": automa_payload.get("grok_mode", "video"),
+                "grokDuration": automa_payload.get("grok_duration", "6s"),
+                "autoType": automa_payload.get("auto_type", False),
+            })
+            imgs = sum(1 for s in automa_payload["scenes"] if s.get("image"))
+            logger.info("Grabber data queued/pushed for {} ({} scenes, {} with images)",
+                        project_id, len(automa_payload["scenes"]), imgs)
+        except Exception as e:
+            logger.warning("WebSocket push failed: {}", e)
 
     # Kie AI: fully server-side — spawn background thread to generate + download
     if provider == "kie-ai":
