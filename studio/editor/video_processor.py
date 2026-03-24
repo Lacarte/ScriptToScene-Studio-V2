@@ -1878,11 +1878,21 @@ class VideoProcessor:
                         word_w = _measure_text(wt['text'], render_font_size)
                         escaped_word = _escape_text(wt['text'])
 
-                        # For each word, render in dim color for full caption duration
-                        # then overlay in highlight color during its active window
                         dim_color = font_color  # base color (may be dim for single_line_highlight)
 
-                        # Dim pass: show word in base color for entire caption
+                        # Compute highlight window for this word
+                        w_begin = wt['begin']
+                        if word_idx + 1 < len(word_timings):
+                            w_active_end = word_timings[word_idx + 1]['begin']
+                        else:
+                            w_active_end = end
+
+                        # Dim pass: show word in base color, but EXCLUDE the highlight window
+                        # so the scaled highlight word doesn't have dim text bleeding through
+                        if current_word_scale > 1.0:
+                            dim_enable = f"between(t,{start},{end})*not(between(t,{w_begin},{w_active_end}))"
+                        else:
+                            dim_enable = f"between(t,{start},{end})"
                         dt_dim = (
                             f"drawtext=fontfile='{font_path_esc}'"
                             f":text='{escaped_word}'"
@@ -1890,18 +1900,10 @@ class VideoProcessor:
                             f":fontcolor=#{dim_color}"
                             f":x={word_x}"
                             f":y={line_y}"
-                            f":enable='between(t,{start},{end})'"
+                            f":enable='{dim_enable}'"
                         )
                         dt_dim += _letter_spacing_suffix() + alpha_suffix + _stroke_suffix() + _shadow_suffix()
                         drawtext_parts.append(dt_dim)
-
-                        # Highlight pass: override with highlight color during this word's time
-                        w_begin = wt['begin']
-                        # Active until next word starts (or caption ends)
-                        if word_idx + 1 < len(word_timings):
-                            w_active_end = word_timings[word_idx + 1]['begin']
-                        else:
-                            w_active_end = end
 
                         if highlight_mode == 'box':
                             # Draw colored box behind word, then white text on top
@@ -1919,29 +1921,37 @@ class VideoProcessor:
                             drawtext_parts.append(dt_box)
 
                             # Redraw word in white on top of box
+                            scaled_fs = int(render_font_size * current_word_scale) if current_word_scale > 1.0 else render_font_size
+                            scaled_w = _measure_text(wt['text'], scaled_fs)
+                            active_x = word_x - int((scaled_w - word_w) / 2) if current_word_scale > 1.0 else word_x
+                            active_y = line_y - int((scaled_fs - render_font_size) / 2) if current_word_scale > 1.0 else line_y
                             dt_active = (
                                 f"drawtext=fontfile='{font_path_esc}'"
                                 f":text='{escaped_word}'"
-                                f":fontsize={int(render_font_size * current_word_scale) if current_word_scale > 1.0 else render_font_size}"
+                                f":fontsize={scaled_fs}"
                                 f":fontcolor=#FFFFFF"
-                                f":x={word_x - int((_measure_text(wt['text'], int(render_font_size * current_word_scale)) - word_w) / 2) if current_word_scale > 1.0 else word_x}"
-                                f":y={line_y - int((int(render_font_size * current_word_scale) - render_font_size) / 2) if current_word_scale > 1.0 else line_y}"
+                                f":x={active_x}"
+                                f":y={active_y}"
                                 f":enable='between(t,{w_begin},{w_active_end})'"
                             )
-                            dt_active += _letter_spacing_suffix() + alpha_suffix
+                            dt_active += _letter_spacing_suffix() + alpha_suffix + _stroke_suffix() + _shadow_suffix()
                             drawtext_parts.append(dt_active)
                         else:
                             # Text highlight: redraw word in highlight color
+                            scaled_fs = int(render_font_size * current_word_scale) if current_word_scale > 1.0 else render_font_size
+                            scaled_w = _measure_text(wt['text'], scaled_fs)
+                            active_x = word_x - int((scaled_w - word_w) / 2) if current_word_scale > 1.0 else word_x
+                            active_y = line_y - int((scaled_fs - render_font_size) / 2) if current_word_scale > 1.0 else line_y
                             dt_active = (
                                 f"drawtext=fontfile='{font_path_esc}'"
                                 f":text='{escaped_word}'"
-                                f":fontsize={int(render_font_size * current_word_scale) if current_word_scale > 1.0 else render_font_size}"
+                                f":fontsize={scaled_fs}"
                                 f":fontcolor=#{highlight_color_hex}"
-                                f":x={word_x - int((_measure_text(wt['text'], int(render_font_size * current_word_scale)) - word_w) / 2) if current_word_scale > 1.0 else word_x}"
-                                f":y={line_y - int((int(render_font_size * current_word_scale) - render_font_size) / 2) if current_word_scale > 1.0 else line_y}"
+                                f":x={active_x}"
+                                f":y={active_y}"
                                 f":enable='between(t,{w_begin},{w_active_end})'"
                             )
-                            dt_active += _letter_spacing_suffix() + alpha_suffix
+                            dt_active += _letter_spacing_suffix() + alpha_suffix + _stroke_suffix() + _shadow_suffix()
                             drawtext_parts.append(dt_active)
 
                         word_x += word_w + space_w

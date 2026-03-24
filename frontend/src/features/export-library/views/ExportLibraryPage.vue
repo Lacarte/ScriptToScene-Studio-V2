@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import ExportCard from '../components/ExportCard.vue'
 import DeleteExportDialog from '../components/DeleteExportDialog.vue'
 import { useExportLibrary, aspectRatioFromDimensions } from '../composables/useExportLibrary.js'
-import { formatBytes, timeAgo, fmtDuration } from '@/shared/utils/format.js'
+import { formatBytes, timeAgo, fmtDuration, fmtTime } from '@/shared/utils/format.js'
 
 defineOptions({ name: 'ExportLibraryPage' })
 
@@ -29,6 +29,9 @@ const {
   downloadVideo,
   downloadZip,
   trashVideo,
+  syncing,
+  syncProgress,
+  syncToPhone,
 } = useExportLibrary()
 
 const cardRefs = ref([])
@@ -187,14 +190,71 @@ const extendedStats = computed(() => {
         <h2 class="page-title">Export Library</h2>
         <p class="page-subtitle">Browse exported videos and download</p>
       </div>
-      <button class="refresh-btn" :disabled="loading" @click="fetchLibrary">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" :class="{ spinning: loading }">
-          <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
-          <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-        </svg>
-        Refresh
-      </button>
+      <div class="header-actions">
+        <button class="sync-btn" :class="{ 'sync-btn--active': syncing }" :disabled="syncing || items.length === 0" @click="syncToPhone" title="Sync all exported videos to the configured folder. Duplicates are skipped.">
+          <span class="sync-btn-icon" :class="{ spinning: syncing }">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/>
+              <path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+            </svg>
+          </span>
+          {{ syncing ? 'Syncing...' : 'Sync to Folder' }}
+        </button>
+        <button class="refresh-btn" :disabled="loading" @click="fetchLibrary">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" :class="{ spinning: loading }">
+            <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+          </svg>
+          Refresh
+        </button>
+      </div>
     </div>
+
+    <!-- Sync progress panel -->
+    <Transition name="sync-panel">
+      <div v-if="syncProgress" class="sync-panel" :class="{ 'sync-panel--done': syncProgress.done }">
+        <!-- Left: icon + status -->
+        <div class="sync-panel-left">
+          <div class="sync-panel-icon" :class="[syncProgress.done ? 'sync-panel-icon--done' : 'sync-panel-icon--active']">
+            <svg v-if="syncProgress.done && syncProgress.doneResult === 'copied'" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            <svg v-else-if="syncProgress.done && syncProgress.doneResult === 'uptodate'" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <svg v-else-if="syncProgress.done" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <svg v-else width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" class="spinning">
+              <path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/>
+              <path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+            </svg>
+          </div>
+          <div class="sync-panel-status">
+            <div class="sync-panel-title">
+              <template v-if="syncProgress.done && syncProgress.doneResult === 'copied'">Sync complete</template>
+              <template v-else-if="syncProgress.done && syncProgress.doneResult === 'uptodate'">Already up to date</template>
+              <template v-else-if="syncProgress.done">Nothing to sync</template>
+              <template v-else-if="syncProgress.phase === 'connecting'">Preparing sync...</template>
+              <template v-else-if="syncProgress.phase === 'copying'">Copying file...</template>
+              <template v-else-if="syncProgress.phase === 'copied'">Copied</template>
+              <template v-else-if="syncProgress.phase === 'skip'">Skipped (exists)</template>
+            </div>
+            <div v-if="syncProgress.file" class="sync-panel-file">{{ syncProgress.file }}</div>
+          </div>
+        </div>
+
+        <!-- Center: progress bar -->
+        <div v-if="syncProgress.total > 0" class="sync-panel-center">
+          <div class="sync-panel-bar-track">
+            <div class="sync-panel-bar-fill" :class="{ 'sync-panel-bar-fill--done': syncProgress.done }" :style="{ width: (syncProgress.index / syncProgress.total * 100) + '%' }" />
+          </div>
+          <div class="sync-panel-meta">
+            <span class="sync-panel-counter">{{ syncProgress.index }}<span class="sync-panel-counter-sep">/</span>{{ syncProgress.total }}</span>
+            <span v-if="!syncProgress.done" class="sync-panel-size">{{ syncProgress.size ? formatBytes(syncProgress.size) : '' }}</span>
+            <span v-if="syncProgress.done" class="sync-panel-summary">
+              <template v-if="syncProgress.copied">{{ syncProgress.copied }} copied</template>
+              <template v-if="syncProgress.copied && syncProgress.skipped"> · </template>
+              <template v-if="syncProgress.skipped">{{ syncProgress.skipped }} skipped</template>
+            </span>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Stats bar -->
     <div v-if="items.length" class="stats-bar">
@@ -321,6 +381,63 @@ const extendedStats = computed(() => {
   margin: 4px 0 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 15px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: 8px;
+  background: rgba(78, 205, 196, 0.06);
+  color: var(--accent);
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.sync-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(78, 205, 196, 0.12), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.sync-btn:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+.sync-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(78, 205, 196, 0.12);
+}
+
+.sync-btn--active {
+  border-color: var(--accent);
+  background: rgba(78, 205, 196, 0.10);
+}
+
+.sync-btn-icon {
+  display: flex;
+  align-items: center;
+}
+
+.sync-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .refresh-btn {
   display: inline-flex;
   align-items: center;
@@ -353,6 +470,182 @@ const extendedStats = computed(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ---- Sync Panel ---- */
+.sync-panel {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 18px;
+  background: var(--bg-surface);
+  border: 1px solid rgba(78, 205, 196, 0.2);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.sync-panel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 3px 0 0 3px;
+}
+
+.sync-panel--done::before {
+  background: var(--accent-ready);
+}
+
+/* Transition */
+.sync-panel-enter-active {
+  animation: sync-slide-in 0.25s ease-out;
+}
+.sync-panel-leave-active {
+  animation: sync-slide-out 0.2s ease-in forwards;
+}
+@keyframes sync-slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes sync-slide-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+
+/* Left: icon + status */
+.sync-panel-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.sync-panel-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sync-panel-icon--active {
+  background: rgba(78, 205, 196, 0.1);
+  color: var(--accent);
+}
+
+.sync-panel-icon--done {
+  background: rgba(38, 222, 129, 0.1);
+  color: var(--accent-ready);
+}
+
+.sync-panel-status {
+  min-width: 0;
+}
+
+.sync-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.sync-panel-file {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  margin-top: 2px;
+}
+
+/* Center: progress */
+.sync-panel-center {
+  flex: 1;
+  min-width: 0;
+}
+
+.sync-panel-bar-track {
+  height: 3px;
+  background: var(--bg-darkest);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.sync-panel-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.sync-panel-bar-fill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -1px;
+  bottom: -1px;
+  width: 20px;
+  background: linear-gradient(90deg, transparent, rgba(78, 205, 196, 0.4));
+  border-radius: 0 2px 2px 0;
+  animation: sync-bar-pulse 1.5s ease-in-out infinite;
+}
+
+.sync-panel-bar-fill--done {
+  background: var(--accent-ready);
+}
+
+.sync-panel-bar-fill--done::after {
+  display: none;
+}
+
+@keyframes sync-bar-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+.sync-panel-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.sync-panel-counter {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+
+.sync-panel-counter-sep {
+  color: var(--text-muted);
+  opacity: 0.4;
+  margin: 0 1px;
+}
+
+.sync-panel-size {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.sync-panel-summary {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--accent-ready);
+  font-weight: 500;
 }
 
 /* ---- Stats Bar ---- */

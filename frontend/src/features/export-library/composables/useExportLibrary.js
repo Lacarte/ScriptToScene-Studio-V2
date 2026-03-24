@@ -238,6 +238,56 @@ export function useExportLibrary() {
     downloadFile(url, name)
   }
 
+  const syncing = ref(false)
+  const syncProgress = ref(null)
+  // syncProgress shape: { file, index, total, phase, copied, skipped, size, done, doneResult }
+
+  function syncToPhone() {
+    if (syncing.value) return
+    syncing.value = true
+    syncProgress.value = { file: '', index: 0, total: 0, phase: 'connecting', copied: 0, skipped: 0, size: 0, done: false, doneResult: null }
+    let finished = false
+    let copiedCount = 0
+    let skippedCount = 0
+
+    const es = new EventSource('/api/export/library/sync')
+
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data)
+
+      if (d.phase === 'copying') {
+        syncProgress.value = { ...syncProgress.value, file: d.file, index: d.index, total: d.total, phase: 'copying', size: d.size || 0, copied: copiedCount, skipped: skippedCount, done: false }
+      } else if (d.phase === 'copied') {
+        copiedCount++
+        syncProgress.value = { ...syncProgress.value, file: d.file, index: d.index, total: d.total, phase: 'copied', copied: copiedCount, skipped: skippedCount, done: false }
+      } else if (d.phase === 'skip') {
+        skippedCount++
+        syncProgress.value = { ...syncProgress.value, file: d.file, index: d.index, total: d.total, phase: 'skip', copied: copiedCount, skipped: skippedCount, done: false }
+      } else if (d.phase === 'error') {
+        finished = true
+        es.close()
+        syncing.value = false
+        syncProgress.value = null
+        toast.error(d.message || 'Sync failed')
+      } else if (d.phase === 'done') {
+        finished = true
+        es.close()
+        syncing.value = false
+        syncProgress.value = { ...syncProgress.value, phase: 'done', done: true, copied: d.copied, skipped: d.skipped, total: d.total, doneResult: d.copied > 0 ? 'copied' : d.skipped > 0 ? 'uptodate' : 'empty' }
+        setTimeout(() => { syncProgress.value = null }, 4000)
+      }
+    }
+
+    es.onerror = () => {
+      es.close()
+      if (!finished) {
+        syncing.value = false
+        syncProgress.value = null
+        toast.error('Sync connection lost')
+      }
+    }
+  }
+
   async function trashVideo(item) {
     if (!item.video_relpath) {
       toast.error('Cannot identify file to delete')
@@ -277,6 +327,11 @@ export function useExportLibrary() {
 
     // Stats
     stats,
+
+    // Sync
+    syncing: readonly(syncing),
+    syncProgress: readonly(syncProgress),
+    syncToPhone,
 
     // Actions
     fetchLibrary,

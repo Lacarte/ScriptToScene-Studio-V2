@@ -9,6 +9,8 @@ const DEFAULTS = {
   'sts-sound-enabled': true,
   'sts-caption-default-preset': 'bold_popup',
   'sts-default-style': 'cinematic',
+  'sts-sync-folder': 'D:/@Sync/PHONE-S24-PC',
+  'sts-auto-sync': true,
 }
 
 const settings = ref({ ...DEFAULTS })

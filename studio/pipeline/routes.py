@@ -990,6 +990,12 @@ def _run_pipeline(job_id):
             "message": f"[{project_id}] Exported {export_result.get('filename', 'video')}",
         })
 
+        # ── Auto-sync to folder ──────────────────────────────────────
+        try:
+            _auto_sync_export(project_id, export_result, job_id)
+        except Exception as e:
+            logger.warning("[{}] Auto-sync failed: {}", project_id, e)
+
         # ── Done ────────────────────────────────────────────────────
         step_timings["total"] = round(time.perf_counter() - pipeline_start, 2)
         results["pipeline_timing"] = step_timings
@@ -1725,3 +1731,59 @@ def _step_export(assemble_result, project_id, job_id):
             logger.debug("Pipeline Export poll error: {}", e)
 
     raise RuntimeError("Export timed out")
+
+
+def _auto_sync_export(project_id, export_result, job_id):
+    """Auto-sync exported video to configured sync folder if enabled."""
+    from config import APP_CONFIG_PATH, EXPORT_DIR
+
+    cfg = safe_json_read(APP_CONFIG_PATH) or {}
+    defaults = cfg.get("defaults", {})
+    user = cfg.get("user", {})
+
+    auto_sync = user.get("sts-auto-sync", defaults.get("sts-auto-sync", False))
+    if not auto_sync:
+        return
+
+    sync_folder = (user.get("sts-sync-folder") or defaults.get("sts-sync-folder") or "").strip()
+    if not sync_folder:
+        return
+
+    sync_folder = os.path.normpath(sync_folder)
+    if not os.path.isdir(sync_folder):
+        logger.warning("[{}] Auto-sync skipped — folder missing: {}", project_id, sync_folder)
+        return
+
+    dest_dir = os.path.join(sync_folder, "exports")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    filename = export_result.get("filename", "")
+    if not filename:
+        return
+
+    # Find the exported file in EXPORT_DIR
+    src_path = None
+    for root, _dirs, files in os.walk(EXPORT_DIR):
+        if filename in files:
+            src_path = os.path.join(root, filename)
+            break
+
+    if not src_path or not os.path.isfile(src_path):
+        logger.warning("[{}] Auto-sync skipped — file not found: {}", project_id, filename)
+        return
+
+    dest_path = os.path.join(dest_dir, filename)
+
+    # Skip if already exists with same size
+    if os.path.isfile(dest_path) and os.path.getsize(dest_path) == os.path.getsize(src_path):
+        logger.info("[{}] Auto-sync: {} already up to date", project_id, filename)
+        return
+
+    import shutil
+    shutil.copy2(src_path, dest_path)
+    logger.success("[{}] Auto-synced: {} → {}", project_id, filename, dest_dir)
+
+    _emit(job_id, {
+        "step": "export", "status": "done",
+        "message": f"[{project_id}] Synced {filename} to folder",
+    })

@@ -133,18 +133,30 @@ async function previewAudio() {
     }
 
     // 2. Not cached — stream from TTS and let backend cache it
+    //    Retry on 429 (another stream in progress) with backoff
     previewLabel.value = 'Generating...'
-    const resp = await fetch('/api/tts/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'kokoro',
-        voice: voice.value,
-        speed: speed.value,
-        prompt: t,
-      }),
-      signal: ctrl.signal,
-    })
+    let resp
+    const MAX_RETRIES = 10
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      resp = await fetch('/api/tts/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'kokoro',
+          voice: voice.value,
+          speed: speed.value,
+          prompt: t,
+        }),
+        signal: ctrl.signal,
+      })
+      if (resp.status !== 429) break
+      if (attempt === MAX_RETRIES) {
+        const err = await resp.json().catch(() => ({}))
+        throw new Error(err.error || 'TTS busy — try again shortly')
+      }
+      previewLabel.value = 'Waiting for TTS...'
+      await new Promise(r => setTimeout(r, 2000))
+    }
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}))

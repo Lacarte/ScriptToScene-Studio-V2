@@ -9239,7 +9239,8 @@ function showExportProgress() {
         elements.exportProgressModal.classList.remove('export-complete', 'export-error');
     }
     if (elements.exportProgressTitle) {
-        elements.exportProgressTitle.textContent = 'Exporting Video...';
+        const pid = EditorState.project?.id || '';
+        elements.exportProgressTitle.textContent = pid ? `Exporting ${pid}...` : 'Exporting Video...';
     }
     if (elements.exportProgressBar) {
         elements.exportProgressBar.style.width = '0%';

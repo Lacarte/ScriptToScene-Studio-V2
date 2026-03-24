@@ -184,6 +184,30 @@ def delete_settings():
     return jsonify({"ok": True})
 
 
+@editor_bp.route("/api/settings/browse-folder", methods=["POST"])
+def browse_folder():
+    """Open a native folder picker dialog and return the selected path."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    data = request.get_json(silent=True) or {}
+    initial_dir = data.get("initial", "")
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+
+    folder = filedialog.askdirectory(
+        title="Select Sync Folder",
+        initialdir=initial_dir if initial_dir and os.path.isdir(initial_dir) else None,
+    )
+    root.destroy()
+
+    if not folder:
+        return jsonify({"cancelled": True})
+    return jsonify({"path": folder.replace("\\", "/")})
+
+
 class ExportCancelled(Exception):
     """Raised when an export job is cancelled while processing."""
 
@@ -1854,6 +1878,77 @@ def export_library_trash():
         logger.info("Trashed export file: {} → {}", fpath, dest)
 
     return jsonify({"status": "trashed", "moved": moved})
+
+
+@editor_bp.route("/api/export/library/sync", methods=["GET"])
+def export_library_sync():
+    """SSE stream: copy exported videos to sync folder with per-file progress."""
+    from flask import Response
+
+    VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+
+    cfg = _read_app_config()
+    defaults = cfg.get("defaults", {})
+    user_settings = cfg.get("user", {})
+    sync_folder = (user_settings.get("sts-sync-folder") or defaults.get("sts-sync-folder") or "").strip()
+
+    def _sse_error(msg):
+        return Response(
+            f"data: {json.dumps({'phase': 'error', 'message': msg})}\n\n",
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    if not sync_folder:
+        return _sse_error("No sync folder configured. Set it in Settings.")
+
+    sync_folder = os.path.normpath(sync_folder)
+    dest_dir = os.path.join(sync_folder, "exports")
+
+    if not os.path.isdir(sync_folder):
+        return _sse_error(f"Sync folder does not exist: {sync_folder}")
+
+    os.makedirs(dest_dir, exist_ok=True)
+
+    # Collect video files first
+    video_files = []
+    if os.path.isdir(EXPORT_DIR):
+        for root, _dirs, files in os.walk(EXPORT_DIR):
+            for fname in files:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in VIDEO_EXTS:
+                    video_files.append((os.path.join(root, fname), fname))
+
+    def _sse():
+        total = len(video_files)
+        copied = 0
+        skipped = 0
+
+        for idx, (src_path, fname) in enumerate(video_files):
+            dest_path = os.path.join(dest_dir, fname)
+            src_size = os.path.getsize(src_path)
+
+            # Skip duplicate (same name + size)
+            if os.path.isfile(dest_path) and os.path.getsize(dest_path) == src_size:
+                skipped += 1
+                yield f"data: {json.dumps({'phase': 'skip', 'file': fname, 'index': idx + 1, 'total': total})}\n\n"
+                continue
+
+            # Emit start event
+            yield f"data: {json.dumps({'phase': 'copying', 'file': fname, 'size': src_size, 'index': idx + 1, 'total': total})}\n\n"
+
+            shutil.copy2(src_path, dest_path)
+            copied += 1
+            logger.info("Synced export: {} → {}", fname, dest_dir)
+
+            yield f"data: {json.dumps({'phase': 'copied', 'file': fname, 'index': idx + 1, 'total': total})}\n\n"
+
+        yield f"data: {json.dumps({'phase': 'done', 'copied': copied, 'skipped': skipped, 'total': total})}\n\n"
+
+    return Response(_sse(), mimetype="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
 
 
 @editor_bp.route("/api/export/library/preview/<path:rel_path>", methods=["GET"])

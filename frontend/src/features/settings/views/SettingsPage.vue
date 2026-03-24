@@ -16,6 +16,23 @@ const toast = useToast()
 const welcome = useWelcomeOverlay()
 const showClearDialog = ref(false)
 const restarting = ref(false)
+const browsing = ref(false)
+
+async function browseSyncFolder() {
+  browsing.value = true
+  try {
+    const current = settings.value['sts-sync-folder'] || ''
+    const result = await api.post('/api/settings/browse-folder', { body: { initial: current } })
+    if (result.path) {
+      await update('sts-sync-folder', result.path)
+      toast.success('Sync folder updated')
+    }
+  } catch (e) {
+    toast.error('Failed to open folder picker')
+  } finally {
+    browsing.value = false
+  }
+}
 const captionPresets = ref([
   { id: 'bold_popup', name: 'Bold Pop-up' },
   { id: 'subtitle_bar', name: 'Subtitle Bar' },
@@ -219,6 +236,40 @@ function featureLabel(val) {
       </div>
     </section>
 
+    <!-- Sync -->
+    <section class="card p-5 mb-4">
+      <label class="section-label">Phone Sync</label>
+      <div class="export-defaults">
+        <div class="export-default-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+          <div class="export-copy">
+            <label class="export-label">Sync Folder</label>
+            <p class="export-help">Exported videos will be copied to this folder when you press "Sync to Folder" in the Export Library. Duplicates with the same filename and size are skipped automatically.</p>
+          </div>
+          <div class="sync-row">
+            <input
+              type="text"
+              class="input-field sync-input"
+              :value="settings['sts-sync-folder'] ?? ''"
+              placeholder="D:/@Sync/PHONE-S24-PC"
+              @change="onToggle('sts-sync-folder', $event.target.value.trim())"
+            />
+            <button class="browse-btn" :disabled="browsing" @click="browseSyncFolder">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+              </svg>
+              {{ browsing ? '...' : 'Browse' }}
+            </button>
+          </div>
+        </div>
+        <SettingsToggle
+          :model-value="settings['sts-auto-sync'] ?? true"
+          label="Auto-sync after export"
+          description="Automatically copy the video to the sync folder when a pipeline export finishes"
+          @update:model-value="onToggle('sts-auto-sync', $event)"
+        />
+      </div>
+    </section>
+
     <!-- Server -->
     <section class="card p-5 mb-4">
       <label class="section-label">Server</label>
@@ -377,6 +428,58 @@ function featureLabel(val) {
 
 .export-select:focus {
   border-color: var(--accent);
+}
+
+.sync-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sync-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sync-input:focus {
+  border-color: var(--accent);
+}
+
+.browse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.browse-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.browse-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 /* ---- Server ---- */
