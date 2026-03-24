@@ -75,6 +75,8 @@ class PipelineRunRequest(BaseModel):
     image_model: Optional[str] = None
     # Storyboard provider: "gemini" (Chrome extension) or "webhook" (WaveSpeed via n8n)
     storyboard_provider: str = "webhook"
+    # Prompt prefix prepended to each image prompt (e.g. "generate an image ")
+    prompt_prefix: str = ""
     # Asset grabber provider (grok videos)
     provider: str = "grok"
     aspect_ratio: str = "9:16"

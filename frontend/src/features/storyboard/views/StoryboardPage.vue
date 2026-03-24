@@ -29,6 +29,13 @@ function setProvider(val) {
   localStorage.setItem('sts-storyboard-provider', val)
 }
 
+// Prompt prefix (prepended to each prompt when using Gemini)
+const promptPrefix = ref(localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ')
+function setPromptPrefix(val) {
+  promptPrefix.value = val
+  localStorage.setItem('sts-prompt-prefix', val)
+}
+
 // Webhook state
 const webhookEnabled = ref(true)
 const webhookUrl = ref('')
@@ -354,7 +361,7 @@ async function grabScene(scene) {
     const body = {
       project_id: projectId.value,
       scene: scene.index,
-      prompt: scene.prompt,
+      prompt: (provider === 'gemini' && promptPrefix.value ? promptPrefix.value : '') + scene.prompt,
       aspect_ratio: aspectRatio.value,
       provider,
     }
@@ -390,7 +397,8 @@ async function grabAll() {
     return
   }
 
-  const scenesPayload = scenes.value.map(s => ({ scene: s.index, prompt: s.prompt }))
+  const pfx = provider === 'gemini' && promptPrefix.value ? promptPrefix.value : ''
+  const scenesPayload = scenes.value.map(s => ({ scene: s.index, prompt: pfx + s.prompt }))
 
   try {
     const body = {
@@ -520,7 +528,7 @@ onUnmounted(() => {
           <span class="webhook-label">Image Provider</span>
         </div>
         <select class="aspect-select" style="margin-top:6px;" :value="storyboardProvider" @change="setProvider($event.target.value)">
-          <option value="gemini">Gemini Scraper</option>
+          <option value="gemini">Gemini Grabber</option>
           <option value="webhook">Webhook (n8n)</option>
         </select>
       </div>
@@ -568,6 +576,17 @@ onUnmounted(() => {
           Prompts are sent via WebSocket to the <b style="color:var(--accent)">STS Gemini</b> Chrome extension.
           Make sure <b>gemini.google.com</b> is open and the extension panel shows <b style="color:#34d399">Connected</b>.
         </p>
+        <div style="margin-top:8px;">
+          <span class="webhook-label" style="font-size:10px;">Prompt Prefix</span>
+          <input
+            type="text"
+            class="webhook-url-input"
+            :value="promptPrefix"
+            placeholder="Prefix prepended to each prompt..."
+            @input="setPromptPrefix($event.target.value)"
+            style="margin-top:4px;"
+          />
+        </div>
       </div>
 
       <!-- Aspect Ratio -->

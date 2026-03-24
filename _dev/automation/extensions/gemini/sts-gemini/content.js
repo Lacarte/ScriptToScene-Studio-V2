@@ -151,6 +151,17 @@
           break;
         }
         case 'PONG': break;
+        case 'NAVIGATE': {
+          var url = msg.url;
+          if (url) {
+            console.log('[STS WS] NAVIGATE received, redirecting to:', url);
+            // Small delay to let any final renders complete
+            setTimeout(function() {
+              window.location.href = url;
+            }, 1500);
+          }
+          break;
+        }
       }
     }
 
@@ -377,8 +388,9 @@
       return !!(stopBtn || thinkingAvatar || textLoader || processingContainer || loadingSpan || justASec);
     }
 
-    function waitForImageGeneration(timeoutMs) {
+    function waitForImageGeneration(timeoutMs, knownUrls) {
       timeoutMs = timeoutMs || 120000;
+      knownUrls = knownUrls || {};
       return new Promise(function(resolve) {
         var start = Date.now();
         var seenLoading = false;
@@ -413,26 +425,33 @@
             clearInterval(checkInterval);
             console.log('[IMAGE] Generation stable. Searching for image...');
 
+            // Helper: find first NEW image URL not in knownUrls
+            function findNewImage(imgs) {
+              for (var i = imgs.length - 1; i >= 0; i--) {
+                var src = imgs[i].src;
+                if (src && src.indexOf('http') === 0 && !knownUrls[src]) {
+                  return src;
+                }
+              }
+              return null;
+            }
+
             // Strategy 1: single-image button > img (exact Gemini DOM path)
             var singleImgs = document.querySelectorAll('single-image button.image-button img');
             console.log('[IMAGE] single-image button img:', singleImgs.length);
-            if (singleImgs.length > 0) {
-              var last = singleImgs[singleImgs.length - 1];
-              if (last.src && last.src.indexOf('http') === 0) {
-                console.log('[IMAGE] Found (single-image):', last.src.substring(0, 80) + '...');
-                resolve(last.src); return;
-              }
+            var newUrl1 = findNewImage(singleImgs);
+            if (newUrl1) {
+              console.log('[IMAGE] Found NEW (single-image):', newUrl1.substring(0, 80) + '...');
+              resolve(newUrl1); return;
             }
 
             // Strategy 2: generated-image img.image.loaded
             var genImgs = document.querySelectorAll('generated-image img.image.loaded');
             console.log('[IMAGE] generated-image img.loaded:', genImgs.length);
-            if (genImgs.length > 0) {
-              var last2 = genImgs[genImgs.length - 1];
-              if (last2.src && last2.src.indexOf('http') === 0) {
-                console.log('[IMAGE] Found (generated-image):', last2.src.substring(0, 80) + '...');
-                resolve(last2.src); return;
-              }
+            var newUrl2 = findNewImage(genImgs);
+            if (newUrl2) {
+              console.log('[IMAGE] Found NEW (generated-image):', newUrl2.substring(0, 80) + '...');
+              resolve(newUrl2); return;
             }
 
             // Strategy 3: any img with Gemini CDN URL pattern
@@ -600,7 +619,7 @@
           .then(function() {
             item.status = 'generating'; render();
             sendWS({ type: 'STATUS_UPDATE', projectId: item.projectId, scene: parseInt(item.scene), status: 'generating' });
-            return waitForImageGeneration(120000);
+            return waitForImageGeneration(120000, seenImageUrls);
           })
           .then(function(imageUrl) {
             if (S.typing.stopRequested) { item.status = 'queued'; return null; }

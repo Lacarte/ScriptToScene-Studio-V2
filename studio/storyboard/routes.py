@@ -366,29 +366,34 @@ def generate(data: StoryboardGenerateRequest):
 def status(project_id):
     """Poll storyboard generation status."""
     project_id = sanitize_project_id(project_id)
-    job = _get_job(project_id)
 
-    # Fallback: load from disk
+    # Always reload from disk (Gemini WS handler writes to disk, not in-memory)
+    json_path = _storyboard_json_path(project_id)
+    job = None
+    if os.path.isfile(json_path):
+        try:
+            job = safe_json_read(json_path)
+            _set_job(project_id, job)
+        except Exception:
+            pass
+
     if not job:
-        json_path = _storyboard_json_path(project_id)
-        if os.path.isfile(json_path):
-            try:
-                job = safe_json_read(json_path)
-                _set_job(project_id, job)
-            except Exception:
-                pass
+        job = _get_job(project_id)
 
     if not job:
         return jsonify({"error": "No storyboard job found for this project"}), 404
 
     scene_statuses = job.get("scene_statuses", {})
-    total = len(scene_statuses)
-    ready = sum(1 for s in scene_statuses.values() if s.get("status") == "ready")
-    errors = sum(1 for s in scene_statuses.values() if s.get("status") == "error")
+    # Use the stored total (set at creation time), exclude sentinel key "-1" from counts
+    total = job.get("total", 0) or sum(1 for k in scene_statuses if k != "-1")
+    ready = sum(1 for k, s in scene_statuses.items() if k != "-1" and s.get("status") in ("ready", "done"))
+    errors = sum(1 for k, s in scene_statuses.items() if k != "-1" and s.get("status") == "error")
+
+    done = ready >= total and total > 0
 
     return jsonify({
         "project_id": project_id,
-        "status": job.get("status", "unknown"),
+        "status": "done" if done else job.get("status", "unknown"),
         "total": total,
         "ready": ready,
         "errors": errors,

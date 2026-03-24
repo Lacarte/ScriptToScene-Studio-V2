@@ -170,66 +170,84 @@ function inferResumeStep(statuses = {}) {
 let _storyboardWin = null
 let _assetsWin = null
 
+const pendingProviderUrl = ref(null)
+
 function _openInProviderTab(url, step) {
-  // Route to the correct window based on which step emitted open_url
-  const isStoryboard = step === 'storyboard'
-  const win = isStoryboard ? _storyboardWin : _assetsWin
+  // Tabs were pre-opened on pipeline start — just focus the right one
+  const isGemini = url.includes('gemini.google.com')
+  const isGrok = url.includes('grok.com')
+  const win = isGemini ? _storyboardWin : isGrok ? _assetsWin : null
 
   if (win && !win.closed) {
-    try {
-      win.location.href = url
-      win.focus()
-    } catch {
-      const newWin = window.open(url, '_blank')
-      if (isStoryboard) _storyboardWin = newWin
-      else _assetsWin = newWin
-    }
-  } else {
-    const newWin = window.open(url, '_blank')
-    if (isStoryboard) _storyboardWin = newWin
-    else _assetsWin = newWin
+    try { win.focus() } catch {}
+    pendingProviderUrl.value = null
+    return
   }
+
+  // Tab was closed — try to reopen (may be blocked if not user gesture)
+  try {
+    const tabName = isGemini ? 'sts-gemini-tab' : 'sts-grok-tab'
+    const newWin = window.open(url, tabName)
+    if (newWin) {
+      if (isGemini) _storyboardWin = newWin
+      else _assetsWin = newWin
+      pendingProviderUrl.value = null
+      return
+    }
+  } catch {}
+
+  // Popup blocked — show banner
+  pendingProviderUrl.value = url
+}
+
+function openPendingProvider() {
+  if (!pendingProviderUrl.value) return
+  const url = pendingProviderUrl.value
+  const isGemini = url.includes('gemini.google.com')
+  const tabName = isGemini ? 'sts-gemini-tab' : 'sts-grok-tab'
+  const win = window.open(url, tabName)
+  if (win) {
+    if (isGemini) _storyboardWin = win
+    else _assetsWin = win
+  }
+  pendingProviderUrl.value = null
 }
 
 function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
-  // Pre-open about:blank loading tabs during user click (bypasses popup blocker).
-  // SSE open_url events will navigate them to the actual provider URLs when steps start.
+  // Called during user click (user gesture) — open all provider tabs now.
+  // This avoids popup blockers when SSE events try to open tabs later.
   const stepIds = ALL_STEPS.map(step => step.id)
   const stopIdx = stopValue ? stepIds.indexOf(stopValue) : -1
   const resumeIdx = resumeStep ? stepIds.indexOf(resumeStep) : -1
 
   const storyboardProvider = localStorage.getItem('sts-storyboard-provider') || 'gemini'
-  const assetProvider = localStorage.getItem('sts-asset-provider') || 'grok'
 
-  function _preOpen(stepName) {
+  function _reaches(stepName) {
     const idx = stepIds.indexOf(stepName)
     const reaches = !stopValue || stopIdx >= idx
     const startsBefore = resumeStep == null || resumeIdx <= idx
     return reaches && startsBefore
   }
 
-  // Pre-open ONE about:blank tab for the first provider step that will need it.
-  // Chrome only allows one window.open per user gesture — the second step's tab
-  // will be opened by the SSE open_url event (or user can open it manually).
-  function _preOpenTab(ref) {
-    try {
-      const w = window.open('about:blank', '_blank')
-      if (w) {
-        w.document.open()
-        w.document.write(providerTabLoadingHTML)
-        w.document.close()
-      }
-      return w
-    } catch { return null }
-  }
-
-  // Pre-open one tab — used by first provider step, then reused by the next
-  if (storyboardProvider === 'gemini' && _preOpen('storyboard')) {
-    _storyboardWin = _preOpenTab()
-    // Assets will reuse this same tab (navigated from gemini → grok after storyboard completes)
-    _assetsWin = _storyboardWin
-  } else if (_preOpen('assets')) {
-    _assetsWin = _preOpenTab()
+  // Only open Gemini tab — after storyboard completes, the server sends
+  // a NAVIGATE message via WS to the extension, which navigates to grok.com/imagine
+  if (storyboardProvider === 'gemini' && _reaches('storyboard')) {
+    if (_storyboardWin && !_storyboardWin.closed) {
+      try { _storyboardWin.focus() } catch {}
+    } else {
+      try {
+        _storyboardWin = window.open('https://gemini.google.com/app', 'sts-gemini-tab')
+      } catch {}
+    }
+  } else if (_reaches('assets')) {
+    // No gemini — open grok directly for assets
+    if (_assetsWin && !_assetsWin.closed) {
+      try { _assetsWin.focus() } catch {}
+    } else {
+      try {
+        _assetsWin = window.open('https://grok.com/imagine', 'sts-grok-tab')
+      } catch {}
+    }
   }
 }
 
@@ -387,6 +405,7 @@ async function start() {
     image_model: imageModel.value || undefined,
     // Storyboard provider: gemini (Chrome ext) or webhook (WaveSpeed)
     storyboard_provider: localStorage.getItem('sts-storyboard-provider') || 'gemini',
+    prompt_prefix: localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ',
     // Asset provider: grok (videos)
     provider: localStorage.getItem('sts-asset-provider') || 'grok',
     auto_type: true,
@@ -642,6 +661,7 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     webhook_url: webhookUrl || undefined,
     image_model: imageModel.value || undefined,
     storyboard_provider: localStorage.getItem('sts-storyboard-provider') || 'gemini',
+    prompt_prefix: localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ',
     provider: localStorage.getItem('sts-asset-provider') || 'grok',
     auto_type: true,
     resume_from: resumeStep,
@@ -814,6 +834,10 @@ export function usePipeline() {
     setStoryTone,
     setNicheCategory,
     init,
+
+    // Provider tab
+    pendingProviderUrl: readonly(pendingProviderUrl),
+    openPendingProvider,
 
     // Helpers
     timeAgo,

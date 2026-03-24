@@ -160,6 +160,7 @@ def run_pipeline(data: PipelineRunRequest):
         "resume_from": resume_from,
         # Storyboard provider (gemini/webhook)
         "storyboard_provider": data.storyboard_provider,
+        "prompt_prefix": data.prompt_prefix,
         "aspect_ratio": data.aspect_ratio,
         "auto_type": data.auto_type,
         # Asset grabber options (grok videos)
@@ -1390,6 +1391,10 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
         raise PipelineStopped(step_name="storyboard")
 
     sb_provider = config.get("storyboard_provider", "webhook")
+    prompt_prefix = config.get("prompt_prefix", "") if sb_provider == "gemini" else ""
+    if prompt_prefix:
+        for sp in scenes_payload:
+            sp["prompt"] = prompt_prefix + sp["prompt"]
 
     payload = {
         "project_id": project_id,

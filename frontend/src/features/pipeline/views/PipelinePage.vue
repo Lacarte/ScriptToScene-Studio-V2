@@ -357,6 +357,7 @@ const {
   start, stop, retry, resumeStopped, loadFromHistory, randomStory, resetProgress,
   selectNiche, clearNiche, saveNichePreset, deleteNichePreset,
   setVisualStyleOverride, setStoryTone, setNicheCategory,
+  pendingProviderUrl, openPendingProvider,
   timeAgo,
 } = usePipeline()
 
@@ -1058,6 +1059,12 @@ function logStepLabel(step) {
         <span v-if="(!text.trim() || shouldGenerateBeforeRun) && !running && globalStatus !== 'error'" class="run-hint">{{ runHintText }}</span>
       </div>
     </section>
+
+    <!-- Pending provider URL banner -->
+    <div v-if="pendingProviderUrl" class="provider-redirect-banner" @click="openPendingProvider()">
+      <span class="provider-redirect-icon">&#x1F517;</span>
+      <span>Click to open provider tab: <b>{{ pendingProviderUrl }}</b></span>
+    </div>
 
     <!-- Progress -->
     <section v-if="showProgress" class="card progress-card">
@@ -2834,5 +2841,35 @@ function logStepLabel(step) {
   50% {
     opacity: 0.5;
   }
+}
+
+.provider-redirect-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  margin: 8px 0;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.15), rgba(45, 212, 191, 0.05));
+  border: 1px solid rgba(45, 212, 191, 0.4);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+  animation: pulse-border 2s ease-in-out infinite;
+  transition: background 0.2s;
+}
+.provider-redirect-banner:hover {
+  background: rgba(45, 212, 191, 0.2);
+}
+.provider-redirect-banner b {
+  color: var(--accent);
+  word-break: break-all;
+}
+.provider-redirect-icon {
+  font-size: 18px;
+}
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(45, 212, 191, 0.4); }
+  50% { border-color: rgba(45, 212, 191, 0.8); }
 }
 </style>

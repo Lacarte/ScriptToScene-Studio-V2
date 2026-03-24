@@ -221,11 +221,15 @@ def _update_scene_status(project_id, scene_num, status, local_path=None):
 
         job["scene_statuses"] = statuses
 
-        # Check if all done
+        # Update ready count and check if all done
         total = job.get("total", 0)
-        ready = sum(1 for s in statuses.values() if s.get("status") in ("ready", "done"))
+        ready = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") in ("ready", "done"))
+        job["ready"] = ready
+        errors = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") == "error")
+        job["errors"] = errors
         if ready >= total and total > 0:
             job["status"] = "done"
+            job["completed_at"] = __import__("datetime").datetime.now().astimezone().isoformat()
 
         with open(job_path, "w", encoding="utf-8") as f:
             json.dump(job, f, indent=2)
@@ -234,8 +238,20 @@ def _update_scene_status(project_id, scene_num, status, local_path=None):
         logger.debug("Failed to update storyboard job: {}", e)
 
 
+def _send_navigate(url):
+    """Send NAVIGATE message to all connected extension clients."""
+    msg = json.dumps({"type": "NAVIGATE", "url": url})
+    with _ws_lock:
+        for ws in list(_ws_clients):
+            try:
+                ws.send(msg)
+                logger.info("Sent NAVIGATE to extension: {}", url)
+            except Exception:
+                pass
+
+
 def _mark_job_done(project_id):
-    """Mark the entire storyboard job as done."""
+    """Mark the entire storyboard job as done and tell extension to navigate to Grok."""
     _update_scene_status(project_id, -1, "done")  # Trigger a save
     try:
         from config import STORYBOARD_DIR
@@ -249,3 +265,6 @@ def _mark_job_done(project_id):
             logger.info("Storyboard job {} marked done", project_id)
     except Exception as e:
         logger.debug("Failed to mark job done: {}", e)
+
+    # Tell the extension to navigate to Grok for the assets step
+    _send_navigate("https://grok.com/imagine")

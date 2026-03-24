@@ -483,6 +483,28 @@ def _resolve_project_captions(data: dict, project_id: str):
             source_folder,
             latest_match.get("project_id", ""),
         )
+        return
+
+    # Fallback: build captions from alignment data
+    align_path = os.path.join(ALIGN_DIR, source_folder, "alignment.json")
+    if os.path.isfile(align_path):
+        try:
+            align_data = safe_json_read(align_path)
+            words = align_data.get("alignment", [])
+            if words:
+                data["captions"] = {
+                    "project_id": project_id,
+                    "source_folder": source_folder,
+                    "words": [
+                        {"word": w["word"], "start": w.get("begin", 0), "end": w.get("end", 0)}
+                        for w in words
+                    ],
+                    "transcript": align_data.get("transcript", ""),
+                    "from_alignment": True,
+                }
+                logger.info("Built captions from alignment for {}", project_id)
+        except Exception as e:
+            logger.debug("Failed to build captions from alignment: {}", e)
 
 
 # ---------------------------------------------------------------------------

@@ -119,7 +119,7 @@ export function initEditorInlineScripts() {
                         return {
                             type: s.type_of_scene || 'image',
                             image_prompt: s.image_prompt || '',
-                            text_content: s.text_content || null,
+                            text_content: s.text_content || s.segment_words || s.narration || null,
                             duration: s.duration || 3,
                             timestamp: s.timestamp ?? null,
                             segment_start: s.segment_start ?? null,
