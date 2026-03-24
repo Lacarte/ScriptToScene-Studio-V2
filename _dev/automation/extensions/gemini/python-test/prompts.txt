@@ -1,0 +1,6 @@
+# Test prompts for Gemini Image Generator
+# One prompt per line. Lines starting with # are ignored.
+
+wide shot, a single sad stick figure standing on flat ground while five other stick figures jump high above him with motion lines, simple black lines on pure white background, minimalist stickman animation style, bold outlines, no shading, flat design, hand-drawn feel
+close-up, a stick figure with a surprised expression looking at a glowing golden star floating in front of him, simple black lines on pure white background, minimalist stickman animation style, bold outlines, no shading, flat design
+medium shot, three stick figures holding hands forming a circle and dancing, motion lines around them, simple black lines on pure white background, minimalist stickman animation style, bold outlines, no shading, flat design

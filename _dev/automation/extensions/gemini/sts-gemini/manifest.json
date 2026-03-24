@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "STS Gemini Image Synchronizer",
+  "version": "1.0",
+  "description": "Automates Gemini image generation via WebSocket for ScriptToScene Studio",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["https://gemini.google.com/*", "https://lh3.googleusercontent.com/*", "https://*.googleusercontent.com/*", "https://*.usercontent.google.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
