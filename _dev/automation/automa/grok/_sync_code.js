@@ -38,7 +38,7 @@ const S = {
 // ── WebSocket Connection ──────────────────────────────────────
 function connectWS() {
   if (S.ws && (S.ws.readyState === WebSocket.OPEN || S.ws.readyState === WebSocket.CONNECTING)) return;
-  const wsUrl = S.studioUrl.replace(/^http/, 'ws') + '/ws/animator';
+  const wsUrl = S.studioUrl.replace(/^http/, 'ws') + '/ws/animator-grok-video-grabber';
   console.log('[STS WS] Connecting to', wsUrl);
   try {
     S.ws = new WebSocket(wsUrl);
@@ -1321,7 +1321,7 @@ $id('sts-tab-sync').addEventListener('click', () => { S.activeTab = 'sync'; rend
 $id('sts-tab-settings').addEventListener('click', () => { S.activeTab = 'settings'; renderTabs(); render(); });
 
 // Settings tab controls
-$id('sts-ws-url').value = S.studioUrl.replace(/^http/, 'ws') + '/ws/animator';
+$id('sts-ws-url').value = S.studioUrl.replace(/^http/, 'ws') + '/ws/animator-grok-video-grabber';
 $id('sts-studio-url').value = S.studioUrl;
 $id('sts-ws-connect').addEventListener('click', () => { connectWS(); });
 $id('sts-ws-disconnect').addEventListener('click', () => {
@@ -1334,7 +1334,7 @@ $id('sts-save-url').addEventListener('click', () => {
   if (url) {
     S.studioUrl = url;
     localStorage.setItem('sts-url', url);
-    $id('sts-ws-url').value = url.replace(/^http/, 'ws') + '/ws/animator';
+    $id('sts-ws-url').value = url.replace(/^http/, 'ws') + '/ws/animator-grok-video-grabber';
     console.log('Studio URL saved:', url);
   }
 });

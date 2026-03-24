@@ -68,6 +68,7 @@ from studio.story import story_bp
 from studio.niches import niches_bp
 from studio.storyboard import storyboard_bp
 from studio.animator import animator_bp, init_animator_ws
+from studio.storyboard.gemini_ws import init_gemini_ws
 app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
@@ -83,6 +84,7 @@ app.register_blueprint(niches_bp)
 app.register_blueprint(storyboard_bp)
 app.register_blueprint(animator_bp)
 init_animator_ws(sock)
+init_gemini_ws(sock)
 
 
 # ---------------------------------------------------------------------------

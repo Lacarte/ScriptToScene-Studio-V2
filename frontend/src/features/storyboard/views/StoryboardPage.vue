@@ -22,11 +22,37 @@ const history = ref([])
 const scenePickerOpen = ref(false)
 const scenePickerData = ref([])
 
+// Provider state
+const storyboardProvider = ref(localStorage.getItem('sts-storyboard-provider') || 'gemini')
+function setProvider(val) {
+  storyboardProvider.value = val
+  localStorage.setItem('sts-storyboard-provider', val)
+}
+
 // Webhook state
 const webhookEnabled = ref(true)
 const webhookUrl = ref('')
 const defaultWebhookUrl = ref('')
 let webhookLoaded = false
+
+// Image model (for webhook provider)
+const imageModel = ref(localStorage.getItem('sts-image-model') || '')
+const imageModelsConfig = ref({})
+const availableImageModels = computed(() => {
+  const cfg = imageModelsConfig.value || {}
+  const models = cfg['default']?.models || []
+  return models
+})
+function setImageModel(val) {
+  imageModel.value = val
+  if (val) localStorage.setItem('sts-image-model', val)
+  else localStorage.removeItem('sts-image-model')
+}
+async function loadImageModels() {
+  try {
+    imageModelsConfig.value = await api.get('/api/storyboard/image-models')
+  } catch (e) { /* ignore */ }
+}
 
 // Image settings
 const aspectRatio = ref(localStorage.getItem('sts-storyboard-aspect-ratio') || '9:16')
@@ -313,30 +339,37 @@ function saveEdit(scene) {
 }
 
 async function grabScene(scene) {
-  if (!webhookEnabled.value) {
-    toast.warning('Enable the webhook first')
-    return
-  }
-  const url = webhookUrl.value?.trim()
-  if (!url) {
-    toast.warning('Enter a webhook URL')
-    return
+  const provider = storyboardProvider.value
+
+  if (provider === 'webhook') {
+    if (!webhookEnabled.value) { toast.warning('Enable the webhook first'); return }
+    const url = webhookUrl.value?.trim()
+    if (!url) { toast.warning('Enter a webhook URL'); return }
   }
 
   sceneStatuses.value[String(scene.index)] = { status: 'generating' }
   grabbing.value = true
 
   try {
-    await api.post('/api/storyboard/grab', {
-      body: {
-        project_id: projectId.value,
-        scene: scene.index,
-        prompt: scene.prompt,
-        aspect_ratio: aspectRatio.value,
-        webhook_url: url,
-      },
-    })
-    toast.success(`Scene ${scene.index} — generating...`)
+    const body = {
+      project_id: projectId.value,
+      scene: scene.index,
+      prompt: scene.prompt,
+      aspect_ratio: aspectRatio.value,
+      provider,
+    }
+    if (provider === 'webhook') {
+      body.webhook_url = webhookUrl.value?.trim()
+      if (imageModel.value) body.image_model = imageModel.value
+    }
+
+    const res = await api.post('/api/storyboard/grab', { body })
+    if (res?.error) {
+      toast.error(res.error)
+      sceneStatuses.value[String(scene.index)] = { status: 'error' }
+      return
+    }
+    toast.success(`Scene ${scene.index} — generating via ${provider}...`)
     startPolling()
   } catch (e) {
     toast.error(`Scene ${scene.index} failed: ${e.message}`)
@@ -345,14 +378,12 @@ async function grabScene(scene) {
 }
 
 async function grabAll() {
-  if (!webhookEnabled.value) {
-    toast.warning('Enable the webhook first')
-    return
-  }
-  const url = webhookUrl.value?.trim()
-  if (!url) {
-    toast.warning('Enter a webhook URL')
-    return
+  const provider = storyboardProvider.value
+
+  if (provider === 'webhook') {
+    if (!webhookEnabled.value) { toast.warning('Enable the webhook first'); return }
+    const url = webhookUrl.value?.trim()
+    if (!url) { toast.warning('Enter a webhook URL'); return }
   }
   if (!scenes.value.length) {
     toast.warning('No scenes loaded')
@@ -362,15 +393,23 @@ async function grabAll() {
   const scenesPayload = scenes.value.map(s => ({ scene: s.index, prompt: s.prompt }))
 
   try {
-    await api.post('/api/storyboard/generate', {
-      body: {
-        project_id: projectId.value,
-        scenes: scenesPayload,
-        aspect_ratio: aspectRatio.value,
-        webhook_url: url,
-      },
-    })
-    toast.success(`Generating ${scenesPayload.length} storyboard images...`)
+    const body = {
+      project_id: projectId.value,
+      scenes: scenesPayload,
+      aspect_ratio: aspectRatio.value,
+      provider,
+    }
+    if (provider === 'webhook') {
+      body.webhook_url = webhookUrl.value?.trim()
+      if (imageModel.value) body.image_model = imageModel.value
+    }
+
+    const res = await api.post('/api/storyboard/generate', { body })
+    if (res?.error) {
+      toast.error(res.error)
+      return
+    }
+    toast.success(`Generating ${scenesPayload.length} images via ${provider}...`)
     grabbing.value = true
     startPolling()
   } catch (e) {
@@ -433,6 +472,7 @@ watch(() => route.query.project, (pid) => {
 onMounted(async () => {
   await initWebhook()
   await loadHistory()
+  await loadImageModels()
   if (projectId.value) loadProject()
 })
 
@@ -474,8 +514,19 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Webhook -->
+      <!-- Provider Selector -->
       <div class="webhook-section">
+        <div class="webhook-header">
+          <span class="webhook-label">Image Provider</span>
+        </div>
+        <select class="aspect-select" style="margin-top:6px;" :value="storyboardProvider" @change="setProvider($event.target.value)">
+          <option value="gemini">Gemini Scraper</option>
+          <option value="webhook">Webhook (n8n)</option>
+        </select>
+      </div>
+
+      <!-- Webhook Config (only when webhook provider selected) -->
+      <div v-if="storyboardProvider === 'webhook'" class="webhook-section">
         <div class="webhook-header">
           <span class="webhook-label">Send to Webhook</span>
           <button
@@ -498,6 +549,25 @@ onUnmounted(() => {
           <button class="action-btn" style="padding:6px 10px;font-size:10px;white-space:nowrap" @click="resetWebhookUrl()">Reset</button>
         </div>
         <p v-else class="setting-hint" style="font-style:italic">Webhook disabled — grabber won't send to n8n</p>
+
+        <!-- Image Model (webhook only) -->
+        <div v-if="availableImageModels.length > 1" style="margin-top:8px;">
+          <span class="webhook-label" style="font-size:10px;">Image Model</span>
+          <select class="aspect-select" style="margin-top:4px;" :value="imageModel" @change="setImageModel($event.target.value)">
+            <option value="">Auto ({{ availableImageModels[0]?.name || 'default' }})</option>
+            <option v-for="m in availableImageModels" :key="m.id" :value="m.id">
+              {{ m.name }}{{ m.price ? ` ($${m.price})` : '' }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Gemini Info (only when gemini provider selected) -->
+      <div v-if="storyboardProvider === 'gemini'" class="webhook-section">
+        <p class="setting-hint" style="color:var(--text-secondary);font-size:11px;line-height:1.5">
+          Prompts are sent via WebSocket to the <b style="color:var(--accent)">STS Gemini</b> Chrome extension.
+          Make sure <b>gemini.google.com</b> is open and the extension panel shows <b style="color:#34d399">Connected</b>.
+        </p>
       </div>
 
       <!-- Aspect Ratio -->

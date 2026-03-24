@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
+from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.ffmpeg_utils import find_ffprobe
@@ -123,6 +123,26 @@ def _pick_scene_asset(project_id: str, *scene_keys: str,
         if used_urls is not None:
             used_urls.add(media_url)
         return media_url, media_type
+
+    # Fallback: check animator videos (output/animator/{project_id}/{scene_key}/*.mp4)
+    for scene_key in deduped_keys:
+        animator_scene_dir = os.path.join(ANIMATOR_DIR, project_id, str(scene_key))
+        if not os.path.isdir(animator_scene_dir):
+            continue
+        vid_files = []
+        for fname in os.listdir(animator_scene_dir):
+            fpath = os.path.join(animator_scene_dir, fname)
+            if os.path.isfile(fpath) and fname.lower().endswith(video_exts):
+                vid_files.append((os.path.getmtime(fpath), fname))
+        if not vid_files:
+            continue
+        _, fname = max(vid_files)
+        media_url = f"/output/animator/{project_id}/{scene_key}/{fname}"
+        if used_urls is not None and media_url in used_urls:
+            continue
+        if used_urls is not None:
+            used_urls.add(media_url)
+        return media_url, "video"
 
     return "", ""
 

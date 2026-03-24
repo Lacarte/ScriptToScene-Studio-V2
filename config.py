@@ -28,6 +28,7 @@ SCENES_DIR = os.path.join(OUTPUT_DIR, "scenes")
 STORIES_DIR = os.path.join(OUTPUT_DIR, "stories")
 PIPELINE_DIR = os.path.join(OUTPUT_DIR, "pipeline")
 ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets")
+ANIMATOR_DIR = os.path.join(OUTPUT_DIR, "animator")
 STORYBOARD_DIR = os.path.join(OUTPUT_DIR, "storyboard")
 SEGMENTER_DIR = os.path.join(OUTPUT_DIR, "segmenters")
 CAPTIONS_DIR = os.path.join(OUTPUT_DIR, "captions")
@@ -48,7 +49,7 @@ APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app-config.json")
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
-for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR,
+for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, ANIMATOR_DIR,
            STORYBOARD_DIR, SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
            EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR, TTS_CACHE_DIR):
     os.makedirs(_d, exist_ok=True)

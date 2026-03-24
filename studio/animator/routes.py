@@ -4,7 +4,7 @@ The STS backend sends image+prompt pairs to the Chrome extension via WebSocket.
 The extension automates Grok's image-to-video generation and returns video URLs.
 
 Provides:
-  WS   /ws/animator                         — WebSocket endpoint (via flask-sock)
+  WS   /ws/animator-grok-video-grabber      — WebSocket endpoint (via flask-sock)
   POST /api/animator/submit                 — submit animation jobs
   GET  /api/animator/status/<project_id>    — poll job status
   GET  /api/animator/videos/<project_id>    — list generated videos
@@ -24,14 +24,11 @@ from loguru import logger
 
 import base64 as b64_mod
 
-from config import OUTPUT_DIR, STORYBOARD_DIR, SCENES_DIR
+from config import OUTPUT_DIR, STORYBOARD_DIR, SCENES_DIR, ANIMATOR_DIR
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.security import sanitize_project_id
 
 animator_bp = Blueprint("animator", __name__)
-
-ANIMATOR_DIR = os.path.join(OUTPUT_DIR, "animator")
-os.makedirs(ANIMATOR_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # WebSocket state
@@ -113,9 +110,9 @@ def _flush_pending_grabber(ws):
 # ---------------------------------------------------------------------------
 
 def init_animator_ws(sock):
-    """Register the /ws/animator WebSocket route on the flask-sock instance."""
+    """Register the /ws/animator-grok-video-grabber WebSocket route on the flask-sock instance."""
 
-    @sock.route("/ws/animator")
+    @sock.route("/ws/animator-grok-video-grabber")
     def animator_ws(ws):
         logger.info("Animator WebSocket client connected")
         with _ws_lock:
@@ -385,15 +382,15 @@ def _handle_asset_result(msg):
 
 
 def _download_video(project_id, job_id, scene_key, video_url):
-    """Download a video from the given URL to output/animator/{project_id}/."""
-    project_dir = os.path.join(ANIMATOR_DIR, project_id)
-    os.makedirs(project_dir, exist_ok=True)
+    """Download a video from the given URL to output/animator/{project_id}/{scene_key}/."""
+    scene_dir = os.path.join(ANIMATOR_DIR, project_id, scene_key)
+    os.makedirs(scene_dir, exist_ok=True)
 
     ext = "mp4"
     if ".webm" in video_url:
         ext = "webm"
     filename = f"{scene_key}.{ext}"
-    filepath = os.path.join(project_dir, filename)
+    filepath = os.path.join(scene_dir, filename)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -411,7 +408,7 @@ def _download_video(project_id, job_id, scene_key, video_url):
                 job = _jobs.get(job_id)
                 if job and scene_key in job["scenes"]:
                     job["scenes"][scene_key]["status"] = "ready"
-                    job["scenes"][scene_key]["local_path"] = filename
+                    job["scenes"][scene_key]["local_path"] = f"{scene_key}/{filename}"
                     _update_job_status(job)
                     _save_job_state(job)
 
@@ -701,16 +698,27 @@ def list_videos(project_id):
     if not os.path.isdir(project_dir):
         return jsonify({"videos": []})
 
-    videos = sorted([
-        f for f in os.listdir(project_dir)
-        if f.endswith((".mp4", ".webm"))
-    ])
+    videos = []
+    for scene_name in sorted(os.listdir(project_dir)):
+        scene_path = os.path.join(project_dir, scene_name)
+        if os.path.isdir(scene_path):
+            for f in sorted(os.listdir(scene_path)):
+                if f.endswith((".mp4", ".webm")):
+                    videos.append(f"{scene_name}/{f}")
     return jsonify({"videos": videos, "project_id": project_id})
 
 
-@animator_bp.route("/api/animator/videos/<project_id>/<filename>")
-def serve_video(project_id, filename):
+@animator_bp.route("/api/animator/videos/<project_id>/<scene>/<filename>")
+def serve_video(project_id, scene, filename):
     """Serve an individual generated video."""
     project_id = sanitize_project_id(project_id)
-    project_dir = os.path.join(ANIMATOR_DIR, project_id)
-    return send_from_directory(project_dir, filename)
+    scene_dir = os.path.join(ANIMATOR_DIR, project_id, scene)
+    return send_from_directory(scene_dir, filename)
+
+
+@animator_bp.route("/output/animator/<path:filepath>")
+def serve_animator_file(filepath):
+    """Serve animator output files (videos) for the editor/export pipeline."""
+    resp = send_from_directory(ANIMATOR_DIR, filepath)
+    resp.headers.setdefault("Accept-Ranges", "bytes")
+    return resp

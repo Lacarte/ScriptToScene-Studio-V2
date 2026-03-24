@@ -17,8 +17,10 @@ class StoryboardGenerateRequest(BaseModel):
     scenes: list[StoryboardScene] = Field(min_length=1)
     aspect_ratio: str = "9:16"
     webhook_url: Optional[str] = None
+    provider: str = "webhook"  # "webhook" or "gemini"
     style: Optional[str] = None
     image_model: Optional[str] = None
+    auto_type: bool = True
 
     model_config = {"extra": "allow"}
 
@@ -29,5 +31,7 @@ class StoryboardGrabOneRequest(BaseModel):
     prompt: str = Field(min_length=1)
     aspect_ratio: str = "9:16"
     webhook_url: Optional[str] = None
+    provider: str = "webhook"
+    auto_type: bool = True
 
     model_config = {"extra": "allow"}

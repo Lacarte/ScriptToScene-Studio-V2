@@ -68,7 +68,7 @@ job_state = {
     "failed": 0,
     "started_at": None,
 }
-pending_job = None  # Queued job to send on next client connect
+pending_jobs: list = []  # Queued jobs to send on next client connect
 
 
 # ── Prompt Loading ────────────────────────────────────────────
@@ -119,6 +119,13 @@ def build_job(prompts: list[str], project_id: str, aspect_ratio: str = "9:16") -
     }
 
 
+# ── Multi-project test prompts ───────────────────────────────
+SECOND_PROJECT_PROMPTS = [
+    "A medieval castle on a misty cliff with ravens circling overhead",
+    "An underwater coral reef teeming with colorful tropical fish",
+]
+
+
 # ── Image Saving ──────────────────────────────────────────────
 def save_image(project_id: str, scene_num: int, image_data: str) -> str:
     """Save a base64 image to disk. Returns the file path."""
@@ -157,11 +164,12 @@ async def ws_handler(websocket):
     remote = websocket.remote_address
     print(f"\n🔌 Client connected: {remote}")
 
-    # Flush pending job to newly connected client
-    if pending_job:
+    # Flush pending jobs to newly connected client
+    for job in pending_jobs:
         try:
-            await websocket.send(json.dumps(pending_job))
-            print(f"📤 Sent queued IMAGE_JOB ({len(pending_job['scenes'])} scenes) to {remote}")
+            await websocket.send(json.dumps(job))
+            pid = job.get("projectId", "?")
+            print(f"📤 Sent queued IMAGE_JOB ({pid} — {len(job['scenes'])} scenes) to {remote}")
         except Exception as e:
             print(f"⚠  Failed to send queued job: {e}")
 
@@ -178,10 +186,11 @@ async def ws_handler(websocket):
             if msg_type == "EXTENSION_READY":
                 source = msg.get("source", "unknown")
                 print(f"✅ Extension ready (source: {source})")
-                # Send pending job if not already sent
-                if pending_job:
-                    await websocket.send(json.dumps(pending_job))
-                    print(f"📤 Sent IMAGE_JOB ({len(pending_job['scenes'])} scenes)")
+                # Send pending jobs if not already sent
+                for job in pending_jobs:
+                    await websocket.send(json.dumps(job))
+                    pid = job.get("projectId", "?")
+                    print(f"📤 Sent IMAGE_JOB ({pid} — {len(job['scenes'])} scenes)")
 
             elif msg_type == "IMAGE_UPLOAD":
                 await handle_image_upload(msg)
@@ -254,20 +263,21 @@ async def api_status_handler(request):
 
 
 async def api_send_job_handler(request):
-    """POST endpoint to send/re-send the job to connected clients."""
-    global pending_job
-    if not pending_job:
-        return web.json_response({"error": "No job loaded"}, status=400)
+    """POST endpoint to send/re-send all jobs to connected clients."""
+    if not pending_jobs:
+        return web.json_response({"error": "No jobs loaded"}, status=400)
 
     sent = 0
     for ws in list(clients):
-        try:
-            await ws.send(json.dumps(pending_job))
-            sent += 1
-        except Exception:
-            pass
+        for job in pending_jobs:
+            try:
+                await ws.send(json.dumps(job))
+                sent += 1
+            except Exception:
+                pass
 
-    return web.json_response({"sent_to": sent, "scenes": len(pending_job["scenes"])})
+    total_scenes = sum(len(j["scenes"]) for j in pending_jobs)
+    return web.json_response({"sent_to": sent, "projects": len(pending_jobs), "scenes": total_scenes})
 
 
 def build_dashboard_html() -> str:
@@ -490,11 +500,25 @@ async def output_file_handler(request):
 
 
 # ── Main ──────────────────────────────────────────────────────
-async def main(prompts: list[str], project_id: str, aspect_ratio: str = "9:16"):
-    global pending_job
+async def main(prompts: list[str], project_id: str, aspect_ratio: str = "9:16",
+               multi_project: bool = False):
+    global pending_jobs
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    pending_job = build_job(prompts, project_id, aspect_ratio)
+    pending_jobs = [build_job(prompts, project_id, aspect_ratio)]
+
+    # If multi-project mode, add a second project with different prompts
+    if multi_project:
+        second_id = project_id + "_B"
+        second_job = {
+            "type": "IMAGE_JOB",
+            "projectId": second_id,
+            "aspectRatio": "16:9",
+            "scenes": [{"scene": i, "prompt": p} for i, p in enumerate(SECOND_PROJECT_PROMPTS)],
+            "autoType": True,
+        }
+        pending_jobs.append(second_job)
+        print(f"  Multi-project mode: will send {len(pending_jobs)} projects")
 
     print(f"╔══════════════════════════════════════════════════╗")
     print(f"║  Gemini Image WS Test Server                    ║")
@@ -508,8 +532,12 @@ async def main(prompts: list[str], project_id: str, aspect_ratio: str = "9:16"):
     for i, p in enumerate(prompts):
         tag = f"[{project_id}|{i}]"
         print(f"  Scene {i}: {p[:60]}{'...' if len(p) > 60 else ''} {tag}")
+    if multi_project:
+        print(f"\n  --- Project B: {project_id}_B ---")
+        for i, p in enumerate(SECOND_PROJECT_PROMPTS):
+            print(f"  Scene {i}: {p[:60]}")
     print()
-    print("Waiting for Automa extension to connect...\n")
+    print("Waiting for extension to connect...\n")
 
     # Start WebSocket server
     ws_server = await websockets.serve(ws_handler, HOST, PORT, ping_interval=30, ping_timeout=10)
@@ -547,12 +575,13 @@ if __name__ == "__main__":
     parser.add_argument("--project", default="pp_GEMTEST", help="Project ID (default: pp_GEMTEST)")
     parser.add_argument("--aspect", default="9:16", help="Aspect ratio (default: 9:16)")
     parser.add_argument("--port", type=int, default=PORT, help=f"WebSocket port (default: {PORT})")
+    parser.add_argument("--multi", action="store_true", help="Send 2 projects to test multi-project queue")
     args = parser.parse_args()
 
     PORT = args.port
     prompts = load_prompts(args.prompts)
 
     try:
-        asyncio.run(main(prompts, args.project, args.aspect))
+        asyncio.run(main(prompts, args.project, args.aspect, multi_project=args.multi))
     except KeyboardInterrupt:
         print("\n\nShutdown.")

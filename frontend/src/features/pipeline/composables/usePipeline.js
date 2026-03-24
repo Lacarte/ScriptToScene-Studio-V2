@@ -166,41 +166,71 @@ function inferResumeStep(statuses = {}) {
   return null
 }
 
-let _providerWin = null
+// Two provider windows: one for storyboard (gemini images), one for assets (grok videos)
+let _storyboardWin = null
+let _assetsWin = null
 
-function _openInProviderTab(url) {
-  // Reuse existing tab if still open, otherwise open a new one
-  if (_providerWin && !_providerWin.closed) {
+function _openInProviderTab(url, step) {
+  // Route to the correct window based on which step emitted open_url
+  const isStoryboard = step === 'storyboard'
+  const win = isStoryboard ? _storyboardWin : _assetsWin
+
+  if (win && !win.closed) {
     try {
-      _providerWin.location.href = url
-      _providerWin.focus()
+      win.location.href = url
+      win.focus()
     } catch {
-      // Cross-origin or closed — open fresh
-      _providerWin = window.open(url, '_blank')
+      const newWin = window.open(url, '_blank')
+      if (isStoryboard) _storyboardWin = newWin
+      else _assetsWin = newWin
     }
   } else {
-    _providerWin = window.open(url, '_blank')
+    const newWin = window.open(url, '_blank')
+    if (isStoryboard) _storyboardWin = newWin
+    else _assetsWin = newWin
   }
 }
 
 function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
-  // Pre-open about:blank during user click (bypasses popup blocker).
-  // When the assets step starts, the SSE open_url event navigates it to grok.com/imagine.
+  // Pre-open about:blank loading tabs during user click (bypasses popup blocker).
+  // SSE open_url events will navigate them to the actual provider URLs when steps start.
   const stepIds = ALL_STEPS.map(step => step.id)
-  const assetsIdx = stepIds.indexOf('assets')
   const stopIdx = stopValue ? stepIds.indexOf(stopValue) : -1
   const resumeIdx = resumeStep ? stepIds.indexOf(resumeStep) : -1
-  const reachesAssets = !stopValue || stopIdx >= assetsIdx
-  const startsBeforeAssets = resumeStep == null || resumeIdx <= assetsIdx
-  if (!reachesAssets || !startsBeforeAssets) return
-  try {
-    _providerWin = window.open('about:blank', '_blank')
-    if (_providerWin) {
-      _providerWin.document.open()
-      _providerWin.document.write(providerTabLoadingHTML)
-      _providerWin.document.close()
-    }
-  } catch {}
+
+  const storyboardProvider = localStorage.getItem('sts-storyboard-provider') || 'gemini'
+  const assetProvider = localStorage.getItem('sts-asset-provider') || 'grok'
+
+  function _preOpen(stepName) {
+    const idx = stepIds.indexOf(stepName)
+    const reaches = !stopValue || stopIdx >= idx
+    const startsBefore = resumeStep == null || resumeIdx <= idx
+    return reaches && startsBefore
+  }
+
+  // Pre-open ONE about:blank tab for the first provider step that will need it.
+  // Chrome only allows one window.open per user gesture — the second step's tab
+  // will be opened by the SSE open_url event (or user can open it manually).
+  function _preOpenTab(ref) {
+    try {
+      const w = window.open('about:blank', '_blank')
+      if (w) {
+        w.document.open()
+        w.document.write(providerTabLoadingHTML)
+        w.document.close()
+      }
+      return w
+    } catch { return null }
+  }
+
+  // Pre-open one tab — used by first provider step, then reused by the next
+  if (storyboardProvider === 'gemini' && _preOpen('storyboard')) {
+    _storyboardWin = _preOpenTab()
+    // Assets will reuse this same tab (navigated from gemini → grok after storyboard completes)
+    _assetsWin = _storyboardWin
+  } else if (_preOpen('assets')) {
+    _assetsWin = _preOpenTab()
+  }
 }
 
 // ── Niche helpers ──
@@ -355,12 +385,14 @@ async function start() {
     webhook_url: webhookUrl || undefined,
     // Image model override (empty = auto from style)
     image_model: imageModel.value || undefined,
-    // Asset grabber options
+    // Storyboard provider: gemini (Chrome ext) or webhook (WaveSpeed)
+    storyboard_provider: localStorage.getItem('sts-storyboard-provider') || 'gemini',
+    // Asset provider: grok (videos)
     provider: localStorage.getItem('sts-asset-provider') || 'grok',
     auto_type: true,
   }
 
-  // Browsers block popups from async/SSE handlers, so open the provider tab now if needed.
+  // Pre-open provider tabs (gemini for images, grok for videos)
   maybeOpenProviderLoadingTab({ stopValue: config.stop_after })
 
   try {
@@ -400,7 +432,7 @@ function startSSE(id) {
     const status = event.status
 
     if (event.open_url) {
-      try { _openInProviderTab(event.open_url) } catch {}
+      try { _openInProviderTab(event.open_url, step) } catch {}
     }
 
     if (step === 'done') {
@@ -539,7 +571,7 @@ async function regenerateAssets(projectId) {
   try {
     const res = await api.post(`/api/pipeline/${projectId}/regenerate-assets`)
     if (res.open_url) {
-      try { _openInProviderTab(res.open_url) } catch {}
+      try { _openInProviderTab(res.open_url, 'assets') } catch {}
     }
     toast.success(`Asset regeneration started (${res.scene_count} scenes)`)
     return res
@@ -609,6 +641,7 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     image_model: imageModel.value || undefined,
+    storyboard_provider: localStorage.getItem('sts-storyboard-provider') || 'gemini',
     provider: localStorage.getItem('sts-asset-provider') || 'grok',
     auto_type: true,
     resume_from: resumeStep,

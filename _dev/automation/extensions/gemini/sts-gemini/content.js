@@ -49,15 +49,15 @@
     window.__stsGeminiActive = true;
 
     var S = {
-      wsUrl: wsUrlOverride || localStorage.getItem('sts-gemini-ws') || 'ws://localhost:5055/ws/image-gemini',
+      wsUrl: wsUrlOverride || localStorage.getItem('sts-gemini-ws') || 'ws://localhost:5050/ws/image-gemini',
       connected: false,
       collapsed: localStorage.getItem('sts-gemini-collapsed') === 'true',
       showSettings: false,
-      projectId: null,
-      aspectRatio: '',
       ws: null,
       wsConnected: false,
       wsReconnectTimer: null,
+      activeTab: 'queue', // 'queue' or 'sync'
+      syncHistory: [], // { projectId, scene, status, timestamp, sizeKB, imageUrl }
       typing: {
         active: false, starting: false, queue: [], runId: 0,
         currentIndex: -1, typedCount: 0, stopRequested: false, toolsEnabled: false,
@@ -117,27 +117,31 @@
     function handleWSMessage(msg) {
       switch (msg.type) {
         case 'IMAGE_JOB': {
-          S.projectId = msg.projectId;
-          S.aspectRatio = msg.aspectRatio || S.aspectRatio || '';
+          var pid = msg.projectId;
+          var jobAspect = msg.aspectRatio || '';
           var scenes = msg.scenes || [];
-          console.log('[STS WS] IMAGE_JOB:', msg.projectId, '-', scenes.length, 'scenes', 'aspect:', S.aspectRatio);
+          console.log('[STS WS] IMAGE_JOB:', pid, '-', scenes.length, 'scenes', 'aspect:', jobAspect);
+
+          // Always clear queue on new IMAGE_JOB — every job is a fresh request
+          console.log('[STS WS] New job, clearing queue');
+          S.typing.queue = [];
+          S.typing.active = false;
+          S.typing.starting = false;
+          S.typing.currentIndex = -1;
+          S.projectId = pid;
+          S.aspectRatio = jobAspect;
+
           for (var si = 0; si < scenes.length; si++) {
             var sc = scenes[si];
             var k = String(sc.scene);
-            var scAspect = sc.aspectRatio || S.aspectRatio || '';
-            var exists = false;
-            for (var qi = 0; qi < S.typing.queue.length; qi++) {
-              if (S.typing.queue[qi].scene === k) { exists = true; break; }
-            }
-            if (!exists) {
-              var arSuffix = scAspect ? ' ' + scAspect : '';
-              S.typing.queue.push({
-                scene: k, displayPrompt: sc.prompt,
-                aspectRatio: scAspect,
-                fullPrompt: sc.prompt + arSuffix + ' [' + msg.projectId + '|' + sc.scene + ']',
-                selected: true, status: 'queued', error: null,
-              });
-            }
+            var scAspect = sc.aspectRatio || jobAspect || '';
+            var arSuffix = scAspect ? ' aspect ratio ' + scAspect : '';
+            S.typing.queue.push({
+              projectId: pid, scene: k, displayPrompt: sc.prompt,
+              aspectRatio: scAspect,
+              fullPrompt: sc.prompt + arSuffix + ' [' + pid + '|' + sc.scene + ']',
+              selected: true, status: 'queued', error: null,
+            });
           }
           render();
           if (msg.autoType && !S.typing.active && !S.typing.starting) {
@@ -536,20 +540,22 @@
       });
 
       var idx = 0;
+      var completedProjects = {}; // Track which projects have been signaled complete
       function processNext() {
         if (S.typing.stopRequested || idx >= tq.length) {
           S.typing.active = false; S.typing.currentIndex = -1; render();
           var completed = 0, failed = 0;
           tq.forEach(function(q) { if (q.status === 'completed') completed++; if (q.status === 'error') failed++; });
           console.log('=== Done: ' + completed + ' ok, ' + failed + ' failed ===');
-          if (completed === tq.length) sendWS({ type: 'JOB_COMPLETE', projectId: S.projectId });
+          // Send JOB_COMPLETE for each project whose scenes are all done
+          _checkProjectCompletions(completedProjects);
           return;
         }
         var item = tq[idx];
         if (!item.selected || item.status === 'completed') { idx++; processNext(); return; }
 
         S.typing.currentIndex = idx; item.status = 'typing'; render();
-        sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'typing' });
+        sendWS({ type: 'STATUS_UPDATE', projectId: item.projectId, scene: parseInt(item.scene), status: 'typing' });
 
         document.querySelectorAll('generated-image img.image.loaded').forEach(function(img) {
           if (img.src) seenImageUrls[img.src] = true;
@@ -593,7 +599,7 @@
           })
           .then(function() {
             item.status = 'generating'; render();
-            sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'generating' });
+            sendWS({ type: 'STATUS_UPDATE', projectId: item.projectId, scene: parseInt(item.scene), status: 'generating' });
             return waitForImageGeneration(120000);
           })
           .then(function(imageUrl) {
@@ -602,11 +608,24 @@
               seenImageUrls[imageUrl] = true;
               return fetchImageAsBase64(imageUrl).then(function(b64) {
                 if (b64) {
-                  sendWS({ type: 'IMAGE_UPLOAD', projectId: S.projectId, scene: parseInt(item.scene),
+                  sendWS({ type: 'IMAGE_UPLOAD', projectId: item.projectId, scene: parseInt(item.scene),
                     image: { data: b64, source_url: imageUrl } });
                   item.status = 'completed'; item.imageUrl = imageUrl; S.typing.typedCount++;
-                  console.log('Scene ' + item.scene + ' completed');
-                } else { item.status = 'error'; item.error = 'Fetch failed'; }
+                  var sizeKB = Math.round(b64.length * 3 / 4 / 1024);
+                  S.syncHistory.push({
+                    projectId: item.projectId, scene: item.scene, status: 'uploaded',
+                    timestamp: new Date().toLocaleTimeString(), sizeKB: sizeKB, imageUrl: imageUrl,
+                  });
+                  console.log('[' + item.projectId + '] Scene ' + item.scene + ' completed (' + sizeKB + ' KB)');
+                  // Check if this project is now complete
+                  _checkProjectCompletions(completedProjects);
+                } else {
+                  item.status = 'error'; item.error = 'Fetch failed';
+                  S.syncHistory.push({
+                    projectId: item.projectId, scene: item.scene, status: 'failed',
+                    timestamp: new Date().toLocaleTimeString(), sizeKB: 0, imageUrl: null,
+                  });
+                }
               });
             } else if (!imageUrl) {
               item.status = 'error'; item.error = 'Timed out';
@@ -632,6 +651,23 @@
     }
 
     function stopTyping() { S.typing.stopRequested = true; render(); }
+
+    function _checkProjectCompletions(sent) {
+      // Group queue items by projectId and send JOB_COMPLETE for fully done projects
+      var projects = {};
+      S.typing.queue.forEach(function(q) {
+        if (!projects[q.projectId]) projects[q.projectId] = { total: 0, done: 0 };
+        projects[q.projectId].total++;
+        if (q.status === 'completed') projects[q.projectId].done++;
+      });
+      for (var pid in projects) {
+        if (projects[pid].done === projects[pid].total && !sent[pid]) {
+          sent[pid] = true;
+          sendWS({ type: 'JOB_COMPLETE', projectId: pid });
+          console.log('[JOB_COMPLETE] All scenes done for', pid);
+        }
+      }
+    }
 
     // ── UI Overlay ───────────────────────────────────
     function injectPanelStyles() {
@@ -694,6 +730,9 @@
         '.sts-ab.go:hover{box-shadow:0 4px 20px var(--sts-ad);}' +
         '.sts-ab.ht{background:linear-gradient(135deg,#f87171,#ef4444);color:#fff;box-shadow:0 2px 12px var(--sts-dd);}' +
         '.sts-ab.ht:hover{box-shadow:0 4px 20px var(--sts-dd);}' +
+        /* Project header in scene list */
+        '.sts-ph{padding:8px 14px;background:linear-gradient(90deg,rgba(45,212,191,.06),transparent);border-bottom:1px solid var(--sts-bd);border-top:1px solid var(--sts-bd);display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;z-index:1;backdrop-filter:blur(8px);}' +
+        '.sts-ph+.sts-ph{border-top:none;}' +
         /* Scene list */
         '.sts-scl{overflow-y:auto;border-top:1px solid var(--sts-bd);flex:1;min-height:0;}' +
         '.sts-scl::-webkit-scrollbar{width:4px;}' +
@@ -711,6 +750,8 @@
         '.sts-se{color:var(--sts-dn);font-size:10px;margin-top:3px;opacity:.85;}' +
         '.sts-sci{font-size:11px;flex-shrink:0;padding-top:1px;}' +
         '.sts-em{padding:20px 16px;color:var(--sts-tm);text-align:center;font-size:11px;}' +
+        '.sts-retry{background:none;border:1px solid var(--sts-bd);color:var(--sts-tm);font-size:9px;font-family:"JetBrains Mono",monospace;font-weight:600;padding:3px 8px;border-radius:5px;cursor:pointer;flex-shrink:0;transition:all .15s;text-transform:uppercase;letter-spacing:.5px;}' +
+        '.sts-retry:hover{color:var(--sts-ac);border-color:var(--sts-ac);background:var(--sts-ad);}' +
         /* Thumbnail */
         '.sts-th{width:32px;height:32px;border-radius:6px;object-fit:cover;border:1px solid var(--sts-bd);flex-shrink:0;cursor:pointer;transition:border-color .15s,box-shadow .15s;}' +
         '.sts-th:hover{border-color:var(--sts-ac);box-shadow:0 0 8px var(--sts-ad);}' +
@@ -725,7 +766,23 @@
         '.sts-cfg input{width:100%;background:#161a26;border:1px solid var(--sts-bd);border-radius:8px;padding:8px 10px;color:var(--sts-t1);font-family:"JetBrains Mono",monospace;font-size:11px;outline:none;transition:border-color .2s,box-shadow .2s;box-sizing:border-box;}' +
         '.sts-cfg input:focus{border-color:var(--sts-ac);box-shadow:0 0 0 3px rgba(45,212,191,.08);}' +
         '.sts-cfb{margin-top:8px;background:var(--sts-el);border:1px solid var(--sts-bd);color:var(--sts-t2);padding:6px 14px;border-radius:8px;font-family:"DM Sans",sans-serif;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}' +
-        '.sts-cfb:hover{background:#1f2536;color:var(--sts-t1);border-color:var(--sts-ac);}';
+        '.sts-cfb:hover{background:#1f2536;color:var(--sts-t1);border-color:var(--sts-ac);}' +
+        /* Tabs */
+        '.sts-tabs{display:flex;border-bottom:1px solid var(--sts-bd);flex-shrink:0;}' +
+        '.sts-tab{flex:1;padding:8px 0;text-align:center;font-family:"JetBrains Mono",monospace;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--sts-tm);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}' +
+        '.sts-tab:hover{color:var(--sts-t2);background:rgba(255,255,255,.02);}' +
+        '.sts-tab.active{color:var(--sts-ac);border-bottom-color:var(--sts-ac);}' +
+        '.sts-tab .sts-badge{display:inline-block;background:var(--sts-ad);color:var(--sts-ac);padding:1px 6px;border-radius:100px;font-size:9px;margin-left:4px;}' +
+        /* Sync list */
+        '.sts-sync-item{padding:8px 14px;border-bottom:1px solid rgba(255,255,255,.03);display:flex;align-items:center;gap:10px;transition:background .12s;}' +
+        '.sts-sync-item:hover{background:rgba(255,255,255,.02);}' +
+        '.sts-sync-icon{font-size:14px;flex-shrink:0;}' +
+        '.sts-sync-info{flex:1;min-width:0;}' +
+        '.sts-sync-title{font-size:11px;font-weight:600;color:var(--sts-t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+        '.sts-sync-meta{font-family:"JetBrains Mono",monospace;font-size:9px;color:var(--sts-tm);margin-top:2px;display:flex;gap:8px;}' +
+        '.sts-sync-status{font-family:"JetBrains Mono",monospace;font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px;}' +
+        '.sts-sync-status.ok{color:var(--sts-ok);background:var(--sts-od);}' +
+        '.sts-sync-status.fail{color:var(--sts-dn);background:var(--sts-dd);}';
       document.head.appendChild(style);
     }
 
@@ -786,9 +843,14 @@
           '</div>';
       }
 
-      var arBadge = S.aspectRatio ? ' <span style="color:var(--sts-ac);background:var(--sts-ad);padding:1px 6px;border-radius:4px;font-size:9px;margin-left:6px;">' + S.aspectRatio + '</span>' : '';
-      var projectHtml = S.projectId
-        ? '<div class="sts-pj">Project \u2022 <b>' + S.projectId + '</b>' + arBadge + '</div>'
+      // Collect unique projects from queue
+      var projectIds = [];
+      tq.forEach(function(q) {
+        if (projectIds.indexOf(q.projectId) === -1) projectIds.push(q.projectId);
+      });
+      var projectCountLabel = projectIds.length > 1 ? projectIds.length + ' projects' : (projectIds[0] || 'No project');
+      var projectHtml = projectIds.length > 0
+        ? '<div class="sts-pj">Queue \u2022 <b>' + projectCountLabel + '</b></div>'
         : '';
 
       var btnLabel = S.typing.active ? 'Stop' : 'Start Typing';
@@ -806,10 +868,42 @@
           '<button id="' + btnId + '" class="' + btnCls + '">' + btnLabel + '</button>' +
         '</div>';
 
+      // Tab switcher
+      var syncCount = S.syncHistory.length;
+      var tabsHtml =
+        '<div class="sts-tabs">' +
+          '<div class="sts-tab' + (S.activeTab === 'queue' ? ' active' : '') + '" data-tab="queue">Queue</div>' +
+          '<div class="sts-tab' + (S.activeTab === 'sync' ? ' active' : '') + '" data-tab="sync">Sync' + (syncCount > 0 ? '<span class="sts-badge">' + syncCount + '</span>' : '') + '</div>' +
+        '</div>';
+
       var scenesHtml = '';
       var stColors = { queued:'var(--sts-tm)', typing:'var(--sts-am)', generating:'#38bdf8', completed:'var(--sts-ok)', error:'var(--sts-dn)' };
       var stIcons = { queued:'\u23F3', typing:'\u270D\uFE0F', generating:'\u2728', completed:'\u2713', error:'\u2717' };
+
+      // Group scenes by project and render with project headers
+      var lastPid = null;
       tq.forEach(function(item, si) {
+        // Project header when projectId changes
+        if (item.projectId !== lastPid) {
+          lastPid = item.projectId;
+          var pDone = 0, pTotal = 0, pErr = 0;
+          tq.forEach(function(q) {
+            if (q.projectId === lastPid) { pTotal++; if (q.status === 'completed') pDone++; if (q.status === 'error') pErr++; }
+          });
+          var pPct = pTotal > 0 ? Math.round(pDone / pTotal * 100) : 0;
+          var arTag = item.aspectRatio ? '<span style="color:var(--sts-ac);background:var(--sts-ad);padding:1px 6px;border-radius:4px;font-size:9px;margin-left:6px;">' + item.aspectRatio + '</span>' : '';
+          var pStatusColor = pDone === pTotal ? 'var(--sts-ok)' : pErr > 0 ? 'var(--sts-am)' : 'var(--sts-t2)';
+          scenesHtml +=
+            '<div class="sts-ph">' +
+              '<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">' +
+                '<span style="color:' + pStatusColor + ';font-size:11px;">\u25A0</span>' +
+                '<span style="font-weight:700;font-size:11px;color:var(--sts-t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (item.projectId || 'unknown') + '</span>' +
+                arTag +
+              '</div>' +
+              '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--sts-tm);">' + pDone + '/' + pTotal + '</span>' +
+            '</div>';
+        }
+
         var sColor = stColors[item.status] || 'var(--sts-tm)';
         var sIcon = stIcons[item.status] || '\u23F3';
         var isActive = si === S.typing.currentIndex;
@@ -818,6 +912,9 @@
         var thumbHtml = item.imageUrl
           ? '<img class="sts-th" src="' + item.imageUrl + '" data-scene="' + item.scene + '" alt="Scene ' + item.scene + '">'
           : '<div class="sts-th-empty">' + sIcon + '</div>';
+        var retryHtml = (item.status === 'error' || item.status === 'completed') && !S.typing.active
+          ? '<button class="sts-retry" data-retry="' + si + '">\u21BB</button>'
+          : '';
         scenesHtml +=
           '<div class="sts-si' + (isActive ? ' act' : '') + '" style="border-left-color:' + (isActive ? sColor : 'transparent') + ';">' +
             thumbHtml +
@@ -826,11 +923,43 @@
               '<div class="sts-sp">' + (item.status === 'typing' ? '<span class="sts-spin"></span>' : item.status === 'generating' ? '<span class="sts-spin gen"></span>' : '') + short + '</div>' +
               errHtml +
             '</div>' +
+            retryHtml +
           '</div>';
       });
-      var sceneListHtml = '<div class="sts-scl">' +
-        (scenesHtml || '<div class="sts-em">No scenes loaded</div>') +
-        '</div>';
+      // Sync tab content
+      var syncHtml = '';
+      if (S.activeTab === 'sync') {
+        if (S.syncHistory.length === 0) {
+          syncHtml = '<div class="sts-em">No images synced yet</div>';
+        } else {
+          // Show newest first
+          for (var hi = S.syncHistory.length - 1; hi >= 0; hi--) {
+            var h = S.syncHistory[hi];
+            var isOk = h.status === 'uploaded';
+            var statusCls = isOk ? 'ok' : 'fail';
+            var statusLabel = isOk ? '\u2713 Sent' : '\u2717 Failed';
+            var thumbSyncHtml = h.imageUrl
+              ? '<img class="sts-th" src="' + h.imageUrl + '" alt="Scene ' + h.scene + '">'
+              : '<div class="sts-th-empty">' + (isOk ? '\u2713' : '\u2717') + '</div>';
+            syncHtml +=
+              '<div class="sts-sync-item">' +
+                thumbSyncHtml +
+                '<div class="sts-sync-info">' +
+                  '<div class="sts-sync-title">' + h.projectId + ' \u2014 Scene #' + h.scene + '</div>' +
+                  '<div class="sts-sync-meta">' +
+                    '<span>' + h.timestamp + '</span>' +
+                    (h.sizeKB > 0 ? '<span>' + h.sizeKB + ' KB</span>' : '') +
+                  '</div>' +
+                '</div>' +
+                '<span class="sts-sync-status ' + statusCls + '">' + statusLabel + '</span>' +
+              '</div>';
+          }
+        }
+      }
+
+      var contentHtml = S.activeTab === 'queue'
+        ? '<div class="sts-scl">' + (scenesHtml || '<div class="sts-em">No scenes loaded</div>') + '</div>'
+        : '<div class="sts-scl">' + syncHtml + '</div>';
 
       var settingsHtml = '';
       if (S.showSettings) {
@@ -842,17 +971,40 @@
           '</div>';
       }
 
-      panel.innerHTML = headerHtml + rateLimitHtml + projectHtml + statsHtml + sceneListHtml + settingsHtml;
+      panel.innerHTML = headerHtml + rateLimitHtml + projectHtml + statsHtml + tabsHtml + contentHtml + settingsHtml;
 
       setTimeout(function() {
         var collapseBtn = document.getElementById('sts-collapse-btn');
         if (collapseBtn) collapseBtn.onclick = function(e) { e.stopPropagation(); S.collapsed = true; localStorage.setItem('sts-gemini-collapsed', 'true'); render(); };
         var settingsToggle = document.getElementById('sts-settings-toggle');
         if (settingsToggle) settingsToggle.onclick = function(e) { e.stopPropagation(); S.showSettings = !S.showSettings; render(); };
+        // Tab switching
+        document.querySelectorAll('#sts-gemini-panel .sts-tab').forEach(function(tab) {
+          tab.onclick = function(e) { e.stopPropagation(); S.activeTab = tab.getAttribute('data-tab'); render(); };
+        });
         var startBtn = document.getElementById('sts-start-btn');
         if (startBtn) startBtn.onclick = function(e) { e.stopPropagation(); startTyping(); };
         var stopBtn = document.getElementById('sts-stop-btn');
         if (stopBtn) stopBtn.onclick = function(e) { e.stopPropagation(); stopTyping(); };
+        // Retry buttons
+        document.querySelectorAll('#sts-gemini-panel .sts-retry').forEach(function(btn) {
+          btn.onclick = function(e) {
+            e.stopPropagation();
+            var idx = parseInt(btn.getAttribute('data-retry'));
+            var item = S.typing.queue[idx];
+            if (item) {
+              console.log('[RETRY] Re-queuing scene', item.scene);
+              item.status = 'queued';
+              item.error = null;
+              item.imageUrl = null;
+              render();
+              // Auto-start if not already running
+              if (!S.typing.active && !S.typing.starting) {
+                setTimeout(function() { startTyping(); }, 500);
+              }
+            }
+          };
+        });
         // Thumbnail click → fullscreen overlay
         var thumbs = document.querySelectorAll('#sts-gemini-panel .sts-th');
         thumbs.forEach(function(th) {

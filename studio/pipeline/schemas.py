@@ -73,7 +73,9 @@ class PipelineRunRequest(BaseModel):
         return self
     # Image model override for storyboard (empty = auto from style config)
     image_model: Optional[str] = None
-    # Asset grabber options (used when pipeline reaches assets step)
+    # Storyboard provider: "gemini" (Chrome extension) or "webhook" (WaveSpeed via n8n)
+    storyboard_provider: str = "webhook"
+    # Asset grabber provider (grok videos)
     provider: str = "grok"
     aspect_ratio: str = "9:16"
     auto_type: bool = True

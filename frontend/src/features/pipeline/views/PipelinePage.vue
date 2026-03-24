@@ -1028,15 +1028,7 @@ function logStepLabel(step) {
             <span class="auto-text">Storyboard</span>
           </label>
         </div>
-        <div v-if="availableImageModels.length > 1" class="control-group">
-          <label class="control-label">Image Model</label>
-          <select v-model="imageModel" class="input-field control-select control-select--sm">
-            <option value="">Auto ({{ availableImageModels[0]?.name || 'default' }})</option>
-            <option v-for="m in availableImageModels" :key="m.id" :value="m.id">
-              {{ m.name }} (${{ m.price }})
-            </option>
-          </select>
-        </div>
+        <!-- Image Model moved to Storyboard page webhook section -->
       </div>
 
       <!-- Action row -->

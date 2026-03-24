@@ -158,10 +158,12 @@ def run_pipeline(data: PipelineRunRequest):
         "stop_after": stop_after,
         "project_id": project_id,
         "resume_from": resume_from,
-        # Asset grabber options
-        "provider": data.provider,
+        # Storyboard provider (gemini/webhook)
+        "storyboard_provider": data.storyboard_provider,
         "aspect_ratio": data.aspect_ratio,
         "auto_type": data.auto_type,
+        # Asset grabber options (grok videos)
+        "provider": data.provider,
         "grok_mode": data.grok_mode,
         "grok_quality": data.grok_quality,
         "grok_duration": data.grok_duration,
@@ -697,7 +699,8 @@ def _run_pipeline(job_id):
 
     stop_after = config.get("stop_after")
     step_seq = job.get("step_sequence", [])
-    provider = config.get("provider", "grok")
+    provider = config.get("provider", "grok")  # Assets provider (grok videos)
+    storyboard_provider = config.get("storyboard_provider", "webhook")  # Storyboard provider (gemini/webhook)
     resume_from = config.get("resume_from")
 
     all_steps = ALL_PIPELINE_STEPS
@@ -880,9 +883,14 @@ def _run_pipeline(job_id):
         if _should_skip("storyboard"):
             storyboard_result = results.get("storyboard", {})
         elif config.get("auto_storyboard", True):
-            logger.info("[{}] Step 5/8: Storyboard starting", project_id)
-            _emit(job_id, {"step": "storyboard", "status": "running",
-                           "message": f"[{project_id}] Generating reference images..."})
+            logger.info("[{}] Step 5/8: Storyboard starting | provider={}", project_id, storyboard_provider)
+            storyboard_emit = {
+                "step": "storyboard", "status": "running",
+                "message": f"[{project_id}] Generating reference images...",
+            }
+            if storyboard_provider == "gemini":
+                storyboard_emit["open_url"] = "https://gemini.google.com/app"
+            _emit(job_id, storyboard_emit)
             _t0 = time.perf_counter()
             storyboard_result = _step_storyboard(results.get("scenes", {}), config, project_id, job_id)
             step_timings["storyboard"] = round(time.perf_counter() - _t0, 2)
@@ -909,7 +917,7 @@ def _run_pipeline(job_id):
             _emit_done(job_id, project_id, results)
             return
 
-        # ── Step 6: Asset Grabber ─────────────────────────────────
+        # ── Step 6: Asset Grabber (Grok videos) ──────────────────
         _raise_if_stop_requested(job_id, step_name="assets")
         if _should_skip("assets"):
             assets_result = results.get("assets", {})
@@ -1381,12 +1389,16 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
     if _stop_requested(job_id):
         raise PipelineStopped(step_name="storyboard")
 
+    sb_provider = config.get("storyboard_provider", "webhook")
+
     payload = {
         "project_id": project_id,
         "scenes": scenes_payload,
         "aspect_ratio": aspect_ratio,
         "style": config.get("style"),
         "image_model": config.get("image_model"),
+        "provider": sb_provider,
+        "auto_type": config.get("auto_type", True),
     }
     resp = http_requests.post(f"{base_url}/api/storyboard/generate",
                               json=payload, timeout=30)

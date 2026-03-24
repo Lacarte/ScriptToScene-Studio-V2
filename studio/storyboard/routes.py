@@ -321,6 +321,35 @@ def generate(data: StoryboardGenerateRequest):
     _set_job(project_id, job)
     _save_storyboard_json(project_id, job)
 
+    provider = getattr(data, "provider", "webhook") or "webhook"
+    logger.info("[{}] Storyboard generate — provider={}, aspect={}, scenes={}",
+                project_id, provider, data.aspect_ratio, len(scenes))
+
+    if provider == "gemini":
+        # Gemini provider: queue prompts via WebSocket to Chrome extension
+        # Job is queued immediately — if extension isn't connected yet, it will
+        # receive the job as soon as it connects (tab may still be loading).
+        from studio.storyboard.gemini_ws import queue_image_job, is_extension_connected
+
+        job_msg = {
+            "type": "IMAGE_JOB",
+            "projectId": project_id,
+            "aspectRatio": data.aspect_ratio,
+            "autoType": getattr(data, "auto_type", True),
+            "scenes": [{"scene": s["scene"], "prompt": s["prompt"]} for s in scenes],
+        }
+
+        if is_extension_connected():
+            queue_image_job(job_msg)
+            logger.info("[{}] Gemini storyboard job sent — {} scenes", project_id, len(scenes))
+        else:
+            queue_image_job(job_msg)
+            logger.info("[{}] Gemini storyboard job queued (waiting for extension) — {} scenes",
+                        project_id, len(scenes))
+
+        return jsonify({"status": "running", "project_id": project_id, "total": len(scenes), "provider": "gemini"}), 202
+
+    # Default: webhook provider
     t = threading.Thread(
         target=_generate_storyboard,
         args=(project_id, scenes, data.aspect_ratio, data.webhook_url),
@@ -555,6 +584,23 @@ def grab_one(data: StoryboardGrabOneRequest):
         _save_storyboard_json(pid, j)
         _set_job(pid, j)
 
+    provider = getattr(data, "provider", "webhook") or "webhook"
+
+    if provider == "gemini":
+        from studio.storyboard.gemini_ws import queue_image_job
+
+        queue_image_job({
+            "type": "IMAGE_JOB",
+            "projectId": project_id,
+            "aspectRatio": data.aspect_ratio,
+            "autoType": getattr(data, "auto_type", True),
+            "scenes": [{"scene": data.scene, "prompt": data.prompt}],
+        })
+
+        logger.info("[{}] Gemini grab scene {} queued", project_id, scene_key)
+        return jsonify({"status": "generating", "project_id": project_id, "scene": data.scene, "provider": "gemini"}), 202
+
+    # Default: webhook
     threading.Thread(
         target=_grab_single,
         args=(project_id, scene_key, data.prompt, data.aspect_ratio, webhook_url),
