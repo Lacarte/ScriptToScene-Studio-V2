@@ -17,6 +17,8 @@ class StoryboardGenerateRequest(BaseModel):
     scenes: list[StoryboardScene] = Field(min_length=1)
     aspect_ratio: str = "9:16"
     webhook_url: Optional[str] = None
+    style: Optional[str] = None
+    image_model: Optional[str] = None
 
     model_config = {"extra": "allow"}
 

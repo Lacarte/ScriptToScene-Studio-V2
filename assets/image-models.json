@@ -1,0 +1,164 @@
+{
+  "_comment": "Maps visual styles to preferred WaveSpeed image generation models. Priority order: first model is tried first, fallbacks below.",
+  "default": {
+    "models": [
+      {
+        "id": "wavespeed-ai/flux-dev-lora-ultra-fast",
+        "name": "Flux Dev LoRA",
+        "price": 0.005,
+        "config": {
+          "loras": [{"path": "strangerzonehf/Flux-Super-Realism-LoRA", "scale": 1}],
+          "num_inference_steps": 28,
+          "guidance_scale": 3.5,
+          "output_format": "jpeg"
+        }
+      }
+    ]
+  },
+  "cinematic": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1-mini/text-to-image",
+        "name": "GPT Image 1 Mini",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      },
+      {
+        "id": "minimax/image-01/text-to-image",
+        "name": "Minimax 01",
+        "price": 0.0035,
+        "config": {}
+      }
+    ]
+  },
+  "stickman_animation": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      },
+      {
+        "id": "openai/gpt-image-1-mini/text-to-image",
+        "name": "GPT Image 1 Mini",
+        "price": 0.02,
+        "config": {}
+      }
+    ]
+  },
+  "anime": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  },
+  "comic_book": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  },
+  "watercolor": {
+    "models": [
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      },
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      }
+    ]
+  },
+  "children_storybook": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  },
+  "bw_cartoon": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  },
+  "lofi_pixel": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  }
+}

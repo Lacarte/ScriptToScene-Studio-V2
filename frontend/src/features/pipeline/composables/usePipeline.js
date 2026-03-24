@@ -113,6 +113,12 @@ watch(stopAfter, (v) => {
   else localStorage.removeItem('sts-pipeline-stop-after')
 })
 const templates = ref([])
+const imageModel = ref(localStorage.getItem('sts-image-model') || '')
+watch(imageModel, (v) => {
+  if (v) localStorage.setItem('sts-image-model', v)
+  else localStorage.removeItem('sts-image-model')
+})
+const imageModelsConfig = ref({})
 
 // ── Niche system state ──
 const nichePreset = ref(localStorage.getItem('sts-niche-preset') || '')
@@ -347,6 +353,8 @@ async function start() {
     auto_storyboard: autoStoryboard.value,
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
+    // Image model override (empty = auto from style)
+    image_model: imageModel.value || undefined,
     // Asset grabber options
     provider: localStorage.getItem('sts-asset-provider') || 'grok',
     auto_type: true,
@@ -600,6 +608,7 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     auto_storyboard: autoStoryboard.value,
     stop_after: stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
+    image_model: imageModel.value || undefined,
     provider: localStorage.getItem('sts-asset-provider') || 'grok',
     auto_type: true,
     resume_from: resumeStep,
@@ -693,6 +702,13 @@ async function init() {
   // Load niche presets
   await loadNiches()
 
+  // Load image models config
+  try {
+    imageModelsConfig.value = await api.get('/api/storyboard/image-models')
+  } catch (e) {
+    console.warn('[Pipeline] Failed to load image models:', e.message)
+  }
+
   await loadHistory()
 }
 
@@ -717,6 +733,8 @@ export function usePipeline() {
     autoScenes,
     autoStoryboard,
     stopAfter,
+    imageModel,
+    imageModelsConfig: readonly(imageModelsConfig),
     templates: readonly(templates),
 
     running: readonly(running),

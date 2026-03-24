@@ -336,7 +336,7 @@ async function loadFromGenHistory(h) {
 const router = useRouter()
 const {
   ALL_STEPS, VOICES,
-  text, voice, speed, style, autoScenes, autoStoryboard, stopAfter, templates,
+  text, voice, speed, style, autoScenes, autoStoryboard, stopAfter, imageModel, imageModelsConfig, templates,
   running, stopping, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
   failedStep, failedProjectId, stoppedStep, stoppedProjectId,
@@ -358,6 +358,12 @@ const STEPS = computed(() => {
 })
 
 const { styleLabel, styleColor } = useScenes()
+
+const availableImageModels = computed(() => {
+  const cfg = imageModelsConfig.value || {}
+  const styleCfg = cfg[style.value] || cfg['default'] || {}
+  return styleCfg.models || []
+})
 
 function formatOptionLabel(value) {
   return String(value || '')
@@ -1009,6 +1015,15 @@ function logStepLabel(step) {
             <input id="pipeline-auto-storyboard" v-model="autoStoryboard" type="checkbox" class="auto-check" :disabled="!!stopAfter">
             <span class="auto-text">Storyboard</span>
           </label>
+        </div>
+        <div v-if="availableImageModels.length > 1" class="control-group">
+          <label class="control-label">Image Model</label>
+          <select v-model="imageModel" class="input-field control-select control-select--sm">
+            <option value="">Auto ({{ availableImageModels[0]?.name || 'default' }})</option>
+            <option v-for="m in availableImageModels" :key="m.id" :value="m.id">
+              {{ m.name }} (${{ m.price }})
+            </option>
+          </select>
         </div>
       </div>
 

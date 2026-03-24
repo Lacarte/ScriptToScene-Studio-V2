@@ -71,6 +71,8 @@ class PipelineRunRequest(BaseModel):
         if self.resume_from and not self.resume_project_id:
             raise ValueError("resume_project_id is required when resume_from is set")
         return self
+    # Image model override for storyboard (empty = auto from style config)
+    image_model: Optional[str] = None
     # Asset grabber options (used when pipeline reaches assets step)
     provider: str = "grok"
     aspect_ratio: str = "9:16"

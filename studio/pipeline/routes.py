@@ -1379,6 +1379,8 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
         "project_id": project_id,
         "scenes": scenes_payload,
         "aspect_ratio": aspect_ratio,
+        "style": config.get("style"),
+        "image_model": config.get("image_model"),
     }
     resp = http_requests.post(f"{base_url}/api/storyboard/generate",
                               json=payload, timeout=30)

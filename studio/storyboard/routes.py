@@ -158,14 +158,17 @@ def _download_image(url, dest_path):
 # Background generation
 # ---------------------------------------------------------------------------
 
-def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
-    """Background thread: generate one image per scene sequentially via n8n webhook.
+def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url, style=None, image_model=None):
+    """Background thread: generate one image per scene.
+
+    Uses direct WaveSpeed API when the style has a non-default model configured
+    in assets/image-models.json. Falls back to n8n webhook for default styles.
 
     Style consistency comes from prompt engineering — the scene blueprint
     generator appends a shared style/palette suffix to every scene prompt.
-    No seed or image-to-image chaining is used, as testing showed those
-    techniques freeze composition rather than unifying style.
     """
+    from .wavespeed import is_default_model, generate_image
+
     job = _get_job(project_id)
     if not job:
         return
@@ -173,6 +176,13 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
     project_dir = _storyboard_dir(project_id)
     os.makedirs(project_dir, exist_ok=True)
     url = webhook_url or N8N_STORYBOARD_WEBHOOK_URL
+
+    # Decide whether to use direct WaveSpeed API or n8n webhook
+    use_direct = image_model or (style and not is_default_model(style))
+    if use_direct:
+        logger.info("[{}] Using direct WaveSpeed API (style={}, model={})", project_id, style, image_model or "auto")
+    else:
+        logger.info("[{}] Using n8n webhook for storyboard", project_id)
 
     total = len(scenes)
     ready = 0
@@ -188,23 +198,34 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
         _save_storyboard_json(project_id, job)
 
         try:
-            payload = {
-                "image_prompt": prompt,
-                "aspect_ratio": aspect_ratio,
-                "wavespeed_api_key": WAVESPEED_API_KEY,
-                "project_id": project_id,
-                "scene": scene_num,
-            }
+            if use_direct:
+                # Direct WaveSpeed API — model selected by style config or override
+                logger.info("[{}] Storyboard scene {} — direct WaveSpeed", project_id, scene_num)
+                image_url = generate_image(
+                    prompt=prompt,
+                    style=style or "default",
+                    aspect_ratio=aspect_ratio,
+                    model_override=image_model,
+                )
+            else:
+                # n8n webhook (original path)
+                payload = {
+                    "image_prompt": prompt,
+                    "aspect_ratio": aspect_ratio,
+                    "wavespeed_api_key": WAVESPEED_API_KEY,
+                    "project_id": project_id,
+                    "scene": scene_num,
+                }
 
-            logger.info("[{}] Storyboard scene {} — calling webhook", project_id, scene_num)
-            result = call_webhook(
-                url, payload, timeout=300,
-                label=f"Storyboard scene {scene_num}",
-            )
+                logger.info("[{}] Storyboard scene {} — calling webhook", project_id, scene_num)
+                result = call_webhook(
+                    url, payload, timeout=300,
+                    label=f"Storyboard scene {scene_num}",
+                )
 
-            image_url = result.get("image_url")
-            if not image_url:
-                raise RuntimeError(f"Webhook returned no image_url: {result}")
+                image_url = result.get("image_url")
+                if not image_url:
+                    raise RuntimeError(f"Webhook returned no image_url: {result}")
 
             # Download into scene subfolder
             job["scene_statuses"][scene_key]["status"] = "downloading"
@@ -269,6 +290,13 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url):
 # Routes
 # ---------------------------------------------------------------------------
 
+@storyboard_bp.route("/api/storyboard/image-models")
+def list_image_models():
+    """Return the image-models.json config for frontend use."""
+    from .wavespeed import _load_image_models
+    return jsonify(_load_image_models())
+
+
 @storyboard_bp.route("/api/storyboard/generate", methods=["POST"])
 @validate_json(StoryboardGenerateRequest)
 def generate(data: StoryboardGenerateRequest):
@@ -296,6 +324,7 @@ def generate(data: StoryboardGenerateRequest):
     t = threading.Thread(
         target=_generate_storyboard,
         args=(project_id, scenes, data.aspect_ratio, data.webhook_url),
+        kwargs={"style": data.style, "image_model": data.image_model},
         daemon=True,
     )
     t.start()
