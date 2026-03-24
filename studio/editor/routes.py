@@ -208,6 +208,38 @@ def browse_folder():
     return jsonify({"path": folder.replace("\\", "/")})
 
 
+def _auto_sync_after_export(filename, output_path):
+    """Auto-sync exported video to sync folder if enabled in settings."""
+    if not filename or not output_path or not os.path.isfile(output_path):
+        return
+
+    cfg = safe_json_read(APP_CONFIG_PATH) or {}
+    defaults = cfg.get("defaults", {})
+    user = cfg.get("user", {})
+
+    if not (user.get("sts-auto-sync", defaults.get("sts-auto-sync", False))):
+        return
+
+    sync_folder = (user.get("sts-sync-folder") or defaults.get("sts-sync-folder") or "").strip()
+    if not sync_folder:
+        return
+
+    sync_folder = os.path.normpath(sync_folder)
+    if not os.path.isdir(sync_folder):
+        return
+
+    dest_dir = os.path.join(sync_folder, "exports")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    dest_path = os.path.join(dest_dir, filename)
+    if os.path.isfile(dest_path) and os.path.getsize(dest_path) == os.path.getsize(output_path):
+        logger.info("Auto-sync: {} already up to date", filename)
+        return
+
+    shutil.copy2(output_path, dest_path)
+    logger.success("Auto-synced: {} → {}", filename, dest_dir)
+
+
 class ExportCancelled(Exception):
     """Raised when an export job is cancelled while processing."""
 
@@ -1528,6 +1560,12 @@ def _process_video(job_id, export_data, output_path):
         job["step"] = "done"
         job["message"] = "Export completed successfully"
         job["completed_at"] = time.time()
+
+        # Auto-sync to folder if enabled
+        try:
+            _auto_sync_after_export(job.get("output_filename", ""), output_path)
+        except Exception as sync_err:
+            logger.warning("[{}] Auto-sync failed: {}", short_id, sync_err)
 
     except ExportCancelled as e:
         logger.info("[{}] Export cancelled", short_id)
