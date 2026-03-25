@@ -35,4 +35,5 @@ export const STYLE_NAMES = {
   stickman_animation: 'Stickman Animation',
   two_choices: 'Two Choices',
   lofi_pixel: 'Lo-Fi Cozy Pixel',
+  existential: 'Existential',
 }

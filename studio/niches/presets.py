@@ -23,8 +23,9 @@ _VALID_TAGS = ("tiktok", "youtube", "shorts", "trending")
 _DEFAULT_VOICE = "af_heart"
 _DEFAULT_SPEED = 1.0
 
-# ── Hardcoded defaults (used if JSON file is missing) ────────────────────────
+# ── Hardcoded defaults (always available as built-in presets) ─────────────────
 _DEFAULTS = {
+    # ── Dark Psychology ──
     "dark_psychology_stickman": {
         "label": "Stickman Dark Psychology",
         "description": "Minimalist stickman visuals with dark psychological narration. Suspenseful tone, fast-paced for TikTok/Shorts.",
@@ -46,6 +47,248 @@ _DEFAULTS = {
         "voice": "af_heart",
         "speed": 0.95,
         "tags": ["youtube", "shorts"],
+    },
+    "dark_psychology_noir": {
+        "label": "Noir Dark Psychology",
+        "description": "Film noir shadows and mystery atmosphere for dark psychology content. Deep male voice, slow pacing.",
+        "category": "psychology",
+        "niche": "dark_psychology",
+        "visual_style": "noir",
+        "story_tone": "suspenseful",
+        "voice": "bm_daniel",
+        "speed": 0.9,
+        "tags": ["youtube"],
+    },
+    # ── True Crime ──
+    "true_crime_cinematic": {
+        "label": "Cinematic True Crime",
+        "description": "Cinematic visuals for true crime investigations. Evidence boards, forensic detail, dramatic narration.",
+        "category": "crime",
+        "niche": "true_crime",
+        "visual_style": "cinematic",
+        "story_tone": "dramatic",
+        "voice": "bm_daniel",
+        "speed": 0.9,
+        "tags": ["youtube"],
+    },
+    "true_crime_noir": {
+        "label": "Noir True Crime",
+        "description": "Noir-style true crime with rain-slicked streets, venetian blind shadows, and cold case atmosphere.",
+        "category": "crime",
+        "niche": "true_crime",
+        "visual_style": "noir",
+        "story_tone": "dramatic",
+        "voice": "bm_daniel",
+        "speed": 0.85,
+        "tags": ["youtube"],
+    },
+    # ── Horror ──
+    "horror_cinematic": {
+        "label": "Cinematic Horror",
+        "description": "Dark, atmospheric horror with cinematic quality. Eerie shadows, desaturated tones, slow-building dread.",
+        "category": "horror",
+        "niche": "horror",
+        "visual_style": "dark_horror",
+        "story_tone": "suspenseful",
+        "voice": "af_heart",
+        "speed": 0.9,
+        "tags": ["youtube", "shorts"],
+    },
+    "horror_stickman": {
+        "label": "Stickman Horror",
+        "description": "Simple stickman art with unsettling horror stories. Minimal visuals let the narration build tension.",
+        "category": "horror",
+        "niche": "horror",
+        "visual_style": "stickman_animation",
+        "story_tone": "suspenseful",
+        "voice": "af_heart",
+        "speed": 0.95,
+        "tags": ["tiktok", "shorts"],
+    },
+    "horror_anime": {
+        "label": "Anime Horror",
+        "description": "Japanese anime-style horror with expressive characters, vivid colors, and supernatural dread.",
+        "category": "horror",
+        "niche": "horror",
+        "visual_style": "anime",
+        "story_tone": "suspenseful",
+        "voice": "af_heart",
+        "speed": 1.0,
+        "tags": ["shorts"],
+    },
+    # ── Philosophy ──
+    "stoicism_cinematic": {
+        "label": "Cinematic Stoicism",
+        "description": "Cinematic visuals with stoic philosophy narration. Marble busts, ancient ruins, educational tone.",
+        "category": "philosophy",
+        "niche": "stoicism",
+        "visual_style": "cinematic",
+        "story_tone": "educational",
+        "voice": "bm_daniel",
+        "speed": 0.9,
+        "tags": ["youtube", "shorts"],
+    },
+    "stoicism_stickman": {
+        "label": "Stickman Stoicism",
+        "description": "Whiteboard-style stickman illustrations for stoic philosophy lessons. Clear, educational, bite-sized.",
+        "category": "philosophy",
+        "niche": "stoicism",
+        "visual_style": "stickman_animation",
+        "story_tone": "educational",
+        "voice": "bm_daniel",
+        "speed": 0.95,
+        "tags": ["tiktok", "shorts"],
+    },
+    "existential_philosophy": {
+        "label": "Existential Philosophy",
+        "description": "Futuristic abstract visuals with philosophical narration. High-contrast mind exploration for deep-thinking content.",
+        "category": "philosophy",
+        "niche": "existential",
+        "visual_style": "existential",
+        "story_tone": "dramatic",
+        "voice": "af_heart",
+        "speed": 0.9,
+        "tags": ["youtube", "shorts"],
+    },
+    # ── Motivation ──
+    "motivation_stickman": {
+        "label": "Stickman Motivation",
+        "description": "Simple stickman visuals with uplifting, inspirational narration. Call-to-action endings.",
+        "category": "motivation",
+        "niche": "motivation",
+        "visual_style": "stickman_animation",
+        "story_tone": "inspirational",
+        "voice": "af_heart",
+        "speed": 1.0,
+        "tags": ["tiktok", "shorts"],
+    },
+    "motivation_cinematic": {
+        "label": "Cinematic Motivation",
+        "description": "Epic cinematic visuals with inspirational narration. Sunrise shots, mountain peaks, triumphant moments.",
+        "category": "motivation",
+        "niche": "motivation",
+        "visual_style": "motivational",
+        "story_tone": "inspirational",
+        "voice": "bm_daniel",
+        "speed": 0.95,
+        "tags": ["youtube", "shorts"],
+    },
+    "wealth_cinematic": {
+        "label": "Cinematic Wealth & Luxury",
+        "description": "Luxury lifestyle visuals with aspirational narration. Penthouses, supercars, golden hour opulence.",
+        "category": "motivation",
+        "niche": "wealth",
+        "visual_style": "cinematic",
+        "story_tone": "inspirational",
+        "voice": "bm_daniel",
+        "speed": 0.95,
+        "tags": ["youtube", "shorts"],
+    },
+    # ── Religion ──
+    "biblical_cinematic": {
+        "label": "Cinematic Biblical",
+        "description": "Cinematic visuals for biblical stories. Divine lighting, sacred imagery, dramatic weight.",
+        "category": "religion",
+        "niche": "biblical",
+        "visual_style": "cinematic",
+        "story_tone": "dramatic",
+        "voice": "bm_daniel",
+        "speed": 0.85,
+        "tags": ["youtube"],
+    },
+    "biblical_gothic": {
+        "label": "Gothic Biblical",
+        "description": "Gothic cathedral aesthetics for religious content. Candlelight, stained glass, dark Victorian elegance.",
+        "category": "religion",
+        "niche": "biblical",
+        "visual_style": "gothic",
+        "story_tone": "dramatic",
+        "voice": "bm_daniel",
+        "speed": 0.85,
+        "tags": ["youtube"],
+    },
+    # ── Mystery / Conspiracy ──
+    "conspiracy_noir": {
+        "label": "Noir Conspiracy",
+        "description": "Film noir visuals for conspiracy and occult stories. Secret symbols, shadowy agendas, hidden truths.",
+        "category": "mystery",
+        "niche": "conspiracy",
+        "visual_style": "noir",
+        "story_tone": "suspenseful",
+        "voice": "bm_daniel",
+        "speed": 0.9,
+        "tags": ["youtube"],
+    },
+    "conspiracy_cinematic": {
+        "label": "Cinematic Conspiracy",
+        "description": "Cinematic visuals for conspiracy theories. Underground bunkers, coded manuscripts, suspenseful reveals.",
+        "category": "mystery",
+        "niche": "conspiracy",
+        "visual_style": "cinematic",
+        "story_tone": "suspenseful",
+        "voice": "bm_daniel",
+        "speed": 0.9,
+        "tags": ["youtube", "shorts"],
+    },
+    # ── Romance ──
+    "anime_romance": {
+        "label": "Anime Romance",
+        "description": "Anime-style romance with expressive characters, vivid colors, and emotional story arcs.",
+        "category": "romance",
+        "niche": "romance",
+        "visual_style": "anime",
+        "story_tone": "dramatic",
+        "voice": "af_heart",
+        "speed": 1.0,
+        "tags": ["shorts"],
+    },
+    # ── Children ──
+    "children_storybook_wholesome": {
+        "label": "Wholesome Storybook",
+        "description": "Soft pastel storybook illustrations with gentle, age-appropriate narration. Warm and magical.",
+        "category": "children",
+        "niche": "children",
+        "visual_style": "children_storybook",
+        "story_tone": "wholesome",
+        "voice": "af_heart",
+        "speed": 0.9,
+        "tags": ["youtube"],
+    },
+    # ── Sci-Fi ──
+    "scifi_cyberpunk": {
+        "label": "Cyberpunk Sci-Fi",
+        "description": "Neon-soaked cyberpunk visuals for sci-fi stories. Futuristic tech, rain-slicked chrome, dramatic pacing.",
+        "category": "science",
+        "niche": "sci_fi",
+        "visual_style": "cyberpunk",
+        "story_tone": "dramatic",
+        "voice": "bm_daniel",
+        "speed": 1.0,
+        "tags": ["youtube", "shorts"],
+    },
+    # ── Reddit / Anecdote ──
+    "reddit_story_cinematic": {
+        "label": "Reddit Story",
+        "description": "Relatable everyday visuals for Reddit-style personal stories. Candid, grounded, dramatic twists.",
+        "category": "anecdote",
+        "niche": "reddit",
+        "visual_style": "reddit_story",
+        "story_tone": "dramatic",
+        "voice": "af_heart",
+        "speed": 1.0,
+        "tags": ["tiktok", "youtube", "shorts"],
+    },
+    # ── Two Choices ──
+    "two_choices_cinematic": {
+        "label": "Two Things Can Happen",
+        "description": "Split-screen branching choices. Every scene shows two possible outcomes side by side.",
+        "category": "psychology",
+        "niche": "two_choices",
+        "visual_style": "two_choices",
+        "story_tone": "suspenseful",
+        "voice": "af_heart",
+        "speed": 1.0,
+        "tags": ["tiktok", "shorts"],
     },
 }
 
@@ -222,7 +465,7 @@ def _normalize_presets_map(raw_presets: dict) -> dict:
 
 
 def _load_presets() -> dict:
-    """Load presets from JSON file, falling back to defaults when needed."""
+    """Load presets from JSON file, merging in any new built-in defaults."""
     raw_presets = None
     if _PRESETS_FILE.exists():
         try:
@@ -231,7 +474,14 @@ def _load_presets() -> dict:
         except (OSError, json.JSONDecodeError):
             raw_presets = None
     normalized = _normalize_presets_map(raw_presets or _DEFAULTS)
-    return normalized or _normalize_presets_map(_DEFAULTS)
+    if not normalized:
+        normalized = _normalize_presets_map(_DEFAULTS)
+    # Merge any new built-in defaults that aren't in the saved file
+    defaults_normalized = _normalize_presets_map(_DEFAULTS)
+    for key, value in defaults_normalized.items():
+        if key not in normalized:
+            normalized[key] = value
+    return normalized
 
 
 def _save_presets(presets: dict) -> None:

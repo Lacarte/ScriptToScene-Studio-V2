@@ -31,6 +31,7 @@ DEFAULT_NEGATIVE_RULES = {
     "true_crime": ["avoid cartoon stylization", "avoid heroic glamorization"],
     "dark_psychology": ["avoid cozy warmth", "avoid playful color palettes"],
     "stickman_animation": ["avoid photorealism", "avoid dense backgrounds"],
+    "existential": ["avoid visual clutter", "avoid warm cozy aesthetics", "avoid cartoon stylization"],
 }
 
 

@@ -849,6 +849,29 @@ SCENE_STYLE_TEMPLATES = [
             "Style: classic newspaper editorial cartoon meets Mike Mignola ink work — bold, graphic, instantly readable."
         ),
     },
+    {
+        "id": "existential",
+        "type": "hybrid",
+        "category": "philosophy",
+        "name": "Existential",
+        "description": "Futuristic, high-contrast abstract visuals for philosophical mind exploration",
+        "color": "#06B6D4",
+        "style_prompt": (
+            "Generate intricate, high-contrast abstract image prompts that evoke philosophical thought and existential reflection. "
+            "Visual identity: futuristic sophistication — clean geometric forms dissolving into organic complexity, "
+            "neural networks rendered as luminous architecture, thought processes visualized as crystalline structures. "
+            "Use stark contrasts: deep voids against brilliant focal points, negative space as metaphor for the unknown. "
+            "Environments: infinite abstract mindscapes, corridors of mirrors reflecting fragmented identity, "
+            "vast cosmic voids with singular illuminated elements, architectural impossibilities suggesting expanded consciousness. "
+            "Lighting: precise, clinical illumination with isolated pools of light in darkness — think Kubrick meets Escher. "
+            "Color palette: predominantly monochromatic with surgical accents of cyan, electric white, or pale gold. "
+            "Composition: symmetrical frames broken by a single asymmetric element, extreme depth of field, "
+            "figures silhouetted against vast abstract spaces suggesting scale of thought vs. self. "
+            "Textures: polished surfaces, fine-line engravings, circuit-like patterns merging with organic neural branching. "
+            "Style: between Beeple's intricate futurism, Olafur Eliasson's light installations, and Zdzisław Beksiński's philosophical surrealism — "
+            "but always clean, clear, and contemplative rather than chaotic."
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
