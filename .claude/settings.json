@@ -1,4 +1,11 @@
 {
   "enableAgentTeam": true,
-  "skills": []
+  "skills": [],
+  "permissions": {
+    "allow": [
+      "Bash(for f:*)",
+      "Bash(do mv:*)",
+      "Bash(done)"
+    ]
+  }
 }
