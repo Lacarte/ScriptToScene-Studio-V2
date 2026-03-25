@@ -73,6 +73,56 @@
 
 ---
 
+## PHASE 1.5: CONTENT FACTORY (Week 5-7)
+> Goal: Data-driven production — stop guessing, replicate what already works
+
+Reference: `_dev/docs/content-monetization-strategy.md`
+
+### 1.5A. Viral Scout (Find What Works)
+| Task | Effort | Impact |
+|------|--------|--------|
+| TikTok trending scraper (niche + views + date filter) | 4 hrs | Know what to make |
+| YouTube Shorts trending via RSS/API | 3 hrs | Cross-platform intel |
+| Filter: 500K+ views, <7 days old, low-follower accounts | 2 hrs | Signal vs noise |
+| Dashboard: top 10 trending per niche, updated daily | 3 hrs | Daily decision tool |
+| "Inspire" button → load viral video metadata into pipeline | 2 hrs | 1-click replication |
+
+### 1.5B. Daily Queue System
+| Task | Effort | Impact |
+|------|--------|--------|
+| Content calendar: assign 1 preset per day per niche | 2 hrs | Consistency |
+| Auto-queue: generate tomorrow's batch overnight | 2 hrs | Wake up to content |
+| Niche rotation config (e.g. Mon=psychology, Tue=horror) | 1 hr | Variety |
+| Daily quota tracker (X/5 videos produced today) | 1 hr | Accountability |
+
+### 1.5C. Pre-Monetization Optimization (30-45s Shorts)
+| Task | Effort | Impact |
+|------|--------|--------|
+| Enforce max 45s for shorts presets | Done | Algorithm-friendly |
+| Auto-remove audio dead air (silence trimmer) | 2 hrs | Higher retention |
+| Scene duration cap: max 3s per scene in segmenter | 1 hr | Faster pacing |
+| Hook library: 50+ proven opening lines per niche | 3 hrs | Stop scroll |
+| Voice speed auto-boost per niche (in TTS, not editor) | Done | Dynamic pacing |
+
+### 1.5D. Multi-Platform Delivery
+| Task | Effort | Impact |
+|------|--------|--------|
+| Google Drive auto-upload after export | 2 hrs | PC → phone bridge |
+| Export 3 variants: TikTok (9:16), YouTube (9:16), FB (9:16) | 1 hr | Platform metadata |
+| Filename convention: `{niche}_{date}_{platform}.mp4` | 30 min | Organization |
+| Post checklist per video (title, tags, description template) | 2 hrs | SEO consistency |
+
+### 1.5E. Account Warming Tracker
+| Task | Effort | Impact |
+|------|--------|--------|
+| Account registry: platform + country + status + age | 2 hrs | Track all accounts |
+| Warming schedule: Day 1-5 checklist per account | 1 hr | Don't post too early |
+| "Ready to post" indicator per account | 30 min | Know when to start |
+
+**Phase 1.5 Exit Criteria:** Data-driven niche selection, 5 optimized shorts/day, multi-platform delivery pipeline.
+
+---
+
 ## PHASE 2: MULTI-CHANNEL SCALING (Week 7-10)
 > Goal: 3-5 niche channels producing daily content, first revenue
 
@@ -285,6 +335,7 @@ Main PC (Flask server)  ◄──── WiFi/LAN ────►  Laptop (Chrome
 | 2026-03-24 | Gemini as second image provider | Reduce Grok dependency, faster rate limits |
 | 2026-03-25 | Chrome Canary as dedicated browser | Separate from daily browsing, persist sessions |
 | 2026-03-25 | Duration per preset | Shorts vs long-form optimization |
+| 2026-03-25 | Content Factory phase (1.5) | Replicate viral content, not guess — data-driven production |
 
 ---
 
