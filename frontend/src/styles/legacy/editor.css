@@ -799,9 +799,6 @@
     opacity: 0.7;
 }
 
-/* ---- Media Card ---- */
-.med-pane { padding: 10px; }
-
 .med-card {
     display: flex;
     flex-direction: column;
@@ -878,6 +875,215 @@
     50% { opacity: 0.3; }
 }
 
+/* ═══ Unified Media Panel Sections ═══ */
+/* ---- Media Card (mirrors efx-card pattern) ---- */
+.med-pane { padding: 10px; }
+
+.med-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 100%;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background:
+        radial-gradient(circle at top left, rgba(130, 170, 220, 0.06), transparent 40%),
+        linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)),
+        var(--bg-surface);
+}
+
+/* Card header — same layout as efx-card-header */
+.med-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.med-card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.med-card-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(130, 170, 220, 0.1);
+    color: rgba(130, 170, 220, 0.9);
+    flex-shrink: 0;
+}
+.med-card-header h3 {
+    margin: 1px 0 0;
+    font-size: 0.85rem;
+    line-height: 1.2;
+    color: var(--text);
+}
+.med-card-kicker {
+    margin: 0;
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(130, 170, 220, 0.9);
+}
+.med-card-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: rgba(130, 170, 220, 0.08);
+    color: rgba(130, 170, 220, 0.9);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+.med-card-badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(130, 170, 220, 0.9);
+    animation: efx-pulse 2s ease-in-out infinite;
+}
+
+/* ---- Card sub-sections (Scene Assets / SFX / Music / Project Assets) ---- */
+.med-card-section {
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    padding-top: 2px;
+}
+.med-card-section:first-of-type {
+    border-top: none;
+    padding-top: 0;
+}
+
+.med-card-section-header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 6px 2px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s;
+    border-radius: 5px;
+}
+.med-card-section-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.med-card-section-chevron {
+    transition: transform 0.15s;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    opacity: 0.35;
+}
+.med-card-section-header[aria-expanded="false"] .med-card-section-chevron,
+.med-section-toggle[aria-expanded="false"] .med-card-section-chevron {
+    transform: rotate(-90deg);
+}
+
+.med-card-section-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    flex-shrink: 0;
+}
+.med-card-section-icon--media {
+    background: rgba(180, 200, 220, 0.08);
+    color: rgba(180, 200, 220, 0.7);
+}
+.med-card-section-icon--sfx {
+    background: rgba(255, 183, 77, 0.08);
+    color: rgba(255, 183, 77, 0.7);
+}
+.med-card-section-icon--music {
+    background: rgba(167, 139, 250, 0.08);
+    color: rgba(167, 139, 250, 0.7);
+}
+.med-card-section-icon--assets {
+    background: rgba(78, 205, 196, 0.08);
+    color: rgba(78, 205, 196, 0.7);
+}
+
+.med-card-section-title {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.01em;
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.med-card-section-count {
+    font-size: 0.5rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    padding: 1px 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    letter-spacing: 0.03em;
+    min-width: 16px;
+    text-align: center;
+}
+.med-card-section-count:empty { display: none; }
+.med-card-section-count--media {
+    background: rgba(180, 200, 220, 0.06);
+    color: rgba(180, 200, 220, 0.55);
+}
+.med-card-section-count--sfx {
+    background: rgba(255, 183, 77, 0.06);
+    color: rgba(255, 183, 77, 0.6);
+}
+.med-card-section-count--music {
+    background: rgba(167, 139, 250, 0.06);
+    color: rgba(167, 139, 250, 0.6);
+}
+.med-card-section-count--assets {
+    background: rgba(78, 205, 196, 0.06);
+    color: rgba(78, 205, 196, 0.6);
+}
+
+.med-card-section-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    opacity: 0;
+    transition: all 0.15s;
+}
+.med-card-section-header:hover .med-card-section-action {
+    opacity: 0.5;
+}
+.med-card-section-action:hover {
+    opacity: 1 !important;
+    border-color: var(--border);
+    color: var(--accent);
+}
+
+.med-card-section-body {
+    padding: 0 0 4px 2px;
+}
+
 .med-card-empty-hint {
     margin-top: 8px;
     font-size: 0.62rem;
@@ -951,18 +1157,21 @@
     border-radius: 50%;
     background: rgba(255, 183, 77, 0.9);
 }
-.sfx-library-hint {
-    font-size: 0.6rem;
-    color: var(--text-muted);
-    opacity: 0.6;
-    margin: 0 0 8px;
+.sfx-library-card {
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
 }
 .sfx-library-list {
-    max-height: 260px;
+    max-height: 280px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
+    padding-left: 0;
+    margin-left: 0;
 }
 .sfx-library-loading,
 .sfx-library-empty {
@@ -979,7 +1188,7 @@
 
 /* SFX category (collapsible group) */
 .sfx-category {
-    margin-bottom: 2px;
+    margin-bottom: 1px;
 }
 .sfx-category-toggle {
     display: flex;
@@ -1106,6 +1315,25 @@
     color: var(--text-muted);
     opacity: 0.6;
     font-family: var(--font-mono);
+}
+
+/* Multi-clip FX track lane */
+.fx-multi-clip-lane {
+    position: relative;
+    min-height: 28px;
+    width: 100%;
+}
+.fx-multi-clip {
+    position: absolute;
+    top: 0;
+    height: 100%;
+}
+.fx-multi-clip .audio-clip-tag {
+    font-size: 0.5rem;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Drop target highlight on audio tracks container */
@@ -1873,23 +2101,7 @@
 }
 
 /* ---- Project Asset Browser ---- */
-.project-assets-browser {
-    margin-top: 12px;
-    border-top: 1px solid var(--border);
-    padding-top: 8px;
-}
-
-.asset-browser-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 2px 8px;
-    font-size: 0.68rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
+/* .asset-browser-header replaced by .med-card-section-header */
 
 .asset-browser-count {
     font-weight: 400;
@@ -1916,14 +2128,47 @@
 }
 
 .asset-scene-group {
-    margin-bottom: 10px;
+    margin-bottom: 4px;
 }
 
 .asset-scene-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 2px;
+    border: none;
+    background: none;
+    cursor: pointer;
     font-family: var(--font-mono);
     font-size: 0.6rem;
+    font-weight: 600;
     color: var(--text-muted);
-    padding: 2px 0 4px;
+    text-align: left;
+    border-radius: 4px;
+    transition: background 0.12s;
+}
+.asset-scene-label:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+.asset-scene-label span:first-of-type {
+    flex: 1;
+}
+.asset-scene-chevron {
+    transition: transform 0.15s;
+    opacity: 0.4;
+    flex-shrink: 0;
+}
+.asset-scene-label[aria-expanded="false"] .asset-scene-chevron {
+    transform: rotate(-90deg);
+}
+.asset-scene-count {
+    font-size: 0.52rem;
+    color: var(--text-muted);
+    opacity: 0.4;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
 }
 
 .asset-scene-grid {

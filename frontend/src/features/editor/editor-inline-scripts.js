@@ -372,6 +372,17 @@ export function initEditorInlineScripts() {
             });
         });
 
+        // ---- Collapsible media sections (Scene Assets, SFX, etc.) ----
+        document.querySelectorAll('.med-section-toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const section = btn.dataset.section;
+                const body = btn.parentElement.querySelector(`.med-section-body[data-section="${section}"]`);
+                const expanded = btn.getAttribute('aria-expanded') === 'true';
+                btn.setAttribute('aria-expanded', String(!expanded));
+                if (body) body.style.display = expanded ? 'none' : '';
+            });
+        });
+
         // ---- Aspect Ratio Dropdown ----
         (function () {
             const ratioBtn = document.getElementById('ratio-btn');

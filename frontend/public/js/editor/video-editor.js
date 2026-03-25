@@ -254,12 +254,42 @@ function createAudioTrack(overrides = {}) {
         muted: false,
         element: null,           // HTML Audio element
         color: AUDIO_TRACK_COLORS.voice,
+        clips: null,             // Multi-clip array for FX tracks: [{id, file, path, label, duration, offset, element}]
     };
     // Apply saved volume if no explicit volume override
     if (savedVol !== null && !('volume' in overrides)) {
         defaults.volume = savedVol;
     }
     return { ...defaults, ...overrides };
+}
+
+let _nextClipId = 1;
+function nextClipId() { return `clip_${_nextClipId++}`; }
+
+/**
+ * Add a clip to a multi-clip FX track. Creates the audio element and wires metadata.
+ */
+function addClipToFxTrack(track, sfx, offset) {
+    if (!track.clips) track.clips = [];
+    const clip = {
+        id: nextClipId(),
+        file: sfx.filename,
+        path: sfx.path,
+        label: sfx.label || sfx.filename || 'FX',
+        duration: sfx.duration || 0,
+        offset: Math.round(Math.max(0, offset) * 1000) / 1000,
+        element: null,
+    };
+    const audio = new Audio(sfx.path);
+    clip.element = audio;
+    audio.addEventListener('loadedmetadata', () => {
+        clip.duration = audio.duration;
+        renderAllAudioTracks();
+    });
+    track.clips.push(clip);
+    // Mark track as loaded if it has clips
+    track.loaded = true;
+    return clip;
 }
 
 function getVoiceTrack() {
@@ -1531,18 +1561,28 @@ function _buildSavePayload() {
             segment_end: s.segment_end ?? null,
             segment_duration: s.segment_duration ?? null
         })),
-        audio_tracks: EditorState.audioTracks.map(t => ({
-            id: t.id, label: t.label, type: t.type,
-            file: t.file || null, path: t.path || null,
-            duration: t.duration || 0,
-            timelineOffset: t.timelineOffset || 0,
-            startOffset: t.startOffset || 0,
-            trimmedDuration: t.trimmedDuration || null,
-            volume: t.volume ?? 1.0, loop: !!t.loop, muted: !!t.muted,
-            duckingEnabled: !!t.duckingEnabled,
-            duckingLevel: t.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL,
-            fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0
-        })),
+        audio_tracks: EditorState.audioTracks.map(t => {
+            const base = {
+                id: t.id, label: t.label, type: t.type,
+                file: t.file || null, path: t.path || null,
+                duration: t.duration || 0,
+                timelineOffset: t.timelineOffset || 0,
+                startOffset: t.startOffset || 0,
+                trimmedDuration: t.trimmedDuration || null,
+                volume: t.volume ?? 1.0, loop: !!t.loop, muted: !!t.muted,
+                duckingEnabled: !!t.duckingEnabled,
+                duckingLevel: t.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL,
+                fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0,
+            };
+            if (t.clips && t.clips.length > 0) {
+                base.clips = t.clips.map(c => ({
+                    id: c.id, file: c.file, path: c.path,
+                    label: c.label, duration: c.duration || 0,
+                    offset: c.offset || 0,
+                }));
+            }
+            return base;
+        }),
         captions,
         captionsEnabled: !!EditorState.captionsEnabled,
         overlays: EditorState.overlays.length ? EditorState.overlays : null,
@@ -2951,12 +2991,13 @@ function _applyExtraState(saved) {
 
     // Restore non-voice audio tracks (music, fx)
     for (const t of (saved.audio_tracks || [])) {
-        if (!t.file || !t.path) continue;
+        const hasClips = t.clips && t.clips.length > 0;
+        if (!hasClips && (!t.file || !t.path)) continue;
         const track = createAudioTrack({
             label: (t.label || t.type).replace(/\s*\d+$/, ''),
             type: t.type,
-            file: t.file,
-            path: t.path,
+            file: t.file || null,
+            path: t.path || null,
             duration: t.duration || 0,
             timelineOffset: t.timelineOffset || t.timeline_offset || 0,
             startOffset: t.startOffset || t.start_offset || 0,
@@ -2969,21 +3010,43 @@ function _applyExtraState(saved) {
             fadeOut: t.fadeOut || 0
         });
         track.muted = !!t.muted;
-        EditorState.audioTracks.push(track);
 
-        const audio = new Audio(t.path);
-        track.element = audio;
-        audio.loop = track.loop;
-        ensureTrackGainNode(track);
-        audio.addEventListener('loadedmetadata', () => {
+        // Restore multi-clip FX tracks
+        if (hasClips) {
+            track.clips = [];
             track.loaded = true;
-            track.duration = audio.duration;
-            renderAllAudioTracks();
-        });
-        audio.addEventListener('error', () => {
-            track.error = true;
-            renderAllAudioTracks();
-        });
+            for (const c of t.clips) {
+                const clip = {
+                    id: c.id || nextClipId(),
+                    file: c.file, path: c.path, label: c.label,
+                    duration: c.duration || 0, offset: c.offset || 0,
+                    element: null,
+                };
+                const clipAudio = new Audio(c.path);
+                clip.element = clipAudio;
+                clipAudio.addEventListener('loadedmetadata', () => {
+                    clip.duration = clipAudio.duration;
+                    renderAllAudioTracks();
+                });
+                track.clips.push(clip);
+            }
+        } else {
+            const audio = new Audio(t.path);
+            track.element = audio;
+            audio.loop = track.loop;
+            ensureTrackGainNode(track);
+            audio.addEventListener('loadedmetadata', () => {
+                track.loaded = true;
+                track.duration = audio.duration;
+                renderAllAudioTracks();
+            });
+            audio.addEventListener('error', () => {
+                track.error = true;
+                renderAllAudioTracks();
+            });
+        }
+
+        EditorState.audioTracks.push(track);
     }
 
     // Restore edit history
@@ -3072,12 +3135,13 @@ function _restoreSavedEditorState() {
     // Restore non-voice audio tracks (music, fx)
     const nonVoiceTracks = saved.audio_tracks || [];
     for (const t of nonVoiceTracks) {
-        if (!t.file || !t.path) continue;
+        const hasClips = t.clips && t.clips.length > 0;
+        if (!hasClips && (!t.file || !t.path)) continue;
         const track = createAudioTrack({
             label: (t.label || t.type).replace(/\s*\d+$/, ''),
             type: t.type,
-            file: t.file,
-            path: t.path,
+            file: t.file || null,
+            path: t.path || null,
             duration: t.duration || 0,
             timelineOffset: t.timelineOffset || t.timeline_offset || 0,
             startOffset: t.startOffset || t.start_offset || 0,
@@ -3090,23 +3154,44 @@ function _restoreSavedEditorState() {
             fadeOut: t.fadeOut || 0
         });
         track.muted = !!t.muted;
-        EditorState.audioTracks.push(track);
 
-        // Load audio element with Web Audio gain node for volume boost
-        const audio = new Audio(t.path);
-        track.element = audio;
-        audio.loop = track.loop;
-        ensureTrackGainNode(track);
-
-        audio.addEventListener('loadedmetadata', () => {
+        if (hasClips) {
+            track.clips = [];
             track.loaded = true;
-            track.duration = audio.duration;
-            renderAllAudioTracks();
-        });
-        audio.addEventListener('error', () => {
-            track.error = true;
-            renderAllAudioTracks();
-        });
+            for (const c of t.clips) {
+                const clip = {
+                    id: c.id || nextClipId(),
+                    file: c.file, path: c.path, label: c.label,
+                    duration: c.duration || 0, offset: c.offset || 0,
+                    element: null,
+                };
+                const clipAudio = new Audio(c.path);
+                clip.element = clipAudio;
+                clipAudio.addEventListener('loadedmetadata', () => {
+                    clip.duration = clipAudio.duration;
+                    renderAllAudioTracks();
+                });
+                track.clips.push(clip);
+            }
+        } else {
+            // Load audio element with Web Audio gain node for volume boost
+            const audio = new Audio(t.path);
+            track.element = audio;
+            audio.loop = track.loop;
+            ensureTrackGainNode(track);
+
+            audio.addEventListener('loadedmetadata', () => {
+                track.loaded = true;
+                track.duration = audio.duration;
+                renderAllAudioTracks();
+            });
+            audio.addEventListener('error', () => {
+                track.error = true;
+                renderAllAudioTracks();
+            });
+        }
+
+        EditorState.audioTracks.push(track);
     }
 
     // Restore edit history
@@ -3668,6 +3753,26 @@ async function loadProjectData(data) {
                 if (EditorState.isPlaying) {
                     applyAudioFades();
                     for (const track of EditorState.audioTracks) {
+                        // Multi-clip FX tracks
+                        if (track.clips && track.clips.length > 0) {
+                            for (const clip of track.clips) {
+                                if (!clip.element) continue;
+                                const clipStart = clip.offset;
+                                const clipEnd = clip.offset + (clip.duration || 0);
+                                const isActive = !track.muted && time >= clipStart && time < clipEnd;
+                                if (!isActive) {
+                                    if (!clip.element.paused) clip.element.pause();
+                                    continue;
+                                }
+                                if (clip.element.paused) {
+                                    clip.element.currentTime = time - clipStart;
+                                    applyTrackVolumeLive(track, track.volume, { resumeContext: true });
+                                    clip.element.play().catch(() => {});
+                                }
+                            }
+                            continue;
+                        }
+
                         if (!track.element || !track.file) continue;
 
                         const trackStart = getTrackTimelineOffset(track);
@@ -3713,6 +3818,11 @@ async function loadProjectData(data) {
                 EditorState.isPlaying = false;
                 // Stop all audio tracks
                 for (const track of EditorState.audioTracks) {
+                    if (track.clips && track.clips.length > 0) {
+                        for (const clip of track.clips) {
+                            if (clip.element) { clip.element.pause(); clip.element.currentTime = 0; }
+                        }
+                    }
                     if (track.element) {
                         track.element.pause();
                         track.element.currentTime = getTrackStartOffset(track);
@@ -4325,7 +4435,7 @@ function updateSceneClipThumb(sceneId, mediaPath, isVideo = false, videoThumbUrl
  * Render the media panel grid with scene thumbnails (CapCut-style)
  */
 function renderMediaGrid() {
-    const pane = document.querySelector('.tab-pane[data-pane="media"] .med-card') ||
+    const pane = document.querySelector('.med-section-body[data-section="media-assets"]') ||
                  document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
     if (!pane || !EditorState.scenes.length) return;
 
@@ -4366,6 +4476,10 @@ function renderMediaGrid() {
             </div>`;
     }).join('');
 
+    // Update scene count badge
+    const sceneCountEl = document.getElementById('scene-assets-count');
+    if (sceneCountEl) sceneCountEl.textContent = EditorState.scenes.length;
+
     // Click to select scene
     grid.querySelectorAll('.media-grid-item').forEach(item => {
         item.addEventListener('click', () => {
@@ -4393,47 +4507,33 @@ async function loadProjectAssets() {
     const projectId = EditorState.project?.id;
     if (!projectId) return;
 
-    const pane = document.querySelector('.tab-pane[data-pane="media"] .med-card') ||
-                 document.querySelector('.tab-pane[data-pane="media"] .tab-pane-body');
-    if (!pane) return;
+    const slot = document.getElementById('project-assets-slot');
+    if (!slot) return;
 
     // Reuse cache if same project
     if (_projectAssetsCacheId === projectId && _projectAssetsCache) {
-        renderProjectAssets(pane, _projectAssetsCache);
+        renderProjectAssets(slot, _projectAssetsCache);
         return;
     }
 
     // Show loading state
-    let container = pane.querySelector('.project-assets-browser');
-    if (!container) {
-        container = document.createElement('div');
-        container.className = 'project-assets-browser';
-        pane.appendChild(container);
-    }
-    container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">Loading project assets...</p>';
+    slot.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">Loading project assets...</p>';
 
     try {
         const data = await fetch(`/api/assets/project/${encodeURIComponent(projectId)}`).then(r => r.ok ? r.json() : null);
         if (!data || !data.scenes) {
-            container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">No assets found for this project</p>';
+            slot.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">No assets found for this project</p>';
             return;
         }
         _projectAssetsCache = data;
         _projectAssetsCacheId = projectId;
-        renderProjectAssets(pane, data);
+        renderProjectAssets(slot, data);
     } catch (e) {
-        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">Could not load assets</p>';
+        slot.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">Could not load assets</p>';
     }
 }
 
-function renderProjectAssets(pane, data) {
-    let container = pane.querySelector('.project-assets-browser');
-    if (!container) {
-        container = document.createElement('div');
-        container.className = 'project-assets-browser';
-        pane.appendChild(container);
-    }
-
+function renderProjectAssets(slot, data) {
     const sceneEntries = Object.entries(data.scenes)
         .sort(([a], [b]) => parseInt(a) - parseInt(b));
 
@@ -4444,37 +4544,35 @@ function renderProjectAssets(pane, data) {
     });
 
     if (totalFiles === 0) {
-        container.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">No asset files on disk</p>';
+        slot.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">No asset files on disk</p>';
         return;
     }
 
-    let html = `<div class="asset-browser-header">
-        <span>Project Assets</span>
-        <span style="display:flex;align-items:center;gap:6px">
-            <span class="asset-browser-count">${totalFiles} files</span>
-            <button class="asset-reload-btn" onclick="window.openProjectAssetsFolder()" title="Open folder">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            </button>
-            <button class="asset-reload-btn" onclick="window.reloadProjectAssets()" title="Reload assets">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            </button>
-        </span>
-    </div>`;
+    let html = `<div class="med-card-section">
+        <button class="med-card-section-header med-section-toggle" aria-expanded="true" data-section="project-assets">
+            <svg class="med-card-section-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            <span class="med-card-section-icon med-card-section-icon--assets">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </span>
+            <span class="med-card-section-title">Project Assets</span>
+            <span class="med-card-section-count med-card-section-count--assets">${totalFiles}</span>
+            <span class="med-card-section-action" onclick="event.stopPropagation(); window.openProjectAssetsFolder()" title="Open folder">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            </span>
+            <span class="med-card-section-action" onclick="event.stopPropagation(); window.reloadProjectAssets()" title="Reload assets">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </span>
+        </button>`;
 
-    html += '<div class="asset-browser-scenes">';
+    html += '<div class="med-card-section-body med-section-body" data-section="project-assets"><div class="asset-scene-grid">';
     sceneEntries.forEach(([sceneNum, info]) => {
         const files = info.files_on_disk || [];
         if (!files.length) return;
 
-        // Find matching editor scene by index
         const editorScene = EditorState.scenes.find(s => s.id === parseInt(sceneNum));
         const sceneLabel = editorScene?.image_prompt
             ? editorScene.image_prompt.substring(0, 25)
             : `Scene ${sceneNum}`;
-
-        html += `<div class="asset-scene-group">
-            <div class="asset-scene-label">Scene ${sceneNum}</div>
-            <div class="asset-scene-grid">`;
 
         files.forEach(file => {
             const isActive = editorScene && editorScene.mediaUrl === file.url;
@@ -4482,22 +4580,34 @@ function renderProjectAssets(pane, data) {
                           draggable="true"
                           data-url="${file.url.replace(/"/g, '&quot;')}"
                           data-scene="${sceneNum}"
-                          title="${sceneLabel} — ${file.filename}">
+                          title="Scene ${sceneNum} — ${file.filename}">
                 ${/\.(mp4|webm|mov|avi|mkv)$/i.test(file.url) ? `<video src="${file.url}#t=0.1" muted preload="auto" style="width:100%;height:100%;object-fit:cover"
                     onmouseenter="this.play();this.nextElementSibling.style.opacity='0'"
                     onmouseleave="this.pause();this.currentTime=0.1;this.nextElementSibling.style.opacity='1'"></video><span class="vid-play-icon" style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity 0.2s;z-index:1"><svg width="8" height="8" fill="white" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg></span><span class="media-video-badge" data-tooltip="Video"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg></span>` : `<img src="${file.url}" alt="${file.filename}" loading="lazy"><span class="media-image-badge" data-tooltip="Image"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>`}
                 ${isActive ? '<span class="asset-thumb-active">In use</span>' : ''}
             </div>`;
         });
-
-        html += '</div></div>';
     });
-    html += '</div>';
+    html += '</div></div></div>';
 
-    container.innerHTML = html;
+    slot.innerHTML = html;
+
+    // Wire collapsible Project Assets header
+    slot.querySelectorAll('.med-section-toggle').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            if (e.target.closest('.med-card-section-action')) return;
+            const section = btn.dataset.section;
+            // Search siblings in the same container
+            const parent = btn.parentElement;
+            const body = parent.querySelector(`.med-section-body[data-section="${section}"]`);
+            const expanded = btn.getAttribute('aria-expanded') === 'true';
+            btn.setAttribute('aria-expanded', String(!expanded));
+            if (body) body.style.display = expanded ? 'none' : '';
+        });
+    });
 
     // Attach drag events to asset thumbnails
-    container.querySelectorAll('.asset-thumb[draggable]').forEach(thumb => {
+    slot.querySelectorAll('.asset-thumb[draggable]').forEach(thumb => {
         thumb.addEventListener('dragstart', (e) => {
             const url = thumb.dataset.url;
             e.dataTransfer.setData('text/plain', url);
@@ -5139,7 +5249,25 @@ function renderAllAudioTracks() {
 
         // Build clip HTML
         let clipHTML;
-        if (track.file || track.path) {
+        const hasClips = track.clips && track.clips.length > 0;
+        if (hasClips) {
+            // Multi-clip FX track: render each clip independently
+            const selectedClass = EditorState.selectedAudioTrack?.id === track.id ? ' selected' : '';
+            clipHTML = track.clips.map(clip => {
+                const cDur = clip.duration || 1;
+                const cWidth = cDur * pps;
+                const cOffsetPx = clip.offset * pps;
+                return `
+                    <div class="audio-clip-wrap fx-multi-clip" data-track-id="${track.id}" data-clip-id="${clip.id}" style="position:absolute; width:${cWidth}px; left:${cOffsetPx}px;">
+                        <span class="audio-clip-tag" style="background:${color}">${clip.label || clip.file || 'FX'}</span>
+                        <div class="audio-clip-universal${selectedClass}" data-track-id="${track.id}" data-clip-id="${clip.id}" style="width:100%; border-left: 3px solid ${color};">
+                            <span class="audio-clip-duration">${formatTimestamp(cDur)}</span>
+                        </div>
+                    </div>`;
+            }).join('');
+            // Wrap in a relative container so absolute clips position correctly
+            clipHTML = `<div class="fx-multi-clip-lane" data-track-id="${track.id}" style="position:relative; width:100%; min-height:28px;">${clipHTML}</div>`;
+        } else if (track.file || track.path) {
             const duration = isVoice
                 ? (getTrackTimelineDuration(track, EditorState.project?.totalDuration || timelineDur) || track.duration || EditorState.project?.totalDuration || 0)
                 : (getTrackTimelineDuration(track, timelineDur) || (track.loop ? timelineDur : track.duration));
@@ -5167,7 +5295,7 @@ function renderAllAudioTracks() {
         } else {
             const emptyLabel = isVoice
                 ? 'voice audio'
-                : (track.type === 'fx' ? 'sound FX' : 'audio');
+                : (track.type === 'fx' ? 'sound FX — drag SFX here' : 'audio');
             clipHTML = `
                 <div class="audio-placeholder audio-track-empty-target"
                      data-track-id="${track.id}"
@@ -5205,6 +5333,7 @@ function renderAllAudioTracks() {
     setupAllAudioResizeHandlers();
     setupAudioResizeHoverIndicators(container);
     setupAudioTrackDragHandlers(container);
+    if (typeof _wireFxTrackDropZones === 'function') _wireFxTrackDropZones();
 
     // Wire up speaker buttons (volume popup)
     container.querySelectorAll('.audio-track-speaker-btn').forEach(btn => {
@@ -5594,12 +5723,18 @@ function removeAudioTrack(trackId) {
     }
     // Save track data for undo (strip non-serializable element)
     const trackIndex = EditorState.audioTracks.indexOf(track);
-    const { element, ...trackData } = track;
+    const { element, clips, ...trackData } = track;
     trackData._index = trackIndex;
 
     if (element) {
         element.pause();
         element.src = '';
+    }
+    // Clean up multi-clip elements
+    if (clips) {
+        for (const clip of clips) {
+            if (clip.element) { clip.element.pause(); clip.element.src = ''; }
+        }
     }
     EditorState.audioTracks = EditorState.audioTracks.filter(t => t.id !== trackId);
     recalculateDuration();
@@ -8705,12 +8840,23 @@ function syncAudioPlayback() {
  */
 function seekAudio(time) {
     for (const track of EditorState.audioTracks) {
-        if (!track.element) continue;
-        if (track.loop) {
-            track.element.currentTime = getTrackPlaybackTime(track, time);
-        } else {
-            track.element.currentTime = getTrackPlaybackTime(track, time);
+        // Multi-clip FX tracks
+        if (track.clips && track.clips.length > 0) {
+            for (const clip of track.clips) {
+                if (!clip.element) continue;
+                const clipStart = clip.offset;
+                const clipEnd = clip.offset + (clip.duration || 0);
+                if (time >= clipStart && time < clipEnd) {
+                    clip.element.currentTime = time - clipStart;
+                } else {
+                    clip.element.pause();
+                    clip.element.currentTime = 0;
+                }
+            }
+            continue;
         }
+        if (!track.element) continue;
+        track.element.currentTime = getTrackPlaybackTime(track, time);
     }
 }
 
@@ -9751,59 +9897,106 @@ function _sfxEsc(value) {
     return div.innerHTML;
 }
 
-// Handle SFX drop onto the audio tracks area (timeline)
+// Expose for inline onclick in editor-shell HTML
+window.loadSfxLibrary = loadSfxLibrary;
+
+// Handle SFX drop onto the timeline (audio tracks or timeline-tracks)
 function _initSfxDropZone() {
+    // Accept drops on both the audio-tracks-container and the full timeline-tracks area
+    const zones = [
+        document.getElementById('audio-tracks-container'),
+        document.getElementById('timeline-tracks'),
+    ].filter(Boolean);
+
+    for (const zone of zones) {
+        zone.addEventListener('dragover', (e) => {
+            if (e.dataTransfer.types.includes('application/x-sfx')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+                zone.classList.add('sfx-drop-target');
+            }
+        });
+        zone.addEventListener('dragleave', (e) => {
+            if (!zone.contains(e.relatedTarget)) {
+                zone.classList.remove('sfx-drop-target');
+            }
+        });
+        zone.addEventListener('drop', (e) => {
+            zone.classList.remove('sfx-drop-target');
+            const raw = e.dataTransfer.getData('application/x-sfx');
+            if (!raw) return;
+            e.preventDefault();
+
+            let sfx;
+            try { sfx = JSON.parse(raw); } catch { return; }
+
+            // Calculate timeline offset from drop X position
+            const timelineTracks = document.getElementById('timeline-tracks');
+            let dropTime = 0;
+            if (timelineTracks) {
+                const rect = timelineTracks.getBoundingClientRect();
+                const relativeX = e.clientX - rect.left - TRACK_BASE_OFFSET + timelineTracks.scrollLeft;
+                dropTime = Math.max(0, pixelsToTime(Math.max(0, relativeX)));
+                dropTime = Math.round(dropTime * 1000) / 1000;
+            }
+
+            // Check if dropped on an existing FX track lane — add clip to it
+            const dropTarget = e.target.closest('[data-audio-track-id]') || e.target.closest('[data-track-id]');
+            let targetTrackId = dropTarget?.dataset?.audioTrackId || dropTarget?.dataset?.trackId;
+            let targetTrack = targetTrackId ? getAudioTrackById(targetTrackId) : null;
+
+            // Only add to existing FX tracks (not voice/music)
+            if (targetTrack && targetTrack.type === 'fx') {
+                addClipToFxTrack(targetTrack, sfx, dropTime);
+                selectAudioTrack(targetTrack.id);
+                renderAllAudioTracks();
+                saveProjectEdits();
+                showToast(`SFX "${sfx.label || sfx.filename}" added at ${formatTimecode(dropTime)}`, 'success');
+                return;
+            }
+
+            // Find an existing empty FX track (no file, no clips) to use
+            let emptyFxTrack = EditorState.audioTracks.find(t =>
+                t.type === 'fx' && !t.file && !t.path && (!t.clips || t.clips.length === 0)
+            );
+
+            if (emptyFxTrack) {
+                addClipToFxTrack(emptyFxTrack, sfx, dropTime);
+                selectAudioTrack(emptyFxTrack.id);
+                renderAllAudioTracks();
+                saveProjectEdits();
+                showToast(`SFX "${sfx.label || sfx.filename}" added at ${formatTimecode(dropTime)}`, 'success');
+                return;
+            }
+
+            // No existing FX track — create a new multi-clip FX track
+            const fxTrack = createAudioTrack({
+                label: 'SFX',
+                type: 'fx',
+                volume: _getSavedVolume('fx') ?? 1.0,
+                color: AUDIO_TRACK_COLORS.fx,
+            });
+            addClipToFxTrack(fxTrack, sfx, dropTime);
+            EditorState.audioTracks.push(fxTrack);
+            selectAudioTrack(fxTrack.id);
+            renderAllAudioTracks();
+            saveProjectEdits();
+            showToast(`SFX "${sfx.label || sfx.filename}" added at ${formatTimecode(dropTime)}`, 'success');
+        });
+    }
+}
+
+// Also wire FX track lanes to accept SFX drops after render
+function _wireFxTrackDropZones() {
     const container = document.getElementById('audio-tracks-container');
     if (!container) return;
-
-    container.addEventListener('dragover', (e) => {
-        if (e.dataTransfer.types.includes('application/x-sfx')) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
-            container.classList.add('sfx-drop-target');
-        }
-    });
-    container.addEventListener('dragleave', (e) => {
-        if (!container.contains(e.relatedTarget)) {
-            container.classList.remove('sfx-drop-target');
-        }
-    });
-    container.addEventListener('drop', (e) => {
-        container.classList.remove('sfx-drop-target');
-        const raw = e.dataTransfer.getData('application/x-sfx');
-        if (!raw) return;
-        e.preventDefault();
-
-        let sfx;
-        try { sfx = JSON.parse(raw); } catch { return; }
-
-        // Create an FX track with the dropped sound
-        const fxTrack = createAudioTrack({
-            label: sfx.label || sfx.filename || 'FX',
-            type: 'fx',
-            file: sfx.filename,
-            path: sfx.path,
-            duration: sfx.duration || 0,
-            volume: _getSavedVolume('fx') ?? 1.0,
-            color: AUDIO_TRACK_COLORS.fx,
-            loaded: true,
+    container.querySelectorAll('.fx-multi-clip-lane, .audio-track-empty-target').forEach(lane => {
+        lane.addEventListener('dragover', (e) => {
+            if (e.dataTransfer.types.includes('application/x-sfx')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+            }
         });
-
-        const audio = new Audio(sfx.path);
-        fxTrack.element = audio;
-        ensureTrackGainNode(fxTrack);
-
-        audio.addEventListener('loadedmetadata', () => {
-            fxTrack.duration = audio.duration;
-            fxTrack.loaded = true;
-            renderAllAudioTracks();
-        });
-
-        EditorState.audioTracks.push(fxTrack);
-        selectAudioTrack(fxTrack.id);
-        renderAllAudioTracks();
-        saveProjectEdits();
-        showToast(`SFX "${sfx.label || sfx.filename}" added to timeline`, 'success');
     });
 }
 
@@ -10638,6 +10831,16 @@ function handleKeyboard(e) {
         seekAudio(EditorState.playbackPosition);
         updateTimeScrubber();
         updatePlayhead();
+    }
+
+    // D - Delete selected audio track (SFX/music)
+    if (e.code === 'KeyD' && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        const track = EditorState.selectedAudioTrack;
+        if (track && track.type !== 'voice') {
+            e.preventDefault();
+            removeAudioTrack(track.id);
+            showToast(`Removed "${track.label || track.file || 'track'}"`, 'info');
+        }
     }
 
     // Escape - Deselect

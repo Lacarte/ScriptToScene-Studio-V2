@@ -185,7 +185,7 @@ export const EDITOR_SHELL_HTML = `
                                     </span>
                                     <div>
                                         <p class="med-card-kicker">Media</p>
-                                        <h3>Scene Assets</h3>
+                                        <h3>Asset Browser</h3>
                                     </div>
                                 </div>
                                 <span class="med-card-badge">
@@ -207,49 +207,72 @@ export const EDITOR_SHELL_HTML = `
                                         <circle cx="8.5" cy="8.5" r="1.5"/>
                                         <path d="M21 15l-5-5L5 21"/>
                                     </svg>
-                                    <p class="tab-instruction-title">Browse your project media</p>
-                                    <p class="tab-instruction-hint">Import a project to populate scene thumbnails and asset browser.</p>
+                                    <p class="tab-instruction-title">Browse and manage your media</p>
+                                    <p class="tab-instruction-hint">Drag scene assets onto the timeline. Browse sound effects and music to add audio. Click to preview, drag to add.</p>
                                 </div>
                             </div>
 
-                            <!-- Empty state -->
-                            <div class="media-empty">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                    <rect x="2" y="2" width="20" height="20" rx="2"/>
-                                    <circle cx="8.5" cy="8.5" r="1.5"/>
-                                    <path d="M21 15l-5-5L5 21"/>
-                                </svg>
-                                <p>Project media will appear here</p>
-                                <p class="med-card-empty-hint">Import a project to populate scene thumbnails and asset browser.</p>
-                            </div>
-
-                        </div>
-
-                        <!-- Sound Effects Library -->
-                        <div class="sfx-library-card">
-                            <div class="sfx-library-header">
-                                <div class="sfx-library-header-left">
-                                    <span class="sfx-library-icon">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M2 12h4l3-9 4 18 3-9h4"/>
-                                        </svg>
+                            <!-- ═══ Scene Assets ═══ -->
+                            <div class="med-card-section">
+                                <button class="med-card-section-header med-section-toggle" aria-expanded="true" data-section="media-assets">
+                                    <svg class="med-card-section-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                                    <span class="med-card-section-icon med-card-section-icon--media">
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                                     </span>
-                                    <div>
-                                        <p class="sfx-library-kicker">Sound FX</p>
-                                        <h3>Effects Library</h3>
+                                    <span class="med-card-section-title">Scene Assets</span>
+                                    <span class="med-card-section-count med-card-section-count--media" id="scene-assets-count"></span>
+                                </button>
+                                <div class="med-card-section-body med-section-body" data-section="media-assets">
+                                    <div class="media-empty">
+                                        <p>Import a project to browse scene media</p>
                                     </div>
                                 </div>
-                                <span class="sfx-library-badge">
-                                    <span class="sfx-library-badge-dot"></span>
-                                    <span id="sfx-library-count">0</span> files
-                                </span>
                             </div>
-                            <p class="sfx-library-hint">Drag onto the FX timeline to add sound effects</p>
-                            <div id="sfx-library-list" class="sfx-library-list">
-                                <div class="sfx-library-loading">Loading effects...</div>
-                            </div>
-                        </div>
 
+                            <!-- ═══ Sound Effects ═══ -->
+                            <div class="med-card-section">
+                                <button class="med-card-section-header med-section-toggle" aria-expanded="true" data-section="sfx-library">
+                                    <svg class="med-card-section-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                                    <span class="med-card-section-icon med-card-section-icon--sfx">
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-9 4 18 3-9h4"/></svg>
+                                    </span>
+                                    <span class="med-card-section-title">Sound Effects</span>
+                                    <span class="med-card-section-count med-card-section-count--sfx" id="sfx-library-count">0</span>
+                                    <span class="med-card-section-action" onclick="event.stopPropagation(); window.loadSfxLibrary()" title="Reload SFX">
+                                        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                    </span>
+                                </button>
+                                <div class="med-card-section-body med-section-body" data-section="sfx-library">
+                                    <div id="sfx-library-list" class="sfx-library-list">
+                                        <div class="sfx-library-loading">Loading effects...</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ═══ Music ═══ -->
+                            <div class="med-card-section">
+                                <button class="med-card-section-header med-section-toggle" aria-expanded="true" data-section="music-library">
+                                    <svg class="med-card-section-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                                    <span class="med-card-section-icon med-card-section-icon--music">
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/><path d="M8 17.5V5l12-2v12.5"/></svg>
+                                    </span>
+                                    <span class="med-card-section-title">Music</span>
+                                    <span class="med-card-section-count med-card-section-count--music" id="music-library-count">0</span>
+                                    <span class="med-card-section-action" onclick="event.stopPropagation(); window.loadMusicLibrary()" title="Reload music">
+                                        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                    </span>
+                                </button>
+                                <div class="med-card-section-body med-section-body" data-section="music-library">
+                                    <div id="music-library-list" class="music-library-list">
+                                        <div class="sfx-library-loading">Loading music...</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ═══ Project Assets (injected by JS) ═══ -->
+                            <div id="project-assets-slot"></div>
+
+                        </div>
                     </div>
                 </div>
                 <div class="tab-pane" data-pane="effects">
