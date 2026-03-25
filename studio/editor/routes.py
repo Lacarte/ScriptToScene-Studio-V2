@@ -485,24 +485,31 @@ def _resolve_project_captions(data: dict, project_id: str):
         )
         return
 
-    # Fallback: build captions from alignment data
+    # Fallback: build captions from alignment data (grouped with style)
     align_path = os.path.join(ALIGN_DIR, source_folder, "alignment.json")
     if os.path.isfile(align_path):
         try:
+            from studio.captions.routes import (
+                _get_default_caption_preset_id,
+                _group_words_into_captions,
+                CAPTION_PRESETS,
+            )
             align_data = safe_json_read(align_path)
-            words = align_data.get("alignment", [])
-            if words:
-                data["captions"] = {
-                    "project_id": project_id,
-                    "source_folder": source_folder,
-                    "words": [
-                        {"word": w["word"], "start": w.get("begin", 0), "end": w.get("end", 0)}
-                        for w in words
-                    ],
-                    "transcript": align_data.get("transcript", ""),
-                    "from_alignment": True,
-                }
-                logger.info("Built captions from alignment for {}", project_id)
+            alignment = align_data.get("alignment", [])
+            if alignment:
+                captions_list = _group_words_into_captions(alignment, words_per_group=3)
+                if captions_list:
+                    preset_id = _get_default_caption_preset_id()
+                    cap_style = dict(CAPTION_PRESETS.get(preset_id, CAPTION_PRESETS.get("bold_popup", {})))
+                    cap_style["preset"] = preset_id
+                    data["captions"] = {
+                        "project_id": project_id,
+                        "source_folder": source_folder,
+                        "captions": captions_list,
+                        "style": cap_style,
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                    }
+                    logger.info("Built {} captions from alignment for {}", len(captions_list), project_id)
         except Exception as e:
             logger.debug("Failed to build captions from alignment: {}", e)
 
@@ -934,9 +941,11 @@ def assemble_project_for_editor(project_id):
 
     # Resolve captions — auto-generate from alignment if none exist
     _resolve_project_captions(editor_data, safe_id)
-    if editor_data.get("captions"):
+    _cap = editor_data.get("captions") or {}
+    _has_entries = bool(_cap.get("entries") or _cap.get("captions"))
+    if _has_entries:
         editor_data["captionsEnabled"] = True
-    if not editor_data.get("captions") and source_folder:
+    if not _has_entries and source_folder:
         try:
             from studio.captions.routes import (
                 _get_default_caption_preset_id,
