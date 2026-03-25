@@ -224,6 +224,32 @@ export const EDITOR_SHELL_HTML = `
                             </div>
 
                         </div>
+
+                        <!-- Sound Effects Library -->
+                        <div class="sfx-library-card">
+                            <div class="sfx-library-header">
+                                <div class="sfx-library-header-left">
+                                    <span class="sfx-library-icon">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M2 12h4l3-9 4 18 3-9h4"/>
+                                        </svg>
+                                    </span>
+                                    <div>
+                                        <p class="sfx-library-kicker">Sound FX</p>
+                                        <h3>Effects Library</h3>
+                                    </div>
+                                </div>
+                                <span class="sfx-library-badge">
+                                    <span class="sfx-library-badge-dot"></span>
+                                    <span id="sfx-library-count">0</span> files
+                                </span>
+                            </div>
+                            <p class="sfx-library-hint">Drag onto the FX timeline to add sound effects</p>
+                            <div id="sfx-library-list" class="sfx-library-list">
+                                <div class="sfx-library-loading">Loading effects...</div>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
                 <div class="tab-pane" data-pane="effects">

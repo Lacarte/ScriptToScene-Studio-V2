@@ -9623,6 +9623,196 @@ window.removeBgMusic = function () {
     if (musicTrack) removeAudioTrack(musicTrack.id);
 };
 
+// ============================================================
+// Sound Effects Library (Media panel sub-pane)
+// ============================================================
+
+let _sfxPreviewAudio = null;
+let _sfxAllFiles = []; // flat list for drag index lookups
+
+function loadSfxLibrary() {
+    fetch('/api/sfx/library')
+        .then(r => r.ok ? r.json() : { categories: [] })
+        .then(data => renderSfxLibrary(data.categories || []))
+        .catch(() => renderSfxLibrary([]));
+}
+
+function renderSfxLibrary(categories) {
+    const list = document.getElementById('sfx-library-list');
+    const countEl = document.getElementById('sfx-library-count');
+    if (!list) return;
+
+    // Build flat file list for drag references
+    _sfxAllFiles = [];
+    for (const cat of categories) {
+        for (const f of cat.files) _sfxAllFiles.push(f);
+    }
+    if (countEl) countEl.textContent = String(_sfxAllFiles.length);
+
+    if (!_sfxAllFiles.length) {
+        list.innerHTML = '<div class="sfx-library-empty">No sound effects found<br><span>Place .mp3/.wav files in assets/sounds/sfx/</span></div>';
+        return;
+    }
+
+    let globalIdx = 0;
+    list.innerHTML = categories.map((cat, catIdx) => {
+        const itemsHtml = cat.files.map(f => {
+            const idx = globalIdx++;
+            return `<div class="sfx-item" data-sfx-index="${idx}" draggable="true" title="${_sfxEsc(f.label)}">
+                <button class="sfx-preview-btn" data-sfx-path="${f.path}" aria-label="Preview">
+                    <svg class="sfx-icon-wave" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 12h4l3-9 4 18 3-9h4"/>
+                    </svg>
+                    <svg class="sfx-icon-play" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                        <polygon points="5,3 19,12 5,21"/>
+                    </svg>
+                    <svg class="sfx-icon-stop" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                        <rect x="4" y="4" width="16" height="16" rx="2"/>
+                    </svg>
+                </button>
+                <div class="sfx-item-info">
+                    <span class="sfx-item-label">${_sfxEsc(f.label)}</span>
+                    <span class="sfx-item-meta">${f.duration ? formatTimecode(f.duration) : ''} · ${f.size_kb}KB</span>
+                </div>
+            </div>`;
+        }).join('');
+
+        return `<div class="sfx-category" data-cat="${catIdx}">
+            <button class="sfx-category-toggle" aria-expanded="true">
+                <svg class="sfx-category-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                <span class="sfx-category-name">${_sfxEsc(cat.name)}</span>
+                <span class="sfx-category-count">${cat.files.length}</span>
+            </button>
+            <div class="sfx-category-items">${itemsHtml}</div>
+        </div>`;
+    }).join('');
+
+    // Wire category collapse toggles
+    list.querySelectorAll('.sfx-category-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const cat = btn.closest('.sfx-category');
+            const items = cat.querySelector('.sfx-category-items');
+            const expanded = btn.getAttribute('aria-expanded') === 'true';
+            btn.setAttribute('aria-expanded', String(!expanded));
+            items.style.display = expanded ? 'none' : '';
+        });
+    });
+
+    // Wire preview buttons
+    list.querySelectorAll('.sfx-preview-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const path = btn.dataset.sfxPath;
+            const item = btn.closest('.sfx-item');
+            const wasPlaying = item.classList.contains('sfx-playing');
+
+            _sfxStopPreview();
+            if (wasPlaying) return;
+
+            _sfxPreviewAudio = new Audio(path);
+            _sfxPreviewAudio.volume = 0.7;
+            item.classList.add('sfx-playing');
+            _sfxPreviewAudio.play().catch(() => {});
+            _sfxPreviewAudio.addEventListener('ended', () => {
+                item.classList.remove('sfx-playing');
+                _sfxPreviewAudio = null;
+            });
+        });
+    });
+
+    // Wire drag-start for each item
+    list.querySelectorAll('.sfx-item').forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+            const idx = Number(item.dataset.sfxIndex);
+            const f = _sfxAllFiles[idx];
+            if (!f) return;
+            e.dataTransfer.setData('application/x-sfx', JSON.stringify(f));
+            e.dataTransfer.effectAllowed = 'copy';
+            item.classList.add('sfx-dragging');
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('sfx-dragging');
+        });
+    });
+}
+
+function _sfxStopPreview() {
+    if (_sfxPreviewAudio) {
+        _sfxPreviewAudio.pause();
+        _sfxPreviewAudio.src = '';
+        _sfxPreviewAudio = null;
+    }
+    document.querySelectorAll('.sfx-playing').forEach(el => el.classList.remove('sfx-playing'));
+}
+
+function _sfxEsc(value) {
+    const div = document.createElement('div');
+    div.textContent = String(value ?? '');
+    return div.innerHTML;
+}
+
+// Handle SFX drop onto the audio tracks area (timeline)
+function _initSfxDropZone() {
+    const container = document.getElementById('audio-tracks-container');
+    if (!container) return;
+
+    container.addEventListener('dragover', (e) => {
+        if (e.dataTransfer.types.includes('application/x-sfx')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            container.classList.add('sfx-drop-target');
+        }
+    });
+    container.addEventListener('dragleave', (e) => {
+        if (!container.contains(e.relatedTarget)) {
+            container.classList.remove('sfx-drop-target');
+        }
+    });
+    container.addEventListener('drop', (e) => {
+        container.classList.remove('sfx-drop-target');
+        const raw = e.dataTransfer.getData('application/x-sfx');
+        if (!raw) return;
+        e.preventDefault();
+
+        let sfx;
+        try { sfx = JSON.parse(raw); } catch { return; }
+
+        // Create an FX track with the dropped sound
+        const fxTrack = createAudioTrack({
+            label: sfx.label || sfx.filename || 'FX',
+            type: 'fx',
+            file: sfx.filename,
+            path: sfx.path,
+            duration: sfx.duration || 0,
+            volume: _getSavedVolume('fx') ?? 1.0,
+            color: AUDIO_TRACK_COLORS.fx,
+            loaded: true,
+        });
+
+        const audio = new Audio(sfx.path);
+        fxTrack.element = audio;
+        ensureTrackGainNode(fxTrack);
+
+        audio.addEventListener('loadedmetadata', () => {
+            fxTrack.duration = audio.duration;
+            fxTrack.loaded = true;
+            renderAllAudioTracks();
+        });
+
+        EditorState.audioTracks.push(fxTrack);
+        selectAudioTrack(fxTrack.id);
+        renderAllAudioTracks();
+        saveProjectEdits();
+        showToast(`SFX "${sfx.label || sfx.filename}" added to timeline`, 'success');
+    });
+}
+
+// Load SFX library on editor init
+setTimeout(() => {
+    loadSfxLibrary();
+    _initSfxDropZone();
+}, 500);
+
 /**
  * Check if there are unsaved changes (edits since last save/load)
  */
