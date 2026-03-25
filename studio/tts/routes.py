@@ -6,6 +6,7 @@ voice blending, and generation history.
 
 import asyncio
 import base64
+import gc
 import json
 import os
 import re
@@ -397,12 +398,15 @@ def _background_chunked_generate(job_id, voice_param, voice_name, sentences, spe
 
         q.put({"phase": "concatenating"})
         audio = concatenate_chunks(audio_chunks, sample_rate=24000, gap_ms=80, crossfade_ms=20)
+        del audio_chunks
         audio = pad_audio(audio, sample_rate=24000)
 
         job_dir = _tts_job_dir(basename)
         os.makedirs(job_dir, exist_ok=True)
         wav_path = os.path.join(job_dir, basename + ".wav")
         sf.write(wav_path, audio, 24000)
+        del audio
+        gc.collect()
 
         q.put({"phase": "normalizing"})
         run_loudnorm(wav_path)
@@ -677,6 +681,8 @@ def generate(data: TtsGenerateRequest):
     json_name = f"{basename}.json"
 
     sf.write(os.path.join(job_dir, wav_name), audio, 24000)
+    del audio  # free numpy array before gc
+    gc.collect()
     logger.success("Generated  {:.1f}s audio in {:.2f}s | RTF {:.2f}", duration_generated, inference_time, rtf)
 
     clean_prompt = re.sub(r'[\[\]]', '', prompt).strip()
@@ -1186,12 +1192,15 @@ def _background_multivoice_generate(job_id, segments, speed, gap_ms, prompt, bas
 
         q.put({"phase": "concatenating"})
         audio = concatenate_chunks(audio_chunks, sample_rate=24000, gap_ms=gap_ms, crossfade_ms=20)
+        del audio_chunks
         audio = pad_audio(audio, sample_rate=24000)
 
         job_dir = _tts_job_dir(basename)
         os.makedirs(job_dir, exist_ok=True)
         wav_path = os.path.join(job_dir, basename + ".wav")
         sf.write(wav_path, audio, 24000)
+        del audio
+        gc.collect()
 
         q.put({"phase": "normalizing"})
         run_loudnorm(wav_path)

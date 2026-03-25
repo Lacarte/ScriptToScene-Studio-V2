@@ -44,6 +44,7 @@ function handleNicheSelect(preset) {
   }
   selectNiche(preset)
   story.storyCategory.value = preset.category || story.storyCategory.value
+  if (preset.duration) story.storyDuration.value = preset.duration
 }
 
 async function handleNicheSave(presetData) {
@@ -229,10 +230,116 @@ function stopPreview() {
 
 onUnmounted(stopPreview)
 
-// ── Saved Stories ──
+// ── Jobs Pane ──
+const jobPaneTab = ref('queue') // 'queue' | 'saved'
+const showJobPane = ref(false)
+
+// ── Auto-generated Job Queue ──
+const JOB_QUEUE_KEY = 'sts-job-queue'
+const jobQueue = ref(JSON.parse(localStorage.getItem(JOB_QUEUE_KEY) || '[]'))
+const jobQueueRunning = ref(false)
+const jobQueueCurrent = ref(null) // { presetId, index, total }
+
+function _persistJobQueue() {
+  localStorage.setItem(JOB_QUEUE_KEY, JSON.stringify(jobQueue.value))
+}
+
+function addToQueue(presetId) {
+  const existing = jobQueue.value.find(q => q.presetId === presetId)
+  if (existing) {
+    existing.count++
+  } else {
+    const preset = nichePresets.value[presetId]
+    if (!preset) return
+    jobQueue.value.push({ presetId, count: 1, label: preset.label || presetId })
+  }
+  _persistJobQueue()
+}
+
+function removeFromQueue(presetId) {
+  const existing = jobQueue.value.find(q => q.presetId === presetId)
+  if (!existing) return
+  existing.count--
+  if (existing.count <= 0) {
+    jobQueue.value = jobQueue.value.filter(q => q.presetId !== presetId)
+  }
+  _persistJobQueue()
+}
+
+function deleteFromQueue(presetId) {
+  jobQueue.value = jobQueue.value.filter(q => q.presetId !== presetId)
+  _persistJobQueue()
+}
+
+function clearQueue() {
+  jobQueue.value = []
+  _persistJobQueue()
+}
+
+const totalQueuedJobs = computed(() => jobQueue.value.reduce((sum, q) => sum + q.count, 0))
+
+async function runJobQueue() {
+  if (jobQueueRunning.value || running.value) return
+  if (!jobQueue.value.length) { toast.error('Queue is empty'); return }
+
+  jobQueueRunning.value = true
+  const queue = [...jobQueue.value] // snapshot
+  let jobIndex = 0
+
+  for (const item of queue) {
+    const preset = nichePresets.value[item.presetId]
+    if (!preset) continue
+
+    for (let i = 0; i < item.count; i++) {
+      jobIndex++
+      jobQueueCurrent.value = { presetId: item.presetId, index: jobIndex, total: totalQueuedJobs.value, label: item.label }
+
+      // Apply preset settings
+      selectNiche(preset)
+      story.storyCategory.value = preset.category || story.storyCategory.value
+      if (preset.duration) story.storyDuration.value = preset.duration
+
+      // Generate a story for this preset
+      try {
+        const generated = await handleGenerateStory({ notifySuccess: false })
+        if (!generated.ok) {
+          toast.error(`Queue job ${jobIndex} failed to generate story`)
+          continue
+        }
+        // Run the pipeline
+        await start()
+        // Wait for pipeline to finish (watch globalStatus)
+        await new Promise((resolve) => {
+          const unwatch = watch(globalStatus, (status) => {
+            if (status === 'done' || status === 'error' || status === 'stopped') {
+              unwatch()
+              resolve()
+            }
+          })
+          // Safety: if not running after start, resolve immediately
+          if (!running.value) { unwatch(); resolve() }
+        })
+      } catch (e) {
+        toast.error(`Queue job ${jobIndex} error: ${e.message || 'unknown'}`)
+      }
+    }
+  }
+
+  jobQueueRunning.value = false
+  jobQueueCurrent.value = null
+  clearQueue()
+  toast.success(`Job queue complete — ${jobIndex} jobs processed`)
+}
+
+function stopJobQueue() {
+  jobQueueRunning.value = false
+  jobQueueCurrent.value = null
+  if (running.value) stop()
+}
+
+// ── Saved Stories (Job Histories) ──
 const SAVED_STORIES_KEY = 'sts-saved-stories'
 const savedStories = ref(JSON.parse(localStorage.getItem(SAVED_STORIES_KEY) || '[]'))
-const showSavedStories = ref(false)
 
 function _persistSavedStories() {
   localStorage.setItem(SAVED_STORIES_KEY, JSON.stringify(savedStories.value))
@@ -268,8 +375,71 @@ function loadSavedStory(entry) {
   if (entry.visualStyle) setVisualStyleOverride(entry.visualStyle)
   if (entry.storyTone) setStoryTone(entry.storyTone)
   if (entry.category) setNicheCategory(entry.category)
-  showSavedStories.value = false
+  showJobPane.value = false
   toast.success('Story loaded')
+}
+
+async function runSavedStory(entry) {
+  if (running.value || jobQueueRunning.value) { toast.error('Pipeline is already running'); return }
+  loadSavedStory(entry)
+  showJobPane.value = false
+  await nextTick()
+  await start()
+}
+
+const savedQueueRunning = ref(false)
+const savedQueueCurrent = ref(null) // { index, total, title }
+
+async function runAllSavedStories() {
+  if (running.value || jobQueueRunning.value || savedQueueRunning.value) { toast.error('Pipeline is already running'); return }
+  if (!savedStories.value.length) { toast.error('No saved stories'); return }
+
+  savedQueueRunning.value = true
+  const stories = [...savedStories.value]
+
+  for (let i = 0; i < stories.length; i++) {
+    if (!savedQueueRunning.value) break // stopped
+
+    const entry = stories[i]
+    savedQueueCurrent.value = { index: i + 1, total: stories.length, title: entry.title }
+
+    // Load story settings
+    text.value = entry.text
+    if (entry.voice) voice.value = entry.voice
+    if (entry.speed) speed.value = entry.speed
+    if (entry.style) style.value = entry.style
+    if (entry.visualStyle) setVisualStyleOverride(entry.visualStyle)
+    if (entry.storyTone) setStoryTone(entry.storyTone)
+    if (entry.category) setNicheCategory(entry.category)
+
+    await nextTick()
+
+    try {
+      await start()
+      // Wait for pipeline to finish
+      await new Promise((resolve) => {
+        const unwatch = watch(globalStatus, (status) => {
+          if (status === 'done' || status === 'error' || status === 'stopped') {
+            unwatch()
+            resolve()
+          }
+        })
+        if (!running.value) { unwatch(); resolve() }
+      })
+    } catch (e) {
+      toast.error(`Saved job ${i + 1} error: ${e.message || 'unknown'}`)
+    }
+  }
+
+  savedQueueRunning.value = false
+  savedQueueCurrent.value = null
+  if (savedQueueRunning.value !== false) toast.success(`All ${stories.length} saved stories processed`)
+}
+
+function stopSavedQueue() {
+  savedQueueRunning.value = false
+  savedQueueCurrent.value = null
+  if (running.value) stop()
 }
 
 function deleteSavedStory(id) {
@@ -1227,38 +1397,196 @@ function logStepLabel(step) {
 
   </div>
 
-  <!-- Right sidebar: Saved Stories -->
-  <aside class="saved-sidebar" :class="{ 'saved-sidebar--open': showSavedStories }">
-    <button class="saved-sidebar-toggle" @click="showSavedStories = !showSavedStories">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-      <span class="saved-sidebar-label">My Stories</span>
-      <span v-if="savedStories.length" class="saved-count">({{ savedStories.length }})</span>
-      <svg class="saved-sidebar-chevron" :class="{ rotated: showSavedStories }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
+  <!-- Right sidebar: Jobs Pane -->
+  <aside class="jobs-sidebar" :class="{ 'jobs-sidebar--open': showJobPane }">
+    <button class="jobs-sidebar-toggle" @click="showJobPane = !showJobPane">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 3v18"/><path d="M16 3v18"/></svg>
+      <span class="jobs-sidebar-label">Jobs</span>
+      <span v-if="totalQueuedJobs" class="jobs-count">{{ totalQueuedJobs }}</span>
+      <svg class="jobs-sidebar-chevron" :class="{ rotated: showJobPane }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
     </button>
-    <button v-if="showSavedStories && text.trim()" class="saved-sidebar-save" @click="saveCurrentStory">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-      Save Current Story
-    </button>
-    <div v-if="showSavedStories" class="saved-sidebar-list">
-      <div v-if="!savedStories.length" class="saved-empty">No saved stories yet.</div>
-      <div v-for="entry in savedStories" :key="entry.id" class="saved-story-item" @click="loadSavedStory(entry)">
-        <div class="saved-story-main">
-          <span class="saved-story-title">{{ entry.title }}</span>
-          <span class="saved-story-meta">
-            <span v-if="entry.style" class="saved-tag">
-              <span class="saved-tag-dot" :style="{ background: styleColor(entry.visualStyle || entry.style) }"></span>
-              {{ styleLabel(entry.visualStyle || entry.style) }}
-            </span>
-            <span v-if="entry.storyTone" class="saved-tag saved-tag--tone">{{ formatOptionLabel(entry.storyTone) }}</span>
-            <span v-if="entry.category" class="saved-tag saved-tag--cat">{{ formatOptionLabel(entry.category) }}</span>
-            <span class="saved-story-age">{{ savedStoryAge(entry) }}</span>
-          </span>
-        </div>
-        <button class="saved-story-delete" title="Delete" @click.stop="deleteSavedStory(entry.id)">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+
+    <template v-if="showJobPane">
+      <!-- Tab bar -->
+      <div class="jobs-tabs">
+        <button class="jobs-tab" :class="{ active: jobPaneTab === 'queue' }" @click="jobPaneTab = 'queue'">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Auto Queue
+          <span v-if="totalQueuedJobs" class="jobs-tab-badge">{{ totalQueuedJobs }}</span>
+        </button>
+        <button class="jobs-tab" :class="{ active: jobPaneTab === 'saved' }" @click="jobPaneTab = 'saved'">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+          Saved
+          <span v-if="savedStories.length" class="jobs-tab-badge jobs-tab-badge--muted">{{ savedStories.length }}</span>
         </button>
       </div>
-    </div>
+
+      <!-- TAB 1: Auto Queue -->
+      <div v-if="jobPaneTab === 'queue'" class="jobs-tab-content">
+
+        <!-- Running status — cinematic progress bar -->
+        <div v-if="jobQueueRunning && jobQueueCurrent" class="q-live">
+          <div class="q-live-track">
+            <div class="q-live-fill" :style="{ width: Math.round((jobQueueCurrent.index / jobQueueCurrent.total) * 100) + '%' }"></div>
+          </div>
+          <div class="q-live-info">
+            <div class="q-live-left">
+              <span class="q-live-pulse"></span>
+              <span class="q-live-counter">{{ jobQueueCurrent.index }}<span class="q-live-sep">/</span>{{ jobQueueCurrent.total }}</span>
+              <span class="q-live-name">{{ jobQueueCurrent.label }}</span>
+            </div>
+            <button class="q-live-stop" @click="stopJobQueue">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+              Abort
+            </button>
+          </div>
+        </div>
+
+        <!-- Dispatch: queued job cards -->
+        <div class="q-dispatch">
+          <div v-if="jobQueue.length" class="q-dispatch-header">
+            <span class="q-dispatch-title">Dispatch</span>
+            <span class="q-dispatch-total">{{ totalQueuedJobs }} job{{ totalQueuedJobs !== 1 ? 's' : '' }}</span>
+          </div>
+
+          <div v-if="!jobQueue.length" class="q-empty">
+            <div class="q-empty-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M12 12v4"/><path d="M10 14h4"/></svg>
+            </div>
+            <span class="q-empty-text">Queue empty</span>
+            <span class="q-empty-hint">Pick presets below to batch-produce videos</span>
+          </div>
+
+          <TransitionGroup name="q-card" tag="div" class="q-cards">
+            <div
+              v-for="item in jobQueue"
+              :key="item.presetId"
+              class="q-card"
+              :style="{ '--q-color': styleColor(nichePresets[item.presetId]?.visual_style) || 'var(--accent)' }"
+            >
+              <div class="q-card-glow"></div>
+              <div class="q-card-body">
+                <div class="q-card-head">
+                  <span class="q-card-dot"></span>
+                  <span class="q-card-name">{{ item.label }}</span>
+                </div>
+                <div class="q-card-cat" v-if="nichePresets[item.presetId]?.category">{{ formatOptionLabel(nichePresets[item.presetId].category) }}</div>
+              </div>
+              <div class="q-card-stepper">
+                <button class="q-step-btn" @click="removeFromQueue(item.presetId)" :disabled="item.count <= 1">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <span class="q-step-val">{{ item.count }}</span>
+                <button class="q-step-btn" @click="addToQueue(item.presetId)">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+              </div>
+              <button class="q-card-remove" @click="deleteFromQueue(item.presetId)" title="Remove">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </TransitionGroup>
+
+          <!-- Launch bar -->
+          <div v-if="jobQueue.length" class="q-launch">
+            <button class="q-launch-btn" :disabled="jobQueueRunning || running" @click="runJobQueue">
+              <span class="q-launch-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </span>
+              <span class="q-launch-text">Launch {{ totalQueuedJobs }}</span>
+            </button>
+            <button class="q-launch-clear" :disabled="jobQueueRunning" @click="clearQueue" title="Clear queue">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Preset catalog — compact grid -->
+        <div class="q-catalog">
+          <span class="q-catalog-label">Presets</span>
+          <div class="q-catalog-grid">
+            <button
+              v-for="(preset, presetId) in nichePresets"
+              :key="presetId"
+              class="q-cat-chip"
+              :class="{ 'q-cat-chip--queued': jobQueue.some(q => q.presetId === presetId) }"
+              :style="{ '--chip-color': styleColor(preset.visual_style) }"
+              @click="addToQueue(presetId)"
+            >
+              <span class="q-cat-dot"></span>
+              <span class="q-cat-name">{{ preset.label }}</span>
+              <span v-if="jobQueue.find(q => q.presetId === presetId)" class="q-cat-count">{{ jobQueue.find(q => q.presetId === presetId).count }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: Saved Stories (Job Histories) -->
+      <div v-if="jobPaneTab === 'saved'" class="jobs-tab-content">
+
+        <!-- Run-all live progress -->
+        <div v-if="savedQueueRunning && savedQueueCurrent" class="q-live">
+          <div class="q-live-track">
+            <div class="q-live-fill" :style="{ width: Math.round((savedQueueCurrent.index / savedQueueCurrent.total) * 100) + '%' }"></div>
+          </div>
+          <div class="q-live-info">
+            <div class="q-live-left">
+              <span class="q-live-pulse"></span>
+              <span class="q-live-counter">{{ savedQueueCurrent.index }}<span class="q-live-sep">/</span>{{ savedQueueCurrent.total }}</span>
+              <span class="q-live-name">{{ savedQueueCurrent.title }}</span>
+            </div>
+            <button class="q-live-stop" @click="stopSavedQueue">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+              Abort
+            </button>
+          </div>
+        </div>
+
+        <!-- Save + Run All actions -->
+        <div class="saved-actions-bar">
+          <button v-if="text.trim()" class="saved-sidebar-save" @click="saveCurrentStory">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save Current
+          </button>
+          <button v-if="savedStories.length >= 1" class="saved-run-all-btn" :disabled="running || jobQueueRunning || savedQueueRunning" @click="runAllSavedStories">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Run All {{ savedStories.length }}
+          </button>
+        </div>
+
+        <div class="saved-sidebar-list">
+          <div v-if="!savedStories.length" class="saved-empty">No saved stories yet.</div>
+          <div
+            v-for="entry in savedStories"
+            :key="entry.id"
+            class="saved-story-item"
+            :class="{ 'saved-story-item--active': savedQueueRunning && savedQueueCurrent && savedQueueCurrent.title === entry.title }"
+            @click="loadSavedStory(entry)"
+          >
+            <div class="saved-story-main">
+              <span class="saved-story-title">{{ entry.title }}</span>
+              <span class="saved-story-meta">
+                <span v-if="entry.style" class="saved-tag">
+                  <span class="saved-tag-dot" :style="{ background: styleColor(entry.visualStyle || entry.style) }"></span>
+                  {{ styleLabel(entry.visualStyle || entry.style) }}
+                </span>
+                <span v-if="entry.storyTone" class="saved-tag saved-tag--tone">{{ formatOptionLabel(entry.storyTone) }}</span>
+                <span v-if="entry.category" class="saved-tag saved-tag--cat">{{ formatOptionLabel(entry.category) }}</span>
+                <span class="saved-story-age">{{ savedStoryAge(entry) }}</span>
+              </span>
+            </div>
+            <div class="saved-story-actions">
+              <button class="saved-story-run" title="Run pipeline" :disabled="running || jobQueueRunning || savedQueueRunning" @click.stop="runSavedStory(entry)">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </button>
+              <button class="saved-story-delete" title="Delete" @click.stop="deleteSavedStory(entry.id)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
   </aside>
 
   </div>
@@ -1461,21 +1789,22 @@ function logStepLabel(step) {
   white-space: nowrap;
 }
 
-/* ── Saved Stories Sidebar ── */
-.saved-sidebar {
+/* ── Jobs Sidebar ── */
+.jobs-sidebar {
   width: 52px;
   flex-shrink: 0;
   padding: 32px 0 32px 0;
   transition: width 0.2s ease;
   overflow: hidden;
 }
-.saved-sidebar--open {
-  width: 300px;
+.jobs-sidebar--open {
+  width: 320px;
   border-left: 1px solid var(--border);
   padding: 32px 16px;
+  overflow-y: auto;
 }
 
-.saved-sidebar-toggle {
+.jobs-sidebar-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1491,16 +1820,569 @@ function logStepLabel(step) {
   transition: all 0.15s;
   width: 100%;
 }
-.saved-sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
-.saved-sidebar--open .saved-sidebar-toggle { margin-bottom: 8px; }
+.jobs-sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.jobs-sidebar--open .jobs-sidebar-toggle { margin-bottom: 10px; }
 
-.saved-sidebar-save {
+.jobs-sidebar-label { display: none; }
+.jobs-sidebar--open .jobs-sidebar-label { display: inline; }
+.jobs-sidebar--open .jobs-count { display: inline-flex; }
+
+.jobs-sidebar-chevron {
+  margin-left: auto;
+  transition: transform 0.2s;
+  display: none;
+}
+.jobs-sidebar--open .jobs-sidebar-chevron { display: block; }
+.jobs-sidebar-chevron.rotated { transform: rotate(180deg); }
+
+.jobs-count {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 9px;
+}
+
+/* ── Jobs Tabs ── */
+.jobs-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.jobs-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.jobs-tab:hover:not(.active) { color: var(--text-secondary); }
+.jobs-tab.active {
+  color: var(--accent);
+  background: rgba(78, 205, 196, 0.08);
+  border-color: rgba(78, 205, 196, 0.2);
+}
+
+.jobs-tab-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.jobs-tab-badge--muted {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-muted);
+}
+
+.jobs-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Live Progress ── */
+.q-live {
+  margin-bottom: 14px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(78, 205, 196, 0.06), rgba(78, 205, 196, 0.02));
+  border: 1px solid rgba(78, 205, 196, 0.18);
+}
+
+.q-live-track {
+  height: 3px;
+  background: rgba(78, 205, 196, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.q-live-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--accent), #5edfd6);
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 12px rgba(78, 205, 196, 0.5);
+}
+.q-live-fill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px var(--accent), 0 0 20px rgba(78, 205, 196, 0.4);
+  animation: q-dot-glow 1.5s ease-in-out infinite;
+}
+
+@keyframes q-dot-glow {
+  0%, 100% { opacity: 0.7; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
+.q-live-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.q-live-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.q-live-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: q-pulse 1.2s ease-in-out infinite;
+  box-shadow: 0 0 6px var(--accent);
+}
+
+@keyframes q-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+.q-live-counter {
+  font: 700 13px/1 var(--font-mono);
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+
+.q-live-sep { opacity: 0.4; margin: 0 1px; }
+
+.q-live-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.q-live-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font: 700 9px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--coral);
+  background: rgba(255, 107, 107, 0.06);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.q-live-stop:hover {
+  background: rgba(255, 107, 107, 0.14);
+  border-color: var(--coral);
+  box-shadow: 0 0 10px rgba(255, 107, 107, 0.15);
+}
+
+/* ── Dispatch Section ── */
+.q-dispatch {
+  margin-bottom: 14px;
+}
+
+.q-dispatch-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.q-dispatch-title {
+  font: 700 9px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.q-dispatch-total {
+  font: 600 10px/1 var(--font-mono);
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+/* ── Empty State ── */
+.q-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 16px 20px;
+  text-align: center;
+}
+
+.q-empty-icon {
+  color: var(--border-hover);
+  opacity: 0.5;
+  margin-bottom: 2px;
+}
+
+.q-empty-text {
+  font: 600 12px/1 var(--font-display);
+  color: var(--text-muted);
+}
+
+.q-empty-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  line-height: 1.4;
+  max-width: 200px;
+}
+
+/* ── Queue Cards ── */
+.q-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.q-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--q-color) 4%, transparent), transparent 60%);
+  border: 1px solid color-mix(in srgb, var(--q-color) 14%, transparent);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+  overflow: hidden;
+}
+.q-card:hover {
+  border-color: color-mix(in srgb, var(--q-color) 30%, transparent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--q-color) 8%, transparent);
+}
+
+/* Subtle left-edge accent stripe */
+.q-card-glow {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--q-color);
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+.q-card:hover .q-card-glow { opacity: 0.9; }
+
+.q-card-body {
+  flex: 1;
+  min-width: 0;
+  padding-left: 4px;
+}
+
+.q-card-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  padding: 7px 12px;
+}
+
+.q-card-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--q-color);
+  flex-shrink: 0;
+  box-shadow: 0 0 5px color-mix(in srgb, var(--q-color) 40%, transparent);
+}
+
+.q-card-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.q-card-cat {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-top: 2px;
+  padding-left: 13px;
+  letter-spacing: 0.02em;
+}
+
+/* Stepper control */
+.q-card-stepper {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.q-step-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.q-step-btn:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(78, 205, 196, 0.08);
+}
+.q-step-btn:disabled { opacity: 0.25; cursor: default; }
+.q-step-btn:first-child { border-right: 1px solid var(--border); }
+.q-step-btn:last-child { border-left: 1px solid var(--border); }
+
+.q-step-val {
+  width: 26px;
+  text-align: center;
+  font: 700 12px/24px var(--font-mono);
+  color: var(--q-color, var(--accent));
+  letter-spacing: -0.03em;
+}
+
+/* Remove button */
+.q-card-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.12s;
+}
+.q-card:hover .q-card-remove { opacity: 0.5; }
+.q-card-remove:hover { opacity: 1 !important; color: var(--coral); background: rgba(255, 107, 107, 0.08); }
+
+/* Card enter/leave transitions */
+.q-card-enter-active { animation: q-card-in 0.25s ease-out; }
+.q-card-leave-active { animation: q-card-out 0.2s ease-in forwards; }
+.q-card-move { transition: transform 0.25s ease; }
+
+@keyframes q-card-in {
+  from { opacity: 0; transform: translateX(12px) scale(0.96); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes q-card-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(-12px) scale(0.96); }
+}
+
+/* ── Launch Bar ── */
+.q-launch {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.q-launch-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), #3abfb7);
+  color: #0a0e13;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.q-launch-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.12), transparent 50%);
+  pointer-events: none;
+}
+.q-launch-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 20px rgba(78, 205, 196, 0.35), 0 0 40px rgba(78, 205, 196, 0.1);
+  transform: translateY(-1px);
+}
+.q-launch-btn:active:not(:disabled) { transform: translateY(0); }
+.q-launch-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: saturate(0.5); }
+
+.q-launch-icon {
+  display: flex;
+  align-items: center;
+}
+
+.q-launch-text {
+  white-space: nowrap;
+}
+
+.q-launch-clear {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.q-launch-clear:hover:not(:disabled) {
+  color: var(--coral);
+  border-color: rgba(255, 107, 107, 0.3);
+  background: rgba(255, 107, 107, 0.05);
+}
+.q-launch-clear:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── Preset Catalog ── */
+.q-catalog {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.q-catalog-label {
+  display: block;
+  font: 700 9px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.q-catalog-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.q-cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  position: relative;
+}
+.q-cat-chip:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--chip-color) 40%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 5%, transparent);
+}
+.q-cat-chip--queued {
+  border-color: color-mix(in srgb, var(--chip-color) 35%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 8%, transparent);
+  color: var(--text);
+}
+
+.q-cat-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--chip-color, var(--text-muted));
+  flex-shrink: 0;
+}
+
+.q-cat-name {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.q-cat-count {
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font: 700 8px/14px var(--font-mono);
+  text-align: center;
+  color: #fff;
+  background: var(--chip-color, var(--accent));
+  border-radius: 7px;
+}
+
+/* ── Saved Stories (in Jobs pane) ── */
+.saved-actions-bar {
+  display: flex;
+  gap: 6px;
   margin-bottom: 12px;
+}
+
+.saved-sidebar-save {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
   font-size: 11px;
   font-weight: 500;
   color: var(--accent);
@@ -1515,24 +2397,42 @@ function logStepLabel(step) {
   border-color: var(--accent);
 }
 
-.saved-sidebar-label {
-  display: none;
+.saved-run-all-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font: 700 10px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0a0e13;
+  background: linear-gradient(135deg, var(--accent), #3abfb7);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
 }
-.saved-sidebar--open .saved-sidebar-label { display: inline; }
-.saved-sidebar--open .saved-count { display: inline; }
-
-.saved-sidebar-chevron {
-  margin-left: auto;
-  transition: transform 0.2s;
-  display: none;
+.saved-run-all-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.12), transparent 50%);
+  pointer-events: none;
 }
-.saved-sidebar--open .saved-sidebar-chevron { display: block; }
-.saved-sidebar-chevron.rotated { transform: rotate(180deg); }
+.saved-run-all-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.3);
+  transform: translateY(-1px);
+}
+.saved-run-all-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: saturate(0.5); }
 
-.saved-count {
-  opacity: 0.6;
-  font-size: 10px;
-  display: none;
+.saved-story-item--active {
+  background: rgba(78, 205, 196, 0.06);
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
 }
 
 .saved-sidebar-list {
@@ -1619,6 +2519,29 @@ function logStepLabel(step) {
   opacity: 0.5;
 }
 
+.saved-story-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.saved-story-item:hover .saved-story-actions { opacity: 1; }
+
+.saved-story-run {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: all 0.12s;
+}
+.saved-story-run:hover:not(:disabled) { opacity: 1; background: rgba(78, 205, 196, 0.1); }
+.saved-story-run:disabled { opacity: 0.3; cursor: not-allowed; }
+
 .saved-story-delete {
   flex-shrink: 0;
   background: none;
@@ -1627,23 +2550,22 @@ function logStepLabel(step) {
   cursor: pointer;
   padding: 4px;
   border-radius: 4px;
-  opacity: 0;
+  opacity: 0.6;
   transition: all 0.12s;
 }
-.saved-story-item:hover .saved-story-delete { opacity: 0.6; }
 .saved-story-delete:hover { opacity: 1 !important; color: #ef4444; }
 
 @media (max-width: 900px) {
   .pipeline-layout { flex-direction: column; }
-  .saved-sidebar {
+  .jobs-sidebar {
     width: 100% !important;
     border-left: none !important;
     border-top: 1px solid var(--border);
     padding: 16px 24px !important;
   }
-  .saved-sidebar-label { display: inline !important; }
-  .saved-sidebar-chevron { display: block !important; }
-  .saved-count { display: inline !important; }
+  .jobs-sidebar-label { display: inline !important; }
+  .jobs-sidebar-chevron { display: block !important; }
+  .jobs-count { display: inline-flex !important; }
 }
 
 .detect-spinner {

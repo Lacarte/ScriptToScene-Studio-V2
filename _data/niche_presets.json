@@ -8,6 +8,7 @@
     "story_tone": "suspenseful",
     "voice": "af_heart",
     "speed": 0.95,
+    "duration": 35,
     "tags": [
       "trending",
       "tiktok",
@@ -24,6 +25,7 @@
     "story_tone": "suspenseful",
     "voice": "af_heart",
     "speed": 0.95,
+    "duration": 60,
     "tags": [
       "youtube",
       "shorts"
@@ -39,6 +41,7 @@
     "story_tone": "suspenseful",
     "voice": "bm_daniel",
     "speed": 0.9,
+    "duration": 75,
     "tags": [
       "youtube"
     ],
@@ -53,6 +56,7 @@
     "story_tone": "dramatic",
     "voice": "bm_daniel",
     "speed": 0.9,
+    "duration": 90,
     "tags": [
       "youtube"
     ],
@@ -67,6 +71,7 @@
     "story_tone": "dramatic",
     "voice": "bm_daniel",
     "speed": 0.85,
+    "duration": 90,
     "tags": [
       "youtube"
     ],
@@ -81,6 +86,7 @@
     "story_tone": "suspenseful",
     "voice": "af_heart",
     "speed": 0.9,
+    "duration": 60,
     "tags": [
       "youtube",
       "shorts"
@@ -96,6 +102,7 @@
     "story_tone": "suspenseful",
     "voice": "af_heart",
     "speed": 0.95,
+    "duration": 35,
     "tags": [
       "tiktok",
       "shorts"
@@ -111,6 +118,7 @@
     "story_tone": "suspenseful",
     "voice": "af_heart",
     "speed": 1.0,
+    "duration": 40,
     "tags": [
       "shorts"
     ],
@@ -125,6 +133,7 @@
     "story_tone": "educational",
     "voice": "bm_daniel",
     "speed": 0.9,
+    "duration": 60,
     "tags": [
       "youtube",
       "shorts"
@@ -140,6 +149,7 @@
     "story_tone": "educational",
     "voice": "bm_daniel",
     "speed": 0.95,
+    "duration": 35,
     "tags": [
       "tiktok",
       "shorts"
@@ -155,6 +165,7 @@
     "story_tone": "inspirational",
     "voice": "af_heart",
     "speed": 1.0,
+    "duration": 30,
     "tags": [
       "tiktok",
       "shorts"
@@ -170,6 +181,7 @@
     "story_tone": "inspirational",
     "voice": "bm_daniel",
     "speed": 0.95,
+    "duration": 60,
     "tags": [
       "youtube",
       "shorts"
@@ -185,6 +197,7 @@
     "story_tone": "dramatic",
     "voice": "bm_daniel",
     "speed": 0.85,
+    "duration": 90,
     "tags": [
       "youtube"
     ],
@@ -199,6 +212,7 @@
     "story_tone": "dramatic",
     "voice": "bm_daniel",
     "speed": 0.85,
+    "duration": 90,
     "tags": [
       "youtube"
     ],
@@ -213,6 +227,7 @@
     "story_tone": "suspenseful",
     "voice": "bm_daniel",
     "speed": 0.9,
+    "duration": 75,
     "tags": [
       "youtube"
     ],
@@ -227,6 +242,7 @@
     "story_tone": "suspenseful",
     "voice": "bm_daniel",
     "speed": 0.9,
+    "duration": 60,
     "tags": [
       "youtube",
       "shorts"
@@ -242,6 +258,7 @@
     "story_tone": "dramatic",
     "voice": "af_heart",
     "speed": 1.0,
+    "duration": 45,
     "tags": [
       "shorts"
     ],
@@ -256,6 +273,7 @@
     "story_tone": "wholesome",
     "voice": "af_heart",
     "speed": 0.9,
+    "duration": 45,
     "tags": [
       "youtube"
     ],
@@ -270,6 +288,7 @@
     "story_tone": "dramatic",
     "voice": "bm_daniel",
     "speed": 1.0,
+    "duration": 60,
     "tags": [
       "youtube",
       "shorts"
@@ -285,6 +304,7 @@
     "story_tone": "inspirational",
     "voice": "bm_daniel",
     "speed": 0.95,
+    "duration": 60,
     "tags": [
       "youtube",
       "shorts"
@@ -300,6 +320,7 @@
     "story_tone": "dramatic",
     "voice": "af_heart",
     "speed": 1.0,
+    "duration": 45,
     "tags": [
       "tiktok",
       "youtube",
@@ -316,8 +337,25 @@
     "story_tone": "suspenseful",
     "voice": "af_heart",
     "speed": 1.0,
+    "duration": 35,
     "tags": [
       "tiktok",
+      "shorts"
+    ],
+    "custom": false
+  },
+  "existential_philosophy": {
+    "label": "Existential Philosophy",
+    "description": "Futuristic abstract visuals with philosophical narration. High-contrast mind exploration for deep-thinking content.",
+    "category": "philosophy",
+    "niche": "existential",
+    "visual_style": "existential",
+    "story_tone": "dramatic",
+    "voice": "af_heart",
+    "speed": 0.9,
+    "duration": 60,
+    "tags": [
+      "youtube",
       "shorts"
     ],
     "custom": false

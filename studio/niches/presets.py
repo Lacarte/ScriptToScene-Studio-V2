@@ -22,6 +22,7 @@ _PRESETS_FILE = _DATA_DIR / "niche_presets.json"
 _VALID_TAGS = ("tiktok", "youtube", "shorts", "trending")
 _DEFAULT_VOICE = "af_heart"
 _DEFAULT_SPEED = 1.0
+_DEFAULT_DURATION = 45
 
 # ── Hardcoded defaults (always available as built-in presets) ─────────────────
 _DEFAULTS = {
@@ -35,6 +36,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "af_heart",
         "speed": 0.95,
+        "duration": 35,
         "tags": ["trending", "tiktok", "shorts"],
     },
     "dark_psychology_cinematic": {
@@ -46,6 +48,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "af_heart",
         "speed": 0.95,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     "dark_psychology_noir": {
@@ -57,6 +60,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "bm_daniel",
         "speed": 0.9,
+        "duration": 75,
         "tags": ["youtube"],
     },
     # ── True Crime ──
@@ -69,6 +73,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "bm_daniel",
         "speed": 0.9,
+        "duration": 90,
         "tags": ["youtube"],
     },
     "true_crime_noir": {
@@ -80,6 +85,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "bm_daniel",
         "speed": 0.85,
+        "duration": 90,
         "tags": ["youtube"],
     },
     # ── Horror ──
@@ -92,6 +98,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "af_heart",
         "speed": 0.9,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     "horror_stickman": {
@@ -103,6 +110,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "af_heart",
         "speed": 0.95,
+        "duration": 35,
         "tags": ["tiktok", "shorts"],
     },
     "horror_anime": {
@@ -114,6 +122,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "af_heart",
         "speed": 1.0,
+        "duration": 40,
         "tags": ["shorts"],
     },
     # ── Philosophy ──
@@ -126,6 +135,7 @@ _DEFAULTS = {
         "story_tone": "educational",
         "voice": "bm_daniel",
         "speed": 0.9,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     "stoicism_stickman": {
@@ -137,6 +147,7 @@ _DEFAULTS = {
         "story_tone": "educational",
         "voice": "bm_daniel",
         "speed": 0.95,
+        "duration": 35,
         "tags": ["tiktok", "shorts"],
     },
     "existential_philosophy": {
@@ -148,6 +159,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "af_heart",
         "speed": 0.9,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     # ── Motivation ──
@@ -160,6 +172,7 @@ _DEFAULTS = {
         "story_tone": "inspirational",
         "voice": "af_heart",
         "speed": 1.0,
+        "duration": 30,
         "tags": ["tiktok", "shorts"],
     },
     "motivation_cinematic": {
@@ -171,6 +184,7 @@ _DEFAULTS = {
         "story_tone": "inspirational",
         "voice": "bm_daniel",
         "speed": 0.95,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     "wealth_cinematic": {
@@ -182,6 +196,7 @@ _DEFAULTS = {
         "story_tone": "inspirational",
         "voice": "bm_daniel",
         "speed": 0.95,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     # ── Religion ──
@@ -194,6 +209,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "bm_daniel",
         "speed": 0.85,
+        "duration": 90,
         "tags": ["youtube"],
     },
     "biblical_gothic": {
@@ -205,6 +221,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "bm_daniel",
         "speed": 0.85,
+        "duration": 90,
         "tags": ["youtube"],
     },
     # ── Mystery / Conspiracy ──
@@ -217,6 +234,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "bm_daniel",
         "speed": 0.9,
+        "duration": 75,
         "tags": ["youtube"],
     },
     "conspiracy_cinematic": {
@@ -228,6 +246,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "bm_daniel",
         "speed": 0.9,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     # ── Romance ──
@@ -240,6 +259,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "af_heart",
         "speed": 1.0,
+        "duration": 45,
         "tags": ["shorts"],
     },
     # ── Children ──
@@ -252,6 +272,7 @@ _DEFAULTS = {
         "story_tone": "wholesome",
         "voice": "af_heart",
         "speed": 0.9,
+        "duration": 45,
         "tags": ["youtube"],
     },
     # ── Sci-Fi ──
@@ -264,6 +285,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "bm_daniel",
         "speed": 1.0,
+        "duration": 60,
         "tags": ["youtube", "shorts"],
     },
     # ── Reddit / Anecdote ──
@@ -276,6 +298,7 @@ _DEFAULTS = {
         "story_tone": "dramatic",
         "voice": "af_heart",
         "speed": 1.0,
+        "duration": 45,
         "tags": ["tiktok", "youtube", "shorts"],
     },
     # ── Two Choices ──
@@ -288,6 +311,7 @@ _DEFAULTS = {
         "story_tone": "suspenseful",
         "voice": "af_heart",
         "speed": 1.0,
+        "duration": 35,
         "tags": ["tiktok", "shorts"],
     },
 }
@@ -334,6 +358,14 @@ def _normalize_speed(value, *, default=_DEFAULT_SPEED) -> float:
     except (TypeError, ValueError):
         return float(default)
     return max(0.5, min(2.0, round(speed, 2)))
+
+
+def _normalize_duration(value, *, default=_DEFAULT_DURATION) -> int:
+    try:
+        duration = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    return max(15, min(180, duration))
 
 
 def _normalize_tags(tags) -> list[str]:
@@ -435,6 +467,7 @@ def normalize_preset_payload(preset_id: str, data: dict) -> tuple[str, dict]:
         "story_tone": story_tone,
         "voice": _clean_text((data or {}).get("voice"), max_length=40) or _DEFAULT_VOICE,
         "speed": _normalize_speed((data or {}).get("speed"), default=_DEFAULT_SPEED),
+        "duration": _normalize_duration((data or {}).get("duration"), default=_DEFAULT_DURATION),
         "tags": _normalize_tags((data or {}).get("tags", [])),
         "thumbnail": _clean_text((data or {}).get("thumbnail"), max_length=120),
         "custom": bool((data or {}).get("custom", False)),
