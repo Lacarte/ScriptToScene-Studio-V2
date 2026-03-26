@@ -531,7 +531,7 @@ The server starts on `http://localhost:5050` and opens your browser automaticall
 ### Development mode
 
 ```bat
-dev.bat
+start-dev.bat
 ```
 
 This starts both the Flask backend (port 5050, minimized) and the Vite dev server (port 5174) with hot reload.

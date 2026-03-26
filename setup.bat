@@ -49,6 +49,6 @@ echo.
 :: ── Done ────────────────────────────────────────────────────────────────
 echo   %D%----------------------------%X%
 echo   %G%%B%Setup complete!%X%
-echo   %D%Run%X% %B%runner.bat%X% %D%or%X% %B%dev.bat%X% %D%to start.%X%
+echo   %D%Run%X% %B%runner.bat%X% %D%or%X% %B%start-dev.bat%X% %D%to start.%X%
 echo.
 pause
