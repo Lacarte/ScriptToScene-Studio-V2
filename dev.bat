@@ -88,7 +88,7 @@ if not exist "bin\chromium\ungoogled-chromium\chrome.exe" (
     echo   %D%~%X% Chromium not installed - running setup...
     call "_dev\automation\browser\launch-chromium.bat"
 ) else (
-    powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',9222)" >nul 2>&1
+    powershell -Command "try { Invoke-RestMethod -Uri 'http://127.0.0.1:9222/json/version' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
     if errorlevel 1 (
         echo   %D%~%X% Launching Chromium...
         call "_dev\automation\browser\launch-chromium.bat"
@@ -100,7 +100,7 @@ if not exist "bin\chromium\ungoogled-chromium\chrome.exe" (
 set "CDP_READY=0"
 set "RETRIES=0"
 :wait_chromium
-powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',9222)" >nul 2>&1
+powershell -Command "try { Invoke-RestMethod -Uri 'http://127.0.0.1:9222/json/version' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 (
     set "CDP_READY=1"
     echo   %G%+%X% Chromium CDP ready
@@ -122,7 +122,7 @@ set "RETRIES=0"
 :wait_flask
 timeout /t 1 /nobreak >nul
 set /a RETRIES+=1
-powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',5050)" >nul 2>&1
+powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:5050/api/health' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
     if %RETRIES% LSS 30 goto wait_flask
     echo   %R%x%X% Flask did not start within 30 seconds.
@@ -147,7 +147,7 @@ set "RETRIES=0"
 :wait_vite
 timeout /t 1 /nobreak >nul
 set /a RETRIES+=1
-powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',5174)" >nul 2>&1
+powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:5174/' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 if errorlevel 1 (
     if %RETRIES% LSS 30 goto wait_vite
     echo   %R%x%X% Vite did not start within 30 seconds.
@@ -160,8 +160,12 @@ echo.
 :: ── Open Pipeline in Chromium ─────────────────────────────────────────
 if "%CDP_READY%"=="1" (
     echo   %D%~%X% Opening pipeline in Chromium...
-    powershell -Command "Invoke-RestMethod 'http://localhost:9222/json/new?http://localhost:5174/#/pipeline'" >nul 2>&1
-    echo   %G%+%X% Pipeline tab opened
+    powershell -Command "$u='http://127.0.0.1:9222/json/new?http://localhost:5174/#/pipeline'; try { Invoke-RestMethod -Method Put -Uri $u -TimeoutSec 5 | Out-Null; exit 0 } catch { try { Invoke-RestMethod -Uri $u -TimeoutSec 5 | Out-Null; exit 0 } catch { exit 1 } }" >nul 2>&1
+    if errorlevel 1 (
+        echo   %Y%!%X% Could not open pipeline tab via CDP
+    ) else (
+        echo   %G%+%X% Pipeline tab opened
+    )
 )
 
 echo.

@@ -908,7 +908,7 @@ function logStepLabel(step) {
     <div class="header">
       <div>
         <h2 class="page-title">Pipeline</h2>
-        <p class="page-subtitle">Run the full TTS &rarr; Alignment &rarr; Segment &rarr; Scenes pipeline</p>
+        <p class="page-subtitle">TTS &rarr; Alignment &rarr; Segment &rarr; Scenes &rarr; Storyboard &rarr; Animator &rarr; Build &rarr; Export</p>
       </div>
     </div>
 
