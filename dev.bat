@@ -83,6 +83,35 @@ if not exist ".env" (
     )
 )
 
+:: ── Automation browser ─────────────────────────────────────────────────
+if not exist "bin\chromium\ungoogled-chromium\chrome.exe" (
+    echo   %D%~%X% Chromium not installed - running setup...
+    call "_dev\automation\browser\launch-chromium.bat"
+) else (
+    powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',9222)" >nul 2>&1
+    if errorlevel 1 (
+        echo   %D%~%X% Launching Chromium...
+        call "_dev\automation\browser\launch-chromium.bat"
+    ) else (
+        echo   %G%+%X% Chromium already running
+    )
+)
+:: Wait for Chromium CDP to be ready
+set "CDP_READY=0"
+set "RETRIES=0"
+:wait_chromium
+powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',9222)" >nul 2>&1
+if not errorlevel 1 (
+    set "CDP_READY=1"
+    echo   %G%+%X% Chromium CDP ready
+    goto :chromium_done
+)
+timeout /t 1 /nobreak >nul
+set /a RETRIES+=1
+if %RETRIES% LSS 15 goto wait_chromium
+echo   %Y%!%X% Chromium CDP not available - pipeline tab will be skipped
+:chromium_done
+
 :: ── Launch Flask (background, minimized) ────────────────────────────────
 echo   %D%~%X% Starting Flask server...
 set "STS_NO_BROWSER=1"
@@ -110,9 +139,34 @@ echo   %B%Vite%X%   %D%:%X%  http://localhost:5174  %D%(UI)%X%
 echo   %D%----------------------------%X%
 echo.
 
-:: ── Launch Vite dev server ──────────────────────────────────────────────
-cd /d "%~dp0frontend"
-npm run dev
+:: ── Launch Vite dev server (background) ────────────────────────────────
+start "STS Vite" /min cmd /c "cd /d "%~dp0frontend" && npm run dev"
+
+:: ── Wait for Vite ─────────────────────────────────────────────────────
+set "RETRIES=0"
+:wait_vite
+timeout /t 1 /nobreak >nul
+set /a RETRIES+=1
+powershell -Command "(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',5174)" >nul 2>&1
+if errorlevel 1 (
+    if %RETRIES% LSS 30 goto wait_vite
+    echo   %R%x%X% Vite did not start within 30 seconds.
+    pause
+    exit /b 1
+)
+echo   %G%+%X% Vite ready
+echo.
+
+:: ── Open Pipeline in Chromium ─────────────────────────────────────────
+if "%CDP_READY%"=="1" (
+    echo   %D%~%X% Opening pipeline in Chromium...
+    powershell -Command "Invoke-RestMethod 'http://localhost:9222/json/new?http://localhost:5174/#/pipeline'" >nul 2>&1
+    echo   %G%+%X% Pipeline tab opened
+)
+
+echo.
+echo   %G%+%X% All services running. Press Ctrl+C to stop.
+pause >nul
 goto :eof
 
 :: ── Subroutine: git pull ────────────────────────────────────────────────

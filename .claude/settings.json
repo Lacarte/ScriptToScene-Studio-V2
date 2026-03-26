@@ -1,11 +1,13 @@
 {
-  "enableAgentTeam": true,
-  "skills": [],
   "permissions": {
     "allow": [
       "Bash(for f:*)",
       "Bash(do mv:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Read(//d/@Workspace/chrome-sts-profile/Default/**)",
+      "Read(//d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/$LOCALAPPDATA/Google/Chrome SxS/Application/**)"
     ]
-  }
+  },
+  "enableAgentTeam": true,
+  "skills": []
 }

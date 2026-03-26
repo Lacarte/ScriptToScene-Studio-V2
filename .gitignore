@@ -17,3 +17,4 @@ static/dist/
 *.bak
 claude-code-skills/
 tmp/
+data/chromium-profile/
