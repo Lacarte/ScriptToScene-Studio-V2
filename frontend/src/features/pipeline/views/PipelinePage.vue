@@ -3,7 +3,11 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, onUnmounted
 import { useRouter } from 'vue-router'
 import { api } from '@/shared/api/client.js'
 import { usePipeline } from '../composables/usePipeline.js'
+import { CATEGORY_COLORS, withAlpha, categoryColor, statusColor, stepColor, stepTextColor, logEntryIcon, logEntryColor } from '../constants/colors.js'
 import NichePicker from '../components/NichePicker.vue'
+import ProgressStepper from '../components/ProgressStepper.vue'
+import PipelineLog from '../components/PipelineLog.vue'
+import PipelineHistory from '../components/PipelineHistory.vue'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useAssets } from '@/features/assets/composables/useAssets.js'
 import { useStory } from '../composables/useStory.js'
@@ -563,36 +567,7 @@ function firstSentence(value) {
   return (match?.[0] || text).trim()
 }
 
-const CATEGORY_COLORS = {
-  psychology: '#8B5CF6',
-  crime: '#EF4444',
-  horror: '#FF6B6B',
-  motivation: '#FACC15',
-  philosophy: '#94A3B8',
-  religion: '#D4AF37',
-  mystery: '#7C3AED',
-  science: '#38BDF8',
-  history: '#C08457',
-  nature: '#22C55E',
-  romance: '#F472B6',
-  comedy: '#F97316',
-  children: '#F9A8D4',
-  anecdote: '#FB7185',
-  politics: '#DC2626',
-  survival: '#84CC16',
-  curiosity: '#2DD4BF',
-  space: '#60A5FA',
-}
-
-function withAlpha(hex, alpha = '18') {
-  if (!hex || typeof hex !== 'string') return `rgba(78, 205, 196, 0.${alpha})`
-  if (hex.startsWith('#') && hex.length === 7) return `${hex}${alpha}`
-  return hex
-}
-
-function categoryColor(categoryId) {
-  return CATEGORY_COLORS[categoryId] || '#4ECDC4'
-}
+// CATEGORY_COLORS, withAlpha, categoryColor imported from constants/colors.js
 
 const availableCategories = computed(() => {
   const base = nicheCategories.value?.length
@@ -752,23 +727,11 @@ const showProgress = computed(() => globalStatus.value !== '')
 const showLog = computed(() => log.value.length > 0)
 
 function dotColor(stepId) {
-  const s = stepStatus.value[stepId] || 'pending'
-  if (s === 'running') return 'var(--accent)'
-  if (s === 'done') return '#26DE81'
-  if (s === 'stopped') return '#FFB347'
-  if (s === 'skipped') return 'var(--text-muted)'
-  if (s === 'error') return '#FF6B6B'
-  return 'var(--border)'
+  return stepColor(stepStatus.value[stepId])
 }
 
 function dotTextColor(stepId) {
-  const s = stepStatus.value[stepId] || 'pending'
-  if (s === 'running') return 'var(--accent)'
-  if (s === 'done') return '#26DE81'
-  if (s === 'stopped') return '#FFB347'
-  if (s === 'skipped') return 'var(--text-muted)'
-  if (s === 'error') return '#FF6B6B'
-  return 'var(--text-muted)'
+  return stepTextColor(stepStatus.value[stepId])
 }
 
 function dotIcon(step) {
@@ -792,24 +755,9 @@ function connectorColor(idx) {
   return (nextStatus === 'done' || thisStatus === 'done') ? '#26DE81' : 'var(--border)'
 }
 
-function logIcon(entry) {
-  if (entry.step === 'error') return '\u2717'
-  if (entry.status === 'done') return '\u2713'
-  return '\u2192'
-}
-
-function logColor(entry) {
-  if (entry.step === 'error') return '#FF6B6B'
-  if (entry.status === 'done') return '#26DE81'
-  return 'var(--text-muted)'
-}
-
-function statusColor(status) {
-  if (status === 'done') return '#26DE81'
-  if (status === 'stopped') return '#FFB347'
-  if (status === 'error') return '#FF6B6B'
-  return 'var(--accent)'
-}
+// logIcon, logColor, statusColor imported from constants/colors.js
+function logIcon(entry) { return logEntryIcon(entry) }
+function logColor(entry) { return logEntryColor(entry) }
 
 function onHistoryClick(index) {
   const j = jobs.value[index]
@@ -1237,163 +1185,33 @@ function logStepLabel(step) {
     </div>
 
     <!-- Progress -->
-    <section v-if="showProgress" class="card progress-card">
-      <div class="progress-header">
-        <label class="field-label progress-label">Progress</label>
-        <div class="progress-header-right">
-          <span v-if="activeProjectId" class="progress-project font-mono">{{ activeProjectId }}</span>
-          <button
-            v-if="running || stopping"
-            class="progress-stop-btn"
-            :disabled="stopping"
-            @click="stop"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-            {{ stopping ? 'Stopping...' : 'Stop' }}
-          </button>
-          <button
-            v-else-if="canResumeStopped"
-            class="progress-resume-btn"
-            @click="resumeStopped"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Resume
-          </button>
-        </div>
-      </div>
-      <div class="steps-row">
-        <template v-for="(step, i) in STEPS" :key="step.id">
-          <div class="step-col">
-            <div
-              class="step-dot"
-              :class="{ 'step-pulse': dotAnimating(step.id) }"
-              :style="{
-                background: dotColor(step.id) + '15',
-                borderColor: dotColor(step.id),
-              }"
-            >{{ dotIcon(step) }}</div>
-            <span class="step-label" :style="{ color: dotTextColor(step.id) }">{{ step.label }}</span>
-          </div>
-          <div
-            v-if="i < STEPS.length - 1"
-            class="step-connector"
-            :style="{ background: connectorColor(i) }"
-          ></div>
-        </template>
-      </div>
-      <div v-if="lastEvent" class="current-step">
-        <div class="current-step-inner">
-          <div v-if="globalStatus === 'running'" class="step-spinner"></div>
-          <span class="current-step-msg" :class="{ 'is-error': lastEvent.step === 'error', 'is-stopped': lastEvent.step === 'stopped' || lastEvent.status === 'stopped' }">
-            {{ lastEvent.step === 'done' ? 'Pipeline complete' : lastEvent.message || '' }}
-          </span>
-        </div>
-      </div>
-    </section>
+    <ProgressStepper
+      v-if="showProgress"
+      :steps="STEPS"
+      :step-status="stepStatus"
+      :global-status="globalStatus"
+      :running="running"
+      :stopping="stopping"
+      :last-event="lastEvent"
+      :active-project-id="activeProjectId"
+      :can-resume="canResumeStopped"
+      @stop="stop"
+      @resume="resumeStopped"
+    />
 
     <!-- Log -->
-    <section v-if="showLog" class="card log-card">
-      <label class="field-label log-label">Log</label>
-      <div ref="logEl" class="log-container">
-        <div v-for="(entry, i) in log" :key="i" class="log-entry" :style="{ color: logColor(entry) }">
-          <span class="log-icon">{{ logIcon(entry) }}</span>
-          <span class="log-step">{{ logStepLabel(entry.step) }}</span>
-          {{ entry.message || '' }}
-        </div>
-      </div>
-    </section>
+    <PipelineLog :log="log" />
 
     <!-- History -->
-    <div class="history-section">
-      <div class="history-header">
-        <h3 class="history-title">History</h3>
-        <span class="history-count">{{ historyCount }}</span>
-      </div>
-      <div class="history-list">
-        <p v-if="!jobs.length" class="history-empty">No pipeline jobs yet</p>
-        <div
-          v-for="(j, i) in jobs"
-          :key="j.project_id || i"
-          class="hist-item"
-          :class="{ active: j.project_id === activeProjectId, 'hist-item--error': j.status === 'error' }"
-          @click="onHistoryClick(i)"
-        >
-          <div class="hist-inner">
-            <span class="hist-dot" :style="{ background: statusColor(j.status) }"></span>
-            <div class="hist-content">
-              <p class="hist-excerpt">{{ (j.text || '').slice(0, 60) + ((j.text || '').length > 60 ? '...' : '') || j.label || j.project_id }}</p>
-              <div class="hist-meta">
-                <span>{{ j.project_id }}</span>
-                <template v-if="j.scene_count">
-                  <span class="hist-sep">/</span>
-                  <span class="hist-scenes">{{ j.scene_count }} scenes</span>
-                </template>
-                <span class="hist-sep">/</span>
-                <span class="hist-time">{{ timeAgo(j.timestamp) }}</span>
-                <template v-if="styleLabel(j.style)">
-                  <span class="hist-sep">&middot;</span>
-                  <span class="hist-style">
-                    <span class="hist-style-dot" :style="{ background: styleColor(j.style) }"></span>
-                    <span :style="{ color: styleColor(j.style), fontWeight: 600 }">{{ styleLabel(j.style) }}</span>
-                  </span>
-                </template>
-                <template v-if="j.status === 'error'">
-                  <span class="hist-sep">&middot;</span>
-                  <span class="hist-error-badge">error at {{ j.error_step || '?' }}</span>
-                </template>
-              </div>
-              <div v-if="j.pipeline_timing && Object.keys(j.pipeline_timing).length" class="hist-timings">
-                <span v-if="formatElapsed(j.pipeline_timing.total)" class="hist-timing hist-timing--total">
-                  total {{ formatElapsed(j.pipeline_timing.total) }}
-                </span>
-                <span
-                  v-for="step in historyTimings(j)"
-                  :key="step.key"
-                  class="hist-timing"
-                >
-                  {{ step.label }} {{ formatElapsed(step.duration) }}
-                </span>
-              </div>
-            </div>
-            <!-- Action buttons -->
-            <div class="hist-actions">
-              <!-- Retry button for errored pipelines -->
-              <button
-                v-if="j.status === 'error' && j.error_step"
-                class="hist-action-btn hist-action-btn--retry"
-                title="Retry from failed step"
-                @click.stop="retryFromHistory(i)"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                Retry
-              </button>
-              <!-- Regenerate assets button for completed pipelines with scenes -->
-              <button
-                v-if="j.status === 'done' && j.scene_count > 0"
-                class="hist-action-btn hist-action-btn--regen"
-                title="Regenerate assets with provider"
-                @click.stop="handleRegenerateAssets(j.project_id)"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                Regen Assets
-              </button>
-              <!-- Open in scenes -->
-              <button
-                class="hist-open-btn"
-                title="Open in Scene Blueprint"
-                @click.stop="openInScenes(j.project_id)"
-              >
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                  <path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                  <path d="M4 11V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/>
-                  <path d="M4 11h16"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <PipelineHistory
+      :jobs="jobs"
+      :active-project-id="activeProjectId"
+      :templates="templates"
+      @select="onHistoryClick"
+      @retry="retryFromHistory"
+      @regenerate="handleRegenerateAssets"
+      @open="openInScenes"
+    />
 
   </div>
 
