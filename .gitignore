@@ -18,3 +18,5 @@ static/dist/
 claude-code-skills/
 tmp/
 data/chromium-profile/
+_dev/self_improver/comparison-report.html
+_dev/self_improver/model-compare/model-6scene-compare.html
