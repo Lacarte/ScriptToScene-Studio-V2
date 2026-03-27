@@ -570,8 +570,8 @@ _DEFAULTS = {
     "short_test": {
         "label": "Short Test",
         "description": "Quick pipeline smoke test — 3-5 simple scenes, fast generation.",
-        "category": None,
-        "niche": None,
+        "category": "motivation",
+        "niche": "motivation",
         "visual_style": "short_test",
         "story_tone": "dramatic",
         "voice": "af_heart",
