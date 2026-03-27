@@ -16,6 +16,14 @@
       }
       initSync(request.wsUrl);
       sendResponse({ ok: true });
+    } else if (request.action === 'STS_STATUS') {
+      var s = window.__stsGeminiState;
+      sendResponse({
+        connected: !!(s && s.wsConnected),
+        projectId: s ? s.projectId : null,
+        sceneCount: s ? Object.keys(s.scenes).length : 0,
+      });
+      return true;
     } else if (request.action === 'STS_STOP') {
       console.log('[STS Gemini] STOP received');
       if (window.__stsGeminiState) {
@@ -89,7 +97,7 @@
       }
       S.ws.onopen = function() {
         console.log('[STS WS] Connected');
-        S.wsConnected = true; S.connected = true;
+        S.wsConnected = true; S.connected = true; _wsReconnectAttempts = 0;
         if (S.ws.readyState === WebSocket.OPEN) {
           S.ws.send(JSON.stringify({ type: 'EXTENSION_READY', source: 'sts-gemini-ext' }));
         }
@@ -105,9 +113,13 @@
       S.ws.onerror = function() { S.wsConnected = false; };
     }
 
+    var _wsReconnectAttempts = 0;
     function scheduleWSReconnect() {
       if (S.wsReconnectTimer) return;
-      S.wsReconnectTimer = setTimeout(function() { S.wsReconnectTimer = null; connectWS(); }, 5000);
+      _wsReconnectAttempts++;
+      // Fast reconnect first 10 attempts (2s), then slow down (5s)
+      var delay = _wsReconnectAttempts <= 10 ? 2000 : 5000;
+      S.wsReconnectTimer = setTimeout(function() { S.wsReconnectTimer = null; connectWS(); }, delay);
     }
 
     function sendWS(msg) {
@@ -370,17 +382,22 @@
 
     // ── Generation detection (from Gemini Automator) ─
     function isGeminiGenerating() {
-      var stopBtn = document.querySelector('button[aria-label="Stop response"]');
-      var thinkingAvatar = document.querySelector('.bard-avatar.thinking');
-      var textLoader = document.querySelector('.gpi-static-text-loader');
-      var processingContainer = document.querySelector('.processing-state_container--processing');
-      var loadingSpan = document.querySelector('span[aria-label="Loading"]');
-      var justASec = null;
-      var spans = document.querySelectorAll('span');
-      for (var i = 0; i < spans.length; i++) {
-        if (spans[i].textContent.indexOf('Just a sec') !== -1) { justASec = spans[i]; break; }
+      // Based on DOM activity analysis — these are reliable generating indicators:
+      // 1. processing-state without hidden attr = actively processing
+      var processingStates = document.querySelectorAll('processing-state:not([hidden])');
+      var hasActiveProcessing = false;
+      for (var p = 0; p < processingStates.length; p++) {
+        if (!processingStates[p].hasAttribute('hidden')) { hasActiveProcessing = true; break; }
       }
-      return !!(stopBtn || thinkingAvatar || textLoader || processingContainer || loadingSpan || justASec);
+      // 2. response-element with "pending" or "animating" class
+      var pendingResponse = document.querySelector('response-element.pending, response-element.animating');
+      // 3. Attachment container still pending
+      var pendingAttachment = document.querySelector('.attachment-container.generated-images.pending');
+      // 4. Classic indicators
+      var stopBtn = document.querySelector('button[aria-label="Stop response"]');
+      var processingContainer = document.querySelector('.processing-state_container--processing');
+
+      return !!(hasActiveProcessing || pendingResponse || pendingAttachment || stopBtn || processingContainer);
     }
 
     function isValidImageSrc(src) {
@@ -389,28 +406,35 @@
 
     function findImageInContainer(container) {
       if (!container) return null;
-      // Strategy 1: single-image img with blob/http src (don't require .loaded class)
+      // Based on DOM activity analysis, the reliable lifecycle is:
+      //   1. aria-busy="false" on markdown div (generation done)
+      //   2. src gets blob: URL on <img> (image available)
+      //   3. class "image" → "image loaded" (final render)
+      // We accept ANY img with a blob: src — don't require .loaded class
+      // because .loaded appears much later and causes timeouts.
+
+      // Strategy 1: img with blob: src inside single-image (most reliable)
       var imgs = container.querySelectorAll('single-image img');
       for (var i = imgs.length - 1; i >= 0; i--) {
-        if (isValidImageSrc(imgs[i].src)) {
-          console.log('[IMAGE] Found in single-image img:', imgs[i].className);
+        if (imgs[i].src && imgs[i].src.indexOf('blob:') === 0) {
+          console.log('[IMAGE] Found blob src in single-image img' + (imgs[i].classList.contains('loaded') ? ' (loaded)' : ' (not yet loaded)'));
           return imgs[i].src;
         }
       }
-      // Strategy 2: generated-image img
+      // Strategy 2: img with blob: src inside generated-image
       var genImgs = container.querySelectorAll('generated-image img');
       for (var j = genImgs.length - 1; j >= 0; j--) {
-        if (isValidImageSrc(genImgs[j].src)) {
-          console.log('[IMAGE] Found in generated-image img');
+        if (genImgs[j].src && genImgs[j].src.indexOf('blob:') === 0) {
+          console.log('[IMAGE] Found blob src in generated-image img');
           return genImgs[j].src;
         }
       }
-      // Strategy 3: any blob img inside the container
+      // Strategy 3: any img with blob: or googleusercontent src
       var allImgs = container.querySelectorAll('img');
       for (var k = allImgs.length - 1; k >= 0; k--) {
         var s = allImgs[k].src;
         if (s && (s.indexOf('blob:') === 0 || s.indexOf('googleusercontent.com') !== -1)) {
-          console.log('[IMAGE] Found via fallback');
+          console.log('[IMAGE] Found img via fallback');
           return s;
         }
       }
@@ -420,33 +444,68 @@
     // Scene-to-container index mapping (set after each submit)
     var sceneContainerMap = {};
 
+    var _capturedContainerIds = {};
+
     function captureContainerForScene(sceneKey) {
-      // After submitting, the last conversation-container is the one for this scene
-      var containers = document.querySelectorAll('.conversation-container');
-      if (containers.length > 0) {
-        var last = containers[containers.length - 1];
-        sceneContainerMap[sceneKey] = last;
-        console.log('[TRACK] Mapped scene ' + sceneKey + ' to container index ' + (containers.length - 1));
-        // Inject scene badge
-        injectSceneBadge(last, sceneKey);
-      }
+      // Count containers BEFORE submit to know how many existed already
+      var countBefore = document.querySelectorAll('.conversation-container').length;
+      var attempts = 0;
+      var maxAttempts = 20; // 20 x 500ms = 10s max wait
+
+      var poll = setInterval(function() {
+        attempts++;
+        // Only match REAL containers (div.conversation-container), NOT pending-request.conversation-container
+        // Gemini creates a temporary <pending-request> container first, then replaces it with the real <div>
+        var containers = document.querySelectorAll('div.conversation-container');
+
+        // Look for a container we haven't captured yet (by its id attribute)
+        for (var i = containers.length - 1; i >= 0; i--) {
+          var c = containers[i];
+          // Skip pending-request containers (Angular will remove them)
+          if (c.tagName === 'PENDING-REQUEST') continue;
+          var cId = c.id || ('idx-' + i);
+          if (!cId || cId.indexOf('idx-') === 0) continue; // Skip containers without a real id
+          if (!_capturedContainerIds[cId]) {
+            clearInterval(poll);
+            _capturedContainerIds[cId] = sceneKey;
+            sceneContainerMap[sceneKey] = c;
+            console.log('[TRACK] Mapped scene ' + sceneKey + ' to container id=' + cId + ' (attempt ' + attempts + ')');
+            injectSceneBadge(c, sceneKey);
+            return;
+          }
+        }
+
+        if (attempts >= maxAttempts) {
+          clearInterval(poll);
+          // Fallback: use last container even if already captured
+          var last = containers[containers.length - 1];
+          if (last) {
+            sceneContainerMap[sceneKey] = last;
+            console.warn('[TRACK] Fallback: mapped scene ' + sceneKey + ' to last container (attempt ' + attempts + ')');
+            injectSceneBadge(last, sceneKey);
+          }
+        }
+      }, 500);
     }
 
     function injectSceneBadge(container, sceneKey) {
       if (!container) return;
-      // Use a dedicated wrapper outside Angular's control
       var wrapperId = 'sts-badge-' + sceneKey;
       if (document.getElementById(wrapperId)) return;
 
-      // Create a floating badge positioned relative to the container
+      // Find the user-query element inside this conversation-container
+      // Angular won't re-render user queries after submit, so this is stable
+      var userQuery = container.querySelector('user-query');
+      if (!userQuery) return;
+
       var badge = document.createElement('div');
       badge.id = wrapperId;
       badge.className = 'sts-scene-badge';
-      badge.textContent = S.projectId + ' | Scene ' + sceneKey;
-      badge.style.cssText = 'background:#00d4aa;color:#0d1117;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;display:block;text-align:left;margin:4px 0;width:fit-content;';
+      badge.textContent = '[' + S.projectId + '|' + sceneKey + ']';
+      badge.style.cssText = 'background:#00d4aa;color:#0d1117;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;display:inline-block;margin:4px 8px;';
 
-      // Insert BEFORE the container — Angular won't touch elements outside its tree
-      container.parentNode.insertBefore(badge, container);
+      // Append inside user-query — each prompt gets its own badge
+      userQuery.appendChild(badge);
     }
 
     function waitForImageGeneration(timeoutMs, projectId, sceneNum) {
@@ -457,13 +516,28 @@
         console.log('[IMAGE] Waiting for image for scene ' + label + ' (timeout: ' + (timeoutMs / 1000) + 's)');
 
         var checkInterval = setInterval(function() {
+          // Try mapped container first
           var container = sceneContainerMap[sceneNum];
+
+          // Fallback: if container not mapped yet, check the last conversation-container
+          if (!container) {
+            var allContainers = document.querySelectorAll('.conversation-container');
+            if (allContainers.length > 0) {
+              container = allContainers[allContainers.length - 1];
+            }
+          }
+
           if (container) {
             var modelResponse = container.querySelector('model-response');
             if (modelResponse) {
               var img = findImageInContainer(modelResponse);
               if (img) {
                 clearInterval(checkInterval);
+                // Also ensure container is mapped if it wasn't
+                if (!sceneContainerMap[sceneNum]) {
+                  sceneContainerMap[sceneNum] = container;
+                  injectSceneBadge(container, sceneNum);
+                }
                 console.log('[IMAGE] Found for scene ' + label + ':', img.substring(0, 80) + '...');
                 resolve(img);
                 return;
@@ -471,11 +545,37 @@
             }
           }
 
-          // Timeout only if not actively generating
-          if (Date.now() - start > timeoutMs && !isGeminiGenerating()) {
+          var elapsed = Date.now() - start;
+
+          // Check aria-busy="false" on the response's markdown div
+          // This is the most reliable "generation complete" signal (from DOM activity analysis)
+          if (container) {
+            var markdownDiv = container.querySelector('.markdown[aria-busy="false"]');
+            var footerDone = container.querySelector('.response-footer.complete, .response-footer.gap.complete');
+            if (markdownDiv || footerDone) {
+              // Generation is confirmed done — if no image found after 10s more, it failed
+              if (elapsed > timeoutMs || elapsed > 30000) {
+                clearInterval(checkInterval);
+                console.error('[IMAGE] aria-busy=false but no image found for scene ' + label);
+                resolve(null);
+                return;
+              }
+            }
+          }
+
+          // Soft timeout: if past timeout and not generating, give up
+          if (elapsed > timeoutMs && !isGeminiGenerating()) {
             clearInterval(checkInterval);
-            console.error('[IMAGE] Timed out for scene ' + label);
+            console.error('[IMAGE] Timed out for scene ' + label + ' (soft)');
             resolve(null);
+            return;
+          }
+          // Hard timeout: 2x the soft timeout — give up no matter what
+          if (elapsed > timeoutMs * 2) {
+            clearInterval(checkInterval);
+            console.error('[IMAGE] Timed out for scene ' + label + ' (hard)');
+            resolve(null);
+            return;
           }
         }, 1000);
       });
@@ -596,12 +696,12 @@
           .then(function() { console.log('[FLOW] Step 2: Waiting 1s before submit...'); return sleep(1000); })
           .then(function() { console.log('[FLOW] Step 3: Submitting...'); return submitPrompt(); })
           .then(function() {
-            // Capture the conversation container for this scene (last one in DOM)
-            return sleep(500).then(function() { captureContainerForScene(item.scene); });
+            // Start polling for the new conversation container (async, non-blocking)
+            captureContainerForScene(item.scene);
           })
           .then(function() {
             // Check rate limit after submit (it may appear after trying to generate)
-            return sleep(1500).then(function() {
+            return sleep(2000).then(function() {
               var postSubmitLimit = checkRateLimit();
               if (postSubmitLimit) {
                 console.log('[FLOW] Rate limit hit after submit!');
@@ -754,14 +854,35 @@
         '</div>';
       document.body.appendChild(root);
 
-      // Event handlers
-      $id('sts-pill').addEventListener('click', function() {
-        S.collapsed = false;
-        localStorage.setItem('sts-gemini-collapsed', 'false');
-        $id('sts-pill').style.display = 'none';
-        $id('sts-panel').style.display = '';
-        render();
-      });
+      // Event handlers — draggable pill
+      (function() {
+        var pill = $id('sts-pill');
+        var dragging = false, hasMoved = false, ox, oy;
+        pill.addEventListener('mousedown', function(e) {
+          dragging = true; hasMoved = false;
+          ox = e.clientX - pill.getBoundingClientRect().left;
+          oy = e.clientY - pill.getBoundingClientRect().top;
+          e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+          if (!dragging) return;
+          hasMoved = true;
+          pill.style.left = (e.clientX - ox) + 'px';
+          pill.style.top = (e.clientY - oy) + 'px';
+          pill.style.right = 'auto';
+          pill.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', function() {
+          if (dragging && !hasMoved) {
+            S.collapsed = false;
+            localStorage.setItem('sts-gemini-collapsed', 'false');
+            $id('sts-pill').style.display = 'none';
+            $id('sts-panel').style.display = '';
+            render();
+          }
+          dragging = false;
+        });
+      })();
       $id('sts-collapse-btn').addEventListener('click', function() {
         S.collapsed = true;
         localStorage.setItem('sts-gemini-collapsed', 'true');
@@ -811,6 +932,22 @@
         console.log('[STS] Retrying ' + retried + ' failed scenes');
         render();
         if (retried > 0 && !S.typing.active) startTyping();
+      });
+
+      // Per-scene retry buttons (delegated)
+      panel.addEventListener('click', function(e) {
+        var btn = e.target.closest('.sts-retry-scene-btn');
+        if (!btn) return;
+        var sceneKey = btn.getAttribute('data-scene');
+        var item = S.typing.queue.find(function(q) { return String(q.scene) === sceneKey; });
+        if (item && item.status === 'error') {
+          item.status = 'queued';
+          item.error = null;
+          if (S.scenes[sceneKey]) S.scenes[sceneKey].status = 'pending';
+          console.log('[STS] Retrying scene ' + sceneKey);
+          render();
+          if (!S.typing.active) startTyping();
+        }
       });
       // Delegate thumbnail clicks for image overlay
       $id('sts-list').addEventListener('click', function(e) {
@@ -949,13 +1086,16 @@
             ? '<img class="sts-row-thumb" src="' + item.imageUrl + '" alt="">'
             : '<div class="sts-row-thumb sts-row-thumb-empty">' + item.scene + '</div>';
           var errHtml = item.error ? '<div class="sts-row-error">' + escHtml(item.error) + '</div>' : '';
+          var retryHtml = item.status === 'error'
+            ? '<button class="sts-retry-scene-btn" data-scene="' + item.scene + '" style="background:#f39c12;color:#0d1117;border:none;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;cursor:pointer;margin-top:2px;">RETRY</button>'
+            : '';
           return '<div class="' + rowCls + '">' +
             thumbHtml +
             '<div class="sts-row-num">' + item.scene + '</div>' +
             '<div class="sts-row-info">' +
               '<div class="sts-row-prompt">' + escHtml(pr) + '</div>' +
               '<div class="sts-row-meta">' + meta + '</div>' +
-              errHtml +
+              errHtml + retryHtml +
             '</div>' +
             '<div class="sts-row-status">' + sHTML + '</div>' +
           '</div>';

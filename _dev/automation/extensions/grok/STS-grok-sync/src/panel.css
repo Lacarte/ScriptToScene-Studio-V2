@@ -38,15 +38,16 @@
   background: var(--bg);
   border: 1.5px solid rgba(255,255,255,0.10);
   border-radius: 100px;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: grab;
+  transition: border-color 0.3s, box-shadow 0.3s;
   box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.02) inset;
   backdrop-filter: blur(20px) saturate(1.5);
+  user-select: none;
 }
+.sts-pill:active { cursor: grabbing; }
 .sts-pill:hover {
   border-color: var(--accent);
   box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 20px var(--accent-glow);
-  transform: translateY(-2px);
 }
 .sts-pill-dot {
   width: 8px; height: 8px; border-radius: 50%;

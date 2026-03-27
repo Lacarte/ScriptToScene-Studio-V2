@@ -1,57 +1,43 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const startBtn = document.getElementById('startBtn');
-  const wsUrlInput = document.getElementById('wsUrl');
   const statusBadge = document.getElementById('statusBadge');
   const statusLabel = document.getElementById('statusLabel');
   const statusText = document.getElementById('statusText');
 
-  function setRunning(running) {
-    if (running) {
-      startBtn.textContent = 'Stop Sync';
-      startBtn.className = 'action-btn stop';
+  function setStatus(connected) {
+    if (connected) {
       statusBadge.className = 'status-badge online';
-      statusLabel.textContent = 'Live';
-      statusText.textContent = 'Running...';
+      statusLabel.textContent = 'Connected';
+      statusText.textContent = 'Auto-connected to Flask WS';
     } else {
-      startBtn.textContent = 'Start Sync';
-      startBtn.className = 'action-btn start';
       statusBadge.className = 'status-badge offline';
-      statusLabel.textContent = 'Offline';
+      statusLabel.textContent = 'Reconnecting';
+      statusText.textContent = 'Waiting for Flask on :5050...';
     }
   }
 
-  // Load saved URL
-  chrome.storage.local.get(['stsWsUrl', 'stsRunning'], (data) => {
-    if (data.stsWsUrl) wsUrlInput.value = data.stsWsUrl;
-    if (data.stsRunning) {
-      setRunning(true);
-    }
-  });
-
-  startBtn.addEventListener('click', async () => {
-    const wsUrl = wsUrlInput.value.trim();
-    chrome.storage.local.set({ stsWsUrl: wsUrl });
-
+  // Query the content script for actual WS state
+  async function checkStatus() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.url.includes('gemini.google.com')) {
-      statusText.textContent = 'Open gemini.google.com first!';
+      statusBadge.className = 'status-badge offline';
+      statusLabel.textContent = 'Wrong page';
+      statusText.textContent = 'Open gemini.google.com';
       return;
     }
 
-    chrome.storage.local.get(['stsRunning'], (data) => {
-      if (data.stsRunning) {
-        // Stop
-        chrome.tabs.sendMessage(tab.id, { action: 'STS_STOP' });
-        chrome.storage.local.set({ stsRunning: false });
-        setRunning(false);
-        statusText.textContent = 'Stopped';
+    chrome.tabs.sendMessage(tab.id, { action: 'STS_STATUS' }, (response) => {
+      if (chrome.runtime.lastError || !response) {
+        setStatus(false);
       } else {
-        // Start
-        chrome.tabs.sendMessage(tab.id, { action: 'STS_START', wsUrl: wsUrl });
-        chrome.storage.local.set({ stsRunning: true });
-        setRunning(true);
-        statusText.textContent = 'Starting...';
+        setStatus(response.connected);
+        if (response.projectId) {
+          statusText.textContent = 'Project: ' + response.projectId + ' (' + response.sceneCount + ' scenes)';
+        }
       }
     });
-  });
+  }
+
+  checkStatus();
+  // Refresh every 2 seconds while popup is open
+  setInterval(checkStatus, 2000);
 });

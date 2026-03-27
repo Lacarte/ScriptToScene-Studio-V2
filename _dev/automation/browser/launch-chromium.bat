@@ -105,9 +105,9 @@ echo.
 echo  Launching Chromium...
 
 if defined EXT_LIST (
-  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 --load-extension=%EXT_LIST% "https://grok.com/imagine" "https://gemini.google.com/app"
+  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 --load-extension=%EXT_LIST% "https://grok.com/imagine" "https://gemini.google.com/u/1/app?pageId=none"
 ) else (
-  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 "https://grok.com/imagine" "https://gemini.google.com/app"
+  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 "https://grok.com/imagine" "https://gemini.google.com/u/1/app?pageId=none"
 )
 
 :: Wait for CDP

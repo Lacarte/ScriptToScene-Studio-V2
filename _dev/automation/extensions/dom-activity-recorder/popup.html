@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 300px; padding: 12px; background: #0d1117; color: #e6edf3; font-family: 'SF Mono', monospace; font-size: 12px; margin: 0; }
+    h3 { margin: 0 0 10px; color: #00d4aa; font-size: 13px; }
+    .btn { display: block; width: 100%; padding: 8px; margin: 6px 0; border: none; border-radius: 4px; font-weight: 700; font-size: 11px; cursor: pointer; font-family: inherit; }
+    .btn-primary { background: #00d4aa; color: #0d1117; }
+    .btn-warn { background: #f39c12; color: #0d1117; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .btn-blue { background: #58a6ff; color: #0d1117; }
+    .btn:hover { opacity: 0.85; }
+    .divider { border-top: 1px solid #30363d; margin: 10px 0; }
+    label { display: block; color: #8b949e; font-size: 10px; margin-bottom: 4px; text-transform: uppercase; }
+    .xpath-input { width: 100%; box-sizing: border-box; padding: 6px 8px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #e6edf3; font-family: inherit; font-size: 11px; margin-bottom: 6px; }
+    .xpath-input:focus { outline: none; border-color: #58a6ff; }
+    .xpath-input::placeholder { color: #484f58; }
+    .status { color: #8b949e; font-size: 11px; margin-top: 8px; }
+    .error { color: #f85149; }
+    .success { color: #3fb950; }
+  </style>
+</head>
+<body>
+  <h3>Section Activity Recorder</h3>
+  <button class="btn btn-primary" id="pick">Pick Element to Monitor</button>
+
+  <div class="divider"></div>
+  <label>Or enter XPath / CSS selector:</label>
+  <input class="xpath-input" id="xpath" type="text" placeholder="/html/body/div[2]/main or div.my-class">
+  <button class="btn btn-blue" id="xpath-go">Select by XPath / CSS</button>
+
+  <div class="divider"></div>
+  <button class="btn btn-warn" id="stop">Stop Recording</button>
+  <button class="btn btn-danger" id="clear">Clear Data</button>
+  <div class="status" id="status">Click "Pick Element" or enter XPath to start</div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -9,11 +9,36 @@ if (window.__stsSyncActive) {
   initSync();
 }
 
+// Listen for messages from popup/background
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  if (request.action === 'STS_STATUS') {
+    var s = window.__stsGrokState;
+    sendResponse({
+      connected: !!(s && s.wsConnected),
+      projectId: s ? s.projectId : null,
+      sceneCount: s ? Object.keys(s.scenes).length : 0,
+    });
+    return true;
+  } else if (request.action === 'STS_STOP') {
+    if (window.__stsGrokState) {
+      window.__stsGrokState.typing.stopRequested = true;
+      if (window.__stsGrokState.ws) {
+        try { window.__stsGrokState.ws.close(); } catch(e) {}
+      }
+    }
+    var panel = document.getElementById('sts-sync');
+    if (panel) panel.remove();
+    window.__stsSyncActive = false;
+    sendResponse({ ok: true });
+  }
+});
+
 function initSync() {
   "use strict";
   console.log("=== STS Grok Sync v1.0 ===");
 
   // ── State ──────────────────────────────────────────────
+  window.__stsGrokState = null; // Exposed for STS_STATUS handler
   const S = {
     studioUrl: localStorage.getItem("sts-url") || "http://localhost:5050",
     connected: false,
@@ -128,6 +153,7 @@ function initSync() {
       S.wsConnected = true;
       S._fetchErrors = 0;
       S.connected = true;
+      _wsReconnectAttempts = 0;
       if (S.ws.readyState === WebSocket.OPEN) {
         S.ws.send(JSON.stringify({ type: "EXTENSION_READY", source: "sts-grok-sync" }));
       }
@@ -146,12 +172,15 @@ function initSync() {
     S.ws.onerror = () => { S.wsConnected = false; };
   }
 
+  let _wsReconnectAttempts = 0;
   function scheduleWSReconnect() {
     if (S.wsReconnectTimer) return;
+    _wsReconnectAttempts++;
+    const delay = _wsReconnectAttempts <= 10 ? 2000 : 5000;
     S.wsReconnectTimer = setTimeout(() => {
       S.wsReconnectTimer = null;
       connectWS();
-    }, 5000);
+    }, delay);
   }
 
   function sendWS(msg) {
@@ -788,7 +817,7 @@ function initSync() {
       if (container.querySelector(".sts-scene-badge")) return;
       const badge = document.createElement("div");
       badge.className = "sts-scene-badge";
-      badge.textContent = (S.projectId || "") + " | Scene " + sceneKey;
+      badge.textContent = "[" + (S.projectId || "") + "|" + sceneKey + "]";
       badge.style.cssText = "position:absolute;top:8px;right:8px;background:#00d4aa;color:#0d1117;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;z-index:999;pointer-events:none;";
       container.style.position = "relative";
       container.appendChild(badge);
@@ -1689,13 +1718,34 @@ function initSync() {
 
     document.body.appendChild(root);
 
-    // Event handlers
-    $id("sts-pill").addEventListener("click", () => {
-      S.collapsed = false;
-      $id("sts-pill").style.display = "none";
-      $id("sts-panel").style.display = "";
-      render();
-    });
+    // Event handlers — draggable pill
+    (() => {
+      const pill = $id("sts-pill");
+      let dragging = false, hasMoved = false, ox, oy;
+      pill.addEventListener("mousedown", (e) => {
+        dragging = true; hasMoved = false;
+        ox = e.clientX - pill.getBoundingClientRect().left;
+        oy = e.clientY - pill.getBoundingClientRect().top;
+        e.preventDefault();
+      });
+      document.addEventListener("mousemove", (e) => {
+        if (!dragging) return;
+        hasMoved = true;
+        pill.style.left = (e.clientX - ox) + "px";
+        pill.style.top = (e.clientY - oy) + "px";
+        pill.style.right = "auto";
+        pill.style.bottom = "auto";
+      });
+      document.addEventListener("mouseup", () => {
+        if (dragging && !hasMoved) {
+          S.collapsed = false;
+          $id("sts-pill").style.display = "none";
+          $id("sts-panel").style.display = "";
+          render();
+        }
+        dragging = false;
+      });
+    })();
 
     $id("sts-collapse-btn").addEventListener("click", () => {
       S.collapsed = true;
@@ -1773,6 +1823,7 @@ function initSync() {
 
   injectUI();
   renderAutoType();
+  window.__stsGrokState = S;
   connectWS();
 
   // Start polling
