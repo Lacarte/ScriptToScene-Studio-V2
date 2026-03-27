@@ -73,3 +73,39 @@ function connectorColor(idx) {
     </div>
   </section>
 </template>
+
+<style scoped>
+.progress-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.progress-label { margin: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
+.progress-header-right { display: flex; align-items: center; gap: 10px; }
+.progress-project { font-size: 11px; color: var(--accent); }
+
+.progress-stop-btn, .progress-resume-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; font-size: 11px; font-weight: 600;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; cursor: pointer; transition: all 0.15s;
+}
+.progress-stop-btn { color: #FF6B6B; border-color: rgba(255,107,107,0.3); }
+.progress-stop-btn:hover:not(:disabled) { background: rgba(255,107,107,0.1); border-color: #FF6B6B; }
+.progress-stop-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.progress-resume-btn { color: #26DE81; border-color: rgba(38,222,129,0.3); }
+.progress-resume-btn:hover { background: rgba(38,222,129,0.1); border-color: #26DE81; }
+
+.steps-row { display: flex; align-items: center; width: 100%; margin-bottom: 16px; }
+.step-col { display: flex; flex-direction: column; align-items: center; min-width: 60px; }
+.step-dot { width: 32px; height: 32px; border-radius: 50%; border: 2px solid; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.3s; }
+.step-pulse { animation: pulse 1.5s infinite; }
+.step-label { font-size: 10px; font-weight: 600; margin-top: 4px; }
+.step-connector { flex: 1; height: 2px; margin: 0 4px; }
+
+.current-step { min-height: 24px; }
+.current-step-inner { display: flex; align-items: center; gap: 8px; }
+.step-spinner { width: 12px; height: 12px; border: 2px solid rgba(78,205,196,0.3); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
+.current-step-msg { font-size: 12px; color: var(--text-secondary); }
+.current-step-msg.is-error { color: #FF6B6B; }
+.current-step-msg.is-stopped { color: #FFB347; }
+
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(78,205,196,0.4); } 50% { box-shadow: 0 0 0 6px rgba(78,205,196,0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>

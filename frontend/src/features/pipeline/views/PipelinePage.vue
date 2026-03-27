@@ -627,6 +627,27 @@ onMounted(() => document.addEventListener('mousedown', onClickOutside))
 onBeforeUnmount(() => document.removeEventListener('mousedown', onClickOutside))
 
 const logEl = ref(null)
+
+// ── Collapsible sections ──
+const creativeOpen = ref(localStorage.getItem('sts-section-creative') !== 'false')
+const settingsOpen = ref(localStorage.getItem('sts-section-settings') !== 'false')
+const logOpen = ref(false)
+watch(creativeOpen, v => localStorage.setItem('sts-section-creative', String(v)))
+watch(settingsOpen, v => localStorage.setItem('sts-section-settings', String(v)))
+
+const settingsSummary = computed(() => {
+  const parts = []
+  parts.push(voice.value || 'af_heart')
+  parts.push(speed.value + 'x')
+  if (stopAfter.value) {
+    const step = ALL_STEPS.find(s => s.id === stopAfter.value)
+    parts.push('→ ' + (step?.label || stopAfter.value))
+  } else {
+    parts.push('All steps')
+  }
+  return parts.join(' / ')
+})
+
 const activeProjectId = ref('')
 useProjectSync(activeProjectId)
 
@@ -910,13 +931,14 @@ function logStepLabel(step) {
       </div>
 
       <div class="creative-panel">
-        <div class="creative-panel-header">
+        <button class="section-toggle" @click="creativeOpen = !creativeOpen">
           <div class="creative-copy">
             <span class="creative-kicker">Creative Setup</span>
             <h3 class="creative-title">Set the creative direction</h3>
-            <p class="creative-note">Choose a niche preset or set the visual style, category, and tone yourself.</p>
           </div>
-        </div>
+          <svg class="section-chevron" :class="{ open: creativeOpen }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div v-show="creativeOpen" class="section-body">
 
         <NichePicker
           :presets="nichePresets"
@@ -989,6 +1011,7 @@ function logStepLabel(step) {
             <p class="creative-detail">{{ activeToneHint || 'How the narration should feel.' }}</p>
           </div>
         </div>
+        </div><!-- /section-body -->
       </div>
 
       <!-- Generate mode: inline story form -->
@@ -1104,8 +1127,12 @@ function logStepLabel(step) {
       </div>
 
       <!-- Controls strip -->
-      <span class="controls-strip-label">Pipeline Settings</span>
-      <div class="controls-strip">
+      <button class="section-toggle section-toggle--compact" @click="settingsOpen = !settingsOpen">
+        <span class="controls-strip-label">Pipeline Settings</span>
+        <span v-if="!settingsOpen" class="section-summary">{{ settingsSummary }}</span>
+        <svg class="section-chevron" :class="{ open: settingsOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div v-show="settingsOpen" class="controls-strip">
         <div class="control-group">
           <label class="control-label">Voice</label>
           <select v-model="voice" class="input-field control-select">
@@ -1199,8 +1226,15 @@ function logStepLabel(step) {
       @resume="resumeStopped"
     />
 
-    <!-- Log -->
-    <PipelineLog :log="log" />
+    <!-- Log (expandable) -->
+    <section v-if="log.length" class="card log-card">
+      <button class="section-toggle section-toggle--compact" @click="logOpen = !logOpen">
+        <label class="field-label log-label">Log</label>
+        <span class="section-summary">{{ log.length }} entries</span>
+        <svg class="section-chevron" :class="{ open: logOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <PipelineLog v-show="logOpen" :log="log" />
+    </section>
 
     <!-- History -->
     <PipelineHistory
@@ -1411,6 +1445,51 @@ function logStepLabel(step) {
 </template>
 
 <style scoped>
+/* ── Collapsible Sections ── */
+.section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  gap: 8px;
+}
+.section-toggle:hover .section-chevron { color: var(--accent); }
+.section-toggle--compact {
+  padding: 4px 0;
+  margin-bottom: 8px;
+}
+.section-chevron {
+  color: var(--text-muted);
+  transition: transform 0.2s ease, color 0.15s;
+  flex-shrink: 0;
+}
+.section-chevron.open { transform: rotate(180deg); }
+.section-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.02em;
+  margin-left: auto;
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.section-body {
+  animation: sectionFadeIn 0.15s ease-out;
+}
+@keyframes sectionFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .pipeline-layout {
   display: flex;
   gap: 0;

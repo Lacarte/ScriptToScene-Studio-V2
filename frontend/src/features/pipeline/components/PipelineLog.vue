@@ -23,14 +23,18 @@ watch(() => props.log.length, async () => {
 </script>
 
 <template>
-  <section v-if="log.length" class="card log-card">
-    <label class="field-label log-label">Log</label>
-    <div ref="logEl" class="log-container">
-      <div v-for="(entry, i) in log" :key="i" class="log-entry" :style="{ color: logEntryColor(entry) }">
-        <span class="log-icon">{{ logEntryIcon(entry) }}</span>
-        <span class="log-step">{{ logStepLabel(entry.step) }}</span>
-        {{ entry.message || '' }}
-      </div>
+  <div ref="logEl" class="log-container">
+    <div v-for="(entry, i) in log" :key="i" class="log-entry" :style="{ color: logEntryColor(entry) }">
+      <span class="log-icon">{{ logEntryIcon(entry) }}</span>
+      <span class="log-step">{{ logStepLabel(entry.step) }}</span>
+      {{ entry.message || '' }}
     </div>
-  </section>
+  </div>
 </template>
+
+<style scoped>
+.log-container { max-height: 200px; overflow-y: auto; font-size: 11px; line-height: 1.6; padding: 8px 12px; background: var(--bg-darkest); border-radius: 8px; border: 1px solid var(--border); font-family: 'JetBrains Mono', monospace; }
+.log-entry { padding: 3px 0; }
+.log-icon { opacity: 0.6; }
+.log-step { color: var(--accent); }
+</style>
