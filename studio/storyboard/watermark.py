@@ -106,7 +106,7 @@ def remove_watermark(filepath: str) -> bool:
 
     try:
         result = subprocess.run(
-            [gwt, "-i", filepath, "-o", filepath],
+            [gwt, "-i", filepath, "-o", filepath, "--force", "--snap", "--no-banner"],
             capture_output=True,
             text=True,
             timeout=30,

@@ -10,6 +10,11 @@ async function _activateProviderTab(target) {
     pendingProviderUrl.value = null
   } catch (e) {
     const msg = e.message || ''
+    // Gemini is always open — the STS Gemini extension handles the connection
+    if (target === 'gemini') {
+      pendingProviderUrl.value = null
+      return
+    }
     if (msg.includes('404')) {
       pendingProviderUrl.value = `No ${target} tab found in Chromium \u2014 open it manually`
     } else {

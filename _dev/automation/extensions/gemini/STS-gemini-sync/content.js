@@ -40,13 +40,9 @@
     }
   });
 
-  // Always auto-start on Gemini — connect WS and show panel
-  chrome.storage.local.get(['stsWsUrl'], function(data) {
-    console.log('[STS Gemini] Auto-starting on page load');
-    setTimeout(function() {
-      initSync(data.stsWsUrl || null);
-    }, 2000);
-  });
+  // Always auto-start on Gemini — connect WS and show panel immediately
+  console.log('[STS Gemini] Auto-starting on page load');
+  initSync(null);
 
   function initSync(wsUrlOverride) {
     console.log('=== STS Gemini Image Synchronizer v1 ===');
