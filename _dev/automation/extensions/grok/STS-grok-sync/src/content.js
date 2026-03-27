@@ -1611,7 +1611,8 @@ function initSync() {
         const rowCls = "sts-row" + (isCurrent ? " highlight" : "") + ((q.status === "error" || q.status === "failed") ? " error-clickable" : "");
         const thumbHtml = q.imageUrl ? '<img class="sts-row-thumb" src="' + q.imageUrl + '" alt="">' : '<div class="sts-row-thumb sts-row-thumb-empty">' + q.scene + "</div>";
         const checkboxHtml = '<label class="sts-row-check-wrap"><input type="checkbox" class="sts-row-check" data-role="typing-checkbox" data-idx="' + i + '"' + (isSelected ? " checked" : "") + (S.typing.active ? " disabled" : "") + "></label>";
-        return '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + escHtml(pr) + '</div><div class="sts-row-meta">' + meta + "</div></div><div class=\"sts-row-status\">" + sHTML + "</div></div>";
+        const pidLabel = q.projectId ? '<span style="color:#00d4aa;font-size:9px;font-family:monospace;margin-right:4px;">' + q.projectId + '</span>' : '';
+        return '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + pidLabel + escHtml(pr) + '</div><div class="sts-row-meta">' + meta + "</div></div><div class=\"sts-row-status\">" + sHTML + "</div></div>";
       }).join("");
     } else {
       const keys = Object.keys(S.scenes).sort((a, b) => parseInt(a) - parseInt(b));
@@ -1801,9 +1802,21 @@ function initSync() {
     });
 
     $id("sts-clear-btn").addEventListener("click", () => {
-      const keep = S.typing.queue.filter(q => q.status === "typing" || q.status === "generating");
-      S.typing.queue.length = 0;
-      S.typing.queue.push(...keep);
+      if (S.typing.active) {
+        S.typing.stopRequested = true;
+        S.typing.active = false;
+      }
+      S.typing.queue = [];
+      S.scenes = {};
+      S.sentScenes = {};
+      S.projectId = null;
+      S.typing.typedCount = 0;
+      S.typing.batchCount = 0;
+      S.typing.currentIndex = -1;
+      S.jobComplete = false;
+      // Remove all badges from DOM
+      document.querySelectorAll(".sts-scene-badge").forEach(b => b.remove());
+      console.log("[STS] Cleared all jobs");
       render();
     });
 

@@ -95,22 +95,24 @@
         console.warn('[STS WS] Connection failed:', e.message);
         S.wsConnected = false; scheduleWSReconnect(); return;
       }
-      S.ws.onopen = function() {
+      var ws = S.ws;
+      ws.onopen = function() {
+        if (S.ws !== ws) return; // stale reference
         console.log('[STS WS] Connected');
         S.wsConnected = true; S.connected = true; _wsReconnectAttempts = 0;
-        if (S.ws.readyState === WebSocket.OPEN) {
-          S.ws.send(JSON.stringify({ type: 'EXTENSION_READY', source: 'sts-gemini-ext' }));
-        }
+        try { ws.send(JSON.stringify({ type: 'EXTENSION_READY', source: 'sts-gemini-ext' })); } catch(e) {}
         render();
       };
-      S.ws.onmessage = function(evt) {
+      ws.onmessage = function(evt) {
+        if (S.ws !== ws) return;
         try { handleWSMessage(JSON.parse(evt.data)); } catch (e) { console.warn('[STS WS] Bad msg:', e); }
       };
-      S.ws.onclose = function() {
+      ws.onclose = function() {
+        if (S.ws === ws) { S.ws = null; }
         console.log('[STS WS] Disconnected');
-        S.wsConnected = false; S.ws = null; render(); scheduleWSReconnect();
+        S.wsConnected = false; render(); scheduleWSReconnect();
       };
-      S.ws.onerror = function() { S.wsConnected = false; };
+      ws.onerror = function() { S.wsConnected = false; };
     }
 
     var _wsReconnectAttempts = 0;
@@ -134,23 +136,26 @@
           S.projectId = msg.projectId;
           S.aspectRatio = msg.aspectRatio || S.aspectRatio || '';
           var scenes = msg.scenes || [];
-          console.log('[STS WS] IMAGE_JOB:', msg.projectId, '-', scenes.length, 'scenes', 'aspect:', S.aspectRatio);
+          var pid = msg.projectId;
+          console.log('[STS WS] IMAGE_JOB:', pid, '-', scenes.length, 'scenes', 'aspect:', S.aspectRatio);
           for (var si = 0; si < scenes.length; si++) {
             var sc = scenes[si];
             var k = String(sc.scene);
+            var queueKey = pid + '|' + k; // Unique key per project+scene
             var scAspect = sc.aspectRatio || S.aspectRatio || '';
             // Populate scenes for sync tab
-            if (!S.scenes[k]) {
-              S.scenes[k] = { prompt: sc.prompt, status: 'pending', imageUrl: null };
+            if (!S.scenes[queueKey]) {
+              S.scenes[queueKey] = { prompt: sc.prompt, status: 'pending', imageUrl: null, projectId: pid };
             }
             var exists = false;
             for (var qi = 0; qi < S.typing.queue.length; qi++) {
-              if (S.typing.queue[qi].scene === k) { exists = true; break; }
+              if (S.typing.queue[qi].queueKey === queueKey) { exists = true; break; }
             }
             if (!exists) {
               var arSuffix = scAspect ? ' ' + scAspect : '';
               S.typing.queue.push({
-                scene: k, displayPrompt: sc.prompt,
+                scene: k, queueKey: queueKey, projectId: pid,
+                displayPrompt: sc.prompt,
                 aspectRatio: scAspect,
                 fullPrompt: sc.prompt + arSuffix,
                 selected: true, status: 'queued', error: null,
@@ -725,7 +730,7 @@
             if (S.scenes[item.scene]) S.scenes[item.scene].status = 'generating';
             render();
             sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'generating' });
-            return waitForImageGeneration(180000, S.projectId, item.scene);
+            return waitForImageGeneration(180000, item.projectId || S.projectId, item.scene);
           })
           .then(function(imageUrl) {
             if (S.typing.stopRequested) { item.status = 'queued'; return null; }
@@ -736,7 +741,7 @@
               console.log('[FLOW] Scene ' + item.scene + ' image found, fetching base64...');
               return fetchImageAsBase64(imageUrl).then(function(b64) {
                 if (b64) {
-                  sendWS({ type: 'IMAGE_UPLOAD', projectId: S.projectId, scene: parseInt(item.scene),
+                  sendWS({ type: 'IMAGE_UPLOAD', projectId: item.projectId || S.projectId, scene: parseInt(item.scene),
                     image: { data: b64, source_url: imageUrl } });
                   item.status = 'completed'; item.imageUrl = imageUrl; S.typing.typedCount++;
                   if (S.scenes[item.scene]) { S.scenes[item.scene].status = 'done'; S.scenes[item.scene].imageUrl = imageUrl; }
@@ -850,6 +855,7 @@
           '<div class="sts-actions">' +
             '<button class="sts-btn sts-btn-primary" id="sts-action-btn">Start Typing</button>' +
             '<button class="sts-btn sts-btn-warn" id="sts-retry-btn" style="display:none;">Retry Failed</button>' +
+            '<button class="sts-btn" id="sts-clear-btn" style="background:#374151;color:#9ca3af;font-size:11px;padding:6px 12px;">CLEAR</button>' +
           '</div>' +
         '</div>';
       document.body.appendChild(root);
@@ -917,6 +923,20 @@
 
       $id('sts-action-btn').addEventListener('click', function() {
         if (S.typing.active) { stopTyping(); } else { startTyping(); }
+      });
+      $id('sts-clear-btn').addEventListener('click', function() {
+        if (S.typing.active) { stopTyping(); }
+        S.typing.queue = [];
+        S.scenes = {};
+        S.projectId = null;
+        S.typing.typedCount = 0;
+        S.typing.currentIndex = -1;
+        _capturedContainerIds = {};
+        sceneContainerMap = {};
+        // Remove all badges from DOM
+        document.querySelectorAll('.sts-scene-badge').forEach(function(b) { b.remove(); });
+        console.log('[STS] Cleared all jobs');
+        render();
       });
       $id('sts-retry-btn').addEventListener('click', function() {
         // Reset all error/timed-out items to queued
@@ -1089,11 +1109,12 @@
           var retryHtml = item.status === 'error'
             ? '<button class="sts-retry-scene-btn" data-scene="' + item.scene + '" style="background:#f39c12;color:#0d1117;border:none;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;cursor:pointer;margin-top:2px;">RETRY</button>'
             : '';
+          var pidLabel = item.projectId ? '<span style="color:#00d4aa;font-size:9px;font-family:monospace;margin-right:4px;">' + item.projectId + '</span>' : '';
           return '<div class="' + rowCls + '">' +
             thumbHtml +
             '<div class="sts-row-num">' + item.scene + '</div>' +
             '<div class="sts-row-info">' +
-              '<div class="sts-row-prompt">' + escHtml(pr) + '</div>' +
+              '<div class="sts-row-prompt">' + pidLabel + escHtml(pr) + '</div>' +
               '<div class="sts-row-meta">' + meta + '</div>' +
               errHtml + retryHtml +
             '</div>' +

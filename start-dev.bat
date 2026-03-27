@@ -165,7 +165,7 @@ set "RETRIES=0"
 :wait_vite
 timeout /t 1 /nobreak >nul
 set /a RETRIES+=1
-curl -s -o nul http://127.0.0.1:5174/ >nul 2>&1
+curl -s -o nul http://localhost:5174/ >nul 2>&1
 if errorlevel 1 (
     if %RETRIES% LSS 30 goto wait_vite
     echo   %R%x%X% Vite did not start within 30 seconds.
@@ -178,15 +178,18 @@ echo.
 :: ════════════════════════════════════════════════════════════════════════
 :: 5) OPEN Pipeline tab in Chromium (Vite is now serving)
 :: ════════════════════════════════════════════════════════════════════════
-if "%CDP_READY%"=="1" (
-    echo   %D%~%X% Opening pipeline in Chromium...
-    curl -s http://127.0.0.1:9222/json/list | findstr /i "localhost:5174" >nul 2>&1
+echo   %D%~%X% Opening pipeline in Chromium...
+curl -s -o nul http://localhost:9222/json/version >nul 2>&1
+if not errorlevel 1 (
+    curl -s http://localhost:9222/json/list | findstr /i "localhost:5174" >nul 2>&1
     if errorlevel 1 (
-        curl -s -o nul "http://127.0.0.1:9222/json/new?http://localhost:5174/#/pipeline"
+        curl -s -o nul "http://localhost:9222/json/new?http://localhost:5174/#/pipeline"
         echo   %G%+%X% Pipeline tab opened
     ) else (
         echo   %G%+%X% Pipeline tab already open
     )
+) else (
+    echo   %Y%!%X% CDP not available - open http://localhost:5174/#/pipeline manually
 )
 
 :: ════════════════════════════════════════════════════════════════════════
