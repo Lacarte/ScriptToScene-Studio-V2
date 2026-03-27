@@ -174,42 +174,45 @@ const TAG_ICONS = {
         :key="p.id"
         class="niche-card"
         :class="{ 'is-selected': p.id === selected }"
-        :style="p.id === selected ? {
-          borderColor: templateColor(p.visual_style),
-          boxShadow: '0 0 12px ' + templateColor(p.visual_style) + '25',
-        } : {}"
+        :style="{
+          '--card-accent': templateColor(p.visual_style),
+          borderColor: p.id === selected ? templateColor(p.visual_style) : undefined,
+          boxShadow: p.id === selected ? '0 0 16px ' + templateColor(p.visual_style) + '20' : undefined,
+        }"
         @click="pick(p)"
       >
-        <div class="card-top">
-          <span class="card-dot" :style="{ background: templateColor(p.visual_style) }"></span>
-          <span class="card-label">{{ p.label }}</span>
-          <span
-            v-if="p.description"
-            class="card-info"
-            @click.stop
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            <span class="card-tooltip">{{ p.description }}</span>
-          </span>
-          <span
-            v-if="p.custom"
-            class="card-delete"
-            title="Delete niche"
-            @click.stop="requestDelete(p.id)"
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </span>
-        </div>
-        <div class="card-bottom">
-          <span class="card-niche">{{ p.niche }}</span>
-          <span class="card-tags">
+        <span class="card-accent-bar" :style="{ background: templateColor(p.visual_style) }"></span>
+        <div class="card-body">
+          <div class="card-top">
+            <span class="card-label">{{ p.label }}</span>
             <span
-              v-for="tag in (p.tags || [])"
-              :key="tag"
-              class="card-tag"
-              :class="'tag--' + tag"
-            >{{ TAG_ICONS[tag] || tag }}</span>
-          </span>
+              v-if="p.description"
+              class="card-info"
+              @click.stop
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span class="card-tooltip">{{ p.description }}</span>
+            </span>
+            <span
+              v-if="p.custom"
+              class="card-delete"
+              title="Delete niche"
+              @click.stop="requestDelete(p.id)"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </span>
+          </div>
+          <div class="card-bottom">
+            <span class="card-niche">{{ p.category || p.niche }}</span>
+            <span class="card-tags">
+              <span
+                v-for="tag in (p.tags || [])"
+                :key="tag"
+                class="card-tag"
+                :class="'tag--' + tag"
+              >{{ TAG_ICONS[tag] || tag }}</span>
+            </span>
+          </div>
         </div>
       </button>
     </div>
@@ -480,50 +483,63 @@ const TAG_ICONS = {
 .niche-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  padding: 4px 8px 8px;
+  gap: 8px;
+  padding: 8px 10px 10px;
 }
 
 @media (max-width: 640px) {
-  .niche-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .niche-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ── Card ── */
 .niche-card {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  overflow: hidden;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.02);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s, transform 0.15s;
+  padding: 0;
 }
 
 .niche-card:hover {
-  background: rgba(255,255,255,0.04);
-  border-color: rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+  border-color: var(--card-accent, rgba(255,255,255,0.12));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 
 .niche-card.is-selected {
-  background: rgba(78, 205, 196, 0.06);
+  background: color-mix(in srgb, var(--card-accent, var(--accent)) 8%, transparent);
+}
+
+.card-accent-bar {
+  width: 3px;
+  flex-shrink: 0;
+  border-radius: 3px 0 0 3px;
+  transition: width 0.15s;
+}
+
+.niche-card:hover .card-accent-bar,
+.niche-card.is-selected .card-accent-bar {
+  width: 4px;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  flex: 1;
+  min-width: 0;
 }
 
 .card-top {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.card-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 .card-label {
@@ -534,6 +550,11 @@ const TAG_ICONS = {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  transition: color 0.15s;
+}
+
+.niche-card.is-selected .card-label {
+  color: var(--card-accent, var(--accent));
 }
 
 .card-info {
