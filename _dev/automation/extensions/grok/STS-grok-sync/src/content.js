@@ -184,6 +184,7 @@ function initSync() {
           });
         }
         render();
+        chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
         console.log(`[STS WS] Job received: ${msg.projectId} scene ${msg.sceneIndex}`);
         break;
       }
@@ -222,6 +223,7 @@ function initSync() {
         }
 
         render();
+        chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
         if (S.autoType && !S.typing.active && !S.typing.starting) {
           console.log("[STS WS] Auto-starting typing from grabber push");
           setTimeout(() => startTyping(), 1000);

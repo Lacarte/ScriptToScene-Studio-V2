@@ -140,6 +140,7 @@
             }
           }
           render();
+          chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB' });
           if (msg.autoType && !S.typing.active && !S.typing.starting) {
             console.log('[STS WS] Auto-starting typing');
             setTimeout(function() { startTyping(); }, 2000);

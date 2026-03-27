@@ -1,7 +1,16 @@
 // STS Gemini — Background Service Worker
-// Fetches images from Google CDN (has host_permissions)
+// Fetches images from Google CDN (has host_permissions) and handles tab activation
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  if (request.type === 'ACTIVATE_TAB') {
+    if (sender.tab && sender.tab.id) {
+      chrome.tabs.update(sender.tab.id, { active: true });
+      chrome.windows.update(sender.tab.windowId, { focused: true });
+      console.log('[STS Gemini] Tab activated:', sender.tab.id);
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
   if (request.action === 'FETCH_IMAGE_BASE64') {
     var url = request.url;
     console.log('[STS BG] Fetching image:', url.substring(0, 80) + '...');
