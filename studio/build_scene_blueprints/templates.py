@@ -935,6 +935,126 @@ SCENE_STYLE_TEMPLATES = [
             "- The image should feel like looking at the universe through a programmer's eyes"
         ),
     },
+    {
+        "id": "solitary_path",
+        "type": "hybrid",
+        "category": "psychology",
+        "name": "Solitary Path",
+        "description": "Lone figure on vast desert horizon — existential isolation, vanishing point symmetry",
+        "color": "#1B4965",
+        "style_prompt": (
+            "Generate cinematic photorealistic image prompts with these rules:\n\n"
+            "DO:\n"
+            "- Single tiny human figure standing at the end of a white line/path\n"
+            "- Vast barren landscape: cracked desert, salt flat, or empty plain\n"
+            "- Deep dark teal/navy sky occupying 60-70% of the frame\n"
+            "- Sandy/earthy ground with visible texture (cracks, dust, dry soil)\n"
+            "- Perfect bilateral symmetry — vanishing point perspective\n"
+            "- White line or path leading from bottom center to the distant figure\n"
+            "- Low horizon line (lower third of frame)\n"
+            "- Backlit figure with subtle rim glow from horizon\n"
+            "- Desaturated, muted color grading — teal shadows, warm sand\n"
+            "- Oppressive empty sky with no clouds or minimal haze\n"
+            "- 9:16 portrait framing, extreme vertical emphasis\n"
+            "- Cinematic film grain and subtle vignette\n\n"
+            "DO NOT:\n"
+            "- No crowds or multiple figures\n"
+            "- No buildings, trees, or man-made structures\n"
+            "- No bright daylight or blue sky\n"
+            "- No warm or cheerful lighting\n"
+            "- No cartoon or illustration aesthetic\n"
+            "- No close-ups of the figure — always tiny and distant\n"
+            "- No lush green landscapes or water\n"
+            "- No text overlays or UI elements\n"
+            "- No dramatic action — the figure is still, contemplative\n\n"
+            "ALWAYS:\n"
+            "- The figure must feel dwarfed by the landscape and sky\n"
+            "- Maintain the cold teal vs warm sand color split\n"
+            "- The white line/path is the visual anchor connecting viewer to figure\n"
+            "- Evoke loneliness, existential weight, and the solitary human journey\n"
+            "- The image should feel like a question, not an answer"
+        ),
+    },
+    {
+        "id": "crimson_silhouette",
+        "type": "visual",
+        "category": None,
+        "name": "Crimson Silhouette",
+        "description": "Black silhouettes against deep red sky with golden sun — epic primal wilderness",
+        "color": "#B91C1C",
+        "style_prompt": (
+            "Generate flat silhouette art image prompts with these rules:\n\n"
+            "DO:\n"
+            "- Deep crimson/blood red sky as dominant color (60-70% of frame)\n"
+            "- Pure black silhouettes for ALL foreground elements — no detail, just shape\n"
+            "- Large golden/amber sun or moon disc as focal backlight\n"
+            "- Layered silhouette bands: sky → distant mountains → treeline → foreground\n"
+            "- Pine/conifer tree silhouettes flanking the composition\n"
+            "- Single animal or figure silhouette centered against the sun disc\n"
+            "- Painterly cloud textures in the red sky (watercolor-like)\n"
+            "- Lower third pure black (ground/foreground)\n"
+            "- 9:16 portrait framing, high vertical sky emphasis\n"
+            "- 3-color palette ONLY: crimson red + pure black + amber gold\n"
+            "- Crisp clean edges on all silhouettes\n\n"
+            "DO NOT:\n"
+            "- No detail or texture inside silhouettes — they must be pure flat black\n"
+            "- No bright daylight or blue sky\n"
+            "- No photorealism or 3D rendering\n"
+            "- No gradients on silhouette shapes\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No urban or man-made structures\n"
+            "- No close-up shots — always wide establishing views\n"
+            "- No more than 3 colors total\n"
+            "- No green, blue, or cool tones anywhere\n"
+            "- No cute or cartoonish proportions\n\n"
+            "ALWAYS:\n"
+            "- The sun/moon disc must be the brightest element\n"
+            "- Silhouettes must read instantly as recognizable shapes\n"
+            "- Maintain the epic, primal, mythic mood — like a campfire legend\n"
+            "- The scene should feel timeless — could be 1000 years ago or 1000 years from now\n"
+            "- Red Dead Redemption meets shadow puppet theater"
+        ),
+    },
+    {
+        "id": "gothic_moonlit",
+        "type": "visual",
+        "category": None,
+        "name": "Gothic Moonlit",
+        "description": "Dark European rooftops under blood-red sky and full moon — manga gothic architecture",
+        "color": "#6B2139",
+        "style_prompt": (
+            "Generate detailed manga-style gothic illustration prompts with these rules:\n\n"
+            "DO:\n"
+            "- European gothic architecture: cathedral domes, spires, steep slate rooftops, ornate facades\n"
+            "- Full pale moon as focal light source in upper portion of frame\n"
+            "- Blood red and crimson clouds at the horizon line, fading to dark teal/charcoal above\n"
+            "- Layered depth: stone building facades in foreground → rooftops → cathedral → sky\n"
+            "- Desaturated gray-blue stone textures with visible line work and cross-hatching\n"
+            "- Stars visible in the darkest parts of the sky\n"
+            "- Warm amber glow from occasional windows (rare, 1-2 max)\n"
+            "- Manga/anime illustration style with European architectural precision\n"
+            "- 9:16 portrait framing, vertical stacking of architectural layers\n"
+            "- Hand-drawn feel with visible brushstrokes in sky and clouds\n"
+            "- Dark academia aesthetic — old universities, cathedrals, bell towers\n\n"
+            "DO NOT:\n"
+            "- No bright daylight or blue sky\n"
+            "- No modern buildings, glass, or steel\n"
+            "- No people visible (empty haunted city)\n"
+            "- No photorealism — this is illustrated/drawn\n"
+            "- No flat vector art — needs texture and detail\n"
+            "- No cheerful or warm color temperature overall\n"
+            "- No Japanese architecture (European only)\n"
+            "- No text, watermarks, or UI overlays\n"
+            "- No neon or cyberpunk elements\n"
+            "- No green vegetation or nature (stone and sky only)\n\n"
+            "ALWAYS:\n"
+            "- The moon must be visible and luminous\n"
+            "- Red clouds at horizon create the dramatic color accent\n"
+            "- Architecture must feel ancient, imposing, and lived-in\n"
+            "- Evoke a sense of haunted beauty — gothic but not horror\n"
+            "- Think Bloodborne + dark academia + Castlevania aesthetic"
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
