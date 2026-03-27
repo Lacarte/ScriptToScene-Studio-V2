@@ -58,9 +58,19 @@ def _broadcast(msg):
 def activate_tab():
     """Send ACTIVATE_TAB to all connected Grok extension clients."""
     msg = json.dumps({"type": "ACTIVATE_TAB"})
+    ping = json.dumps({"type": "PING"})
     sent = False
     with _ws_lock:
-        for ws in list(_ws_clients):
+        # Prune dead connections first
+        alive = []
+        for ws in _ws_clients:
+            try:
+                ws.send(ping)
+                alive.append(ws)
+            except Exception:
+                pass
+        _ws_clients[:] = alive
+        for ws in alive:
             try:
                 ws.send(msg)
                 sent = True

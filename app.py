@@ -163,20 +163,23 @@ def health():
 @app.route("/api/chromium/activate-tab", methods=["POST"])
 def activate_chromium_tab():
     """Activate a provider tab via WebSocket to the extension."""
+    import time as _time
     data = request.get_json(silent=True) or {}
     target = data.get("target", "gemini")
 
     if target == "gemini":
         from studio.storyboard.gemini_ws import activate_tab
-        sent = activate_tab()
     elif target == "grok":
         from studio.animator.routes import activate_tab
-        sent = activate_tab()
     else:
         return jsonify({"ok": False, "error": f"Unknown target: {target}"}), 400
 
-    if sent:
-        return jsonify({"ok": True, "target": target})
+    # Retry briefly — extension WS may be mid-reconnect (2s cycle)
+    for _ in range(3):
+        if activate_tab():
+            return jsonify({"ok": True, "target": target})
+        _time.sleep(1)
+
     return jsonify({"ok": False, "error": f"No {target} extension connected"}), 404
 
 

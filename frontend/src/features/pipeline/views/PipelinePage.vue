@@ -860,6 +860,67 @@ function logStepLabel(step) {
   <div class="pipeline-layout">
   <div class="pipeline-page">
 
+    <!-- Background filmstrip watermark -->
+    <svg class="bg-filmstrip" viewBox="0 0 80 520" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="fs-fade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="white" stop-opacity="1"/>
+          <stop offset="75%" stop-color="white" stop-opacity="0.6"/>
+          <stop offset="100%" stop-color="white" stop-opacity="0"/>
+        </linearGradient>
+        <mask id="fs-mask"><rect width="80" height="520" fill="url(#fs-fade)"/></mask>
+      </defs>
+      <g mask="url(#fs-mask)">
+        <!-- Outer strip -->
+        <rect x="1" y="1" width="78" height="518" rx="4" stroke="currentColor" stroke-width="1.2" fill="none"/>
+        <!-- Sprocket track borders -->
+        <line x1="14" y1="0" x2="14" y2="520" stroke="currentColor" stroke-width="0.4"/>
+        <line x1="66" y1="0" x2="66" y2="520" stroke="currentColor" stroke-width="0.4"/>
+        <!-- Left sprocket holes -->
+        <rect x="5" y="16" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="56" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="96" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="136" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="176" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="216" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="256" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="296" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="336" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="376" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="416" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="456" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="5" y="496" width="6" height="4" rx="1" fill="currentColor"/>
+        <!-- Right sprocket holes -->
+        <rect x="69" y="16" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="56" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="96" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="136" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="176" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="216" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="256" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="296" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="336" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="376" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="416" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="456" width="6" height="4" rx="1" fill="currentColor"/>
+        <rect x="69" y="496" width="6" height="4" rx="1" fill="currentColor"/>
+        <!-- Film frames (rounded) -->
+        <rect x="17" y="5" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="45" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="85" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="125" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="165" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="205" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="245" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="285" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="325" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="365" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="405" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="445" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+        <rect x="17" y="485" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
+      </g>
+    </svg>
+
     <!-- Header -->
     <div class="header">
       <div>
@@ -1478,6 +1539,19 @@ function logStepLabel(step) {
   max-width: 780px;
   margin: 0 auto;
   padding: 32px 24px;
+  position: relative;
+}
+
+.bg-filmstrip {
+  position: fixed;
+  top: -30px;
+  right: 60px;
+  height: 110vh;
+  width: auto;
+  color: rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+  z-index: 0;
+  transform: rotate(8deg);
 }
 
 /* ---- Header ---- */

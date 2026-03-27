@@ -58,19 +58,24 @@ def init_gemini_ws(sock):
             logger.info("Gemini WS client disconnected")
 
 
+def _prune_dead_clients():
+    """Remove dead WebSocket connections by sending a PING. Must hold _ws_lock."""
+    alive = []
+    ping = json.dumps({"type": "PING"})
+    for ws in _ws_clients:
+        try:
+            ws.send(ping)
+            alive.append(ws)
+        except Exception:
+            pass
+    _ws_clients[:] = alive
+    return alive
+
+
 def is_extension_connected():
     """Check if at least one Gemini extension client is connected."""
     with _ws_lock:
-        # Clean dead connections
-        alive = []
-        for ws in _ws_clients:
-            try:
-                ws.send(json.dumps({"type": "PING"}))
-                alive.append(ws)
-            except Exception:
-                pass
-        _ws_clients[:] = alive
-        return len(alive) > 0
+        return len(_prune_dead_clients()) > 0
 
 
 def queue_image_job(msg):
@@ -243,6 +248,7 @@ def activate_tab():
     msg = json.dumps({"type": "ACTIVATE_TAB"})
     sent = False
     with _ws_lock:
+        _prune_dead_clients()
         for ws in list(_ws_clients):
             try:
                 ws.send(msg)
