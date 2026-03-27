@@ -988,7 +988,8 @@ def _run_pipeline(job_id):
         _emit(job_id, {"step": "export", "status": "running",
                        "message": f"[{project_id}] Exporting video..."})
         _t0 = time.perf_counter()
-        export_result = _step_export(assemble_result, project_id, job_id)
+        export_result = _step_export(assemble_result, project_id, job_id,
+                                            story_tone=config.get("story_tone"))
         step_timings["export"] = round(time.perf_counter() - _t0, 2)
         results["export"] = export_result
         logger.success("[{}] Step 8/8: Export done — {} ({})",
@@ -1621,7 +1622,7 @@ def _normalize_export_captions(assembled):
     return normalized
 
 
-def _step_export(assemble_result, project_id, job_id):
+def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
     """Step 7: Export video with default profile."""
     # Read export profile from settings
     from config import APP_CONFIG_PATH
@@ -1677,6 +1678,14 @@ def _step_export(assemble_result, project_id, job_id):
     total_duration = assembled.get("total_duration") or assemble_result.get("total_duration") or sum(
         float(s.get("duration", 0) or 0) for s in raw_scenes
     )
+    # Auto-select background music if none was manually chosen
+    bg_music = assembled.get("bgMusic")
+    if not bg_music and story_tone:
+        from studio.music.selector import select_music
+        bg_music = select_music(story_tone)
+        if bg_music:
+            logger.info("Pipeline Export: auto-selected bgMusic for tone '{}'", story_tone)
+
     export_payload = {
         "project_id": project_id,
         "scenes": export_scenes,
@@ -1688,6 +1697,7 @@ def _step_export(assemble_result, project_id, job_id):
         "timeline": {"total_duration": total_duration},
         "captions": _normalize_export_captions(assembled) if captions_enabled else None,
         "audio": _normalize_export_audio(assembled),
+        "bgMusic": bg_music,
         "grain_overlay": assembled.get("grain_overlay") if grain_enabled else None,
     }
 
