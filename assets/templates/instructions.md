@@ -33,14 +33,43 @@ Add an entry to the `SCENE_STYLE_TEMPLATES` list:
     "description": "One sentence describing the look.",
     "color": "#4ECDC4",              # Accent color (hex) for UI
     "style_prompt": """Generate image prompts with these rules:
-- Vast white negative space
-- Single bold geometric object
-- Flat/origami aesthetic
-- 9:16 portrait framing
-- Minimal composition, clean lines
+
+DO:
+- Vast white negative space (80%+ of frame)
+- Single bold geometric object as focal point
+- Flat/origami aesthetic with clean vector lines
+- 9:16 portrait framing, centered composition
+- Minimal composition, surgical precision
+- Soft even lighting, almost shadowless
+- Limited palette: one accent color + white/off-white
+
+DO NOT:
+- No busy or cluttered backgrounds
+- No realistic textures or photorealism
+- No dark/moody backgrounds
+- No text, watermarks, or UI overlays
+- No multiple subjects competing for attention
+- No gradients or complex color palettes
+- No drop shadows or 3D effects
+- No human faces (use abstract/geometric figures instead)
 """,
 }
 ```
+
+### Writing Effective Style Prompts
+
+Every `style_prompt` should have **three sections**:
+
+1. **DO** — What the image MUST have (composition, palette, lighting, framing)
+2. **DO NOT** — What to explicitly avoid (common AI pitfalls for this style)
+3. **ALWAYS** — Non-negotiable rules (aspect ratio, subject count, mood)
+
+The DO NOT section is critical — without it, image models tend to:
+- Add busy backgrounds when you want minimal
+- Default to photorealism when you want illustration
+- Add text/watermarks
+- Over-saturate colors
+- Add multiple subjects when you want a single focal point
 
 ### Template Fields
 
@@ -152,6 +181,26 @@ Models are tried in priority order. If model 1 fails, model 2 is used as fallbac
 | Anime | GPT Image 1.5, Reve |
 | Abstract/Artistic | Reve, GPT Image 1.5 |
 | Simple/Minimal | Any (default Flux works fine) |
+
+---
+
+## Common DO NOT Rules by Style Type
+
+Use these as starting points when writing the DO NOT section of your `style_prompt`:
+
+| Style Type | Common DO NOT Rules |
+|-----------|-------------------|
+| **Minimal/Clean** | No clutter, no busy backgrounds, no gradients, no text, no multiple subjects |
+| **Dark/Horror** | No cheerful colors, no bright daylight, no smiling faces, no cartoon aesthetic |
+| **Anime/Cartoon** | No photorealism, no muted colors, no realistic proportions, no film grain |
+| **Cinematic** | No flat lighting, no cartoon aesthetic, no centered composition, no clean edges |
+| **Illustration** | No photorealism, no 3D effects, no film grain, no lens flare |
+| **Noir** | No saturated colors, no daylight, no warm tones, no cheerful mood |
+| **Stickman** | No realistic anatomy, no detailed faces, no complex backgrounds, no color fills |
+| **Children's** | No violence, no dark themes, no complex imagery, no small text |
+| **Abstract** | No recognizable objects, no text, no borders, no symmetry (unless intentional) |
+
+These rules prevent the most common AI image generation failures for each style.
 
 ---
 
@@ -303,13 +352,28 @@ Assembly → Export
     "description": "Bold single object on vast white space, origami aesthetic",
     "color": "#FF6B6B",
     "style_prompt": """Generate image prompts following these rules:
+
+DO:
 - Vast white/light negative space (80%+ of frame)
 - Single bold focal object, geometric or origami-style
-- Flat illustration with clean lines
-- Limited palette: one accent color + white
-- No backgrounds, no clutter, no text
-- Portrait 9:16 framing
+- Flat illustration with clean vector lines
+- Limited palette: one strong accent color + white/off-white
+- Portrait 9:16 framing, subject centered or slightly off-center
 - Soft even lighting, almost shadowless
+
+DO NOT:
+- No busy backgrounds or environmental detail
+- No realistic textures, gradients, or photorealism
+- No dark or moody color schemes
+- No text, watermarks, logos, or UI elements
+- No multiple competing subjects
+- No drop shadows or 3D perspective effects
+- No human faces (use abstract/geometric representations)
+
+ALWAYS:
+- Maintain vast empty space as the dominant visual element
+- Keep the single object bold, simple, and immediately recognizable
+- Use clean geometric shapes over organic forms
 """,
 }
 ```
