@@ -5,6 +5,9 @@
   "description": "Automates Gemini image generation via WebSocket for ScriptToScene Studio",
   "permissions": ["storage", "activeTab"],
   "host_permissions": ["https://gemini.google.com/*", "https://lh3.googleusercontent.com/*", "https://*.googleusercontent.com/*", "https://*.usercontent.google.com/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:*"
+  },
   "background": {
     "service_worker": "background.js"
   },

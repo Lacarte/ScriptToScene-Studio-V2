@@ -20,12 +20,11 @@ defineOptions({ name: 'PipelinePage' })
 
 const toast = useToast()
 const story = useStory()
-const generateBeforeRun = ref(localStorage.getItem('sts-pipeline-generate-before-run') === 'true')
+const generateBeforeRun = ref(false) // always disabled
 
 // Source mode: 'manual' (paste/random) or 'generate' (AI story)
 const sourceMode = ref(localStorage.getItem('sts-pipeline-source-mode') || 'manual')
 watch(sourceMode, (v) => localStorage.setItem('sts-pipeline-source-mode', v))
-watch(generateBeforeRun, (v) => localStorage.setItem('sts-pipeline-generate-before-run', String(v)))
 
 function applyRecommendedStyle(styleId) {
   const tmpl = templates.value.find(t => t.id === styleId)
@@ -1022,10 +1021,7 @@ function logStepLabel(step) {
               <span class="creative-kicker">Story Generator</span>
               <h3 class="story-generator-title">Generate text from your current creative setup</h3>
             </div>
-            <label class="generate-first-toggle">
-              <input v-model="generateBeforeRun" type="checkbox" class="generate-first-check">
-              <span class="generate-first-text">Run Pipeline generates first</span>
-            </label>
+            <!-- "Run Pipeline generates first" toggle removed -->
           </div>
           <div class="gen-form">
             <div class="gen-group">
@@ -1164,16 +1160,7 @@ function logStepLabel(step) {
             <option value="export">→ Export</option>
           </select>
         </div>
-        <div class="control-group control-group--auto">
-          <label class="auto-toggle" for="pipeline-auto-scenes" :class="{ disabled: stopAfter }">
-            <input id="pipeline-auto-scenes" v-model="autoScenes" type="checkbox" class="auto-check" :disabled="!!stopAfter">
-            <span class="auto-text">Auto-scenes</span>
-          </label>
-          <label class="auto-toggle" for="pipeline-auto-storyboard" :class="{ disabled: stopAfter }">
-            <input id="pipeline-auto-storyboard" v-model="autoStoryboard" type="checkbox" class="auto-check" :disabled="!!stopAfter">
-            <span class="auto-text">Storyboard</span>
-          </label>
-        </div>
+        <!-- auto-scenes and auto-storyboard toggles removed — always enabled -->
         <!-- Image Model moved to Storyboard page webhook section -->
       </div>
 
@@ -2734,29 +2721,6 @@ function logStepLabel(step) {
   margin-bottom: 10px;
 }
 
-.generate-first-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.generate-first-check {
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.generate-first-text {
-  font: 600 10px/1 var(--font-mono);
-  letter-spacing: 0.03em;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
 
 .story-generator-title {
   margin: 0;
@@ -2942,11 +2906,6 @@ function logStepLabel(step) {
   min-width: 0;
 }
 
-.control-group--auto {
-  margin-left: auto;
-  flex-shrink: 0;
-  align-self: flex-end;
-}
 
 .control-select {
   width: 100%;
@@ -3061,8 +3020,7 @@ function logStepLabel(step) {
     align-items: stretch;
   }
 
-  .gen-group--action,
-  .control-group--auto {
+  .gen-group--action {
     margin-left: 0;
     align-self: stretch;
   }
@@ -3071,47 +3029,8 @@ function logStepLabel(step) {
     flex-direction: column;
     align-items: stretch;
   }
-
-  .generate-first-toggle {
-    width: fit-content;
-  }
 }
 
-/* ---- Auto-scenes ---- */
-.auto-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  padding: 8px 12px;
-  height: 34px;
-  box-sizing: border-box;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-darkest);
-  transition: all 0.15s;
-}
-
-.auto-toggle:hover {
-  border-color: var(--border-hover);
-}
-
-.auto-toggle.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.auto-check {
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.auto-text {
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
 
 /* ---- Action Row ---- */
 .action-row {
