@@ -898,6 +898,43 @@ SCENE_STYLE_TEMPLATES = [
             "but always clean, clear, and contemplative rather than chaotic."
         ),
     },
+    {
+        "id": "code_cosmos",
+        "type": "hybrid",
+        "category": "science",
+        "name": "Code Cosmos",
+        "description": "Earth from space overlaid with floating code and math — sci-fi intellectual aesthetic",
+        "color": "#00B4D8",
+        "style_prompt": (
+            "Generate sci-fi digital composite image prompts with these rules:\n\n"
+            "DO:\n"
+            "- Deep space black background with planet Earth (or celestial body) as central anchor\n"
+            "- Floating mathematical formulas, code snippets, and equations overlaid as semi-transparent holographic text\n"
+            "- Electric cyan and ice-blue as primary accent colors against pure black\n"
+            "- Earth's atmospheric rim glow as the main light source — thin bright blue-white edge\n"
+            "- Dense layering: planet + code typography + particle effects\n"
+            "- 9:16 portrait framing, planet positioned center or lower-third\n"
+            "- Digital noise and subtle lens flare around atmospheric glow\n"
+            "- Text/formulas should feel like data streams — varied sizes, rotations, opacity\n"
+            "- Monospaced typography for code elements (Courier-like)\n"
+            "- Awe-inspiring scale: the planet dwarfs the viewer\n\n"
+            "DO NOT:\n"
+            "- No bright daylight or warm colors\n"
+            "- No cartoon or flat illustration aesthetic\n"
+            "- No clean/minimal compositions — this style is dense and layered\n"
+            "- No readable full code blocks — fragments and symbols only\n"
+            "- No cheerful or playful mood\n"
+            "- No human figures in the foreground\n"
+            "- No generic stock photo of Earth — stylize it with the code overlay\n"
+            "- No solid text blocks — text should float and fade\n\n"
+            "ALWAYS:\n"
+            "- Maintain the black void of space as dominant background\n"
+            "- Keep the cyan/blue glow as the only color accent\n"
+            "- Layer code/math as atmosphere, not as readable content\n"
+            "- Evoke a sense of intellectual awe and cosmic scale\n"
+            "- The image should feel like looking at the universe through a programmer's eyes"
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)

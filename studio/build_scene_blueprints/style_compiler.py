@@ -32,6 +32,7 @@ DEFAULT_NEGATIVE_RULES = {
     "dark_psychology": ["avoid cozy warmth", "avoid playful color palettes"],
     "stickman_animation": ["avoid photorealism", "avoid dense backgrounds"],
     "existential": ["avoid visual clutter", "avoid warm cozy aesthetics", "avoid cartoon stylization"],
+    "code_cosmos": ["avoid bright daylight", "avoid cartoon aesthetic", "avoid minimal/clean compositions", "avoid warm colors", "avoid empty backgrounds"],
 }
 
 
