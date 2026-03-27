@@ -567,6 +567,37 @@ function firstSentence(value) {
 
 // CATEGORY_COLORS, withAlpha, categoryColor imported from constants/colors.js
 
+const jobCatalogSearch = ref('')
+const CATALOG_CAT_COLORS = {
+  horror: '#DC2626', psychology: '#8B5CF6', philosophy: '#6366F1',
+  motivation: '#F59E0B', romance: '#EC4899', mystery: '#6D28D9',
+  history: '#D97706', science: '#0EA5E9', nature: '#10B981',
+  survival: '#EF4444', bible: '#A78BFA', other: '#6B7280',
+}
+
+const groupedCatalog = computed(() => {
+  const q = jobCatalogSearch.value.toLowerCase().trim()
+  const entries = Object.entries(nichePresets.value || {})
+  const filtered = q
+    ? entries.filter(([, p]) =>
+        (p.label || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        (p.visual_style || '').toLowerCase().includes(q) ||
+        (p.description || '').toLowerCase().includes(q) ||
+        (p.tags || []).some(t => t.toLowerCase().includes(q))
+      )
+    : entries
+  const groups = {}
+  for (const [id, p] of filtered) {
+    const cat = p.category || 'other'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push({ id, ...p })
+  }
+  return Object.keys(groups)
+    .sort((a, b) => a === 'other' ? 1 : b === 'other' ? -1 : a.localeCompare(b))
+    .map(cat => ({ category: cat, presets: groups[cat] }))
+})
+
 const availableCategories = computed(() => {
   const base = nicheCategories.value?.length
     ? [...nicheCategories.value]
@@ -1389,22 +1420,47 @@ function logStepLabel(step) {
           </div>
         </div>
 
-        <!-- Preset catalog — compact grid -->
+        <!-- Preset catalog — grouped with search -->
         <div class="q-catalog">
-          <span class="q-catalog-label">Presets</span>
-          <div class="q-catalog-grid">
-            <button
-              v-for="(preset, presetId) in nichePresets"
-              :key="presetId"
-              class="q-cat-chip"
-              :class="{ 'q-cat-chip--queued': jobQueue.some(q => q.presetId === presetId) }"
-              :style="{ '--chip-color': styleColor(preset.visual_style) }"
-              @click="addToQueue(presetId)"
-            >
-              <span class="q-cat-dot"></span>
-              <span class="q-cat-name">{{ preset.label }}</span>
-              <span v-if="jobQueue.find(q => q.presetId === presetId)" class="q-cat-count">{{ jobQueue.find(q => q.presetId === presetId).count }}</span>
-            </button>
+          <div class="q-catalog-header">
+            <span class="q-catalog-label">Presets</span>
+            <span class="q-catalog-total">{{ Object.keys(nichePresets).length }}</span>
+          </div>
+          <div class="q-catalog-search">
+            <svg class="q-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input
+              v-model="jobCatalogSearch"
+              class="q-search-input"
+              placeholder="Search presets..."
+              @keydown.escape="jobCatalogSearch = ''"
+            />
+            <button v-if="jobCatalogSearch" type="button" class="q-search-clear" @click="jobCatalogSearch = ''">&times;</button>
+          </div>
+          <div class="q-catalog-groups">
+            <div v-if="groupedCatalog.length === 0" class="q-catalog-empty">
+              No presets match "{{ jobCatalogSearch }}"
+            </div>
+            <div v-for="group in groupedCatalog" :key="group.category" class="q-cat-group">
+              <div class="q-group-header">
+                <span class="q-group-dot" :style="{ background: CATALOG_CAT_COLORS[group.category] || '#6B7280' }"></span>
+                <span class="q-group-label">{{ formatOptionLabel(group.category) }}</span>
+                <span class="q-group-count">{{ group.presets.length }}</span>
+              </div>
+              <div class="q-catalog-grid">
+                <button
+                  v-for="p in group.presets"
+                  :key="p.id"
+                  class="q-cat-chip"
+                  :class="{ 'q-cat-chip--queued': jobQueue.some(q => q.presetId === p.id) }"
+                  :style="{ '--chip-color': styleColor(p.visual_style) }"
+                  @click="addToQueue(p.id)"
+                >
+                  <span class="q-cat-bar" :style="{ background: styleColor(p.visual_style) }"></span>
+                  <span class="q-cat-name">{{ p.label }}</span>
+                  <span v-if="jobQueue.find(q => q.presetId === p.id)" class="q-cat-count">{{ jobQueue.find(q => q.presetId === p.id).count }}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2254,47 +2310,164 @@ function logStepLabel(step) {
 /* ── Preset Catalog ── */
 .q-catalog {
   border-top: 1px solid var(--border);
-  padding-top: 12px;
+  padding-top: 10px;
+}
+
+.q-catalog-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .q-catalog-label {
-  display: block;
   font: 700 9px/1 var(--font-mono);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 8px;
 }
 
-.q-catalog-grid {
+.q-catalog-total {
+  font: 500 9px/1 var(--font-mono);
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.06);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.q-catalog-search {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  max-height: 200px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.q-search-icon {
+  color: var(--text-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.q-search-input {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 26px 5px 8px;
+  font: 400 11px/1.3 system-ui, sans-serif;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.q-search-input:focus {
+  border-color: var(--accent);
+}
+
+.q-search-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.q-search-clear {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.q-search-clear:hover {
+  color: var(--text);
+}
+
+.q-catalog-groups {
+  max-height: 340px;
   overflow-y: auto;
   padding-right: 2px;
 }
 
-.q-cat-chip {
-  display: inline-flex;
+.q-catalog-groups::-webkit-scrollbar { width: 4px; }
+.q-catalog-groups::-webkit-scrollbar-track { background: transparent; }
+.q-catalog-groups::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+.q-catalog-empty {
+  text-align: center;
+  padding: 20px 0;
+  font: 400 11px/1.4 system-ui, sans-serif;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.q-cat-group {
+  margin-bottom: 8px;
+}
+
+.q-cat-group:last-child {
+  margin-bottom: 0;
+}
+
+.q-group-header {
+  display: flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 9px;
+  padding: 3px 0 5px;
+}
+
+.q-group-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.q-group-label {
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.q-group-count {
+  font: 500 8px/1 var(--font-mono);
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.q-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px;
+}
+
+.q-cat-chip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
   font-size: 10px;
   font-weight: 500;
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border);
   border-radius: 5px;
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
   position: relative;
+  overflow: hidden;
 }
 .q-cat-chip:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--chip-color) 40%, var(--border));
   background: color-mix(in srgb, var(--chip-color) 5%, transparent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 .q-cat-chip--queued {
   border-color: color-mix(in srgb, var(--chip-color) 35%, transparent);
@@ -2302,29 +2475,37 @@ function logStepLabel(step) {
   color: var(--text);
 }
 
-.q-cat-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--chip-color, var(--text-muted));
+.q-cat-bar {
+  width: 3px;
+  align-self: stretch;
   flex-shrink: 0;
+  border-radius: 3px 0 0 3px;
+  transition: width 0.15s;
+}
+
+.q-cat-chip:hover .q-cat-bar {
+  width: 4px;
 }
 
 .q-cat-name {
-  max-width: 110px;
+  padding: 5px 8px;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
 .q-cat-count {
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  font: 700 8px/14px var(--font-mono);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font: 700 9px/16px var(--font-mono);
   text-align: center;
   color: #fff;
   background: var(--chip-color, var(--accent));
-  border-radius: 7px;
+  border-radius: 8px;
+  margin-right: 6px;
+  flex-shrink: 0;
 }
 
 /* ── Saved Stories (in Jobs pane) ── */
