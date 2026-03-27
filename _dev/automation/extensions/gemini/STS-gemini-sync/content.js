@@ -24,7 +24,7 @@
           try { window.__stsGeminiState.ws.close(); } catch(e) {}
         }
       }
-      var panel = document.getElementById('sts-gemini-panel');
+      var panel = document.getElementById('sts-sync');
       if (panel) panel.remove();
       window.__stsGeminiActive = false;
       chrome.storage.local.set({ stsRunning: false });
@@ -49,7 +49,7 @@
     window.__stsGeminiActive = true;
 
     var S = {
-      wsUrl: wsUrlOverride || localStorage.getItem('sts-gemini-ws') || 'ws://localhost:5055/ws/image-gemini',
+      wsUrl: wsUrlOverride || localStorage.getItem('sts-gemini-ws') || 'ws://localhost:5050/ws/image-gemini',
       connected: false,
       collapsed: localStorage.getItem('sts-gemini-collapsed') === 'true',
       showSettings: false,
@@ -633,255 +633,256 @@
 
     function stopTyping() { S.typing.stopRequested = true; render(); }
 
-    // ── UI Overlay ───────────────────────────────────
-    function injectPanelStyles() {
-      if (document.getElementById('sts-gemini-styles')) return;
-      var style = document.createElement('style');
-      style.id = 'sts-gemini-styles';
-      style.textContent =
-        '@import url("https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;600&display=swap");' +
-        '#sts-gemini-panel{--sts-bg:#0c0e14;--sts-sf:#12151e;--sts-el:#1a1e2a;--sts-bd:#1f2536;--sts-t1:#e2e8f0;--sts-t2:#64748b;--sts-tm:#475569;--sts-ac:#2dd4bf;--sts-ad:#2dd4bf33;--sts-dn:#f87171;--sts-dd:#f8717133;--sts-ok:#34d399;--sts-od:#34d39933;--sts-am:#fbbf24;}' +
-        '#sts-gemini-panel *,#sts-gemini-panel *::before,#sts-gemini-panel *::after{box-sizing:border-box;}' +
-        '#sts-gemini-panel{position:fixed;top:0;right:0;z-index:99999;font-family:"DM Sans",sans-serif;font-size:12px;color:var(--sts-t1);}' +
-        /* Collapsed pill */
-        '#sts-gemini-panel.sts-c{top:14px;right:14px;background:var(--sts-bg);border:1px solid var(--sts-bd);border-radius:100px;padding:10px 18px;cursor:pointer;display:flex;align-items:center;gap:10px;box-shadow:0 4px 24px rgba(0,0,0,0.5),0 0 0 1px rgba(45,212,191,0.06);backdrop-filter:blur(20px) saturate(1.5);transition:transform .15s,box-shadow .15s;}' +
-        '#sts-gemini-panel.sts-c:hover{transform:translateY(-2px);box-shadow:0 6px 28px rgba(0,0,0,0.6),0 0 20px rgba(45,212,191,0.08);}' +
-        '.sts-pd{width:7px;height:7px;border-radius:50%;flex-shrink:0;}' +
-        '.sts-pt{font-weight:700;font-size:12px;letter-spacing:-.2px;}' +
-        '.sts-pc{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--sts-tm);}' +
-        /* Expanded */
-        '#sts-gemini-panel.sts-e{background:var(--sts-bg);border-left:1.5px solid rgba(255,255,255,0.10);border-radius:0;width:420px;height:100vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.55),0 0 0 1px rgba(255,255,255,0.03) inset;backdrop-filter:blur(24px) saturate(1.4);animation:sts-sl .3s cubic-bezier(.16,1,.3,1);}' +
-        '@keyframes sts-sl{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}' +
-        /* Header */
-        '.sts-hd{padding:16px 20px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--sts-bd);background:linear-gradient(180deg,rgba(45,212,191,0.06) 0%,transparent 100%);flex-shrink:0;position:relative;}' +
-        '.sts-hd::after{content:"";position:absolute;bottom:0;left:16px;right:16px;height:1px;background:linear-gradient(90deg,transparent,var(--sts-ad),transparent);}' +
-        '.sts-hl{display:flex;align-items:center;gap:10px;}' +
-        '.sts-lg{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--sts-ac),#06b6d4);display:flex;align-items:center;justify-content:center;font-family:"JetBrains Mono",monospace;font-weight:600;font-size:9px;color:#0c0e14;letter-spacing:-.5px;flex-shrink:0;box-shadow:0 0 14px var(--sts-ad);}' +
-        '.sts-ti{font-weight:700;font-size:13px;letter-spacing:-.3px;}' +
-        '.sts-wb{display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 6px;border-radius:100px;font-family:"JetBrains Mono",monospace;font-size:9px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;}' +
-        '.sts-wb.on{background:var(--sts-od);color:var(--sts-ok);border:1px solid rgba(52,211,153,.15);}' +
-        '.sts-wb.off{background:var(--sts-dd);color:var(--sts-dn);border:1px solid rgba(248,113,113,.15);}' +
-        '.sts-wd{width:5px;height:5px;border-radius:50%;}' +
-        '.sts-wb.on .sts-wd{background:var(--sts-ok);box-shadow:0 0 6px var(--sts-ok);animation:sts-p 2s ease-in-out infinite;}' +
-        '.sts-wb.off .sts-wd{background:var(--sts-dn);box-shadow:0 0 6px var(--sts-dn);}' +
-        '@keyframes sts-p{0%,100%{opacity:1}50%{opacity:.4}}' +
-        '.sts-ha{display:flex;gap:2px;}' +
-        '.sts-ib{background:none;border:1px solid transparent;color:var(--sts-tm);cursor:pointer;font-size:14px;padding:4px 6px;border-radius:6px;transition:all .15s;line-height:1;}' +
-        '.sts-ib:hover{color:var(--sts-t1);background:var(--sts-el);border-color:var(--sts-bd);}' +
-        /* Rate limit */
-        '.sts-rl{padding:10px 16px;background:rgba(248,113,113,.08);border-bottom:1px solid rgba(248,113,113,.12);display:flex;align-items:center;gap:10px;flex-shrink:0;}' +
-        '.sts-ri{font-size:18px;flex-shrink:0;filter:drop-shadow(0 0 4px rgba(248,113,113,.4));}' +
-        '.sts-rf{flex:1;}' +
-        '.sts-rt{color:var(--sts-dn);font-weight:700;font-size:11px;letter-spacing:.3px;text-transform:uppercase;}' +
-        '.sts-rs{color:#f8717199;font-size:10px;margin-top:1px;}' +
-        '.sts-rc{font-family:"JetBrains Mono",monospace;font-size:18px;font-weight:600;color:#fff;background:rgba(248,113,113,.15);border:1px solid rgba(248,113,113,.2);padding:4px 12px;border-radius:8px;min-width:86px;text-align:center;letter-spacing:1px;}' +
-        /* Project */
-        '.sts-pj{padding:6px 16px;font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--sts-tm);border-bottom:1px solid var(--sts-bd);letter-spacing:.3px;flex-shrink:0;}' +
-        '.sts-pj b{color:var(--sts-t2);font-weight:600;}' +
-        /* Stats */
-        '.sts-ss{padding:12px 16px 14px;flex-shrink:0;}' +
-        '.sts-sr{display:flex;gap:16px;margin-bottom:10px;}' +
-        '.sts-st{display:flex;align-items:baseline;gap:4px;}' +
-        '.sts-sn{font-family:"JetBrains Mono",monospace;font-weight:600;font-size:14px;}' +
-        '.sts-sl{font-size:10px;color:var(--sts-tm);text-transform:uppercase;letter-spacing:.5px;}' +
-        '.sts-pk{height:4px;background:var(--sts-el);border-radius:4px;overflow:hidden;margin-bottom:12px;}' +
-        '.sts-pf{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--sts-ac),#06b6d4);transition:width .4s cubic-bezier(.4,0,.2,1);position:relative;}' +
-        '.sts-pf::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15) 50%,transparent);animation:sts-sh 2s ease-in-out infinite;}' +
-        '@keyframes sts-sh{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}' +
-        '.sts-ab{width:100%;padding:10px;border:none;border-radius:10px;font-family:"DM Sans",sans-serif;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.2px;transition:all .15s;overflow:hidden;}' +
-        '.sts-ab:active{transform:scale(.98);}' +
-        '.sts-ab.go{background:linear-gradient(135deg,#2dd4bf,#06b6d4);color:#0c0e14;box-shadow:0 2px 12px var(--sts-ad);}' +
-        '.sts-ab.go:hover{box-shadow:0 4px 20px var(--sts-ad);}' +
-        '.sts-ab.ht{background:linear-gradient(135deg,#f87171,#ef4444);color:#fff;box-shadow:0 2px 12px var(--sts-dd);}' +
-        '.sts-ab.ht:hover{box-shadow:0 4px 20px var(--sts-dd);}' +
-        /* Scene list */
-        '.sts-scl{overflow-y:auto;border-top:1px solid var(--sts-bd);flex:1;min-height:0;}' +
-        '.sts-scl::-webkit-scrollbar{width:4px;}' +
-        '.sts-scl::-webkit-scrollbar-track{background:transparent;}' +
-        '.sts-scl::-webkit-scrollbar-thumb{background:var(--sts-bd);border-radius:4px;}' +
-        '.sts-si{padding:8px 12px 8px 14px;border-left:3px solid transparent;transition:background .12s,border-color .12s;display:flex;align-items:flex-start;gap:8px;}' +
-        '.sts-si:hover{background:rgba(255,255,255,.02);}' +
-        '.sts-si.act{background:rgba(45,212,191,.04);}' +
-        '.sts-snu{font-family:"JetBrains Mono",monospace;font-weight:600;font-size:11px;min-width:24px;padding-top:1px;}' +
-        '.sts-sb{flex:1;min-width:0;}' +
-        '.sts-sp{color:#94a3b8;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px;}' +
-        '.sts-spin{width:12px;height:12px;border:2px solid var(--sts-bd);border-top-color:var(--sts-ac);border-radius:50%;flex-shrink:0;animation:sts-rot .8s linear infinite;}' +
-        '.sts-spin.gen{border-top-color:var(--sts-am);}' +
-        '@keyframes sts-rot{to{transform:rotate(360deg)}}' +
-        '.sts-se{color:var(--sts-dn);font-size:10px;margin-top:3px;opacity:.85;}' +
-        '.sts-sci{font-size:11px;flex-shrink:0;padding-top:1px;}' +
-        '.sts-em{padding:20px 16px;color:var(--sts-tm);text-align:center;font-size:11px;}' +
-        /* Thumbnail */
-        '.sts-th{width:32px;height:32px;border-radius:6px;object-fit:cover;border:1px solid var(--sts-bd);flex-shrink:0;cursor:pointer;transition:border-color .15s,box-shadow .15s;}' +
-        '.sts-th:hover{border-color:var(--sts-ac);box-shadow:0 0 8px var(--sts-ad);}' +
-        '.sts-th-empty{width:32px;height:32px;border-radius:6px;background:var(--sts-el);border:1px solid var(--sts-bd);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sts-tm);}' +
-        /* Image overlay */
-        '#sts-img-overlay{position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;cursor:pointer;animation:sts-fo .2s ease-out;}' +
-        '@keyframes sts-fo{from{opacity:0}to{opacity:1}}' +
-        '#sts-img-overlay img{max-width:90vw;max-height:90vh;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.1);}' +
-        /* Settings */
-        '.sts-cfg{padding:12px 16px;border-top:1px solid var(--sts-bd);flex-shrink:0;}' +
-        '.sts-cfg label{font-family:"JetBrains Mono",monospace;font-size:9px;color:var(--sts-tm);letter-spacing:.8px;text-transform:uppercase;display:block;margin-bottom:5px;}' +
-        '.sts-cfg input{width:100%;background:#161a26;border:1px solid var(--sts-bd);border-radius:8px;padding:8px 10px;color:var(--sts-t1);font-family:"JetBrains Mono",monospace;font-size:11px;outline:none;transition:border-color .2s,box-shadow .2s;box-sizing:border-box;}' +
-        '.sts-cfg input:focus{border-color:var(--sts-ac);box-shadow:0 0 0 3px rgba(45,212,191,.08);}' +
-        '.sts-cfb{margin-top:8px;background:var(--sts-el);border:1px solid var(--sts-bd);color:var(--sts-t2);padding:6px 14px;border-radius:8px;font-family:"DM Sans",sans-serif;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}' +
-        '.sts-cfb:hover{background:#1f2536;color:var(--sts-t1);border-color:var(--sts-ac);}';
-      document.head.appendChild(style);
+    // ── UI ───────────────────────────────────────────
+    function $id(id) { return document.getElementById(id); }
+    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function injectUI() {
+      if (document.getElementById('sts-sync')) return;
+      var root = document.createElement('div');
+      root.id = 'sts-sync';
+      root.innerHTML =
+        '<!-- Collapsed Pill -->' +
+        '<div class="sts-pill" id="sts-pill">' +
+          '<div class="sts-pill-dot" id="sts-pill-dot"></div>' +
+          '<span class="sts-pill-label">STS Gemini</span>' +
+          '<span class="sts-pill-proj" id="sts-pill-proj"></span>' +
+          '<div class="sts-pill-counts">' +
+            '<span class="sts-c-done" id="sts-pill-done">0</span>' +
+            '<span class="sts-c-total" id="sts-pill-total">0</span>' +
+          '</div>' +
+        '</div>' +
+        '<!-- Expanded Panel -->' +
+        '<div class="sts-panel" id="sts-panel" style="display:none;">' +
+          '<!-- Header -->' +
+          '<div class="sts-head">' +
+            '<div class="sts-head-left">' +
+              '<div class="sts-head-dot" id="sts-head-dot"></div>' +
+              '<h3>STS Gemini</h3>' +
+              '<span class="sts-head-proj" id="sts-head-proj" style="display:none;"></span>' +
+              '<span class="sts-head-ar" id="sts-head-ar" style="display:none;"></span>' +
+            '</div>' +
+            '<div class="sts-head-btns">' +
+              '<button class="sts-hb" id="sts-settings-btn" title="Settings">&#x2699;</button>' +
+              '<button class="sts-hb" id="sts-collapse-btn" title="Collapse">&#x2715;</button>' +
+            '</div>' +
+          '</div>' +
+          '<!-- Connection bar -->' +
+          '<div class="sts-conn-bar" id="sts-conn-bar" style="display:none;">' +
+            '<span id="sts-conn-icon">&#x26A0;</span>' +
+            '<span id="sts-conn-msg">Disconnected</span>' +
+          '</div>' +
+          '<!-- Rate limit -->' +
+          '<div class="sts-rate-limit" id="sts-rate-limit" style="display:none;">' +
+            '<span class="sts-rate-icon">&#x26A0;</span>' +
+            '<div class="sts-rate-info">' +
+              '<div class="sts-rate-title">Rate Limited</div>' +
+              '<div class="sts-rate-sub" id="sts-rate-sub">Resets at --</div>' +
+            '</div>' +
+            '<div class="sts-rate-countdown" id="sts-rate-countdown">??:??:??</div>' +
+          '</div>' +
+          '<!-- Settings -->' +
+          '<div class="sts-settings" id="sts-settings">' +
+            '<label>WS URL</label>' +
+            '<input type="text" class="sts-url-input" id="sts-url-input" />' +
+            '<button class="sts-url-save" id="sts-url-save">Save</button>' +
+          '</div>' +
+          '<!-- Stats -->' +
+          '<div class="sts-stats">' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-done" id="sts-n-done">0</span><span class="sts-sl">Done</span></div>' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-err" id="sts-n-err">0</span><span class="sts-sl">Errors</span></div>' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-total" id="sts-n-total">0</span><span class="sts-sl">Total</span></div>' +
+          '</div>' +
+          '<!-- Progress -->' +
+          '<div class="sts-progress">' +
+            '<div class="sts-prog-track"><div class="sts-prog-fill" id="sts-prog-fill"></div></div>' +
+            '<span class="sts-prog-label" id="sts-prog-label">No scenes loaded</span>' +
+          '</div>' +
+          '<!-- List -->' +
+          '<div class="sts-list" id="sts-list">' +
+            '<div class="sts-empty"><div class="sts-empty-icon">&#x1F3A8;</div>No scenes loaded yet.</div>' +
+          '</div>' +
+          '<!-- Actions -->' +
+          '<div class="sts-actions">' +
+            '<button class="sts-btn sts-btn-primary" id="sts-action-btn">Start Typing</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(root);
+
+      // Event handlers
+      $id('sts-pill').addEventListener('click', function() {
+        S.collapsed = false;
+        localStorage.setItem('sts-gemini-collapsed', 'false');
+        $id('sts-pill').style.display = 'none';
+        $id('sts-panel').style.display = '';
+        render();
+      });
+      $id('sts-collapse-btn').addEventListener('click', function() {
+        S.collapsed = true;
+        localStorage.setItem('sts-gemini-collapsed', 'true');
+        $id('sts-panel').style.display = 'none';
+        $id('sts-pill').style.display = '';
+        render();
+      });
+      $id('sts-settings-btn').addEventListener('click', function() {
+        S.showSettings = !S.showSettings;
+        $id('sts-settings').classList.toggle('open', S.showSettings);
+        $id('sts-settings-btn').classList.toggle('active', S.showSettings);
+        if (S.showSettings) $id('sts-url-input').value = S.wsUrl;
+      });
+      $id('sts-url-save').addEventListener('click', function() {
+        var val = $id('sts-url-input').value;
+        if (val) {
+          S.wsUrl = val; localStorage.setItem('sts-gemini-ws', S.wsUrl);
+          if (S.ws) { try { S.ws.close(); } catch(ex) {} }
+          S.ws = null; S.wsConnected = false; connectWS(); render();
+        }
+      });
+      $id('sts-action-btn').addEventListener('click', function() {
+        if (S.typing.active) { stopTyping(); } else { startTyping(); }
+      });
+      // Delegate thumbnail clicks for image overlay
+      $id('sts-list').addEventListener('click', function(e) {
+        var thumb = e.target.closest('.sts-row-thumb');
+        if (!thumb || !thumb.src) return;
+        e.stopPropagation();
+        var overlay = document.getElementById('sts-img-overlay');
+        if (overlay) overlay.remove();
+        overlay = document.createElement('div');
+        overlay.id = 'sts-img-overlay';
+        overlay.innerHTML = '<img src="' + thumb.src + '" alt="Scene preview">';
+        overlay.onclick = function() { overlay.remove(); };
+        document.body.appendChild(overlay);
+      });
+
+      // Initial state
+      if (!S.collapsed) {
+        $id('sts-pill').style.display = 'none';
+        $id('sts-panel').style.display = '';
+      }
     }
 
     function render() {
-      injectPanelStyles();
-      var panel = document.getElementById('sts-gemini-panel');
-      if (!panel) { panel = document.createElement('div'); panel.id = 'sts-gemini-panel'; document.body.appendChild(panel); }
+      if (!document.getElementById('sts-sync')) injectUI();
       var tq = S.typing.queue;
       var total = tq.length, completed = 0, failed = 0;
       tq.forEach(function(q) { if (q.status === 'completed') completed++; if (q.status === 'error') failed++; });
       var pct = total > 0 ? Math.round(completed / total * 100) : 0;
       var wsOn = S.wsConnected;
-      var wsLabel = wsOn ? 'Live' : 'Off';
-      var wsCls = wsOn ? 'sts-wb on' : 'sts-wb off';
 
-      // ── Collapsed pill ──
-      if (S.collapsed) {
-        panel.className = 'sts-c';
-        var dotBg = wsOn ? 'var(--sts-ok)' : 'var(--sts-dn)';
-        var dotSh = wsOn ? '0 0 6px var(--sts-ok)' : '0 0 6px var(--sts-dn)';
-        panel.innerHTML =
-          '<span class="sts-pd" style="background:' + dotBg + ';box-shadow:' + dotSh + ';"></span>' +
-          '<span class="sts-pt">STS Gemini</span>' +
-          '<span class="sts-pc">' + completed + '/' + total + '</span>';
-        panel.onclick = function() { S.collapsed = false; localStorage.setItem('sts-gemini-collapsed', 'false'); render(); };
+      // Pill
+      var pillDot = $id('sts-pill-dot');
+      if (pillDot) pillDot.classList.toggle('on', wsOn);
+      var pillProj = $id('sts-pill-proj');
+      if (pillProj) pillProj.textContent = S.projectId || '';
+      var pillDone = $id('sts-pill-done');
+      if (pillDone) pillDone.textContent = completed;
+      var pillTotal = $id('sts-pill-total');
+      if (pillTotal) pillTotal.textContent = total;
+
+      // Header
+      var headDot = $id('sts-head-dot');
+      if (headDot) headDot.classList.toggle('on', wsOn);
+      var headProj = $id('sts-head-proj');
+      if (headProj) { headProj.textContent = S.projectId || ''; headProj.style.display = S.projectId ? '' : 'none'; }
+      var headAr = $id('sts-head-ar');
+      if (headAr) { headAr.textContent = S.aspectRatio || ''; headAr.style.display = S.aspectRatio ? '' : 'none'; }
+
+      // Connection bar
+      var connBar = $id('sts-conn-bar');
+      if (connBar) {
+        if (wsOn) {
+          connBar.style.display = 'flex'; connBar.classList.add('ok');
+          var connMsg = $id('sts-conn-msg'); if (connMsg) connMsg.textContent = 'WS connected';
+        } else if (!S.connected) {
+          connBar.style.display = 'flex'; connBar.classList.remove('ok');
+          var connMsg2 = $id('sts-conn-msg'); if (connMsg2) connMsg2.textContent = 'Disconnected';
+        } else {
+          connBar.style.display = 'none';
+        }
+      }
+
+      // Rate limit
+      var rlEl = $id('sts-rate-limit');
+      if (rlEl) {
+        if (S.typing.rateLimited) {
+          rlEl.style.display = 'flex';
+          var rlSub = $id('sts-rate-sub');
+          if (rlSub) rlSub.textContent = S.typing.rateLimitReset ? 'Resets at ' + S.typing.rateLimitReset.toLocaleTimeString() : 'Resets at unknown';
+          var rlCd = $id('sts-rate-countdown');
+          if (rlCd) rlCd.textContent = S.typing.rateLimitReset ? formatCountdown(S.typing.rateLimitReset) : '??:??:??';
+        } else {
+          rlEl.style.display = 'none';
+        }
+      }
+
+      // Stats
+      var nDone = $id('sts-n-done'); if (nDone) nDone.textContent = completed;
+      var nErr = $id('sts-n-err'); if (nErr) nErr.textContent = failed;
+      var nTotal = $id('sts-n-total'); if (nTotal) nTotal.textContent = total;
+
+      // Progress
+      var fill = $id('sts-prog-fill'); if (fill) fill.style.width = pct + '%';
+      var label = $id('sts-prog-label');
+      if (label) {
+        if (S.typing.active) {
+          var ci = S.typing.currentIndex;
+          label.textContent = ci >= 0 ? 'Typing ' + (ci + 1) + '/' + total : 'Typing...';
+        } else if (total > 0) {
+          label.textContent = completed === total ? 'All done' : completed + '/' + total + ' completed';
+        } else {
+          label.textContent = 'No scenes loaded';
+        }
+      }
+
+      // Action button
+      var btn = $id('sts-action-btn');
+      if (btn) {
+        if (S.typing.active) {
+          btn.textContent = 'Stop'; btn.className = 'sts-btn sts-btn-danger';
+        } else if (S.typing.starting) {
+          btn.textContent = 'Starting...'; btn.className = 'sts-btn sts-btn-primary'; btn.disabled = true;
+        } else {
+          btn.textContent = 'Start Typing'; btn.className = 'sts-btn sts-btn-primary'; btn.disabled = false;
+        }
+      }
+
+      // List
+      var list = $id('sts-list');
+      if (!list) return;
+      if (!tq.length) {
+        list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F3A8;</div>No scenes loaded yet.</div>';
         return;
       }
-
-      // ── Expanded panel ──
-      panel.className = 'sts-e';
-      panel.onclick = null;
-
-      var headerHtml =
-        '<div class="sts-hd">' +
-          '<div class="sts-hl">' +
-            '<div class="sts-lg">STS</div>' +
-            '<span class="sts-ti">STS Gemini</span>' +
-            '<span class="' + wsCls + '"><span class="sts-wd"></span>' + wsLabel + '</span>' +
-          '</div>' +
-          '<div class="sts-ha">' +
-            '<button id="sts-settings-toggle" class="sts-ib" title="Settings">\u2699</button>' +
-            '<button id="sts-collapse-btn" class="sts-ib" title="Minimize">\u2212</button>' +
-          '</div>' +
-        '</div>';
-
-      var rateLimitHtml = '';
-      if (S.typing.rateLimited) {
-        var countdown = S.typing.rateLimitReset ? formatCountdown(S.typing.rateLimitReset) : '??:??:??';
-        var resetStr = S.typing.rateLimitReset ? S.typing.rateLimitReset.toLocaleTimeString() : 'unknown';
-        rateLimitHtml =
-          '<div class="sts-rl">' +
-            '<span class="sts-ri">\u26A0</span>' +
-            '<div class="sts-rf">' +
-              '<div class="sts-rt">Rate Limited</div>' +
-              '<div class="sts-rs">Resets at ' + resetStr + '</div>' +
-            '</div>' +
-            '<div class="sts-rc">' + countdown + '</div>' +
-          '</div>';
-      }
-
-      var arBadge = S.aspectRatio ? ' <span style="color:var(--sts-ac);background:var(--sts-ad);padding:1px 6px;border-radius:4px;font-size:9px;margin-left:6px;">' + S.aspectRatio + '</span>' : '';
-      var projectHtml = S.projectId
-        ? '<div class="sts-pj">Project \u2022 <b>' + S.projectId + '</b>' + arBadge + '</div>'
-        : '';
-
-      var btnLabel = S.typing.active ? 'Stop' : 'Start Typing';
-      var btnCls = S.typing.active ? 'sts-ab ht' : 'sts-ab go';
-      var btnId = S.typing.active ? 'sts-stop-btn' : 'sts-start-btn';
-
-      var statsHtml =
-        '<div class="sts-ss">' +
-          '<div class="sts-sr">' +
-            '<div class="sts-st"><span class="sts-sn" style="color:var(--sts-ok);">' + completed + '</span><span class="sts-sl">done</span></div>' +
-            '<div class="sts-st"><span class="sts-sn" style="color:var(--sts-dn);">' + failed + '</span><span class="sts-sl">err</span></div>' +
-            '<div class="sts-st"><span class="sts-sn" style="color:var(--sts-t2);">' + total + '</span><span class="sts-sl">total</span></div>' +
-          '</div>' +
-          '<div class="sts-pk"><div class="sts-pf" style="width:' + pct + '%;"></div></div>' +
-          '<button id="' + btnId + '" class="' + btnCls + '">' + btnLabel + '</button>' +
-        '</div>';
-
-      var scenesHtml = '';
-      var stColors = { queued:'var(--sts-tm)', typing:'var(--sts-am)', generating:'#38bdf8', completed:'var(--sts-ok)', error:'var(--sts-dn)' };
-      var stIcons = { queued:'\u23F3', typing:'\u270D\uFE0F', generating:'\u2728', completed:'\u2713', error:'\u2717' };
-      tq.forEach(function(item, si) {
-        var sColor = stColors[item.status] || 'var(--sts-tm)';
-        var sIcon = stIcons[item.status] || '\u23F3';
-        var isActive = si === S.typing.currentIndex;
-        var short = item.displayPrompt.substring(0, 55) + (item.displayPrompt.length > 55 ? '\u2026' : '');
-        var errHtml = item.error ? '<div class="sts-se">' + item.error + '</div>' : '';
+      list.innerHTML = tq.map(function(item, si) {
+        var pr = (item.displayPrompt || '').length > 46 ? item.displayPrompt.substring(0, 46) + '...' : item.displayPrompt || '';
+        var sHTML = '', meta = '';
+        var isCurrent = S.typing.active && si === S.typing.currentIndex;
+        if (item.status === 'queued') { sHTML = '<div class="sts-d-q"></div>'; meta = 'queued'; }
+        else if (item.status === 'typing') { sHTML = '<div class="sts-d-typing"></div>'; meta = 'typing...'; }
+        else if (item.status === 'generating') { sHTML = '<div class="sts-d-gen"></div>'; meta = 'generating...'; }
+        else if (item.status === 'completed') { sHTML = '<span class="sts-d-done">&#x2714;</span>'; meta = 'done'; }
+        else if (item.status === 'error') { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = 'error'; }
+        var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + (item.status === 'error' ? ' error-row' : '');
         var thumbHtml = item.imageUrl
-          ? '<img class="sts-th" src="' + item.imageUrl + '" data-scene="' + item.scene + '" alt="Scene ' + item.scene + '">'
-          : '<div class="sts-th-empty">' + sIcon + '</div>';
-        scenesHtml +=
-          '<div class="sts-si' + (isActive ? ' act' : '') + '" style="border-left-color:' + (isActive ? sColor : 'transparent') + ';">' +
-            thumbHtml +
-            '<span class="sts-snu" style="color:' + sColor + ';">#' + item.scene + '</span>' +
-            '<div class="sts-sb">' +
-              '<div class="sts-sp">' + (item.status === 'typing' ? '<span class="sts-spin"></span>' : item.status === 'generating' ? '<span class="sts-spin gen"></span>' : '') + short + '</div>' +
-              errHtml +
-            '</div>' +
-          '</div>';
-      });
-      var sceneListHtml = '<div class="sts-scl">' +
-        (scenesHtml || '<div class="sts-em">No scenes loaded</div>') +
+          ? '<img class="sts-row-thumb" src="' + item.imageUrl + '" alt="">'
+          : '<div class="sts-row-thumb sts-row-thumb-empty">' + item.scene + '</div>';
+        var errHtml = item.error ? '<div class="sts-row-error">' + escHtml(item.error) + '</div>' : '';
+        return '<div class="' + rowCls + '">' +
+          thumbHtml +
+          '<div class="sts-row-num">' + item.scene + '</div>' +
+          '<div class="sts-row-info">' +
+            '<div class="sts-row-prompt">' + escHtml(pr) + '</div>' +
+            '<div class="sts-row-meta">' + meta + '</div>' +
+            errHtml +
+          '</div>' +
+          '<div class="sts-row-status">' + sHTML + '</div>' +
         '</div>';
-
-      var settingsHtml = '';
-      if (S.showSettings) {
-        settingsHtml =
-          '<div class="sts-cfg">' +
-            '<label>WebSocket Endpoint</label>' +
-            '<input id="sts-ws-url" type="text" value="' + S.wsUrl + '" spellcheck="false">' +
-            '<button id="sts-ws-save" class="sts-cfb">Save &amp; Reconnect</button>' +
-          '</div>';
-      }
-
-      panel.innerHTML = headerHtml + rateLimitHtml + projectHtml + statsHtml + sceneListHtml + settingsHtml;
-
-      setTimeout(function() {
-        var collapseBtn = document.getElementById('sts-collapse-btn');
-        if (collapseBtn) collapseBtn.onclick = function(e) { e.stopPropagation(); S.collapsed = true; localStorage.setItem('sts-gemini-collapsed', 'true'); render(); };
-        var settingsToggle = document.getElementById('sts-settings-toggle');
-        if (settingsToggle) settingsToggle.onclick = function(e) { e.stopPropagation(); S.showSettings = !S.showSettings; render(); };
-        var startBtn = document.getElementById('sts-start-btn');
-        if (startBtn) startBtn.onclick = function(e) { e.stopPropagation(); startTyping(); };
-        var stopBtn = document.getElementById('sts-stop-btn');
-        if (stopBtn) stopBtn.onclick = function(e) { e.stopPropagation(); stopTyping(); };
-        // Thumbnail click → fullscreen overlay
-        var thumbs = document.querySelectorAll('#sts-gemini-panel .sts-th');
-        thumbs.forEach(function(th) {
-          th.onclick = function(e) {
-            e.stopPropagation();
-            var overlay = document.getElementById('sts-img-overlay');
-            if (overlay) overlay.remove();
-            overlay = document.createElement('div');
-            overlay.id = 'sts-img-overlay';
-            overlay.innerHTML = '<img src="' + th.src + '" alt="Scene preview">';
-            overlay.onclick = function() { overlay.remove(); };
-            document.body.appendChild(overlay);
-          };
-        });
-
-        var saveBtn = document.getElementById('sts-ws-save');
-        if (saveBtn) saveBtn.onclick = function(e) {
-          e.stopPropagation();
-          var urlInput = document.getElementById('sts-ws-url');
-          if (urlInput && urlInput.value) {
-            S.wsUrl = urlInput.value; localStorage.setItem('sts-gemini-ws', S.wsUrl);
-            if (S.ws) { try { S.ws.close(); } catch(ex) {} }
-            S.ws = null; S.wsConnected = false; connectWS(); render();
-          }
-        };
-      }, 50);
+      }).join('');
     }
 
     // ── Boot ─────────────────────────────────────────
+    injectUI();
     render();
     connectWS();
     console.log('STS Gemini Synchronizer initialized');

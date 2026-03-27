@@ -12,6 +12,7 @@
     {
       "matches": ["https://gemini.google.com/*"],
       "js": ["content.js"],
+      "css": ["panel.css"],
       "run_at": "document_end",
       "all_frames": false
     }
