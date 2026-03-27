@@ -53,8 +53,10 @@
       connected: false,
       collapsed: localStorage.getItem('sts-gemini-collapsed') === 'true',
       showSettings: false,
+      activeTab: 'typing',
       projectId: null,
       aspectRatio: '',
+      scenes: {},
       ws: null,
       wsConnected: false,
       wsReconnectTimer: null,
@@ -125,6 +127,10 @@
             var sc = scenes[si];
             var k = String(sc.scene);
             var scAspect = sc.aspectRatio || S.aspectRatio || '';
+            // Populate scenes for sync tab
+            if (!S.scenes[k]) {
+              S.scenes[k] = { prompt: sc.prompt, status: 'pending', imageUrl: null };
+            }
             var exists = false;
             for (var qi = 0; qi < S.typing.queue.length; qi++) {
               if (S.typing.queue[qi].scene === k) { exists = true; break; }
@@ -381,80 +387,77 @@
       return src && (src.indexOf('http') === 0 || src.indexOf('blob:') === 0);
     }
 
-    function findNewImage(knownSrcs) {
-      // Strategy 1: exact Gemini DOM path — single-image button img (supports blob: URLs)
-      var exactImgs = document.querySelectorAll('single-image button img.loaded, single-image button img[src^="blob:"]');
-      for (var i = exactImgs.length - 1; i >= 0; i--) {
-        if (isValidImageSrc(exactImgs[i].src) && !knownSrcs[exactImgs[i].src]) {
-          console.log('[IMAGE] Match via single-image button img');
-          return exactImgs[i].src;
+    function findImageInContainer(container) {
+      if (!container) return null;
+      // Strategy 1: single-image button img (exact Gemini DOM path)
+      var imgs = container.querySelectorAll('single-image button img');
+      for (var i = imgs.length - 1; i >= 0; i--) {
+        if (isValidImageSrc(imgs[i].src)) {
+          console.log('[IMAGE] Found in single-image button img');
+          return imgs[i].src;
         }
       }
-      // Strategy 2: generated-image img (any loaded)
-      var genImgs = document.querySelectorAll('generated-image img');
-      for (var k = genImgs.length - 1; k >= 0; k--) {
-        if (isValidImageSrc(genImgs[k].src) && !knownSrcs[genImgs[k].src]) {
-          console.log('[IMAGE] Match via generated-image img');
-          return genImgs[k].src;
+      // Strategy 2: generated-image img
+      var genImgs = container.querySelectorAll('generated-image img');
+      for (var j = genImgs.length - 1; j >= 0; j--) {
+        if (isValidImageSrc(genImgs[j].src)) {
+          console.log('[IMAGE] Found in generated-image img');
+          return genImgs[j].src;
         }
       }
-      // Strategy 3: Gemini CDN or blob pattern
-      var allImgs = document.querySelectorAll('img');
-      for (var m = allImgs.length - 1; m >= 0; m--) {
-        var s = allImgs[m].src;
-        if (s && s.indexOf('googleusercontent.com') !== -1 && !knownSrcs[s]) {
-          console.log('[IMAGE] Match via googleusercontent CDN');
+      // Strategy 3: any blob img inside the container
+      var allImgs = container.querySelectorAll('img');
+      for (var k = allImgs.length - 1; k >= 0; k--) {
+        var s = allImgs[k].src;
+        if (s && (s.indexOf('blob:') === 0 || s.indexOf('googleusercontent.com') !== -1)) {
+          console.log('[IMAGE] Found via fallback');
           return s;
         }
       }
       return null;
     }
 
-    function snapshotImageSrcs() {
-      var srcs = {};
-      document.querySelectorAll('img').forEach(function(img) {
-        if (isValidImageSrc(img.src)) srcs[img.src] = true;
-      });
-      return srcs;
+    function findConversationForScene(projectId, sceneNum) {
+      // Find the conversation-container whose user-query contains [projectId|sceneNum]
+      var tag = '[' + projectId + '|' + sceneNum + ']';
+      var containers = document.querySelectorAll('.conversation-container');
+      for (var i = containers.length - 1; i >= 0; i--) {
+        var query = containers[i].querySelector('user-query');
+        if (query && query.textContent.indexOf(tag) !== -1) {
+          console.log('[IMAGE] Found conversation for ' + tag + ' at index ' + i);
+          return containers[i];
+        }
+      }
+      return null;
     }
 
-    function waitForImageGeneration(timeoutMs) {
+    function waitForImageGeneration(timeoutMs, projectId, sceneNum) {
       timeoutMs = timeoutMs || 180000;
       return new Promise(function(resolve) {
         var start = Date.now();
-        var knownSrcs = snapshotImageSrcs();
-        console.log('[IMAGE] Watching for new image (known: ' + Object.keys(knownSrcs).length + ', timeout: ' + (timeoutMs / 1000) + 's)');
+        var tag = '[' + projectId + '|' + sceneNum + ']';
+        console.log('[IMAGE] Waiting for image matching ' + tag + ' (timeout: ' + (timeoutMs / 1000) + 's)');
 
         var checkInterval = setInterval(function() {
-          // Check if a new image appeared
-          var newImg = findNewImage(knownSrcs);
-          if (newImg) {
-            clearInterval(checkInterval);
-            console.log('[IMAGE] Found new image:', newImg.substring(0, 80) + '...');
-            resolve(newImg);
-            return;
-          }
-
-          // Check for completion buttons (image may have loaded but we missed it)
-          var showMore = document.querySelector('button[aria-label*="Show more"]');
-          var regenerate = document.querySelector('button[aria-label*="Regenerate"]');
-          var modifyResponse = document.querySelector('button[aria-label*="Modify response"]');
-          var dlBtn = document.querySelector('mat-icon[fonticon="download"]');
-          if (showMore || regenerate || modifyResponse || dlBtn) {
-            // Completion detected — one more sweep
-            var finalImg = findNewImage({});
-            if (finalImg) {
-              clearInterval(checkInterval);
-              console.log('[IMAGE] Found image after completion:', finalImg.substring(0, 80) + '...');
-              resolve(finalImg);
-              return;
+          // Find the conversation container for this specific scene
+          var container = findConversationForScene(projectId, sceneNum);
+          if (container) {
+            var modelResponse = container.querySelector('model-response');
+            if (modelResponse) {
+              var img = findImageInContainer(modelResponse);
+              if (img) {
+                clearInterval(checkInterval);
+                console.log('[IMAGE] Found for ' + tag + ':', img.substring(0, 80) + '...');
+                resolve(img);
+                return;
+              }
             }
           }
 
           // Timeout only if not actively generating
           if (Date.now() - start > timeoutMs && !isGeminiGenerating()) {
             clearInterval(checkInterval);
-            console.error('[IMAGE] Timed out — no new image detected');
+            console.error('[IMAGE] Timed out for ' + tag);
             resolve(null);
           }
         }, 1000);
@@ -536,8 +539,8 @@
       console.log('=== Starting: ' + runItems.length + ' prompts ===');
 
       var seenImageUrls = {};
-      document.querySelectorAll('generated-image img.image.loaded').forEach(function(img) {
-        if (img.src) seenImageUrls[img.src] = true;
+      document.querySelectorAll('img').forEach(function(img) {
+        if (isValidImageSrc(img.src)) seenImageUrls[img.src] = true;
       });
 
       var idx = 0;
@@ -597,25 +600,35 @@
             }
           })
           .then(function() {
-            item.status = 'generating'; render();
+            item.status = 'generating';
+            if (S.scenes[item.scene]) S.scenes[item.scene].status = 'generating';
+            render();
             sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'generating' });
-            return waitForImageGeneration(180000);
+            return waitForImageGeneration(180000, S.projectId, item.scene);
           })
           .then(function(imageUrl) {
             if (S.typing.stopRequested) { item.status = 'queued'; return null; }
-            if (imageUrl && !seenImageUrls[imageUrl]) {
+            if (imageUrl) {
               seenImageUrls[imageUrl] = true;
+              if (S.scenes[item.scene]) S.scenes[item.scene].status = 'uploading';
+              render();
+              console.log('[FLOW] Scene ' + item.scene + ' image found, fetching base64...');
               return fetchImageAsBase64(imageUrl).then(function(b64) {
                 if (b64) {
                   sendWS({ type: 'IMAGE_UPLOAD', projectId: S.projectId, scene: parseInt(item.scene),
                     image: { data: b64, source_url: imageUrl } });
                   item.status = 'completed'; item.imageUrl = imageUrl; S.typing.typedCount++;
+                  if (S.scenes[item.scene]) { S.scenes[item.scene].status = 'done'; S.scenes[item.scene].imageUrl = imageUrl; }
                   console.log('Scene ' + item.scene + ' completed');
-                } else { item.status = 'error'; item.error = 'Fetch failed'; }
+                } else {
+                  item.status = 'error'; item.error = 'Fetch failed';
+                  if (S.scenes[item.scene]) S.scenes[item.scene].status = 'error';
+                }
               });
-            } else if (!imageUrl) {
+            } else {
               item.status = 'error'; item.error = 'Timed out';
-            } else { item.status = 'error'; item.error = 'Duplicate'; }
+              if (S.scenes[item.scene]) S.scenes[item.scene].status = 'error';
+            }
             return null;
           })
           .then(function() {
@@ -698,6 +711,11 @@
             '<div class="sts-stat"><span class="sts-sv sts-c-err" id="sts-n-err">0</span><span class="sts-sl">Errors</span></div>' +
             '<div class="sts-stat"><span class="sts-sv sts-c-total" id="sts-n-total">0</span><span class="sts-sl">Total</span></div>' +
           '</div>' +
+          '<!-- Tabs -->' +
+          '<div class="sts-tabs">' +
+            '<button class="sts-tab active" data-tab="typing">Typing</button>' +
+            '<button class="sts-tab" data-tab="sync">Sync</button>' +
+          '</div>' +
           '<!-- Progress -->' +
           '<div class="sts-progress">' +
             '<div class="sts-prog-track"><div class="sts-prog-fill" id="sts-prog-fill"></div></div>' +
@@ -710,6 +728,7 @@
           '<!-- Actions -->' +
           '<div class="sts-actions">' +
             '<button class="sts-btn sts-btn-primary" id="sts-action-btn">Start Typing</button>' +
+            '<button class="sts-btn sts-btn-warn" id="sts-retry-btn" style="display:none;">Retry Failed</button>' +
           '</div>' +
         '</div>';
       document.body.appendChild(root);
@@ -743,8 +762,34 @@
           S.ws = null; S.wsConnected = false; connectWS(); render();
         }
       });
+      // Tabs
+      var tabs = root.querySelectorAll('.sts-tab');
+      for (var ti = 0; ti < tabs.length; ti++) {
+        tabs[ti].addEventListener('click', function() {
+          root.querySelectorAll('.sts-tab').forEach(function(t) { t.classList.remove('active'); });
+          this.classList.add('active');
+          S.activeTab = this.dataset.tab;
+          render();
+        });
+      }
+
       $id('sts-action-btn').addEventListener('click', function() {
         if (S.typing.active) { stopTyping(); } else { startTyping(); }
+      });
+      $id('sts-retry-btn').addEventListener('click', function() {
+        // Reset all error/timed-out items to queued
+        var retried = 0;
+        S.typing.queue.forEach(function(q) {
+          if (q.status === 'error') {
+            q.status = 'queued';
+            q.error = null;
+            if (S.scenes[q.scene]) S.scenes[q.scene].status = 'pending';
+            retried++;
+          }
+        });
+        console.log('[STS] Retrying ' + retried + ' failed scenes');
+        render();
+        if (retried > 0 && !S.typing.active) startTyping();
       });
       // Delegate thumbnail clicks for image overlay
       $id('sts-list').addEventListener('click', function(e) {
@@ -852,38 +897,77 @@
         }
       }
 
+      // Retry button — show when there are errors and not currently typing
+      var retryBtn = $id('sts-retry-btn');
+      if (retryBtn) {
+        var hasErrors = tq.some(function(q) { return q.status === 'error'; });
+        retryBtn.style.display = (hasErrors && !S.typing.active) ? '' : 'none';
+      }
+
       // List
       var list = $id('sts-list');
       if (!list) return;
-      if (!tq.length) {
-        list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F3A8;</div>No scenes loaded yet.</div>';
-        return;
+
+      if (S.activeTab === 'typing') {
+        // ── Typing tab ──
+        if (!tq.length) {
+          list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F3A8;</div>No scenes loaded yet.</div>';
+          return;
+        }
+        list.innerHTML = tq.map(function(item, si) {
+          var pr = (item.displayPrompt || '').length > 46 ? item.displayPrompt.substring(0, 46) + '...' : item.displayPrompt || '';
+          var sHTML = '', meta = '';
+          var isCurrent = S.typing.active && si === S.typing.currentIndex;
+          if (item.status === 'queued') { sHTML = '<div class="sts-d-q"></div>'; meta = 'queued'; }
+          else if (item.status === 'typing') { sHTML = '<div class="sts-d-typing"></div>'; meta = 'typing...'; }
+          else if (item.status === 'generating') { sHTML = '<div class="sts-d-gen"></div>'; meta = 'generating...'; }
+          else if (item.status === 'completed') { sHTML = '<span class="sts-d-done">&#x2714;</span>'; meta = 'done'; }
+          else if (item.status === 'error') { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = 'error'; }
+          var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + (item.status === 'error' ? ' error-row' : '');
+          var thumbHtml = item.imageUrl
+            ? '<img class="sts-row-thumb" src="' + item.imageUrl + '" alt="">'
+            : '<div class="sts-row-thumb sts-row-thumb-empty">' + item.scene + '</div>';
+          var errHtml = item.error ? '<div class="sts-row-error">' + escHtml(item.error) + '</div>' : '';
+          return '<div class="' + rowCls + '">' +
+            thumbHtml +
+            '<div class="sts-row-num">' + item.scene + '</div>' +
+            '<div class="sts-row-info">' +
+              '<div class="sts-row-prompt">' + escHtml(pr) + '</div>' +
+              '<div class="sts-row-meta">' + meta + '</div>' +
+              errHtml +
+            '</div>' +
+            '<div class="sts-row-status">' + sHTML + '</div>' +
+          '</div>';
+        }).join('');
+      } else {
+        // ── Sync tab — shows image upload/save status per scene ──
+        var sceneKeys = Object.keys(S.scenes).sort(function(a, b) { return parseInt(a) - parseInt(b); });
+        if (!sceneKeys.length) {
+          list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F4E1;</div>Waiting for generations...</div>';
+          return;
+        }
+        list.innerHTML = sceneKeys.map(function(num) {
+          var sc = S.scenes[num];
+          var pr = (sc.prompt || '').length > 52 ? sc.prompt.substring(0, 52) + '...' : sc.prompt || '';
+          var badgeMap = {
+            pending: ['pending', 'pending'],
+            generating: ['generating', 'generating...'],
+            uploading: ['uploading', 'uploading...'],
+            done: ['done', 'saved'],
+            error: ['error', 'error']
+          };
+          var badge = badgeMap[sc.status] || ['pending', sc.status];
+          var thumbHtml = sc.imageUrl
+            ? '<img class="sts-row-thumb" src="' + sc.imageUrl + '" alt="" style="margin-right:8px;">'
+            : '';
+          return '<div class="sts-card"><div class="sts-card-head">' +
+            thumbHtml +
+            '<div class="sts-card-num">' + num + '</div>' +
+            '<div class="sts-card-prompt">' + escHtml(pr) + '</div>' +
+            '<span class="sts-card-badge sts-badge-' + badge[0] + '">' + badge[1] + '</span>' +
+          '</div></div>';
+        }).join('');
       }
-      list.innerHTML = tq.map(function(item, si) {
-        var pr = (item.displayPrompt || '').length > 46 ? item.displayPrompt.substring(0, 46) + '...' : item.displayPrompt || '';
-        var sHTML = '', meta = '';
-        var isCurrent = S.typing.active && si === S.typing.currentIndex;
-        if (item.status === 'queued') { sHTML = '<div class="sts-d-q"></div>'; meta = 'queued'; }
-        else if (item.status === 'typing') { sHTML = '<div class="sts-d-typing"></div>'; meta = 'typing...'; }
-        else if (item.status === 'generating') { sHTML = '<div class="sts-d-gen"></div>'; meta = 'generating...'; }
-        else if (item.status === 'completed') { sHTML = '<span class="sts-d-done">&#x2714;</span>'; meta = 'done'; }
-        else if (item.status === 'error') { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = 'error'; }
-        var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + (item.status === 'error' ? ' error-row' : '');
-        var thumbHtml = item.imageUrl
-          ? '<img class="sts-row-thumb" src="' + item.imageUrl + '" alt="">'
-          : '<div class="sts-row-thumb sts-row-thumb-empty">' + item.scene + '</div>';
-        var errHtml = item.error ? '<div class="sts-row-error">' + escHtml(item.error) + '</div>' : '';
-        return '<div class="' + rowCls + '">' +
-          thumbHtml +
-          '<div class="sts-row-num">' + item.scene + '</div>' +
-          '<div class="sts-row-info">' +
-            '<div class="sts-row-prompt">' + escHtml(pr) + '</div>' +
-            '<div class="sts-row-meta">' + meta + '</div>' +
-            errHtml +
-          '</div>' +
-          '<div class="sts-row-status">' + sHTML + '</div>' +
-        '</div>';
-      }).join('');
     }
 
     // ── Boot ─────────────────────────────────────────

@@ -248,6 +248,40 @@
 .sts-d-done { color: var(--green); font-size: 12px; }
 .sts-d-err { color: var(--red); font-size: 12px; }
 
+/* ── Tabs ─── */
+.sts-tabs {
+  display: flex; gap: 2px; padding: 6px 16px; border-bottom: 1px solid var(--border);
+}
+.sts-tab {
+  flex: 1; padding: 6px 0; text-align: center; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted);
+  cursor: pointer; border: none; background: transparent; border-radius: var(--radius-sm);
+}
+.sts-tab:hover { color: var(--text-dim); background: var(--bg-hover); }
+.sts-tab.active { color: var(--accent); background: var(--accent-bg); }
+
+/* ── Card (sync tab) ─── */
+.sts-card {
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+}
+.sts-card-head { display: flex; align-items: center; gap: 8px; }
+.sts-card-num {
+  width: 22px; height: 22px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  background: var(--accent-bg); color: var(--accent); flex-shrink: 0;
+}
+.sts-card-prompt { flex: 1; font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sts-card-badge {
+  font-size: 9px; font-family: var(--mono); font-weight: 600; padding: 2px 8px;
+  border-radius: 4px; text-transform: uppercase; flex-shrink: 0;
+}
+.sts-badge-pending { color: var(--text-muted); background: rgba(255,255,255,0.04); }
+.sts-badge-generating { color: var(--amber); background: var(--amber-bg); }
+.sts-badge-ready { color: var(--green); background: var(--green-bg); }
+.sts-badge-uploading { color: var(--accent); background: var(--accent-bg); }
+.sts-badge-done { color: var(--green); background: var(--green-bg); }
+.sts-badge-error { color: var(--red); background: var(--red-bg); }
+
 /* ── Actions ─── */
 .sts-actions {
   display: flex; gap: 6px; padding: 10px 16px;
@@ -264,6 +298,8 @@
 .sts-btn-primary:hover { background: linear-gradient(135deg, var(--accent-hover), var(--accent)); }
 .sts-btn-danger { background: var(--red); color: #fff; flex: 1; }
 .sts-btn-danger:hover { background: #ff8585; }
+.sts-btn-warn { background: var(--amber); color: #0a0e13; }
+.sts-btn-warn:hover { background: #ffc570; }
 
 /* ── Image overlay ─── */
 #sts-img-overlay {
