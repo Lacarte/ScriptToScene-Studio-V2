@@ -166,61 +166,37 @@ function inferResumeStep(statuses = {}) {
   return null
 }
 
-// Two provider windows: one for storyboard (gemini images), one for assets (grok videos)
-let _storyboardWin = null
-let _assetsWin = null
-
+// Activate provider tabs in project Chromium via CDP (port 9222)
 const pendingProviderUrl = ref(null)
 
-function _openInProviderTab(url, step) {
-  // Tabs were pre-opened on pipeline start — just focus the right one
-  const isGemini = url.includes('gemini.google.com')
-  const isGrok = url.includes('grok.com')
-  const win = isGemini ? _storyboardWin : isGrok ? _assetsWin : null
-
-  if (win && !win.closed) {
-    try { win.focus() } catch {}
-    pendingProviderUrl.value = null
-    return
-  }
-
-  // Tab was closed — try to reopen (may be blocked if not user gesture)
+async function _activateProviderTab(target) {
   try {
-    const tabName = isGemini ? 'sts-gemini-tab' : 'sts-grok-tab'
-    const newWin = window.open(url, tabName)
-    if (newWin) {
-      if (isGemini) _storyboardWin = newWin
-      else _assetsWin = newWin
-      pendingProviderUrl.value = null
-      return
+    await api.post('/api/chromium/activate-tab', { body: { target } })
+    pendingProviderUrl.value = null
+  } catch (e) {
+    const msg = e.message || ''
+    if (msg.includes('404')) {
+      pendingProviderUrl.value = `No ${target} tab found in Chromium — open it manually`
+    } else {
+      pendingProviderUrl.value = 'Chromium not running — launch it via start-dev'
     }
-  } catch {}
+    console.warn('[STS] Tab activate failed:', msg)
+  }
+}
 
-  // Popup blocked — show banner
-  pendingProviderUrl.value = url
+function _openInProviderTab(url) {
+  const target = url.includes('gemini.google.com') ? 'gemini' : 'grok'
+  _activateProviderTab(target)
 }
 
 function openPendingProvider() {
-  if (!pendingProviderUrl.value) return
-  const url = pendingProviderUrl.value
-  const isGemini = url.includes('gemini.google.com')
-  const tabName = isGemini ? 'sts-gemini-tab' : 'sts-grok-tab'
-  const win = window.open(url, tabName)
-  if (win) {
-    if (isGemini) _storyboardWin = win
-    else _assetsWin = win
-  }
   pendingProviderUrl.value = null
 }
 
 function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
-  // Called during user click (user gesture) — open all provider tabs now.
-  // This avoids popup blockers when SSE events try to open tabs later.
   const stepIds = ALL_STEPS.map(step => step.id)
   const stopIdx = stopValue ? stepIds.indexOf(stopValue) : -1
   const resumeIdx = resumeStep ? stepIds.indexOf(resumeStep) : -1
-
-  const storyboardProvider = localStorage.getItem('sts-storyboard-provider') || 'gemini'
 
   function _reaches(stepName) {
     const idx = stepIds.indexOf(stepName)
@@ -229,25 +205,11 @@ function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
     return reaches && startsBefore
   }
 
-  // Only open Gemini tab — after storyboard completes, the server sends
-  // a NAVIGATE message via WS to the extension, which navigates to grok.com/imagine
+  const storyboardProvider = localStorage.getItem('sts-storyboard-provider') || 'gemini'
   if (storyboardProvider === 'gemini' && _reaches('storyboard')) {
-    if (_storyboardWin && !_storyboardWin.closed) {
-      try { _storyboardWin.focus() } catch {}
-    } else {
-      try {
-        _storyboardWin = window.open('https://gemini.google.com/app', 'sts-gemini-tab')
-      } catch {}
-    }
+    _activateProviderTab('gemini')
   } else if (_reaches('assets')) {
-    // No gemini — open grok directly for assets
-    if (_assetsWin && !_assetsWin.closed) {
-      try { _assetsWin.focus() } catch {}
-    } else {
-      try {
-        _assetsWin = window.open('https://grok.com/imagine', 'sts-grok-tab')
-      } catch {}
-    }
+    _activateProviderTab('grok')
   }
 }
 

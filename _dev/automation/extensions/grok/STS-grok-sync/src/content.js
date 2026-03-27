@@ -230,6 +230,9 @@ function initSync() {
         }
         break;
       }
+      case "ACTIVATE_TAB":
+        chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
+        break;
       case "PING":
         sendWS({ type: "PONG" });
         break;

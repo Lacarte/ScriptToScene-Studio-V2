@@ -238,6 +238,22 @@ def _update_scene_status(project_id, scene_num, status, local_path=None):
         logger.debug("Failed to update storyboard job: {}", e)
 
 
+def activate_tab():
+    """Send ACTIVATE_TAB to all connected Gemini extension clients."""
+    msg = json.dumps({"type": "ACTIVATE_TAB"})
+    sent = False
+    with _ws_lock:
+        for ws in list(_ws_clients):
+            try:
+                ws.send(msg)
+                sent = True
+            except Exception:
+                pass
+    if sent:
+        logger.info("Sent ACTIVATE_TAB to Gemini extension")
+    return sent
+
+
 def _send_navigate(url):
     """Send NAVIGATE message to all connected extension clients."""
     msg = json.dumps({"type": "NAVIGATE", "url": url})

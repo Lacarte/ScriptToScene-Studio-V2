@@ -147,6 +147,9 @@
           }
           break;
         }
+        case 'ACTIVATE_TAB':
+          chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB' });
+          break;
         case 'PONG': break;
       }
     }
@@ -374,84 +377,85 @@
       return !!(stopBtn || thinkingAvatar || textLoader || processingContainer || loadingSpan || justASec);
     }
 
+    function isValidImageSrc(src) {
+      return src && (src.indexOf('http') === 0 || src.indexOf('blob:') === 0);
+    }
+
+    function findNewImage(knownSrcs) {
+      // Strategy 1: exact Gemini DOM path — single-image button img (supports blob: URLs)
+      var exactImgs = document.querySelectorAll('single-image button img.loaded, single-image button img[src^="blob:"]');
+      for (var i = exactImgs.length - 1; i >= 0; i--) {
+        if (isValidImageSrc(exactImgs[i].src) && !knownSrcs[exactImgs[i].src]) {
+          console.log('[IMAGE] Match via single-image button img');
+          return exactImgs[i].src;
+        }
+      }
+      // Strategy 2: generated-image img (any loaded)
+      var genImgs = document.querySelectorAll('generated-image img');
+      for (var k = genImgs.length - 1; k >= 0; k--) {
+        if (isValidImageSrc(genImgs[k].src) && !knownSrcs[genImgs[k].src]) {
+          console.log('[IMAGE] Match via generated-image img');
+          return genImgs[k].src;
+        }
+      }
+      // Strategy 3: Gemini CDN or blob pattern
+      var allImgs = document.querySelectorAll('img');
+      for (var m = allImgs.length - 1; m >= 0; m--) {
+        var s = allImgs[m].src;
+        if (s && s.indexOf('googleusercontent.com') !== -1 && !knownSrcs[s]) {
+          console.log('[IMAGE] Match via googleusercontent CDN');
+          return s;
+        }
+      }
+      return null;
+    }
+
+    function snapshotImageSrcs() {
+      var srcs = {};
+      document.querySelectorAll('img').forEach(function(img) {
+        if (isValidImageSrc(img.src)) srcs[img.src] = true;
+      });
+      return srcs;
+    }
+
     function waitForImageGeneration(timeoutMs) {
-      timeoutMs = timeoutMs || 120000;
+      timeoutMs = timeoutMs || 180000;
       return new Promise(function(resolve) {
         var start = Date.now();
-        var seenLoading = false;
-        var stableCount = 0;
-        var requiredStable = 5;
-        console.log('Waiting for image (timeout: ' + (timeoutMs / 1000) + 's)...');
+        var knownSrcs = snapshotImageSrcs();
+        console.log('[IMAGE] Watching for new image (known: ' + Object.keys(knownSrcs).length + ', timeout: ' + (timeoutMs / 1000) + 's)');
 
         var checkInterval = setInterval(function() {
-          var generating = isGeminiGenerating();
-          if (generating) {
-            if (!seenLoading) { seenLoading = true; console.log('Generation started'); }
-            stableCount = 0;
-          } else {
-            if (seenLoading) {
-              stableCount++;
-              var showMore = document.querySelector('button[aria-label*="Show more"]');
-              var regenerate = document.querySelector('button[aria-label*="Regenerate"]');
-              var modifyResponse = document.querySelector('button[aria-label*="Modify response"]');
-              if (showMore || regenerate || modifyResponse) {
-                console.log('Completion buttons detected');
-                stableCount = requiredStable;
-              }
-            } else {
-              if (Date.now() - start > 15000) {
-                var dlBtn = document.querySelector('mat-icon[fonticon="download"]');
-                if (dlBtn) { seenLoading = true; stableCount = requiredStable; }
-              }
-            }
-          }
-
-          if (seenLoading && stableCount >= requiredStable) {
+          // Check if a new image appeared
+          var newImg = findNewImage(knownSrcs);
+          if (newImg) {
             clearInterval(checkInterval);
-            console.log('[IMAGE] Generation stable. Searching for image...');
-
-            // Strategy 1: single-image button > img (exact Gemini DOM path)
-            var singleImgs = document.querySelectorAll('single-image button.image-button img');
-            console.log('[IMAGE] single-image button img:', singleImgs.length);
-            if (singleImgs.length > 0) {
-              var last = singleImgs[singleImgs.length - 1];
-              if (last.src && last.src.indexOf('http') === 0) {
-                console.log('[IMAGE] Found (single-image):', last.src.substring(0, 80) + '...');
-                resolve(last.src); return;
-              }
-            }
-
-            // Strategy 2: generated-image img.image.loaded
-            var genImgs = document.querySelectorAll('generated-image img.image.loaded');
-            console.log('[IMAGE] generated-image img.loaded:', genImgs.length);
-            if (genImgs.length > 0) {
-              var last2 = genImgs[genImgs.length - 1];
-              if (last2.src && last2.src.indexOf('http') === 0) {
-                console.log('[IMAGE] Found (generated-image):', last2.src.substring(0, 80) + '...');
-                resolve(last2.src); return;
-              }
-            }
-
-            // Strategy 3: any img with Gemini CDN URL pattern
-            var allImgs = document.querySelectorAll('img');
-            for (var i = allImgs.length - 1; i >= 0; i--) {
-              if (allImgs[i].src && allImgs[i].src.indexOf('lh3.googleusercontent.com/gg') !== -1) {
-                console.log('[IMAGE] Found (CDN fallback):', allImgs[i].src.substring(0, 80) + '...');
-                resolve(allImgs[i].src); return;
-              }
-            }
-
-            console.warn('[IMAGE] Generation complete but no image found. Dumping all img srcs:');
-            document.querySelectorAll('img').forEach(function(img, idx) {
-              if (img.src && img.src.indexOf('data:') !== 0) {
-                console.log('[IMAGE]   img[' + idx + '] class="' + img.className + '" src="' + img.src.substring(0, 60) + '..."');
-              }
-            });
-            resolve(null); return;
+            console.log('[IMAGE] Found new image:', newImg.substring(0, 80) + '...');
+            resolve(newImg);
+            return;
           }
 
-          if (Date.now() - start > timeoutMs) {
-            clearInterval(checkInterval); console.error('Timed out'); resolve(null);
+          // Check for completion buttons (image may have loaded but we missed it)
+          var showMore = document.querySelector('button[aria-label*="Show more"]');
+          var regenerate = document.querySelector('button[aria-label*="Regenerate"]');
+          var modifyResponse = document.querySelector('button[aria-label*="Modify response"]');
+          var dlBtn = document.querySelector('mat-icon[fonticon="download"]');
+          if (showMore || regenerate || modifyResponse || dlBtn) {
+            // Completion detected — one more sweep
+            var finalImg = findNewImage({});
+            if (finalImg) {
+              clearInterval(checkInterval);
+              console.log('[IMAGE] Found image after completion:', finalImg.substring(0, 80) + '...');
+              resolve(finalImg);
+              return;
+            }
+          }
+
+          // Timeout only if not actively generating
+          if (Date.now() - start > timeoutMs && !isGeminiGenerating()) {
+            clearInterval(checkInterval);
+            console.error('[IMAGE] Timed out — no new image detected');
+            resolve(null);
           }
         }, 1000);
       });
@@ -595,7 +599,7 @@
           .then(function() {
             item.status = 'generating'; render();
             sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'generating' });
-            return waitForImageGeneration(120000);
+            return waitForImageGeneration(180000);
           })
           .then(function(imageUrl) {
             if (S.typing.stopRequested) { item.status = 'queued'; return null; }

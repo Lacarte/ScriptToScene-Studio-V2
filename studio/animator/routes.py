@@ -55,6 +55,22 @@ def _broadcast(msg):
             _ws_clients.remove(ws)
 
 
+def activate_tab():
+    """Send ACTIVATE_TAB to all connected Grok extension clients."""
+    msg = json.dumps({"type": "ACTIVATE_TAB"})
+    sent = False
+    with _ws_lock:
+        for ws in list(_ws_clients):
+            try:
+                ws.send(msg)
+                sent = True
+            except Exception:
+                pass
+    if sent:
+        logger.info("Sent ACTIVATE_TAB to Grok extension")
+    return sent
+
+
 def _send_to_extension(msg):
     """Send a message to the first connected extension client."""
     with _ws_lock:
