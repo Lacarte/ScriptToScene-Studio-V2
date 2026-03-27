@@ -567,6 +567,18 @@ _DEFAULTS = {
         "duration": 60,
         "tags": ["history", "medieval", "europe", "dark_academia"],
     },
+    "short_test": {
+        "label": "Short Test",
+        "description": "Quick pipeline smoke test — 3-5 simple scenes, fast generation.",
+        "category": None,
+        "niche": None,
+        "visual_style": "short_test",
+        "story_tone": "dramatic",
+        "voice": "af_heart",
+        "speed": 1.0,
+        "duration": 15,
+        "tags": ["test", "debug", "quick"],
+    },
 }
 
 # ── Story tones — narration style keywords for the LLM ──────────────────────

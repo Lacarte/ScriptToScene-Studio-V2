@@ -1055,6 +1055,33 @@ SCENE_STYLE_TEMPLATES = [
             "- Think Bloodborne + dark academia + Castlevania aesthetic"
         ),
     },
+    {
+        "id": "short_test",
+        "type": "hybrid",
+        "category": None,
+        "name": "Short Test",
+        "description": "Quick pipeline test — 3-5 simple scenes, minimal prompts, fast generation",
+        "color": "#6B7280",
+        "style_prompt": (
+            "Generate simple, fast-to-render image prompts with these rules:\n\n"
+            "DO:\n"
+            "- Simple single-subject compositions (one object, one person, one shape)\n"
+            "- Solid color or gradient backgrounds\n"
+            "- Clean, uncluttered scenes — maximum 2 elements per image\n"
+            "- Bold, recognizable subjects (red ball, blue door, yellow star)\n"
+            "- Flat or semi-flat illustration style\n"
+            "- Keep prompts under 30 words\n\n"
+            "DO NOT:\n"
+            "- No complex scenes or crowds\n"
+            "- No photorealism or detailed textures\n"
+            "- No multiple overlapping elements\n"
+            "- No text or typography in the image\n\n"
+            "ALWAYS:\n"
+            "- Prioritize speed over quality\n"
+            "- Each scene should be visually distinct from the others\n"
+            "- Think children's book simplicity"
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
