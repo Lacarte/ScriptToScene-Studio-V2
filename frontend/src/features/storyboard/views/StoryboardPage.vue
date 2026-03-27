@@ -513,9 +513,6 @@ onUnmounted(() => {
           </span>
         </div>
         <div class="source-actions">
-          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="loadCurrentResult">
-            Use Current Result
-          </button>
           <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="pickFromHistory">
             Pick from History
           </button>

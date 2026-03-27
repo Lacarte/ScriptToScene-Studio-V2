@@ -1,4 +1,4 @@
-import { ref, computed, readonly, shallowRef } from 'vue'
+import { ref, computed, readonly } from 'vue'
 import { api } from '@/shared/api/client.js'
 
 // ---- Provider config ----

@@ -300,7 +300,6 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <div class="source-actions">
-          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="useTtsResult">Use Current Result</button>
           <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="openTtsPicker">Pick from History</button>
         </div>
       </div>

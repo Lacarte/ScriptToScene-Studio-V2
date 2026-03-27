@@ -20,7 +20,6 @@ defineOptions({ name: 'PipelinePage' })
 
 const toast = useToast()
 const story = useStory()
-const generateBeforeRun = ref(false) // always disabled
 
 // Source mode: 'manual' (paste/random) or 'generate' (AI story)
 const sourceMode = ref(localStorage.getItem('sts-pipeline-source-mode') || 'manual')
@@ -521,7 +520,7 @@ async function loadFromGenHistory(h) {
 const router = useRouter()
 const {
   ALL_STEPS, VOICES,
-  text, voice, speed, style, autoScenes, autoStoryboard, stopAfter, imageModel, imageModelsConfig, templates,
+  text, voice, speed, style, stopAfter, imageModel, imageModelsConfig, templates,
   running, stopping, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
   failedStep, failedProjectId, stoppedStep, stoppedProjectId,
@@ -593,7 +592,6 @@ const activeStyleTemplate = computed(() => (
 ))
 const activeToneDescription = computed(() => storyTones.value?.[storyTone.value] || '')
 const activeToneHint = computed(() => firstSentence(activeToneDescription.value))
-const shouldGenerateBeforeRun = computed(() => sourceMode.value === 'generate' && generateBeforeRun.value)
 const currentCategoryColor = computed(() => categoryColor(story.storyCategory.value))
 const currentNicheConfig = computed(() => {
   const selected = selectedNicheConfig.value
@@ -660,7 +658,6 @@ watch(log, async () => {
 
 const canRun = computed(() => {
   if (running.value || story.isGenerating.value) return false
-  if (shouldGenerateBeforeRun.value) return !!story.webhookUrl.value?.trim()
   return text.value.trim().length > 0
 })
 const runLabel = computed(() => {
@@ -669,11 +666,6 @@ const runLabel = computed(() => {
   return 'Run Pipeline'
 })
 const runHintText = computed(() => {
-  if (shouldGenerateBeforeRun.value) {
-    return story.webhookUrl.value?.trim()
-      ? 'Run Pipeline will generate fresh text first using your current setup'
-      : 'Configure the story webhook to generate text before running'
-  }
   return sourceMode.value === 'generate'
     ? 'Generate a story or type text to get started'
     : 'Paste text or click Random to get started'
@@ -687,10 +679,6 @@ const canResumeStopped = computed(() => (
 
 async function handleRunPipeline() {
   if (!canRun.value) return
-  if (shouldGenerateBeforeRun.value) {
-    const generated = await handleGenerateStory({ notifySuccess: false })
-    if (!generated.ok) return
-  }
   await start()
 }
 
@@ -1188,7 +1176,7 @@ function logStepLabel(step) {
           </svg>
           Retry from {{ failedStep }}
         </button>
-        <span v-if="(!text.trim() || shouldGenerateBeforeRun) && !running && globalStatus !== 'error'" class="run-hint">{{ runHintText }}</span>
+        <span v-if="!text.trim() && !running && globalStatus !== 'error'" class="run-hint">{{ runHintText }}</span>
       </div>
     </section>
 
@@ -1238,7 +1226,7 @@ function logStepLabel(step) {
 
   <!-- Right sidebar: Jobs Pane -->
   <aside class="jobs-sidebar" :class="{ 'jobs-sidebar--open': showJobPane }">
-    <button class="jobs-sidebar-toggle" @click="showJobPane = !showJobPane">
+    <button class="jobs-sidebar-toggle" :title="showJobPane ? '' : 'Jobs'" @click="showJobPane = !showJobPane">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 3v18"/><path d="M16 3v18"/></svg>
       <span class="jobs-sidebar-label">Jobs</span>
       <span v-if="totalQueuedJobs" class="jobs-count">{{ totalQueuedJobs }}</span>
@@ -1675,18 +1663,29 @@ function logStepLabel(step) {
 
 /* ── Jobs Sidebar ── */
 .jobs-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
   width: 52px;
   flex-shrink: 0;
   padding: 32px 0 32px 0;
   transition: width 0.2s ease;
   overflow: hidden;
+  z-index: 100;
+  background: var(--bg-surface, #0f1117);
 }
 .jobs-sidebar--open {
   width: 320px;
   border-left: 1px solid var(--border);
   padding: 32px 16px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
 }
+.jobs-sidebar--open::-webkit-scrollbar { width: 4px; }
+.jobs-sidebar--open::-webkit-scrollbar-track { background: transparent; }
+.jobs-sidebar--open::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
 
 .jobs-sidebar-toggle {
   display: flex;
@@ -2442,7 +2441,13 @@ function logStepLabel(step) {
 @media (max-width: 900px) {
   .pipeline-layout { flex-direction: column; }
   .jobs-sidebar {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    right: 0;
     width: 100% !important;
+    height: auto !important;
+    max-height: 70vh;
     border-left: none !important;
     border-top: 1px solid var(--border);
     padding: 16px 24px !important;

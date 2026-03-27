@@ -4,23 +4,19 @@ import json
 import os
 import platform
 import subprocess
-import threading
-from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR, KIE_AI_MODEL
+from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR, KIE_AI_MODEL, BIN_DIR
 from studio.ffmpeg_utils import find_ffmpeg
-from studio.io_utils import safe_json_write
+from studio.io_utils import safe_json_write, now_iso, JobStore
 from studio.security import is_loopback_remote, sanitize_project_id
 from studio.validation import validate_json
 from .schemas import GrabberStartRequest
 from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
 from .providers.kie_ai import generate_image as kie_ai_generate
-
-BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "bin")
 
 VIDEO_EXTS = (".mp4", ".webm", ".mov")
 
@@ -79,32 +75,16 @@ def _video_thumbnail(video_path):
 assets_bp = Blueprint("assets", __name__)
 
 # In-memory grabber job tracking
-grabber_jobs = {}
-grabber_jobs_lock = threading.Lock()
-
-
-def _get_job(project_id):
-    with grabber_jobs_lock:
-        return grabber_jobs.get(project_id)
-
-
-def _set_job(project_id, job):
-    with grabber_jobs_lock:
-        grabber_jobs[project_id] = job
+grabber_jobs = JobStore()
 
 
 def _save_job(job):
     """Persist grabber job state to disk."""
     try:
-        job["updated_at"] = _now_iso()
+        job["updated_at"] = now_iso()
         safe_json_write(os.path.join(ASSETS_DIR, job["project_id"], "grabber_job.json"), job, indent=2)
     except Exception as e:
         logger.error("Failed to persist job {}: {}", job.get("grabber_id", "?"), e)
-
-
-def _now_iso():
-    """Return a timezone-aware ISO timestamp for job bookkeeping."""
-    return datetime.now().astimezone().isoformat()
 
 
 def _parse_iso_dt(value):
@@ -156,7 +136,7 @@ def _clear_job_completion(job):
 def _mark_job_done(job):
     """Stamp completion fields for a finished grabber job."""
     job["status"] = "done"
-    job["completed_at"] = _now_iso()
+    job["completed_at"] = now_iso()
     job["generation_time"] = _job_elapsed_seconds(job)
 
 
@@ -177,7 +157,7 @@ def _load_jobs_from_disk():
         try:
             with open(job_path, "r", encoding="utf-8") as f:
                 job = json.load(f)
-            _set_job(pid, job)
+            grabber_jobs.set(pid, job)
         except (json.JSONDecodeError, OSError, KeyError) as e:
             logger.warning("Skipped loading job from {}: {}", pid, e)
 
@@ -263,7 +243,7 @@ def grabber_start(data: GrabberStartRequest):
 
     # Per-scene status tracking — preserve existing statuses for scenes not
     # being resent so that already-completed scenes keep their "ready" state.
-    prev_job = _get_job(project_id)
+    prev_job = grabber_jobs.get(project_id)
     scene_statuses = dict(prev_job["scene_statuses"]) if prev_job else {}
     for s in automa_payload["scenes"]:
         scene_statuses[str(s["scene"])] = {
@@ -280,8 +260,8 @@ def grabber_start(data: GrabberStartRequest):
         "payload": automa_payload,
         "scene_statuses": scene_statuses,
         "status": "waiting",  # waiting | grabbing | generating | downloading | done | error
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
     }
 
     # Store Kie AI generation options for the background thread
@@ -293,7 +273,7 @@ def grabber_start(data: GrabberStartRequest):
             "output_format": data.output_format or "jpg",
         }
 
-    _set_job(project_id, job)
+    grabber_jobs.set(project_id, job)
     _save_job(job)
 
     logger.info("Grabber job created: {} ({} scenes, provider={})", grabber_id, len(automa_payload["scenes"]), provider)
@@ -409,8 +389,7 @@ def grabber_pending():
         return jsonify({"error": "Forbidden"}), 403
 
     latest = None
-    with grabber_jobs_lock:
-        jobs_snapshot = list(grabber_jobs.values())
+    jobs_snapshot = grabber_jobs.values()
     for job in jobs_snapshot:
         if job["status"] == "waiting":
             if not latest or job["created_at"] > latest["created_at"]:
@@ -441,7 +420,7 @@ def grabber_results():
         project_id = sanitize_project_id(project.get("projectId", ""))
         if not project_id:
             continue
-        job = _get_job(project_id)
+        job = grabber_jobs.get(project_id)
         if not job:
             logger.warning("Grabber results for unknown project: {}", project_id)
             continue
@@ -544,7 +523,7 @@ def grabber_upload():
     if not project_id or not scenes:
         return jsonify({"error": "Missing projectId or scenes"}), 400
 
-    job = _get_job(project_id)
+    job = grabber_jobs.get(project_id)
     if job:
         _clear_job_completion(job)
         job["status"] = "downloading"
@@ -619,7 +598,7 @@ def grabber_status(project_id):
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    job = _get_job(project_id)
+    job = grabber_jobs.get(project_id)
     if not job:
         return jsonify({"error": "No grabber job found"}), 404
 
@@ -644,7 +623,7 @@ def redownload_assets(project_id):
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    job = _get_job(project_id)
+    job = grabber_jobs.get(project_id)
     if not job:
         return jsonify({"error": "No grabber job found"}), 404
 
@@ -879,7 +858,7 @@ def reconcile_assets(project_id):
         job_path = os.path.join(project_dir, "grabber_job.json")
         if os.path.isfile(job_path):
             with open(job_path, "r", encoding="utf-8") as f:
-                _set_job(project_id, json.load(f))
+                grabber_jobs.set(project_id, json.load(f))
     return jsonify({"updated": updated})
 
 

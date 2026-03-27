@@ -11,9 +11,7 @@ Provides:
 """
 
 import os
-import threading
 import time
-from datetime import datetime
 from urllib.parse import urlparse
 
 import requests as http_requests
@@ -22,7 +20,7 @@ from loguru import logger
 
 from config import STORYBOARD_DIR, THUMBNAILS_DIR, N8N_STORYBOARD_WEBHOOK_URL, WAVESPEED_API_KEY
 from studio.ffmpeg_utils import find_ffmpeg
-from studio.io_utils import safe_json_write, safe_json_read
+from studio.io_utils import safe_json_write, safe_json_read, now_iso, JobStore
 from studio.security import sanitize_project_id
 from studio.validation import validate_json
 from studio.webhooks import call_webhook
@@ -33,8 +31,7 @@ storyboard_bp = Blueprint("storyboard", __name__)
 # ---------------------------------------------------------------------------
 # In-memory job tracking
 # ---------------------------------------------------------------------------
-_jobs = {}
-_jobs_lock = threading.Lock()
+_jobs = JobStore()
 
 MAX_DL_RETRIES = 3
 DL_RETRY_DELAY = 2  # seconds
@@ -44,20 +41,6 @@ _DL_HEADERS = {
                   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
 }
-
-
-def _get_job(project_id):
-    with _jobs_lock:
-        return _jobs.get(project_id)
-
-
-def _set_job(project_id, job):
-    with _jobs_lock:
-        _jobs[project_id] = job
-
-
-def _now_iso():
-    return datetime.now().astimezone().isoformat()
 
 
 def _storyboard_dir(project_id):
@@ -169,7 +152,7 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url, style=No
     """
     from .wavespeed import is_default_model, generate_image
 
-    job = _get_job(project_id)
+    job = _jobs.get(project_id)
     if not job:
         return
 
@@ -276,12 +259,12 @@ def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url, style=No
 
     # Finalize
     job["status"] = "done"
-    job["completed_at"] = _now_iso()
+    job["completed_at"] = now_iso()
     job["ready"] = ready
     job["errors"] = errors
     job["total"] = total
     _save_storyboard_json(project_id, job)
-    _set_job(project_id, job)
+    _jobs.set(project_id, job)
     logger.success("[{}] Storyboard complete — {}/{} ready, {} errors",
                    project_id, ready, total, errors)
 
@@ -311,14 +294,14 @@ def generate(data: StoryboardGenerateRequest):
         "ready": 0,
         "errors": 0,
         "aspect_ratio": data.aspect_ratio,
-        "created_at": _now_iso(),
+        "created_at": now_iso(),
         "completed_at": None,
         "scene_statuses": {
             str(s["scene"]): {"status": "pending", "image_url": None, "local_path": None}
             for s in scenes
         },
     }
-    _set_job(project_id, job)
+    _jobs.set(project_id, job)
     _save_storyboard_json(project_id, job)
 
     provider = getattr(data, "provider", "webhook") or "webhook"
@@ -373,12 +356,12 @@ def status(project_id):
     if os.path.isfile(json_path):
         try:
             job = safe_json_read(json_path)
-            _set_job(project_id, job)
+            _jobs.set(project_id, job)
         except Exception:
             pass
 
     if not job:
-        job = _get_job(project_id)
+        job = _jobs.get(project_id)
 
     if not job:
         return jsonify({"error": "No storyboard job found for this project"}), 404
@@ -488,13 +471,13 @@ def grab_one(data: StoryboardGrabOneRequest):
     webhook_url = data.webhook_url or N8N_STORYBOARD_WEBHOOK_URL
 
     # Load or create job
-    job = _get_job(project_id)
+    job = _jobs.get(project_id)
     if not job:
         json_path = _storyboard_json_path(project_id)
         if os.path.isfile(json_path):
             try:
                 job = safe_json_read(json_path)
-                _set_job(project_id, job)
+                _jobs.set(project_id, job)
             except Exception:
                 pass
     if not job:
@@ -505,7 +488,7 @@ def grab_one(data: StoryboardGrabOneRequest):
             "ready": 0,
             "errors": 0,
             "aspect_ratio": data.aspect_ratio,
-            "created_at": _now_iso(),
+            "created_at": now_iso(),
             "completed_at": None,
             "scene_statuses": {},
         }
@@ -513,11 +496,11 @@ def grab_one(data: StoryboardGrabOneRequest):
     # Mark this scene as generating
     job["status"] = "running"
     job["scene_statuses"][scene_key] = {"status": "generating", "image_url": None, "local_path": None}
-    _set_job(project_id, job)
+    _jobs.set(project_id, job)
     _save_storyboard_json(project_id, job)
 
     def _grab_single(pid, sk, prompt, ar, url):
-        j = _get_job(pid)
+        j = _jobs.get(pid)
         if not j:
             return
         project_dir = _storyboard_dir(pid)
@@ -585,9 +568,9 @@ def grab_one(data: StoryboardGrabOneRequest):
         all_done = all(s["status"] in ("ready", "error") for s in statuses.values())
         if all_done:
             j["status"] = "done"
-            j["completed_at"] = _now_iso()
+            j["completed_at"] = now_iso()
         _save_storyboard_json(pid, j)
-        _set_job(pid, j)
+        _jobs.set(pid, j)
 
     provider = getattr(data, "provider", "webhook") or "webhook"
 

@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import TIMELINE_EDITOR_DIR, OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
+from config import OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.ffmpeg_utils import find_ffprobe

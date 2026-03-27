@@ -580,9 +580,6 @@ onMounted(async () => {
           </span>
         </div>
         <div class="source-actions">
-          <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="loadCurrentScenes">
-            Use Current Result
-          </button>
           <button class="action-btn" style="padding:6px 14px;font-size:11px" @click="pickFromSceneHistory">
             Pick from History
           </button>

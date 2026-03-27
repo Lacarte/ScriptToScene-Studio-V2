@@ -35,8 +35,6 @@ CAPTIONS_DIR = os.path.join(OUTPUT_DIR, "captions")
 MUSIC_DIR = os.path.join(OUTPUT_DIR, "musics")
 TTS_DIR = os.path.join(OUTPUT_DIR, "tts")
 MODELS_DIR = os.path.join(ROOT_DIR, "models")
-# Editor is now inlined in static/ — this path is kept for backward compat only
-TIMELINE_EDITOR_DIR = os.path.join(ROOT_DIR, "static")
 BIN_DIR = os.path.join(ROOT_DIR, "bin")
 FONTS_DIR = os.path.join(ROOT_DIR, "assets", "fonts")
 EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")

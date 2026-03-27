@@ -1,11 +1,58 @@
-"""Reliable JSON read/write utilities with atomic saves and backup recovery."""
+"""Shared I/O utilities: JSON read/write, timestamps, thread-safe job stores."""
 
 import json
 import os
 import shutil
 import tempfile
+import threading
+from datetime import datetime
 
 from loguru import logger
+
+
+# ---------------------------------------------------------------------------
+# Timestamp helper
+# ---------------------------------------------------------------------------
+
+def now_iso() -> str:
+    """Return current local time as ISO 8601 string with timezone."""
+    return datetime.now().astimezone().isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Thread-safe job store (replaces per-module _jobs dict + _jobs_lock pattern)
+# ---------------------------------------------------------------------------
+
+class JobStore:
+    """A thread-safe dict wrapper for in-memory job tracking."""
+
+    def __init__(self):
+        self._jobs: dict = {}
+        self._lock = threading.Lock()
+
+    def get(self, key, default=None):
+        with self._lock:
+            return self._jobs.get(key, default)
+
+    def set(self, key, value):
+        with self._lock:
+            self._jobs[key] = value
+
+    def pop(self, key, default=None):
+        with self._lock:
+            return self._jobs.pop(key, default)
+
+    def values(self):
+        with self._lock:
+            return list(self._jobs.values())
+
+    def items(self):
+        with self._lock:
+            return list(self._jobs.items())
+
+    def __contains__(self, key):
+        with self._lock:
+            return key in self._jobs
 
 
 def safe_json_write(path: str, data: dict, *, indent: int | None = None, ensure_ascii: bool = False) -> None:

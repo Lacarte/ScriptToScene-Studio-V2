@@ -8,8 +8,6 @@ const text = ref('')
 const voice = ref('af_heart')
 const speed = ref(1.0)
 const style = ref('cinematic')
-const autoScenes = ref(true)   // always enabled (UI toggle removed)
-const autoStoryboard = ref(true) // always enabled (UI toggle removed)
 const stopAfter = ref(localStorage.getItem('sts-pipeline-stop-after') || '')
 watch(stopAfter, (v) => {
   if (v) localStorage.setItem('sts-pipeline-stop-after', v)
@@ -80,8 +78,6 @@ export function usePipelineForm() {
     voice,
     speed,
     style,
-    autoScenes,
-    autoStoryboard,
     stopAfter,
     imageModel,
     imageModelsConfig,

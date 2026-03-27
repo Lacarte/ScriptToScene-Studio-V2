@@ -157,8 +157,8 @@ async function start() {
     speed: form.speed.value,
     style: form.style.value,
     ...niches._buildNicheConfig(),
-    auto_scenes: form.autoScenes.value,
-    auto_storyboard: form.autoStoryboard.value,
+    auto_scenes: true,
+    auto_storyboard: true,
     stop_after: form.stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     image_model: form.imageModel.value || undefined,
@@ -212,8 +212,8 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     speed: form.speed.value,
     style: form.style.value,
     ...niches._buildNicheConfig(),
-    auto_scenes: form.autoScenes.value,
-    auto_storyboard: form.autoStoryboard.value,
+    auto_scenes: true,
+    auto_storyboard: true,
     stop_after: form.stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     image_model: form.imageModel.value || undefined,
@@ -324,8 +324,6 @@ function loadFromHistory(index) {
   if (Object.prototype.hasOwnProperty.call(j, 'story_tone')) niches.setStoryTone(j.story_tone || '')
   if (Object.prototype.hasOwnProperty.call(j, 'category')) niches.setNicheCategory(j.category || '')
   if (j.stop_after !== undefined) form.stopAfter.value = j.stop_after || ''
-  if (j.auto_scenes !== undefined) form.autoScenes.value = j.auto_scenes
-  if (j.auto_storyboard !== undefined) form.autoStoryboard.value = j.auto_storyboard
 
   if (j.step_statuses && Object.keys(j.step_statuses).length) {
     stepStatus.value = { ...j.step_statuses }
@@ -394,8 +392,6 @@ export function usePipeline() {
     voice: form.voice,
     speed: form.speed,
     style: form.style,
-    autoScenes: form.autoScenes,
-    autoStoryboard: form.autoStoryboard,
     stopAfter: form.stopAfter,
     imageModel: form.imageModel,
     imageModelsConfig: readonly(form.imageModelsConfig),

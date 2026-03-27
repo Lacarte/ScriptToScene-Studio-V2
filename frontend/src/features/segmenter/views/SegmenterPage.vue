@@ -213,7 +213,6 @@ const relativeTime = timeAgo
           <span class="source-label font-mono" :class="{ empty: !hasAlignment }">{{ sourceInfoText }}</span>
         </div>
         <div class="source-actions">
-          <button class="action-btn hover-accent" style="padding:6px 14px;font-size:11px" @click="useCurrentResult">Use Current Result</button>
           <button class="action-btn hover-accent" style="padding:6px 14px;font-size:11px" @click="openPicker">Pick from History</button>
         </div>
       </div>

@@ -242,7 +242,6 @@ export function useSegmenter() {
     loadHistory,
     loadResult,
     loadAlignmentHistory,
-    loadTimingHistory: loadAlignmentHistory,
     loadAudio: audio.loadAudio,
     togglePlay: audio.togglePlay,
     playSegment,
