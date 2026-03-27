@@ -26,6 +26,43 @@ _DEFAULT_DURATION = 45
 
 # ── Hardcoded defaults (always available as built-in presets) ─────────────────
 _DEFAULTS = {
+    # ── Minimalist Illustration ──
+    "minimal_illustration_psychology": {
+        "label": "Minimal Illustration — Psychology",
+        "description": "Bold single objects on vast white space. Origami-like flat illustrations as visual metaphors for psychological concepts.",
+        "category": "psychology",
+        "niche": "dark_psychology",
+        "visual_style": "minimal_illustration",
+        "story_tone": "suspenseful",
+        "voice": "af_heart",
+        "speed": 0.9,
+        "duration": 45,
+        "tags": ["trending", "tiktok", "shorts"],
+    },
+    "minimal_illustration_philosophy": {
+        "label": "Minimal Illustration — Philosophy",
+        "description": "Clean geometric illustrations with vast negative space. Contemplative, poetic narration exploring philosophical ideas.",
+        "category": "philosophy",
+        "niche": "stoicism",
+        "visual_style": "minimal_illustration",
+        "story_tone": "inspirational",
+        "voice": "af_heart",
+        "speed": 0.85,
+        "duration": 60,
+        "tags": ["youtube"],
+    },
+    "minimal_illustration_motivational": {
+        "label": "Minimal Illustration — Motivational",
+        "description": "Single symbolic objects as metaphors for growth and change. Clean, uplifting, editorial illustration style.",
+        "category": "motivation",
+        "niche": "motivational",
+        "visual_style": "minimal_illustration",
+        "story_tone": "inspirational",
+        "voice": "af_heart",
+        "speed": 0.9,
+        "duration": 45,
+        "tags": ["trending", "tiktok", "youtube"],
+    },
     # ── Dark Psychology ──
     "dark_psychology_stickman": {
         "label": "Stickman Dark Psychology",

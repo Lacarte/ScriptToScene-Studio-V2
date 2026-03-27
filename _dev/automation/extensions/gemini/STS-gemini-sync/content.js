@@ -443,7 +443,7 @@
       badge.id = wrapperId;
       badge.className = 'sts-scene-badge';
       badge.textContent = S.projectId + ' | Scene ' + sceneKey;
-      badge.style.cssText = 'background:#00d4aa;color:#0d1117;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;display:inline-block;margin:4px 0;';
+      badge.style.cssText = 'background:#00d4aa;color:#0d1117;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;display:block;text-align:left;margin:4px 0;width:fit-content;';
 
       // Insert BEFORE the container — Angular won't touch elements outside its tree
       container.parentNode.insertBefore(badge, container);

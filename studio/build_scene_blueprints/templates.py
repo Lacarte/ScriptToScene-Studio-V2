@@ -160,6 +160,32 @@ SCENE_STYLE_TEMPLATES = [
         ),
     },
     {
+        "id": "minimal_illustration",
+        "type": "visual",
+        "category": None,
+        "name": "Minimalist Illustration",
+        "description": "Bold single object on vast white space, flat geometric style, origami-like forms",
+        "color": "#E74C3C",
+        "style_prompt": (
+            "Generate minimalist illustration image prompts with a single bold focal object on vast empty white or light background. "
+            "Style: flat illustration, geometric/origami-like forms, paper-craft aesthetic, clean vector lines. "
+            "Composition: the subject occupies less than 30% of the frame, surrounded by enormous negative space. "
+            "Use portrait/vertical 9:16 framing. The subject should feel isolated, contemplative, floating in space. "
+            "Color: one bold accent color (red, teal, gold, deep blue) against pure white or very light background. "
+            "No textures, no gradients on background — keep it surgically clean. "
+            "Subjects: simple symbolic objects (paper airplane, origami boat, lone figure, single tree, floating cube, "
+            "envelope, key, umbrella, lightbulb, compass). Each scene uses ONE object as a visual metaphor. "
+            "Lighting: soft, even, almost shadowless — the object creates its own visual weight through color contrast alone. "
+            "Mood: contemplative, poetic, spacious, breathing room. Think editorial illustration meets zen philosophy. "
+            "Camera angles vary per scene type: "
+            "- Establishing: extreme wide, subject tiny in center "
+            "- Close-up: subject fills 50% but still generous margins "
+            "- Over-shoulder: silhouette of observer looking at distant object "
+            "- Bird's-eye: top-down geometric pattern with subject as focal point "
+            "- Medium: centered subject with balanced negative space on all sides"
+        ),
+    },
+    {
         "id": "cyberpunk",
         "type": "visual",
         "category": None,
