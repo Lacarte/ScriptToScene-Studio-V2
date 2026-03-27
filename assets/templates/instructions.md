@@ -240,38 +240,183 @@ export const CATEGORY_COLORS = {
 
 ## Creating Templates From Reference Material
 
-### From Images
+### From Images — Visual DNA Extraction
 
-1. Analyze the visual characteristics:
-   - Color palette (monochrome? limited palette? bold?)
-   - Composition (minimal? busy? centered?)
-   - Style (photorealistic? illustration? abstract?)
-   - Lighting (even? dramatic? soft?)
-   - Framing (wide? close-up? bird's-eye?)
+When you have a reference image (or set of images) that captures the look you want, extract these 8 dimensions:
 
-2. Write the `style_prompt` describing these characteristics as generation rules.
+#### 1. Color Palette & Temperature
 
-3. Place any reference images in `assets/templates/references/your_style_id/`.
+Ask: *What colors dominate? Is it warm or cool? Saturated or muted?*
+
+| What to look for | Example values |
+|-----------------|----------------|
+| **Dominant color** | `deep crimson`, `off-white`, `charcoal`, `teal` |
+| **Accent color** | `surgical cyan`, `blood red`, `gold leaf` |
+| **Palette size** | `monochrome`, `2-color`, `limited (3-4)`, `full spectrum` |
+| **Saturation** | `desaturated/muted`, `natural`, `hyper-saturated`, `neon` |
+| **Temperature** | `cold/clinical`, `neutral`, `warm/golden`, `mixed` |
+| **Contrast** | `low (foggy)`, `medium`, `high (stark)`, `extreme (silhouette)` |
+
+→ Put in style_prompt: `Limited palette: off-white background with single bold red accent. High contrast, cold temperature.`
+
+#### 2. Mood & Emotional Tone
+
+Ask: *What do you FEEL when you look at this image?*
+
+| Mood | Visual indicators |
+|------|------------------|
+| **Eerie/unsettling** | Empty space, distorted proportions, muted colors |
+| **Calm/serene** | Soft edges, pastel tones, balanced composition |
+| **Intense/dramatic** | Strong contrast, diagonal lines, saturated accents |
+| **Mysterious** | Fog, silhouettes, partial visibility, dark tones |
+| **Playful/light** | Bright colors, rounded shapes, asymmetry |
+| **Clinical/precise** | Grid alignment, surgical colors, sharp edges |
+| **Nostalgic** | Warm tones, film grain, faded colors, soft focus |
+| **Oppressive/heavy** | Dark palette, top-heavy composition, tight framing |
+
+→ Put in style_prompt: `Mood: clinical and contemplative. Empty space creates tension, not peace.`
+
+#### 3. Composition & Framing
+
+Ask: *Where does the eye go? How much empty space?*
+
+| Element | Options |
+|---------|---------|
+| **Subject placement** | `centered`, `rule-of-thirds`, `off-center`, `edge` |
+| **Negative space** | `minimal (<20%)`, `balanced (40-60%)`, `dominant (>70%)` |
+| **Depth** | `flat/2D`, `shallow depth`, `deep perspective` |
+| **Symmetry** | `symmetric`, `asymmetric`, `broken symmetry` |
+| **Framing** | `wide/establishing`, `medium`, `close-up`, `extreme close-up`, `bird's-eye`, `over-shoulder` |
+
+→ Put in style_prompt: `Composition: single subject centered with 80% negative space. Flat 2D depth, no perspective.`
+
+#### 4. Lighting & Atmosphere
+
+Ask: *Where does the light come from? Is there shadow?*
+
+| Element | Options |
+|---------|---------|
+| **Direction** | `top-down`, `side-lit`, `backlit`, `ambient/even`, `from below` |
+| **Quality** | `hard (sharp shadows)`, `soft (diffused)`, `flat (shadowless)` |
+| **Intensity** | `dim/low-key`, `natural`, `bright/high-key`, `overexposed` |
+| **Atmosphere** | `clear`, `hazy`, `foggy`, `dusty`, `smoky`, `neon glow` |
+| **Special** | `volumetric rays`, `rim lighting`, `chiaroscuro`, `clinical white` |
+
+→ Put in style_prompt: `Lighting: soft, even, almost shadowless. Clinical white illumination from above.`
+
+#### 5. Art Style & Rendering
+
+Ask: *Is this a photo, illustration, painting, or something else?*
+
+| Style | Characteristics |
+|-------|----------------|
+| **Photorealistic** | Film grain, depth of field, lens effects |
+| **Flat illustration** | Clean vector lines, solid fills, no gradients |
+| **Watercolor** | Bleed edges, visible paper texture, soft washes |
+| **Ink/line art** | Bold outlines, cross-hatching, high contrast |
+| **3D render** | Smooth surfaces, ambient occlusion, soft shadows |
+| **Collage/mixed** | Cut edges, layered textures, varied materials |
+| **Pixel art** | Grid-aligned, limited palette, blocky shapes |
+| **Stickman/minimal** | Simple lines, no fill, abstract anatomy |
+| **Origami/geometric** | Folded planes, hard edges, paper-like |
+
+→ Put in style_prompt: `Style: flat vector illustration with clean geometric lines. Origami-like paper aesthetic.`
+
+#### 6. Subject Treatment
+
+Ask: *How are people/objects depicted?*
+
+| Element | Options |
+|---------|---------|
+| **Human figures** | `realistic`, `stylized`, `silhouette`, `abstract`, `faceless`, `geometric` |
+| **Detail level** | `hyper-detailed`, `moderate`, `simplified`, `abstract` |
+| **Scale** | `large/dominant`, `medium`, `small/distant`, `tiny (ant-like)` |
+| **Count** | `single subject`, `pair`, `group`, `crowd`, `none (landscape)` |
+| **Agency** | `active/dynamic`, `static/posed`, `contemplative`, `vulnerable` |
+
+→ Put in style_prompt: `Subjects: single abstract geometric figure, small against vast space. No faces, no realistic anatomy.`
+
+#### 7. Texture & Material
+
+Ask: *What would this feel like if you could touch it?*
+
+| Element | Options |
+|---------|---------|
+| **Surface** | `smooth`, `rough`, `paper-like`, `metallic`, `organic`, `glass` |
+| **Edges** | `sharp/crisp`, `soft/blurred`, `hand-drawn`, `pixelated` |
+| **Grain/noise** | `clean`, `subtle grain`, `heavy film grain`, `digital noise` |
+| **Material feel** | `paper`, `canvas`, `screen`, `fabric`, `stone`, `water` |
+
+→ Put in style_prompt: `Texture: clean digital surface, no grain. Crisp edges like vector cut-outs.`
+
+#### 8. Motion & Energy (for video/animation styles)
+
+Ask: *If this were a video, how would it move?*
+
+| Element | Options |
+|---------|---------|
+| **Energy** | `still/frozen`, `slow/meditative`, `moderate`, `energetic`, `chaotic` |
+| **Camera** | `static`, `slow pan`, `slow zoom`, `handheld`, `drone`, `orbiting` |
+| **Subject motion** | `none`, `subtle breathing`, `walking`, `running`, `abstract flow` |
+| **Transitions** | `cut`, `dissolve`, `morph`, `slide`, `zoom-through` |
+
+→ Put in style_prompt: `Motion: slow push-in zoom toward subject over 4s. Focal length ramps 24mm→55mm.`
+
+---
+
+### Putting It All Together — From Image to Template
+
+**Step-by-step process:**
+
+1. **Collect 3-5 reference images** that share the same visual DNA
+2. **Fill out the 8 dimensions above** for each image
+3. **Find the common thread** — what's consistent across all references?
+4. **Write the DO section** from the consistent elements
+5. **Write the DO NOT section** from what's ABSENT in all references
+6. **Write the ALWAYS section** for the non-negotiable rules
+7. **Pick the `color` field** from the dominant accent color in the references
+8. **Choose the `category`** based on what content this style serves best
+9. **Place references** in `assets/templates/references/your_style_id/`
+
+**Example extraction from a red paper airplane on white:**
+
+| Dimension | Extracted |
+|-----------|----------|
+| Palette | Off-white bg + bold red accent. 2-color. High contrast. Cold. |
+| Mood | Calm yet focused. Deliberate simplicity. |
+| Composition | Centered subject, 85% negative space, flat 2D |
+| Lighting | Even, shadowless, clinical white |
+| Style | Flat geometric illustration, origami aesthetic |
+| Subject | Single object, simplified, bold, geometric |
+| Texture | Clean digital, crisp edges, no grain |
+| Motion | Slow drift or gentle float |
+
+→ This becomes the `minimal_illustration` template.
+
+---
 
 ### From Video
 
-1. Take key frame screenshots that represent the look.
-2. Analyze the visual style across frames (is it consistent?).
-3. Note the motion style too — this goes in `motion_profile` if using style_spec.
-4. Write the `style_prompt` from the static visual analysis.
+1. Take 5-10 key frame screenshots that represent the visual identity.
+2. Run them through the 8-dimension extraction above.
+3. Note what stays CONSISTENT across frames — that's your style DNA.
+4. Note the motion style (dimension 8) — this feeds into `motion_profile`.
+5. Write the `style_prompt` from the static analysis + motion notes.
 
 ### From Text/Script
 
-1. Identify the tone and mood (dark? uplifting? mysterious?).
-2. Choose or create a matching `story_tone`.
-3. Pick a visual style that complements the text mood.
-4. Create a preset combining the tone + style.
+1. Identify the **emotional arc** — what moods does the text move through?
+2. Pick a `story_tone` that matches the dominant emotion.
+3. Imagine: *If this text were a series of images, what would they look like?*
+4. Choose or create a visual style that serves the text's emotional needs.
+5. Create a preset combining the tone + style.
 
 ### From an Existing Script
 
-1. Run the script through the pipeline with different visual styles.
-2. Compare outputs to find the best visual match.
-3. Create a preset locking in that combination.
+1. Run the script through the pipeline with 3-4 different visual styles.
+2. Compare outputs — which images best serve the story?
+3. Note what works and what doesn't in each style.
+4. Create a refined preset locking in the best combination.
 
 ---
 
