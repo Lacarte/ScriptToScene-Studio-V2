@@ -16,10 +16,40 @@ const saveLabel = ref('')
 const saveDescription = ref('')
 const saving = ref(false)
 const confirmDeleteId = ref('')
+const searchQuery = ref('')
 
 const presetList = computed(() =>
   Object.entries(props.presets).map(([id, p]) => ({ id, ...p }))
 )
+
+const filteredPresets = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim()
+  if (!q) return presetList.value
+  return presetList.value.filter(p =>
+    (p.label || '').toLowerCase().includes(q) ||
+    (p.category || '').toLowerCase().includes(q) ||
+    (p.niche || '').toLowerCase().includes(q) ||
+    (p.description || '').toLowerCase().includes(q) ||
+    (p.visual_style || '').toLowerCase().includes(q) ||
+    (p.tags || []).some(t => t.toLowerCase().includes(q))
+  )
+})
+
+const groupedPresets = computed(() => {
+  const groups = {}
+  for (const p of filteredPresets.value) {
+    const cat = p.category || 'other'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(p)
+  }
+  // Sort categories alphabetically, but put 'other' last
+  const sorted = Object.keys(groups).sort((a, b) => {
+    if (a === 'other') return 1
+    if (b === 'other') return -1
+    return a.localeCompare(b)
+  })
+  return sorted.map(cat => ({ category: cat, presets: groups[cat] }))
+})
 
 const count = computed(() => presetList.value.length)
 
@@ -36,6 +66,10 @@ const canSave = computed(() => {
 function templateColor(visualStyleId) {
   const t = props.templates.find(tp => tp.id === visualStyleId)
   return t?.color || '#888'
+}
+
+function formatCategory(cat) {
+  return (cat || 'other').replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function pick(preset) {
@@ -87,11 +121,19 @@ function cancelDelete() {
   confirmDeleteId.value = ''
 }
 
-const TAG_ICONS = {
-  tiktok: 'T',
-  youtube: 'Y',
-  shorts: 'S',
-  trending: '\u2191',
+const CATEGORY_COLORS = {
+  horror: '#DC2626',
+  psychology: '#8B5CF6',
+  philosophy: '#6366F1',
+  motivation: '#F59E0B',
+  romance: '#EC4899',
+  mystery: '#6D28D9',
+  history: '#D97706',
+  science: '#0EA5E9',
+  nature: '#10B981',
+  survival: '#EF4444',
+  bible: '#A78BFA',
+  other: '#6B7280',
 }
 </script>
 
@@ -101,7 +143,7 @@ const TAG_ICONS = {
       <button type="button" class="niche-header-main" @click="expanded = !expanded">
         <span class="niche-header-left">
           <svg class="niche-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-          <span class="niche-title">Niche Presets</span>
+          <span class="niche-title">Presets</span>
           <span class="niche-count">{{ count }}</span>
         </span>
       </button>
@@ -112,7 +154,7 @@ const TAG_ICONS = {
           class="niche-save-btn"
           @click.stop="openSaveForm"
           title="Save current config as niche"
-        >+ Save as Niche</button>
+        >+ Save</button>
         <button
           v-if="selected"
           type="button"
@@ -122,6 +164,23 @@ const TAG_ICONS = {
         <span v-if="selected" class="niche-active-dot"></span>
         <span v-if="selected" class="niche-active-label">{{ presets[selected]?.label || selected }}</span>
       </span>
+    </div>
+
+    <!-- Search -->
+    <div v-show="expanded" class="niche-search">
+      <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input
+        v-model="searchQuery"
+        class="search-input"
+        placeholder="Search presets..."
+        @keydown.escape="searchQuery = ''"
+      />
+      <button
+        v-if="searchQuery"
+        type="button"
+        class="search-clear"
+        @click="searchQuery = ''"
+      >&times;</button>
     </div>
 
     <!-- Save Form -->
@@ -167,54 +226,61 @@ const TAG_ICONS = {
       <button type="button" class="delete-no-btn" @click="cancelDelete">Cancel</button>
     </div>
 
-    <div v-show="expanded" class="niche-grid">
-      <button
-        type="button"
-        v-for="p in presetList"
-        :key="p.id"
-        class="niche-card"
-        :class="{ 'is-selected': p.id === selected }"
-        :style="{
-          '--card-accent': templateColor(p.visual_style),
-          borderColor: p.id === selected ? templateColor(p.visual_style) : undefined,
-          boxShadow: p.id === selected ? '0 0 16px ' + templateColor(p.visual_style) + '20' : undefined,
-        }"
-        @click="pick(p)"
-      >
-        <span class="card-accent-bar" :style="{ background: templateColor(p.visual_style) }"></span>
-        <div class="card-body">
-          <div class="card-top">
-            <span class="card-label">{{ p.label }}</span>
-            <span
-              v-if="p.description"
-              class="card-info"
-              @click.stop
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-              <span class="card-tooltip">{{ p.description }}</span>
-            </span>
-            <span
-              v-if="p.custom"
-              class="card-delete"
-              title="Delete niche"
-              @click.stop="requestDelete(p.id)"
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </span>
-          </div>
-          <div class="card-bottom">
-            <span class="card-niche">{{ p.category || p.niche }}</span>
-            <span class="card-tags">
-              <span
-                v-for="tag in (p.tags || [])"
-                :key="tag"
-                class="card-tag"
-                :class="'tag--' + tag"
-              >{{ TAG_ICONS[tag] || tag }}</span>
-            </span>
-          </div>
+    <!-- Grouped preset grid -->
+    <div v-show="expanded" class="niche-groups">
+      <div v-if="filteredPresets.length === 0" class="niche-empty">
+        No presets match "{{ searchQuery }}"
+      </div>
+
+      <div v-for="group in groupedPresets" :key="group.category" class="niche-group">
+        <div class="group-header">
+          <span class="group-dot" :style="{ background: CATEGORY_COLORS[group.category] || '#6B7280' }"></span>
+          <span class="group-label">{{ formatCategory(group.category) }}</span>
+          <span class="group-count">{{ group.presets.length }}</span>
         </div>
-      </button>
+        <div class="niche-grid">
+          <button
+            type="button"
+            v-for="p in group.presets"
+            :key="p.id"
+            class="niche-card"
+            :class="{ 'is-selected': p.id === selected }"
+            :style="{
+              '--card-accent': templateColor(p.visual_style),
+              borderColor: p.id === selected ? templateColor(p.visual_style) : undefined,
+              boxShadow: p.id === selected ? '0 0 16px ' + templateColor(p.visual_style) + '20' : undefined,
+            }"
+            @click="pick(p)"
+          >
+            <span class="card-accent-bar" :style="{ background: templateColor(p.visual_style) }"></span>
+            <div class="card-body">
+              <div class="card-top">
+                <span class="card-label">{{ p.label }}</span>
+                <span
+                  v-if="p.description"
+                  class="card-info"
+                  @click.stop
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                  <span class="card-tooltip">{{ p.description }}</span>
+                </span>
+                <span
+                  v-if="p.custom"
+                  class="card-delete"
+                  title="Delete niche"
+                  @click.stop="requestDelete(p.id)"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              </div>
+              <div class="card-meta">
+                <span class="card-style" :style="{ color: templateColor(p.visual_style) }">{{ p.visual_style?.replace(/_/g, ' ') }}</span>
+                <span class="card-tone">{{ p.story_tone }}</span>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -340,6 +406,59 @@ const TAG_ICONS = {
 .niche-save-btn:hover {
   background: rgba(78, 205, 196, 0.15);
   border-color: rgba(78, 205, 196, 0.4);
+}
+
+/* ── Search ── */
+.niche-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 6px;
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+.search-icon {
+  color: var(--text-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 28px 5px 8px;
+  font: 400 11px/1.3 system-ui, sans-serif;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.search-clear {
+  position: absolute;
+  right: 16px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  color: var(--text);
 }
 
 /* ── Save Form ── */
@@ -479,23 +598,81 @@ const TAG_ICONS = {
   cursor: pointer;
 }
 
+/* ── Groups ── */
+.niche-groups {
+  padding: 4px 10px 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.niche-groups::-webkit-scrollbar {
+  width: 4px;
+}
+
+.niche-groups::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.niche-groups::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+}
+
+.niche-empty {
+  text-align: center;
+  padding: 24px 0;
+  font: 400 12px/1.4 system-ui, sans-serif;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.niche-group {
+  margin-bottom: 10px;
+}
+
+.niche-group:last-child {
+  margin-bottom: 0;
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 6px;
+}
+
+.group-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.group-label {
+  font: 600 10px/1 var(--font-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.group-count {
+  font: 500 9px/1 var(--font-mono, monospace);
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
 /* ── Grid ── */
 .niche-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 8px 10px 10px;
-}
-
-@media (max-width: 640px) {
-  .niche-grid { grid-template-columns: repeat(2, 1fr); }
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
 }
 
 /* ── Card ── */
 .niche-card {
   display: flex;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.02);
   cursor: pointer;
@@ -530,8 +707,8 @@ const TAG_ICONS = {
 .card-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 3px;
+  padding: 6px 8px;
   flex: 1;
   min-width: 0;
 }
@@ -539,11 +716,11 @@ const TAG_ICONS = {
 .card-top {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .card-label {
-  font: 600 11px/1.3 var(--font-mono, monospace);
+  font: 600 11px/1.3 system-ui, sans-serif;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -555,6 +732,26 @@ const TAG_ICONS = {
 
 .niche-card.is-selected .card-label {
   color: var(--card-accent, var(--accent));
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-style {
+  font: 500 9px/1 var(--font-mono, monospace);
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-tone {
+  font: 400 9px/1 var(--font-mono, monospace);
+  color: var(--text-muted);
+  opacity: 0.5;
 }
 
 .card-info {
@@ -624,53 +821,5 @@ const TAG_ICONS = {
   opacity: 1 !important;
   color: #FF6B6B;
   background: rgba(255, 107, 107, 0.1);
-}
-
-.card-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-}
-
-.card-niche {
-  font: 500 9px/1 system-ui, sans-serif;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-
-.card-tags {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
-}
-
-.card-tag {
-  font: 700 8px/1 var(--font-mono, monospace);
-  padding: 2px 4px;
-  border-radius: 3px;
-  background: rgba(255,255,255,0.06);
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-
-.tag--trending {
-  color: #FFD93D;
-  background: rgba(255, 217, 61, 0.1);
-}
-
-.tag--tiktok {
-  color: #E879F9;
-  background: rgba(232, 121, 249, 0.1);
-}
-
-.tag--youtube {
-  color: #FF6B6B;
-  background: rgba(255, 107, 107, 0.1);
-}
-
-.tag--shorts {
-  color: #38BDF8;
-  background: rgba(56, 189, 248, 0.1);
 }
 </style>
