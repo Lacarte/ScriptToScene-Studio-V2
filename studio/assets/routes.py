@@ -78,6 +78,16 @@ assets_bp = Blueprint("assets", __name__)
 grabber_jobs = JobStore()
 
 
+def _get_job(project_id):
+    """Get a grabber job by project ID."""
+    return grabber_jobs.get(project_id)
+
+
+def _set_job(project_id, job):
+    """Set a grabber job by project ID."""
+    grabber_jobs.set(project_id, job)
+
+
 def _save_job(job):
     """Persist grabber job state to disk."""
     try:
