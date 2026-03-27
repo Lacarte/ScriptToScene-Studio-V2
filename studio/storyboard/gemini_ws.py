@@ -80,6 +80,12 @@ def is_extension_connected():
 
 def queue_image_job(msg):
     """Queue an IMAGE_JOB message. Sends immediately to connected clients."""
+    # Persist scene prompts so _mark_job_done can forward them to Grok
+    pid = msg.get("projectId", "")
+    scenes = msg.get("scenes", [])
+    if pid and scenes:
+        _save_scene_prompts(pid, scenes)
+
     with _pending_job_lock:
         _pending_jobs.append(msg)
 
@@ -276,8 +282,20 @@ def _send_navigate(url):
                 pass
 
 
+def _save_scene_prompts(project_id, scenes):
+    """Persist scene prompts alongside the storyboard job so Grok can read them."""
+    try:
+        from config import STORYBOARD_DIR
+        prompts_path = os.path.join(STORYBOARD_DIR, project_id, "scene_prompts.json")
+        os.makedirs(os.path.dirname(prompts_path), exist_ok=True)
+        with open(prompts_path, "w", encoding="utf-8") as f:
+            json.dump(scenes, f, indent=2)
+    except Exception as e:
+        logger.debug("Failed to save scene prompts: {}", e)
+
+
 def _mark_job_done(project_id):
-    """Mark the entire storyboard job as done and tell extension to navigate to Grok."""
+    """Mark the entire storyboard job as done, then push images+prompts to Grok."""
     _update_scene_status(project_id, -1, "done")  # Trigger a save
     try:
         from config import STORYBOARD_DIR
@@ -292,5 +310,74 @@ def _mark_job_done(project_id):
     except Exception as e:
         logger.debug("Failed to mark job done: {}", e)
 
-    # Tell the extension to navigate to Grok for the assets step
-    _send_navigate("https://grok.com/imagine")
+    # Auto-trigger Grok assets step with storyboard images + prompts
+    threading.Thread(target=_push_to_grok, args=(project_id,), daemon=True).start()
+
+
+def _push_to_grok(project_id):
+    """Read storyboard images + prompts and send GRABBER_START to the Grok extension."""
+    import base64 as b64_mod
+    from config import STORYBOARD_DIR
+
+    prompts_path = os.path.join(STORYBOARD_DIR, project_id, "scene_prompts.json")
+    if not os.path.isfile(prompts_path):
+        logger.warning("No scene_prompts.json for {} — cannot push to Grok", project_id)
+        return
+
+    try:
+        with open(prompts_path, "r", encoding="utf-8") as f:
+            scenes = json.load(f)
+    except Exception as e:
+        logger.error("Failed to read scene prompts: {}", e)
+        return
+
+    # Build scenes list with base64 storyboard images
+    image_exts = (".jpg", ".jpeg", ".png", ".webp")
+    grok_scenes = []
+    for s in scenes:
+        scene_num = s.get("scene")
+        prompt = s.get("prompt", "")
+        if scene_num is None or not prompt:
+            continue
+
+        entry = {"scene": scene_num, "prompt": prompt}
+
+        # Read the storyboard image for this scene
+        scene_dir = os.path.join(STORYBOARD_DIR, project_id, str(scene_num))
+        if os.path.isdir(scene_dir):
+            for fname in os.listdir(scene_dir):
+                if fname.startswith("image") and fname.lower().endswith(image_exts):
+                    img_path = os.path.join(scene_dir, fname)
+                    try:
+                        with open(img_path, "rb") as img_f:
+                            raw = img_f.read()
+                        ext = os.path.splitext(fname)[1].lstrip(".")
+                        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(ext, "jpeg")
+                        entry["image"] = f"data:image/{mime};base64,{b64_mod.b64encode(raw).decode()}"
+                    except Exception:
+                        pass
+                    break
+
+        grok_scenes.append(entry)
+
+    if not grok_scenes:
+        logger.warning("No scenes to push to Grok for {}", project_id)
+        return
+
+    # Activate Grok tab and send GRABBER_START
+    try:
+        from studio.animator.routes import queue_grabber_start, activate_tab as grok_activate
+        grok_activate()
+
+        queue_grabber_start({
+            "type": "GRABBER_START",
+            "projectId": project_id,
+            "scenes": grok_scenes,
+            "aspectRatio": "9:16",
+            "grokMode": "video",
+            "grokDuration": "6s",
+            "autoType": True,
+        })
+        logger.success("Pushed {} scenes to Grok for {}", len(grok_scenes), project_id)
+    except Exception as e:
+        logger.error("Failed to push to Grok: {}", e)
