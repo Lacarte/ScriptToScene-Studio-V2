@@ -42,8 +42,10 @@ const groupedPresets = computed(() => {
     if (!groups[cat]) groups[cat] = []
     groups[cat].push(p)
   }
-  // Sort categories alphabetically, but put 'other' last
+  // Sort: 'test' first, 'other' last, rest alphabetically
   const sorted = Object.keys(groups).sort((a, b) => {
+    if (a === 'test') return -1
+    if (b === 'test') return 1
     if (a === 'other') return 1
     if (b === 'other') return -1
     return a.localeCompare(b)
@@ -122,6 +124,7 @@ function cancelDelete() {
 }
 
 const CATEGORY_COLORS = {
+  test: '#00D4AA',
   horror: '#DC2626',
   psychology: '#8B5CF6',
   philosophy: '#6366F1',

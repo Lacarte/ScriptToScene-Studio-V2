@@ -569,7 +569,7 @@ function firstSentence(value) {
 
 const jobCatalogSearch = ref('')
 const CATALOG_CAT_COLORS = {
-  horror: '#DC2626', psychology: '#8B5CF6', philosophy: '#6366F1',
+  test: '#00D4AA', horror: '#DC2626', psychology: '#8B5CF6', philosophy: '#6366F1',
   motivation: '#F59E0B', romance: '#EC4899', mystery: '#6D28D9',
   history: '#D97706', science: '#0EA5E9', nature: '#10B981',
   survival: '#EF4444', bible: '#A78BFA', other: '#6B7280',
@@ -594,7 +594,13 @@ const groupedCatalog = computed(() => {
     groups[cat].push({ id, ...p })
   }
   return Object.keys(groups)
-    .sort((a, b) => a === 'other' ? 1 : b === 'other' ? -1 : a.localeCompare(b))
+    .sort((a, b) => {
+      if (a === 'test') return -1
+      if (b === 'test') return 1
+      if (a === 'other') return 1
+      if (b === 'other') return -1
+      return a.localeCompare(b)
+    })
     .map(cat => ({ category: cat, presets: groups[cat] }))
 })
 
