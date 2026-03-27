@@ -192,6 +192,10 @@ def _handle_image_upload(msg):
             size_kb = os.path.getsize(filepath) / 1024
             logger.success("Saved: {} ({:.0f} KB)", filepath, size_kb)
 
+            # Remove Gemini watermark
+            from studio.storyboard.watermark import remove_watermark
+            remove_watermark(filepath)
+
             # Update storyboard job status
             _update_scene_status(project_id, scene_num, "ready",
                                  local_path=f"/output/storyboard/{project_id}/{scene_key}/image{ext}")

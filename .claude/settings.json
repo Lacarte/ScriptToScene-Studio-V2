@@ -5,7 +5,9 @@
       "Bash(do mv:*)",
       "Bash(done)",
       "Read(//d/@Workspace/chrome-sts-profile/Default/**)",
-      "Read(//d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/$LOCALAPPDATA/Google/Chrome SxS/Application/**)"
+      "Read(//d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/$LOCALAPPDATA/Google/Chrome SxS/Application/**)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
     ]
   },
   "enableAgentTeam": true,
