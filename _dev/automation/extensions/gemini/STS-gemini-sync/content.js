@@ -84,17 +84,77 @@
     }
 
     // ── WebSocket ─────────────────────────────────────
+    var _WS_PATH = '/ws/image-gemini';
+    var _PORT_MIN = 5050;
+    var _PORT_MAX = 5060;
+
+    function _tryPort(port) {
+      return new Promise(function(resolve) {
+        var url = 'ws://localhost:' + port + _WS_PATH;
+        var ws;
+        try { ws = new WebSocket(url); } catch(e) { resolve(null); return; }
+        var timer = setTimeout(function() { try { ws.close(); } catch(e) {} resolve(null); }, 1500);
+        ws.onopen = function() { clearTimeout(timer); resolve({ ws: ws, url: url, port: port }); };
+        ws.onerror = function() { clearTimeout(timer); resolve(null); };
+      });
+    }
+
+    function _discoverPort() {
+      // Try all ports in parallel, first one to connect wins
+      var promises = [];
+      for (var p = _PORT_MIN; p <= _PORT_MAX; p++) promises.push(_tryPort(p));
+      return Promise.all(promises).then(function(results) {
+        var winner = null;
+        for (var i = 0; i < results.length; i++) {
+          if (results[i]) {
+            if (!winner) { winner = results[i]; }
+            else { try { results[i].ws.close(); } catch(e) {} }
+          }
+        }
+        return winner;
+      });
+    }
+
     function connectWS() {
       if (S.ws && (S.ws.readyState === WebSocket.OPEN || S.ws.readyState === WebSocket.CONNECTING)) return;
-      console.log('[STS WS] Connecting to', S.wsUrl);
-      try { S.ws = new WebSocket(S.wsUrl); } catch (e) {
+
+      // If user manually set a URL, use it directly
+      var manualUrl = localStorage.getItem('sts-gemini-ws-manual');
+      if (manualUrl) {
+        console.log('[STS WS] Connecting to manual URL:', manualUrl);
+        _connectToUrl(manualUrl);
+        return;
+      }
+
+      // Auto-discover port
+      console.log('[STS WS] Scanning ports ' + _PORT_MIN + '-' + _PORT_MAX + '...');
+      _discoverPort().then(function(result) {
+        if (result) {
+          console.log('[STS WS] Discovered server on port ' + result.port);
+          S.wsUrl = result.url;
+          localStorage.setItem('sts-gemini-ws', result.url);
+          _attachWS(result.ws);
+        } else {
+          console.warn('[STS WS] No server found on ports ' + _PORT_MIN + '-' + _PORT_MAX);
+          S.wsConnected = false; render(); scheduleWSReconnect();
+        }
+      });
+    }
+
+    function _connectToUrl(url) {
+      var ws;
+      try { ws = new WebSocket(url); } catch (e) {
         console.warn('[STS WS] Connection failed:', e.message);
         S.wsConnected = false; scheduleWSReconnect(); return;
       }
-      var ws = S.ws;
+      _attachWS(ws);
+    }
+
+    function _attachWS(ws) {
+      S.ws = ws;
       ws.onopen = function() {
-        if (S.ws !== ws) return; // stale reference
-        console.log('[STS WS] Connected');
+        if (S.ws !== ws) return;
+        console.log('[STS WS] Connected to', S.wsUrl);
         S.wsConnected = true; S.connected = true; _wsReconnectAttempts = 0;
         try { ws.send(JSON.stringify({ type: 'EXTENSION_READY', source: 'sts-gemini-ext' })); } catch(e) {}
         render();
@@ -115,7 +175,6 @@
     function scheduleWSReconnect() {
       if (S.wsReconnectTimer) return;
       _wsReconnectAttempts++;
-      // Fast reconnect first 10 attempts (2s), then slow down (5s)
       var delay = _wsReconnectAttempts <= 10 ? 2000 : 5000;
       S.wsReconnectTimer = setTimeout(function() { S.wsReconnectTimer = null; connectWS(); }, delay);
     }
@@ -899,9 +958,16 @@
         if (S.showSettings) $id('sts-url-input').value = S.wsUrl;
       });
       $id('sts-url-save').addEventListener('click', function() {
-        var val = $id('sts-url-input').value;
+        var val = $id('sts-url-input').value.trim();
         if (val) {
-          S.wsUrl = val; localStorage.setItem('sts-gemini-ws', S.wsUrl);
+          S.wsUrl = val;
+          localStorage.setItem('sts-gemini-ws', val);
+          localStorage.setItem('sts-gemini-ws-manual', val);
+          if (S.ws) { try { S.ws.close(); } catch(ex) {} }
+          S.ws = null; S.wsConnected = false; connectWS(); render();
+        } else {
+          // Clear manual override → re-enable auto-discovery
+          localStorage.removeItem('sts-gemini-ws-manual');
           if (S.ws) { try { S.ws.close(); } catch(ex) {} }
           S.ws = null; S.wsConnected = false; connectWS(); render();
         }

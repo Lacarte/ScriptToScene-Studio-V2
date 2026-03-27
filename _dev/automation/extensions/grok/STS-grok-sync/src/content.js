@@ -136,40 +136,96 @@ function initSync() {
   }
 
   // ── WebSocket ──────────────────────────────────────────
+  const _WS_PATH = "/ws/animator-grok-video-grabber";
+  const _PORT_MIN = 5050;
+  const _PORT_MAX = 5060;
+
+  function _tryPort(port) {
+    return new Promise((resolve) => {
+      const url = "ws://localhost:" + port + _WS_PATH;
+      let ws;
+      try { ws = new WebSocket(url); } catch(e) { resolve(null); return; }
+      const timer = setTimeout(() => { try { ws.close(); } catch(e) {} resolve(null); }, 1500);
+      ws.onopen = () => { clearTimeout(timer); resolve({ ws, url, port }); };
+      ws.onerror = () => { clearTimeout(timer); resolve(null); };
+    });
+  }
+
+  function _discoverPort() {
+    const promises = [];
+    for (let p = _PORT_MIN; p <= _PORT_MAX; p++) promises.push(_tryPort(p));
+    return Promise.all(promises).then((results) => {
+      let winner = null;
+      for (const r of results) {
+        if (r) {
+          if (!winner) { winner = r; }
+          else { try { r.ws.close(); } catch(e) {} }
+        }
+      }
+      return winner;
+    });
+  }
+
   function connectWS() {
     if (S.ws && (S.ws.readyState === WebSocket.OPEN || S.ws.readyState === WebSocket.CONNECTING)) return;
-    const wsUrl = S.studioUrl.replace(/^http/, "ws") + "/ws/animator-grok-video-grabber";
-    console.log("[STS WS] Connecting to", wsUrl);
-    try {
-      S.ws = new WebSocket(wsUrl);
-    } catch (e) {
-      console.warn("[STS WS] Connection failed:", e.message);
-      S.wsConnected = false;
-      scheduleWSReconnect();
+
+    // If user manually set a URL, use it directly
+    const manualUrl = localStorage.getItem("sts-url-manual");
+    if (manualUrl) {
+      const wsUrl = manualUrl.replace(/^http/, "ws") + _WS_PATH;
+      console.log("[STS WS] Connecting to manual URL:", wsUrl);
+      _connectToUrl(wsUrl);
       return;
     }
-    S.ws.onopen = () => {
-      console.log("[STS WS] Connected");
+
+    // Auto-discover port
+    console.log("[STS WS] Scanning ports " + _PORT_MIN + "-" + _PORT_MAX + "...");
+    _discoverPort().then((result) => {
+      if (result) {
+        console.log("[STS WS] Discovered server on port " + result.port);
+        S.studioUrl = "http://localhost:" + result.port;
+        localStorage.setItem("sts-url", S.studioUrl);
+        _attachWS(result.ws);
+      } else {
+        console.warn("[STS WS] No server found on ports " + _PORT_MIN + "-" + _PORT_MAX);
+        S.wsConnected = false; render(); scheduleWSReconnect();
+      }
+    });
+  }
+
+  function _connectToUrl(wsUrl) {
+    let ws;
+    try { ws = new WebSocket(wsUrl); } catch (e) {
+      console.warn("[STS WS] Connection failed:", e.message);
+      S.wsConnected = false; scheduleWSReconnect(); return;
+    }
+    _attachWS(ws);
+  }
+
+  function _attachWS(ws) {
+    S.ws = ws;
+    ws.onopen = () => {
+      console.log("[STS WS] Connected to", S.studioUrl);
       S.wsConnected = true;
       S._fetchErrors = 0;
       S.connected = true;
       _wsReconnectAttempts = 0;
-      if (S.ws.readyState === WebSocket.OPEN) {
-        S.ws.send(JSON.stringify({ type: "EXTENSION_READY", source: "sts-grok-sync" }));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "EXTENSION_READY", source: "sts-grok-sync" }));
       }
       render();
     };
-    S.ws.onmessage = (evt) => {
+    ws.onmessage = (evt) => {
       try { handleWSMessage(JSON.parse(evt.data)); } catch (e) { console.warn("[STS WS] Bad message:", e); }
     };
-    S.ws.onclose = () => {
+    ws.onclose = () => {
       console.log("[STS WS] Disconnected");
       S.wsConnected = false;
-      S.ws = null;
+      if (S.ws === ws) S.ws = null;
       render();
       scheduleWSReconnect();
     };
-    S.ws.onerror = () => { S.wsConnected = false; };
+    ws.onerror = () => { S.wsConnected = false; };
   }
 
   let _wsReconnectAttempts = 0;
@@ -1763,9 +1819,17 @@ function initSync() {
 
     $id("sts-url-input").value = S.studioUrl;
     $id("sts-url-save").addEventListener("click", () => {
-      S.studioUrl = $id("sts-url-input").value.trim() || "http://localhost:5050";
-      localStorage.setItem("sts-url", S.studioUrl);
-      connectWS();
+      const val = $id("sts-url-input").value.trim();
+      if (val) {
+        S.studioUrl = val;
+        localStorage.setItem("sts-url", val);
+        localStorage.setItem("sts-url-manual", val);
+      } else {
+        // Clear manual override → re-enable auto-discovery
+        localStorage.removeItem("sts-url-manual");
+      }
+      if (S.ws) { try { S.ws.close(); } catch(e) {} }
+      S.ws = null; S.wsConnected = false; connectWS(); render();
     });
 
     $id("sts-head-autotype").addEventListener("click", () => {

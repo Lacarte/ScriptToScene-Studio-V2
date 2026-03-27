@@ -570,8 +570,8 @@ _DEFAULTS = {
     "short_test": {
         "label": "Short Test",
         "description": "Quick pipeline smoke test — 3-5 simple scenes, fast generation.",
-        "category": "motivation",
-        "niche": "motivation",
+        "category": "test",
+        "niche": "test",
         "visual_style": "short_test",
         "story_tone": "dramatic",
         "voice": "af_heart",
@@ -593,6 +593,7 @@ STORY_TONES = {
 
 # ── All valid categories ─────────────────────────────────────────────────────
 CATEGORIES = [
+    "test",
     "psychology", "crime", "horror", "motivation", "philosophy",
     "religion", "mystery", "science", "history", "nature",
     "romance", "comedy", "children", "anecdote", "politics",
