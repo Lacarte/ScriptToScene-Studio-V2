@@ -140,7 +140,7 @@
               S.typing.queue.push({
                 scene: k, displayPrompt: sc.prompt,
                 aspectRatio: scAspect,
-                fullPrompt: sc.prompt + arSuffix + ' [' + msg.projectId + '|' + sc.scene + ']',
+                fullPrompt: sc.prompt + arSuffix,
                 selected: true, status: 'queued', error: null,
               });
             }
@@ -389,11 +389,11 @@
 
     function findImageInContainer(container) {
       if (!container) return null;
-      // Strategy 1: single-image button img (exact Gemini DOM path)
-      var imgs = container.querySelectorAll('single-image button img');
+      // Strategy 1: single-image img with blob/http src (don't require .loaded class)
+      var imgs = container.querySelectorAll('single-image img');
       for (var i = imgs.length - 1; i >= 0; i--) {
         if (isValidImageSrc(imgs[i].src)) {
-          console.log('[IMAGE] Found in single-image button img');
+          console.log('[IMAGE] Found in single-image img:', imgs[i].className);
           return imgs[i].src;
         }
       }
@@ -417,37 +417,54 @@
       return null;
     }
 
-    function findConversationForScene(projectId, sceneNum) {
-      // Find the conversation-container whose user-query contains [projectId|sceneNum]
-      var tag = '[' + projectId + '|' + sceneNum + ']';
+    // Scene-to-container index mapping (set after each submit)
+    var sceneContainerMap = {};
+
+    function captureContainerForScene(sceneKey) {
+      // After submitting, the last conversation-container is the one for this scene
       var containers = document.querySelectorAll('.conversation-container');
-      for (var i = containers.length - 1; i >= 0; i--) {
-        var query = containers[i].querySelector('user-query');
-        if (query && query.textContent.indexOf(tag) !== -1) {
-          console.log('[IMAGE] Found conversation for ' + tag + ' at index ' + i);
-          return containers[i];
-        }
+      if (containers.length > 0) {
+        var last = containers[containers.length - 1];
+        sceneContainerMap[sceneKey] = last;
+        console.log('[TRACK] Mapped scene ' + sceneKey + ' to container index ' + (containers.length - 1));
+        // Inject scene badge
+        injectSceneBadge(last, sceneKey);
       }
-      return null;
+    }
+
+    function injectSceneBadge(container, sceneKey) {
+      if (!container) return;
+      // Use a dedicated wrapper outside Angular's control
+      var wrapperId = 'sts-badge-' + sceneKey;
+      if (document.getElementById(wrapperId)) return;
+
+      // Create a floating badge positioned relative to the container
+      var badge = document.createElement('div');
+      badge.id = wrapperId;
+      badge.className = 'sts-scene-badge';
+      badge.textContent = S.projectId + ' | Scene ' + sceneKey;
+      badge.style.cssText = 'background:#00d4aa;color:#0d1117;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;display:inline-block;margin:4px 0;';
+
+      // Insert BEFORE the container — Angular won't touch elements outside its tree
+      container.parentNode.insertBefore(badge, container);
     }
 
     function waitForImageGeneration(timeoutMs, projectId, sceneNum) {
       timeoutMs = timeoutMs || 180000;
       return new Promise(function(resolve) {
         var start = Date.now();
-        var tag = '[' + projectId + '|' + sceneNum + ']';
-        console.log('[IMAGE] Waiting for image matching ' + tag + ' (timeout: ' + (timeoutMs / 1000) + 's)');
+        var label = projectId + '|' + sceneNum;
+        console.log('[IMAGE] Waiting for image for scene ' + label + ' (timeout: ' + (timeoutMs / 1000) + 's)');
 
         var checkInterval = setInterval(function() {
-          // Find the conversation container for this specific scene
-          var container = findConversationForScene(projectId, sceneNum);
+          var container = sceneContainerMap[sceneNum];
           if (container) {
             var modelResponse = container.querySelector('model-response');
             if (modelResponse) {
               var img = findImageInContainer(modelResponse);
               if (img) {
                 clearInterval(checkInterval);
-                console.log('[IMAGE] Found for ' + tag + ':', img.substring(0, 80) + '...');
+                console.log('[IMAGE] Found for scene ' + label + ':', img.substring(0, 80) + '...');
                 resolve(img);
                 return;
               }
@@ -457,7 +474,7 @@
           // Timeout only if not actively generating
           if (Date.now() - start > timeoutMs && !isGeminiGenerating()) {
             clearInterval(checkInterval);
-            console.error('[IMAGE] Timed out for ' + tag);
+            console.error('[IMAGE] Timed out for scene ' + label);
             resolve(null);
           }
         }, 1000);
@@ -579,8 +596,12 @@
           .then(function() { console.log('[FLOW] Step 2: Waiting 1s before submit...'); return sleep(1000); })
           .then(function() { console.log('[FLOW] Step 3: Submitting...'); return submitPrompt(); })
           .then(function() {
+            // Capture the conversation container for this scene (last one in DOM)
+            return sleep(500).then(function() { captureContainerForScene(item.scene); });
+          })
+          .then(function() {
             // Check rate limit after submit (it may appear after trying to generate)
-            return sleep(2000).then(function() {
+            return sleep(1500).then(function() {
               var postSubmitLimit = checkRateLimit();
               if (postSubmitLimit) {
                 console.log('[FLOW] Rate limit hit after submit!');

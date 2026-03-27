@@ -212,7 +212,7 @@ function initSync() {
             S.typing.queue.push({
               scene: k,
               displayPrompt: sc.prompt,
-              fullPrompt: sc.prompt + " [" + msg.projectId + "|" + sc.scene + "]",
+              fullPrompt: sc.prompt,
               selected: true,
               status: "queued",
               imageUrl: imgData,
@@ -769,6 +769,38 @@ function initSync() {
     return urls;
   }
 
+  // Scene-to-container mapping (set after each submit)
+  const sceneContainerMap = {};
+
+  function captureContainerForScene(sceneKey) {
+    const articles = document.querySelectorAll("article");
+    if (articles.length > 0) {
+      const last = articles[articles.length - 1];
+      sceneContainerMap[sceneKey] = last;
+      console.log("[TRACK] Mapped scene " + sceneKey + " to article index " + (articles.length - 1));
+      injectSceneBadge(last, sceneKey);
+    }
+  }
+
+  function injectSceneBadge(container, sceneKey) {
+    if (!container) return;
+    const _doInject = () => {
+      if (container.querySelector(".sts-scene-badge")) return;
+      const badge = document.createElement("div");
+      badge.className = "sts-scene-badge";
+      badge.textContent = (S.projectId || "") + " | Scene " + sceneKey;
+      badge.style.cssText = "position:absolute;top:8px;right:8px;background:#00d4aa;color:#0d1117;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;z-index:999;pointer-events:none;";
+      container.style.position = "relative";
+      container.appendChild(badge);
+    };
+    _doInject();
+    // Re-inject if React re-renders and removes our badge
+    const observer = new MutationObserver(() => {
+      if (!container.querySelector(".sts-scene-badge")) _doInject();
+    });
+    observer.observe(container, { childList: true, subtree: true });
+  }
+
   async function waitForGeneration(sceneId, seenUrls, timeoutMs = 300000, runId) {
     const pollInterval = 2000;
     const maxPolls = Math.ceil(timeoutMs / pollInterval);
@@ -1089,13 +1121,19 @@ function initSync() {
         await typeIntoGrok(item.fullPrompt);
         console.log("Submitted scene", item.scene, "- waiting for generation...");
 
-        await sleep(2000);
+        // Capture the last article as this scene's response container + inject badge
+        await sleep(500);
+        captureContainerForScene(item.scene);
+
+        await sleep(1500);
         if (checkRateLimit()) {
           item.status = "queued";
           render();
           await handleRateLimitCooldown();
           await typeIntoGrok(item.fullPrompt);
-          await sleep(2000);
+          await sleep(500);
+          captureContainerForScene(item.scene);
+          await sleep(1500);
           if (checkRateLimit()) {
             item.status = "error";
             item.errorCount = (item.errorCount || 0) + 1;
@@ -1179,6 +1217,8 @@ function initSync() {
           document.querySelectorAll('video[src*="assets.grok.com"]').forEach(v => addSeen(seenVideoUrls, v.src || ""));
           if (item.imageUrl && item.imageUrl.startsWith("data:")) await uploadImageToGrok(item.imageUrl);
           await typeIntoGrok(item.fullPrompt);
+          await sleep(500);
+          captureContainerForScene(item.scene);
           item.status = "generating";
           render();
 
@@ -1218,11 +1258,13 @@ function initSync() {
       }
     }
 
-    // Rescan thumbnails
+    // Rescan thumbnails using scene-to-container map
     if (!shouldStopTyping(runId) && S.projectId) {
-      const rescanTagRe = new RegExp("\\[" + S.projectId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\|(\\d+)\\]");
-      for (const thumbImg of document.querySelectorAll('button img[alt^="Thumbnail"]')) {
+      for (const [sceneNum, container] of Object.entries(sceneContainerMap)) {
         if (shouldStopTyping(runId)) break;
+        if (S.sentScenes[sceneNum]) continue;
+        const thumbImg = container.querySelector('button img[alt^="Thumbnail"]');
+        if (!thumbImg) continue;
         const thumbBtn = thumbImg.closest("button");
         if (!thumbBtn) continue;
         try {
@@ -1238,11 +1280,6 @@ function initSync() {
             if (uuidMatch && userMatch) videoUrl = "https://assets.grok.com/users/" + userMatch[1] + "/generated/" + uuidMatch[1] + "/generated_video.mp4";
           }
           if (!videoUrl) continue;
-          const editor = document.querySelector(".tiptap.ProseMirror");
-          const prompt = editor ? (editor.querySelector("p")?.textContent?.trim() || editor.textContent.trim()) : "";
-          const match = prompt.match(rescanTagRe);
-          if (!match) continue;
-          const sceneNum = match[1];
           const sc = S.scenes[sceneNum];
           if (sc && !S.sentScenes[sceneNum]) {
             sc.urls = [videoUrl]; sc.fileCount = 1; sc.status = "ready";
@@ -1341,7 +1378,7 @@ function initSync() {
           const args = S.arguments ? " " + S.arguments : "";
           S.typing.queue.push({
             scene: k, displayPrompt: sc.prompt,
-            fullPrompt: sc.prompt + " [" + d.projectId + "|" + sc.scene + "]" + args,
+            fullPrompt: sc.prompt + args,
             selected: true, status: "queued", imageUrl: imgData,
           });
         }
