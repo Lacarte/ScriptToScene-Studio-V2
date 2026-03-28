@@ -1830,8 +1830,12 @@ function initSync() {
   injectUI();
   renderAutoType();
   window.__stsGrokState = S;
-  // Background service worker auto-connects; just check current status
+  // Background service worker auto-connects; poll status until connected
   checkWSStatus();
+  var _wsStatusPoll = setInterval(function() {
+    if (S.wsConnected) { clearInterval(_wsStatusPoll); return; }
+    checkWSStatus();
+  }, 2000);
 
   // Start polling
   (async () => {
