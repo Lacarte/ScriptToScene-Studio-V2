@@ -241,6 +241,8 @@ const JOB_QUEUE_KEY = 'sts-job-queue'
 const jobQueue = ref(JSON.parse(localStorage.getItem(JOB_QUEUE_KEY) || '[]'))
 const jobQueueRunning = ref(false)
 const jobQueueCurrent = ref(null) // { presetId, index, total }
+const jobSettingsOpen = ref(null) // presetId of the open settings popover
+const showLaunchConfirm = ref(false)
 
 function _persistJobQueue() {
   localStorage.setItem(JOB_QUEUE_KEY, JSON.stringify(jobQueue.value))
@@ -253,8 +255,31 @@ function addToQueue(presetId) {
   } else {
     const preset = nichePresets.value[presetId]
     if (!preset) return
-    jobQueue.value.push({ presetId, count: 1, label: preset.label || presetId })
+    jobQueue.value.push({
+      presetId,
+      count: 1,
+      label: preset.label || presetId,
+      overrides: {
+        voice: preset.voice || 'af_heart',
+        speed: preset.speed || 1.0,
+      },
+    })
   }
+  _persistJobQueue()
+}
+
+function toggleJobSettings(presetId) {
+  jobSettingsOpen.value = jobSettingsOpen.value === presetId ? null : presetId
+}
+
+function updateJobOverride(presetId, field, value) {
+  const item = jobQueue.value.find(q => q.presetId === presetId)
+  if (!item) return
+  if (!item.overrides) {
+    const preset = nichePresets.value[presetId] || {}
+    item.overrides = { voice: preset.voice || 'af_heart', speed: preset.speed || 1.0 }
+  }
+  item.overrides[field] = value
   _persistJobQueue()
 }
 
@@ -280,7 +305,14 @@ function clearQueue() {
 
 const totalQueuedJobs = computed(() => jobQueue.value.reduce((sum, q) => sum + q.count, 0))
 
+function requestLaunchQueue() {
+  if (jobQueueRunning.value || running.value) return
+  if (!jobQueue.value.length) { toast.error('Queue is empty'); return }
+  showLaunchConfirm.value = true
+}
+
 async function runJobQueue() {
+  showLaunchConfirm.value = false
   if (jobQueueRunning.value || running.value) return
   if (!jobQueue.value.length) { toast.error('Queue is empty'); return }
 
@@ -296,10 +328,16 @@ async function runJobQueue() {
       jobIndex++
       jobQueueCurrent.value = { presetId: item.presetId, index: jobIndex, total: totalQueuedJobs.value, label: item.label }
 
-      // Apply preset settings
-      selectNiche(preset)
+      // Apply preset settings (with per-job overrides)
+      const overrides = item.overrides || {}
+      selectNiche({
+        ...preset,
+        voice: overrides.voice || preset.voice,
+        speed: overrides.speed || preset.speed,
+      })
       story.storyCategory.value = preset.category || story.storyCategory.value
-      if (preset.duration) story.storyDuration.value = preset.duration
+      if (overrides.duration) story.storyDuration.value = overrides.duration
+      else if (preset.duration) story.storyDuration.value = preset.duration
 
       // Generate a story for this preset
       try {
@@ -1495,6 +1533,9 @@ function logStepLabel(step) {
                 </div>
                 <div class="q-card-cat" v-if="nichePresets[item.presetId]?.category">{{ formatOptionLabel(nichePresets[item.presetId].category) }}</div>
               </div>
+              <button class="q-card-gear" @click.stop="toggleJobSettings(item.presetId)" title="Job settings" :class="{ 'q-card-gear--active': jobSettingsOpen === item.presetId }">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
               <div class="q-card-stepper">
                 <button class="q-step-btn" @click="removeFromQueue(item.presetId)" :disabled="item.count <= 1">
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1507,12 +1548,59 @@ function logStepLabel(step) {
               <button class="q-card-remove" @click="deleteFromQueue(item.presetId)" title="Remove">
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
+
+              <!-- Settings popover -->
+              <Transition name="q-settings">
+                <div v-if="jobSettingsOpen === item.presetId" class="q-card-settings" @click.stop>
+                  <div class="q-settings-row">
+                    <label class="q-settings-label">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                      Voice
+                    </label>
+                    <select
+                      class="q-settings-select"
+                      :value="item.overrides?.voice || nichePresets[item.presetId]?.voice || 'af_heart'"
+                      @change="updateJobOverride(item.presetId, 'voice', $event.target.value)"
+                    >
+                      <option v-for="v in VOICES" :key="v.id" :value="v.id">{{ v.label }}</option>
+                    </select>
+                  </div>
+                  <div class="q-settings-row">
+                    <label class="q-settings-label">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                      Speed
+                    </label>
+                    <input
+                      type="range"
+                      class="q-settings-range"
+                      min="0.5" max="2.0" step="0.05"
+                      :value="item.overrides?.speed || nichePresets[item.presetId]?.speed || 1.0"
+                      @input="updateJobOverride(item.presetId, 'speed', parseFloat($event.target.value))"
+                    />
+                    <span class="q-settings-val">{{ (item.overrides?.speed || nichePresets[item.presetId]?.speed || 1.0).toFixed(2) }}x</span>
+                  </div>
+                  <div class="q-settings-row">
+                    <label class="q-settings-label">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      Duration
+                    </label>
+                    <input
+                      type="range"
+                      class="q-settings-range"
+                      min="15" max="180" step="5"
+                      :value="item.overrides?.duration || nichePresets[item.presetId]?.duration || story.storyDuration.value"
+                      @input="updateJobOverride(item.presetId, 'duration', parseInt($event.target.value))"
+                    />
+                    <span class="q-settings-val">{{ item.overrides?.duration || nichePresets[item.presetId]?.duration || story.storyDuration.value }}s</span>
+                  </div>
+                </div>
+              </Transition>
             </div>
           </TransitionGroup>
 
           <!-- Launch bar -->
           <div v-if="jobQueue.length" class="q-launch">
-            <button class="q-launch-btn" :disabled="jobQueueRunning || running" @click="runJobQueue">
+            <button class="q-launch-btn" :disabled="jobQueueRunning || running" @click="requestLaunchQueue">
               <span class="q-launch-icon">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               </span>
@@ -1523,6 +1611,50 @@ function logStepLabel(step) {
             </button>
           </div>
         </div>
+
+        <!-- Launch confirmation dialog -->
+        <Teleport to="body">
+          <Transition name="q-confirm">
+            <div v-if="showLaunchConfirm" class="q-confirm-overlay" @click.self="showLaunchConfirm = false">
+              <div class="q-confirm-dialog">
+                <div class="q-confirm-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  <span class="q-confirm-title">Launch {{ totalQueuedJobs }} Job{{ totalQueuedJobs !== 1 ? 's' : '' }}</span>
+                </div>
+
+                <div class="q-confirm-list">
+                  <div
+                    v-for="item in jobQueue"
+                    :key="item.presetId"
+                    class="q-confirm-item"
+                    :style="{ '--qc-color': styleColor(nichePresets[item.presetId]?.visual_style) || 'var(--accent)' }"
+                  >
+                    <span class="q-confirm-bar"></span>
+                    <div class="q-confirm-info">
+                      <div class="q-confirm-name">{{ item.label }}</div>
+                      <div v-if="nichePresets[item.presetId]?.description" class="q-confirm-desc">{{ nichePresets[item.presetId].description }}</div>
+                      <div class="q-confirm-meta">
+                        <span class="q-confirm-pill q-confirm-pill--category"><span class="q-confirm-pill-label">Category:</span> {{ nichePresets[item.presetId]?.category || '—' }}</span>
+                        <span class="q-confirm-pill q-confirm-pill--voice"><span class="q-confirm-pill-label">Voice:</span> {{ item.overrides?.voice || nichePresets[item.presetId]?.voice || 'af_heart' }}</span>
+                        <span class="q-confirm-pill q-confirm-pill--speed"><span class="q-confirm-pill-label">Speed:</span> {{ (item.overrides?.speed || nichePresets[item.presetId]?.speed || 1.0).toFixed(2) }}x</span>
+                        <span class="q-confirm-pill q-confirm-pill--duration"><span class="q-confirm-pill-label">Duration:</span> {{ item.overrides?.duration || nichePresets[item.presetId]?.duration || story.storyDuration.value }}s</span>
+                      </div>
+                    </div>
+                    <span class="q-confirm-count">&times;{{ item.count }}</span>
+                  </div>
+                </div>
+
+                <div class="q-confirm-actions">
+                  <button class="q-confirm-cancel" @click="showLaunchConfirm = false">Cancel</button>
+                  <button class="q-confirm-go" @click="runJobQueue">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </Teleport>
 
         <!-- Preset catalog — grouped with search -->
         <div class="q-catalog">
@@ -2214,6 +2346,7 @@ function logStepLabel(step) {
   position: relative;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 9px 10px;
   border-radius: 8px;
@@ -2341,6 +2474,124 @@ function logStepLabel(step) {
 .q-card:hover .q-card-remove { opacity: 0.5; }
 .q-card-remove:hover { opacity: 1 !important; color: var(--coral); background: rgba(255, 107, 107, 0.08); }
 
+/* Gear settings button */
+.q-card-gear {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 5px;
+  opacity: 0;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.q-card:hover .q-card-gear { opacity: 0.45; }
+.q-card-gear:hover { opacity: 1 !important; color: var(--q-color); background: color-mix(in srgb, var(--q-color) 8%, transparent); border-color: color-mix(in srgb, var(--q-color) 20%, transparent); }
+.q-card-gear--active { opacity: 1 !important; color: var(--q-color); background: color-mix(in srgb, var(--q-color) 10%, transparent); border-color: color-mix(in srgb, var(--q-color) 25%, transparent); }
+
+/* Settings popover (inline below card content) */
+.q-card-settings {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 6px 14px;
+  margin-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--q-color) 12%, transparent);
+}
+
+.q-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.q-settings-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  width: 62px;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.q-settings-label svg { opacity: 0.5; }
+
+.q-settings-select {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.q-settings-select:focus { border-color: var(--q-color); }
+
+.q-settings-range {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.q-settings-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--q-color, var(--accent));
+  border: none;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--q-color) 40%, transparent);
+  cursor: pointer;
+}
+.q-settings-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--q-color, var(--accent));
+  border: none;
+  cursor: pointer;
+}
+
+.q-settings-val {
+  font: 600 10px/1 var(--font-mono);
+  color: var(--q-color, var(--accent));
+  width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Settings transition */
+.q-settings-enter-active { animation: q-settings-in 0.2s ease-out; }
+.q-settings-leave-active { animation: q-settings-out 0.15s ease-in forwards; }
+@keyframes q-settings-in {
+  from { opacity: 0; max-height: 0; margin-top: 0; padding-top: 0; padding-bottom: 0; }
+  to { opacity: 1; max-height: 120px; margin-top: 4px; }
+}
+@keyframes q-settings-out {
+  from { opacity: 1; max-height: 120px; }
+  to { opacity: 0; max-height: 0; margin-top: 0; padding-top: 0; padding-bottom: 0; }
+}
+
 /* Card enter/leave transitions */
 .q-card-enter-active { animation: q-card-in 0.25s ease-out; }
 .q-card-leave-active { animation: q-card-out 0.2s ease-in forwards; }
@@ -2424,6 +2675,218 @@ function logStepLabel(step) {
   background: rgba(255, 107, 107, 0.05);
 }
 .q-launch-clear:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── Launch Confirmation Dialog ── */
+.q-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.q-confirm-dialog {
+  width: 360px;
+  max-width: 92vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #141820);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.q-confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+}
+
+.q-confirm-title {
+  font: 700 12px/1 var(--font-mono);
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.q-confirm-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.q-confirm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--qc-color) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--qc-color) 10%, transparent);
+}
+
+.q-confirm-bar {
+  width: 3px;
+  height: 28px;
+  border-radius: 1.5px;
+  background: var(--qc-color);
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.q-confirm-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.q-confirm-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.q-confirm-desc {
+  font: 400 9.5px/1.4 system-ui, sans-serif;
+  color: var(--text-muted);
+  margin-top: 2px;
+  opacity: 0.7;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.q-confirm-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.q-confirm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+.q-confirm-pill-label { opacity: 0.5; font-weight: 500; }
+
+.q-confirm-pill--category {
+  color: var(--qc-color, #8B5CF6);
+  background: color-mix(in srgb, var(--qc-color, #8B5CF6) 10%, transparent);
+  border-color: color-mix(in srgb, var(--qc-color, #8B5CF6) 20%, transparent);
+}
+
+.q-confirm-pill--voice {
+  color: #60A5FA;
+  background: rgba(96, 165, 250, 0.08);
+  border-color: rgba(96, 165, 250, 0.18);
+}
+
+.q-confirm-pill--speed {
+  color: #FBBF24;
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.18);
+}
+
+.q-confirm-pill--duration {
+  color: #34D399;
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.18);
+}
+
+.q-confirm-count {
+  font: 700 13px/1 var(--font-mono);
+  color: var(--qc-color, var(--accent));
+  flex-shrink: 0;
+  min-width: 22px;
+  text-align: right;
+}
+
+.q-confirm-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.q-confirm-cancel {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.q-confirm-cancel:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.q-confirm-go {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 7px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), #3abfb7);
+  color: #0a0e13;
+  font: 700 11px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.q-confirm-go:hover {
+  box-shadow: 0 4px 20px rgba(78, 205, 196, 0.35);
+  transform: translateY(-1px);
+}
+.q-confirm-go:active { transform: translateY(0); }
+
+/* Confirm dialog transitions */
+.q-confirm-enter-active { transition: opacity 0.2s ease-out; }
+.q-confirm-enter-active .q-confirm-dialog { animation: q-confirm-in 0.25s ease-out; }
+.q-confirm-leave-active { transition: opacity 0.15s ease-in; }
+.q-confirm-leave-active .q-confirm-dialog { animation: q-confirm-out 0.15s ease-in forwards; }
+.q-confirm-enter-from, .q-confirm-leave-to { opacity: 0; }
+
+@keyframes q-confirm-in {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes q-confirm-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.95) translateY(8px); }
+}
 
 /* ── Preset Catalog ── */
 .q-catalog {

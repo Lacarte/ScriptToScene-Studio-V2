@@ -123,6 +123,33 @@ function cancelDelete() {
   confirmDeleteId.value = ''
 }
 
+// ── Floating tooltip ──
+const tooltipText = ref('')
+const tooltipStyle = ref({})
+const tooltipVisible = ref(false)
+
+function showTooltip(e, text) {
+  tooltipText.value = text
+  tooltipVisible.value = true
+  positionTooltip(e)
+}
+
+function positionTooltip(e) {
+  tooltipStyle.value = {
+    left: e.clientX + 'px',
+    top: (e.clientY - 10) + 'px',
+  }
+}
+
+function moveTooltip(e) {
+  if (tooltipVisible.value) positionTooltip(e)
+}
+
+function hideTooltip() {
+  tooltipVisible.value = false
+  tooltipText.value = ''
+}
+
 const CATEGORY_COLORS = {
   test: '#00D4AA',
   horror: '#DC2626',
@@ -263,9 +290,11 @@ const CATEGORY_COLORS = {
                   v-if="p.description"
                   class="card-info"
                   @click.stop
+                  @mouseenter="showTooltip($event, p.description)"
+                  @mousemove="moveTooltip"
+                  @mouseleave="hideTooltip"
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                  <span class="card-tooltip">{{ p.description }}</span>
                 </span>
                 <span
                   v-if="p.custom"
@@ -286,6 +315,15 @@ const CATEGORY_COLORS = {
       </div>
     </div>
   </div>
+
+  <!-- Floating tooltip (teleported to body to escape all overflow) -->
+  <Teleport to="body">
+    <Transition name="tip">
+      <div v-if="tooltipVisible && tooltipText" class="float-tooltip" :style="tooltipStyle">
+        {{ tooltipText }}
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -773,36 +811,6 @@ const CATEGORY_COLORS = {
   color: var(--accent);
 }
 
-.card-tooltip {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: -8px;
-  width: 220px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: #1a1f2e;
-  border: 1px solid rgba(78, 205, 196, 0.2);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  font: 400 10px/1.5 system-ui, sans-serif;
-  color: var(--text);
-  white-space: normal;
-  z-index: 50;
-  pointer-events: none;
-}
-
-.card-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  right: 12px;
-  border: 5px solid transparent;
-  border-top-color: #1a1f2e;
-}
-
-.card-info:hover .card-tooltip {
-  display: block;
-}
 
 .card-delete {
   flex-shrink: 0;
@@ -825,4 +833,43 @@ const CATEGORY_COLORS = {
   color: #FF6B6B;
   background: rgba(255, 107, 107, 0.1);
 }
+</style>
+
+<style>
+/* Floating tooltip — unscoped because it's teleported to body */
+.float-tooltip {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  max-width: 260px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #1c2233;
+  border: 1px solid rgba(78, 205, 196, 0.18);
+  box-shadow:
+    0 4px 6px rgba(0, 0, 0, 0.3),
+    0 12px 28px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  font: 400 11px/1.5 system-ui, -apple-system, sans-serif;
+  color: #c8d0dc;
+  white-space: normal;
+  z-index: 99999;
+  pointer-events: none;
+  letter-spacing: 0.01em;
+}
+
+.float-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-top-color: #1c2233;
+}
+
+.tip-enter-active { transition: opacity 0.12s ease-out, transform 0.12s ease-out; }
+.tip-leave-active { transition: opacity 0.08s ease-in; }
+.tip-enter-from { opacity: 0; transform: translate(-50%, calc(-100% + 4px)); }
+.tip-leave-to { opacity: 0; }
 </style>
