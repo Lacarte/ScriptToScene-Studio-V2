@@ -164,7 +164,18 @@ def init_animator_ws(sock):
                 except (json.JSONDecodeError, TypeError):
                     continue
 
-                _handle_ws_message(msg)
+                mt = msg.get("type", "")
+                if mt in ("DIAGNOSE", "DIAGNOSE_REPORT", "FORCE_DISCONNECT"):
+                    # Relay to all OTHER connected clients
+                    data = json.dumps(msg)
+                    with _ws_lock:
+                        for c in list(_ws_clients):
+                            if c is not ws:
+                                try: c.send(data)
+                                except Exception: pass
+                    logger.info("Relayed {} to other clients", mt)
+                else:
+                    _handle_ws_message(msg)
         except Exception as e:
             logger.debug("Animator WS closed: {}", e)
         finally:

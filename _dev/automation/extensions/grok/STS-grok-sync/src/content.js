@@ -19,6 +19,26 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       sceneCount: s ? Object.keys(s.scenes).length : 0,
     });
     return true;
+  } else if (request.action === 'STS_DIAGNOSE') {
+    var s = window.__stsGrokState;
+    var connBar = document.getElementById('sts-conn-bar');
+    var connMsg = document.getElementById('sts-conn-msg');
+    var headDot = document.getElementById('sts-head-dot');
+    sendResponse({
+      active: !!window.__stsSyncActive,
+      wsConnected: s ? s.wsConnected : null,
+      connected: s ? s.connected : null,
+      projectId: s ? s.projectId : null,
+      scenesCount: s ? Object.keys(s.scenes).length : 0,
+      queueLength: s ? s.typing.queue.length : 0,
+      typingActive: s ? s.typing.active : false,
+      panelExists: !!document.getElementById('sts-sync'),
+      connBarDisplay: connBar ? connBar.style.display : null,
+      connBarClass: connBar ? connBar.className : null,
+      connMsgText: connMsg ? connMsg.textContent : null,
+      headDotClass: headDot ? headDot.className : null,
+    });
+    return true;
   } else if (request.action === 'STS_STOP') {
     if (window.__stsGrokState) {
       window.__stsGrokState.typing.stopRequested = true;
@@ -134,13 +154,21 @@ function initSync() {
   // The background worker owns the WS connection to bypass page CSP.
   // Content script sends/receives via chrome.runtime messaging.
 
-  // ── Persistent port to background (keeps service worker alive) ──
+  // ── WebSocket (proxied via background service worker) ──
+  // Port keeps worker alive. sendMessage handles all communication.
 
-  let _bgPort = null;
+  (function keepAlive() {
+    try {
+      const port = chrome.runtime.connect({ name: "sts-grok-alive" });
+      port.onDisconnect.addListener(() => { setTimeout(keepAlive, 1000); });
+    } catch(e) { setTimeout(keepAlive, 2000); }
+  })();
 
-  function _handleBgMessage(msg) {
-    if (msg.type === "STS_WS_STATUS") {
-      const prev = S.wsConnected;
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "STS_WS_MESSAGE") {
+      if (!S.wsConnected) { S.wsConnected = true; S.connected = true; S._fetchErrors = 0; render(); }
+      try { handleWSMessage(msg.payload); } catch(e) { console.warn("[STS WS] Bad msg:", e); }
+    } else if (msg.action === "STS_WS_STATUS") {
       S.wsConnected = msg.connected;
       S.connected = msg.connected;
       if (msg.connected) S._fetchErrors = 0;
@@ -148,65 +176,30 @@ function initSync() {
         S.studioUrl = "http://localhost:" + msg.port;
         localStorage.setItem("sts-url", S.studioUrl);
       }
-      if (prev !== msg.connected) {
-        console.log("[STS WS]", msg.connected ? "Connected" : "Disconnected");
-      }
-      render();
-    } else if (msg.type === "STS_WS_MESSAGE") {
-      if (!S.wsConnected) { S.wsConnected = true; S.connected = true; S._fetchErrors = 0; render(); }
-      try { handleWSMessage(msg.payload); } catch(e) { console.warn("[STS WS] Bad msg:", e); }
-    }
-  }
-
-  function _connectPort() {
-    try { _bgPort = chrome.runtime.connect({ name: "sts-grok-alive" }); }
-    catch(e) { return; }
-
-    _bgPort.onMessage.addListener(_handleBgMessage);
-
-    _bgPort.onDisconnect.addListener(() => {
-      _bgPort = null;
-      S.wsConnected = false; S.connected = false; render();
-      setTimeout(_connectPort, 1000);
-    });
-  }
-
-  // Fallback listener via chrome.runtime.onMessage
-  chrome.runtime.onMessage.addListener((bgMsg, sender, sendResponse) => {
-    if (bgMsg.action === "STS_WS_MESSAGE") {
-      if (!S.wsConnected) { S.wsConnected = true; S.connected = true; S._fetchErrors = 0; render(); }
-      try { handleWSMessage(bgMsg.payload); } catch(e) {}
-    } else if (bgMsg.action === "STS_WS_STATUS") {
-      S.wsConnected = bgMsg.connected;
-      S.connected = bgMsg.connected;
-      if (bgMsg.connected) S._fetchErrors = 0;
-      if (bgMsg.port) {
-        S.studioUrl = "http://localhost:" + bgMsg.port;
-        localStorage.setItem("sts-url", S.studioUrl);
-      }
       render();
     }
   });
 
+  setInterval(() => {
+    try {
+      chrome.runtime.sendMessage({ action: "STS_WS_GET_STATUS" }, (resp) => {
+        if (chrome.runtime.lastError || !resp) return;
+        S.wsConnected = resp.connected;
+        S.connected = resp.connected;
+        render();
+      });
+    } catch(e) {}
+  }, 2000);
+
   function connectWS() {
     const manualUrl = localStorage.getItem("sts-url-manual");
     const manualWsUrl = manualUrl ? manualUrl.replace(/^http/, "ws") + "/ws/animator-grok-video-grabber" : null;
-    if (_bgPort) {
-      _bgPort.postMessage({ action: "STS_WS_RECONNECT", manualWsUrl });
-    } else {
-      chrome.runtime.sendMessage({ action: "STS_WS_RECONNECT", manualWsUrl });
-    }
+    try { chrome.runtime.sendMessage({ action: "STS_WS_RECONNECT", manualWsUrl }); } catch(e) {}
   }
 
   function sendWS(msg) {
-    if (_bgPort) {
-      _bgPort.postMessage({ action: "STS_WS_SEND", payload: msg });
-    } else {
-      chrome.runtime.sendMessage({ action: "STS_WS_SEND", payload: msg });
-    }
+    try { chrome.runtime.sendMessage({ action: "STS_WS_SEND", payload: msg }); } catch(e) {}
   }
-
-  _connectPort();
 
   function handleWSMessage(msg) {
     switch (msg.type) {
@@ -1549,12 +1542,16 @@ function initSync() {
     const connBar = $id("sts-conn-bar");
     if (connBar) {
       connBar.style.display = "flex";
+      const connIcon = $id("sts-conn-icon");
+      const connMsg = $id("sts-conn-msg");
       if (S.wsConnected) {
         connBar.classList.add("ok");
-        const connMsg = $id("sts-conn-msg"); if (connMsg) connMsg.textContent = "Connected";
+        if (connIcon) connIcon.textContent = "\u2713";
+        if (connMsg) connMsg.textContent = "Connected";
       } else {
         connBar.classList.remove("ok");
-        const connMsg = $id("sts-conn-msg"); if (connMsg) connMsg.textContent = "Backend disconnected";
+        if (connIcon) connIcon.textContent = "\u26A0";
+        if (connMsg) connMsg.textContent = "Backend disconnected";
       }
     }
 
@@ -1596,7 +1593,7 @@ function initSync() {
       } else if (S.typing.starting) {
         btn.textContent = "Starting..."; btn.className = "sts-btn sts-btn-ghost"; btn.disabled = true;
       } else {
-        btn.textContent = selectedTotal > 0 ? "Start Typing" : "Select Prompts";
+        btn.textContent = selectedTotal > 0 ? "Start Typing" : "Waiting for Job";
         btn.className = "sts-btn sts-btn-primary"; btn.disabled = false;
       }
     }
@@ -1680,7 +1677,7 @@ function initSync() {
       <h3>STS Grok Sync</h3>
       <span class="sts-head-proj" id="sts-head-proj" style="display:none;"></span>
       <span class="sts-head-port" id="sts-head-port"></span>
-      <span class="sts-head-autotype off" id="sts-head-autotype">MANUAL</span>
+      <span class="sts-head-autotype" id="sts-head-autotype" style="display:none;"></span>
     </div>
     <div class="sts-head-btns">
       <button class="sts-hb" id="sts-settings-btn" title="Settings">&#x2699;</button>
@@ -1690,7 +1687,7 @@ function initSync() {
 
   <!-- Connection bar -->
   <div class="sts-conn-bar" id="sts-conn-bar" style="display:none;">
-    <span id="sts-conn-icon">&#x26A0;</span>
+    <span id="sts-conn-icon"></span>
     <span id="sts-conn-msg">Backend disconnected</span>
   </div>
 
@@ -1705,7 +1702,7 @@ function initSync() {
   <div class="sts-stats">
     <div class="sts-stat"><span class="sts-sv sts-c-pend" id="sts-n-q">0</span><span class="sts-sl">Queue</span></div>
     <div class="sts-stat"><span class="sts-sv sts-c-proc" id="sts-n-typed">0</span><span class="sts-sl">Typed</span></div>
-    <div class="sts-stat"><span class="sts-sv sts-c-rdy" id="sts-n-rdy">0</span><span class="sts-sl">Ready</span></div>
+    <div class="sts-stat"><span class="sts-sv sts-c-rdy" id="sts-n-rdy">0</span><span class="sts-sl">Done</span></div>
     <div class="sts-stat"><span class="sts-sv sts-c-sent" id="sts-n-sent">0</span><span class="sts-sl">Sent</span></div>
   </div>
 

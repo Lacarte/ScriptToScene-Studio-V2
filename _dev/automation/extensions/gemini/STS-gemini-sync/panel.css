@@ -183,7 +183,7 @@
 
 /* ── Stats ─── */
 .sts-stats {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
   background: var(--border); border-bottom: 1px solid var(--border);
 }
 .sts-stat { display: flex; flex-direction: column; align-items: center; padding: 8px 4px; background: var(--bg); }

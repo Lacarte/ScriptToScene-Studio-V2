@@ -8,7 +8,7 @@ let _wsReconnectTimer = null;
 let _wsReconnectAttempts = 0;
 const _WS_PATH = "/ws/animator-grok-video-grabber";
 const _PORT_MIN = 5050;
-const _PORT_MAX = 5060;
+const _PORT_MAX = 5059; // 5060 is blocked by Chrome (SIP port — ERR_UNSAFE_PORT)
 
 // ── Persistent Port (keeps service worker alive) ────
 
@@ -97,7 +97,7 @@ function _relayToContent(msg) {
 
 function _attachWS(ws, wsUrl, port) {
   _ws = ws;
-  ws.onopen = () => {
+  const _onOpen = () => {
     if (_ws !== ws) return;
     console.log("[STS BG] Connected to", wsUrl);
     _wsConnected = true;
@@ -105,12 +105,20 @@ function _attachWS(ws, wsUrl, port) {
     try { ws.send(JSON.stringify({ type: "EXTENSION_READY", source: "sts-grok-sync" })); } catch(e) {}
     _broadcastStatus(port);
   };
+  if (ws.readyState === WebSocket.OPEN) { _onOpen(); }
+  ws.onopen = _onOpen;
   ws.onmessage = (evt) => {
     if (_ws !== ws) return;
     try {
       const msg = JSON.parse(evt.data);
       if (msg.type === "PING") { try { ws.send(JSON.stringify({ type: "PONG" })); } catch(e) {} return; }
       if (msg.type === "PONG") return;
+      if (msg.type === "DIAGNOSE") { _handleDiagnose(_ws); return; }
+      if (msg.type === "FORCE_DISCONNECT") {
+        console.log("[STS BG] FORCE_DISCONNECT — closing WS");
+        if (_ws) { try { _ws.close(); } catch(e) {} }
+        return;
+      }
       _relayToContent(msg);
     } catch(e) {
       console.warn("[STS BG] Bad message:", e);
@@ -170,6 +178,43 @@ function sendWS(msg) {
 }
 
 connectWS(null);
+
+// ── Diagnostics ─────────────────────────────────────
+
+function _handleDiagnose(ws) {
+  const report = {
+    type: "DIAGNOSE_REPORT",
+    ts: new Date().toISOString(),
+    bg: {
+      wsConnected: _wsConnected,
+      wsReadyState: _ws ? _ws.readyState : -1,
+      portsActive: _ports.length,
+      reconnectAttempts: _wsReconnectAttempts,
+    },
+    contentStates: [],
+  };
+
+  chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
+    if (!tabs || !tabs.length) {
+      try { ws.send(JSON.stringify(report)); } catch(e) {}
+      return;
+    }
+    let pending = tabs.length;
+    for (const tab of tabs) {
+      chrome.tabs.sendMessage(tab.id, { action: "STS_DIAGNOSE" }, (resp) => {
+        if (chrome.runtime.lastError) {
+          report.contentStates.push({ tabId: tab.id, error: chrome.runtime.lastError.message });
+        } else if (resp) {
+          report.contentStates.push({ tabId: tab.id, state: resp });
+        }
+        pending--;
+        if (pending <= 0) {
+          try { ws.send(JSON.stringify(report)); } catch(e) {}
+        }
+      });
+    }
+  });
+}
 
 // ── Legacy Message Handler ──────────────────────────
 

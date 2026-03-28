@@ -9,7 +9,7 @@ var _wsReconnectTimer = null;
 var _wsReconnectAttempts = 0;
 var _WS_PATH = '/ws/image-gemini';
 var _PORT_MIN = 5050;
-var _PORT_MAX = 5060;
+var _PORT_MAX = 5059; // 5060 is blocked by Chrome (SIP port — ERR_UNSAFE_PORT)
 
 // ── Persistent Port (keeps service worker alive) ────
 // Content scripts connect via chrome.runtime.connect().
@@ -106,14 +106,20 @@ function _attachWS(ws, wsUrl) {
   _ws = ws;
   _wsUrl = wsUrl;
 
-  ws.onopen = function() {
+  function _onOpen() {
     if (_ws !== ws) return;
     console.log('[STS BG] Connected to', wsUrl);
     _wsConnected = true;
     _wsReconnectAttempts = 0;
     try { ws.send(JSON.stringify({ type: 'EXTENSION_READY', source: 'sts-gemini-ext' })); } catch(e) {}
     _broadcastStatus();
-  };
+  }
+
+  // If WS is already open (from port discovery), run open logic now
+  if (ws.readyState === WebSocket.OPEN) {
+    _onOpen();
+  }
+  ws.onopen = _onOpen;
 
   ws.onmessage = function(evt) {
     if (_ws !== ws) return;
@@ -124,6 +130,12 @@ function _attachWS(ws, wsUrl) {
         return;
       }
       if (msg.type === 'PONG') return;
+      if (msg.type === 'DIAGNOSE') { _handleDiagnose(_ws); return; }
+      if (msg.type === 'FORCE_DISCONNECT') {
+        console.log('[STS BG] FORCE_DISCONNECT received — closing WS');
+        if (_ws) { try { _ws.close(); } catch(e) {} }
+        return;
+      }
       _relayToContent(msg);
     } catch(e) {
       console.warn('[STS BG] Bad message:', e);
@@ -185,6 +197,83 @@ function sendWS(msg) {
     } catch(e) {}
   }
   return false;
+}
+
+// ── Diagnostics (triggered via WS DIAGNOSE command) ─
+
+function _handleDiagnose(ws) {
+  var report = {
+    type: 'DIAGNOSE_REPORT',
+    ts: new Date().toISOString(),
+    bg: {
+      wsConnected: _wsConnected,
+      wsUrl: _wsUrl,
+      wsReadyState: _ws ? _ws.readyState : -1,
+      portsActive: _ports.length,
+      reconnectAttempts: _wsReconnectAttempts,
+    },
+    contentStates: [],
+    screenshot: null,
+    errors: [],
+  };
+
+  // 1. Query content script state from all Gemini tabs
+  chrome.tabs.query({ url: 'https://gemini.google.com/*' }, function(tabs) {
+    if (!tabs || !tabs.length) {
+      report.errors.push('No Gemini tabs open');
+      _finishDiagnose(ws, report, tabs);
+      return;
+    }
+    var pending = tabs.length;
+    for (var i = 0; i < tabs.length; i++) {
+      (function(tab) {
+        chrome.tabs.sendMessage(tab.id, { action: 'STS_DIAGNOSE' }, function(resp) {
+          if (chrome.runtime.lastError) {
+            report.contentStates.push({ tabId: tab.id, error: chrome.runtime.lastError.message });
+          } else if (resp) {
+            report.contentStates.push({ tabId: tab.id, state: resp });
+          }
+          pending--;
+          if (pending <= 0) _finishDiagnose(ws, report, tabs);
+        });
+      })(tabs[i]);
+    }
+  });
+}
+
+function _finishDiagnose(ws, report, tabs) {
+  // 2. Take screenshot of the active Gemini tab
+  if (tabs && tabs.length > 0) {
+    var targetTab = tabs[0];
+    // Make sure the tab is active first
+    chrome.tabs.update(targetTab.id, { active: true }, function() {
+      chrome.windows.update(targetTab.windowId, { focused: true }, function() {
+        setTimeout(function() {
+          try { chrome.tabs.captureVisibleTab(targetTab.windowId, { format: 'png' }, function(dataUrl) {
+            if (chrome.runtime.lastError) {
+              report.errors.push('Screenshot failed: ' + chrome.runtime.lastError.message);
+            } else {
+              report.screenshot = dataUrl;
+            }
+            _sendDiagnoseReport(ws, report);
+          });
+          } catch(e) { report.errors.push('Screenshot error: ' + e.message); _sendDiagnoseReport(ws, report); }
+        }, 500);
+      });
+    });
+  } else {
+    _sendDiagnoseReport(ws, report);
+  }
+}
+
+function _sendDiagnoseReport(ws, report) {
+  try {
+    // Send report back over the WS that requested it
+    ws.send(JSON.stringify(report));
+    console.log('[STS BG] Diagnose report sent');
+  } catch(e) {
+    console.warn('[STS BG] Failed to send diagnose report:', e);
+  }
 }
 
 // Auto-connect on service worker start

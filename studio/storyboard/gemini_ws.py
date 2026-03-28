@@ -150,6 +150,19 @@ def _handle_message(msg, ws):
         logger.success("Gemini job complete: {}", project_id)
         _mark_job_done(project_id)
 
+    elif msg_type in ("DIAGNOSE", "DIAGNOSE_REPORT", "FORCE_DISCONNECT"):
+        # Relay to all OTHER connected clients (diagnostic bridge)
+        data = json.dumps(msg)
+        with _ws_lock:
+            for client in list(_ws_clients):
+                if client is not ws:
+                    try:
+                        client.send(data)
+                    except Exception:
+                        pass
+        logger.info("Relayed {} to {} other client(s)", msg_type,
+                    len(_ws_clients) - 1)
+
     elif msg_type == "PING":
         try:
             ws.send(json.dumps({"type": "PONG"}))

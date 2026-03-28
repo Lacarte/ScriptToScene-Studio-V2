@@ -24,6 +24,27 @@
         sceneCount: s ? Object.keys(s.scenes).length : 0,
       });
       return true;
+    } else if (request.action === 'STS_DIAGNOSE') {
+      var s = window.__stsGeminiState;
+      var connBar = document.getElementById('sts-conn-bar');
+      var connMsg = document.getElementById('sts-conn-msg');
+      var headDot = document.getElementById('sts-head-dot');
+      sendResponse({
+        active: !!window.__stsGeminiActive,
+        wsConnected: s ? s.wsConnected : null,
+        connected: s ? s.connected : null,
+        wsUrl: s ? s.wsUrl : null,
+        projectId: s ? s.projectId : null,
+        scenesCount: s ? Object.keys(s.scenes).length : 0,
+        queueLength: s ? s.typing.queue.length : 0,
+        typingActive: s ? s.typing.active : false,
+        panelExists: !!document.getElementById('sts-sync'),
+        connBarDisplay: connBar ? connBar.style.display : null,
+        connBarClass: connBar ? connBar.className : null,
+        connMsgText: connMsg ? connMsg.textContent : null,
+        headDotClass: headDot ? headDot.className : null,
+      });
+      return true;
     } else if (request.action === 'STS_STOP') {
       console.log('[STS Gemini] STOP received');
       if (window.__stsGeminiState) {
@@ -79,70 +100,50 @@
     }
 
     // ── WebSocket (proxied via background service worker) ──
-    // Background owns the WS. Content script holds a persistent port
-    // to keep the service worker alive (MV3 kills idle workers after 30s).
+    // Port keeps the service worker alive. sendMessage handles all communication.
 
-    var _bgPort = null;
+    // Keep service worker alive with a persistent port
+    (function keepAlive() {
+      try {
+        var port = chrome.runtime.connect({ name: 'sts-gemini-alive' });
+        port.onDisconnect.addListener(function() { setTimeout(keepAlive, 1000); });
+      } catch(e) { setTimeout(keepAlive, 2000); }
+    })();
 
-    function _connectPort() {
-      try { _bgPort = chrome.runtime.connect({ name: 'sts-gemini-alive' }); }
-      catch(e) { console.warn('[STS WS] Port connect failed:', e); return; }
-
-      _bgPort.onMessage.addListener(function(msg) {
-        if (msg.type === 'STS_WS_STATUS') {
-          var prev = S.wsConnected;
-          S.wsConnected = msg.connected;
-          S.connected = msg.connected;
-          if (msg.wsUrl) S.wsUrl = msg.wsUrl;
-          if (prev !== msg.connected) {
-            console.log('[STS WS]', msg.connected ? 'Connected' : 'Disconnected');
-          }
-          render();
-        } else if (msg.type === 'STS_WS_MESSAGE') {
-          if (!S.wsConnected) { S.wsConnected = true; S.connected = true; render(); }
-          try { handleWSMessage(msg.payload); } catch(e) { console.warn('[STS WS] Bad msg:', e); }
-        }
-      });
-
-      _bgPort.onDisconnect.addListener(function() {
-        console.log('[STS WS] Port lost — reconnecting in 1s');
-        _bgPort = null;
-        S.wsConnected = false; S.connected = false; render();
-        setTimeout(_connectPort, 1000);
-      });
-    }
-
-    // Also listen via chrome.runtime.onMessage as fallback
-    chrome.runtime.onMessage.addListener(function(bgMsg, sender, sendResponse) {
-      if (bgMsg.action === 'STS_WS_MESSAGE') {
+    // Receive WS messages + status pushed from background
+    chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
+      if (msg.action === 'STS_WS_MESSAGE') {
         if (!S.wsConnected) { S.wsConnected = true; S.connected = true; render(); }
-        try { handleWSMessage(bgMsg.payload); } catch(e) {}
-      } else if (bgMsg.action === 'STS_WS_STATUS') {
-        S.wsConnected = bgMsg.connected;
-        S.connected = bgMsg.connected;
-        if (bgMsg.wsUrl) S.wsUrl = bgMsg.wsUrl;
+        try { handleWSMessage(msg.payload); } catch(e) { console.warn('[STS WS] Bad msg:', e); }
+      } else if (msg.action === 'STS_WS_STATUS') {
+        S.wsConnected = msg.connected;
+        S.connected = msg.connected;
+        if (msg.wsUrl) S.wsUrl = msg.wsUrl;
         render();
       }
     });
 
+    // Poll background for WS status every 2s
+    setInterval(function() {
+      try {
+        chrome.runtime.sendMessage({ action: 'STS_WS_GET_STATUS' }, function(resp) {
+          if (chrome.runtime.lastError || !resp) return;
+          S.wsConnected = resp.connected;
+          S.connected = resp.connected;
+          if (resp.wsUrl) S.wsUrl = resp.wsUrl;
+          render();
+        });
+      } catch(e) {}
+    }, 2000);
+
     function connectWS() {
       var manualUrl = localStorage.getItem('sts-gemini-ws-manual') || null;
-      if (_bgPort) {
-        _bgPort.postMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl });
-      } else {
-        chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl });
-      }
+      try { chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl }); } catch(e) {}
     }
 
     function sendWS(msg) {
-      if (_bgPort) {
-        _bgPort.postMessage({ action: 'STS_WS_SEND', payload: msg });
-      } else {
-        chrome.runtime.sendMessage({ action: 'STS_WS_SEND', payload: msg });
-      }
+      try { chrome.runtime.sendMessage({ action: 'STS_WS_SEND', payload: msg }); } catch(e) {}
     }
-
-    _connectPort();
 
     function handleWSMessage(msg) {
       switch (msg.type) {
@@ -818,6 +819,7 @@
               '<div class="sts-head-dot" id="sts-head-dot"></div>' +
               '<h3>STS Gemini</h3>' +
               '<span class="sts-head-proj" id="sts-head-proj" style="display:none;"></span>' +
+              '<span class="sts-head-port" id="sts-head-port" style="display:none;"></span>' +
               '<span class="sts-head-ar" id="sts-head-ar" style="display:none;"></span>' +
             '</div>' +
             '<div class="sts-head-btns">' +
@@ -827,7 +829,7 @@
           '</div>' +
           '<!-- Connection bar -->' +
           '<div class="sts-conn-bar" id="sts-conn-bar" style="display:none;">' +
-            '<span id="sts-conn-icon">&#x26A0;</span>' +
+            '<span id="sts-conn-icon"></span>' +
             '<span id="sts-conn-msg">Disconnected</span>' +
           '</div>' +
           '<!-- Rate limit -->' +
@@ -847,9 +849,10 @@
           '</div>' +
           '<!-- Stats -->' +
           '<div class="sts-stats">' +
-            '<div class="sts-stat"><span class="sts-sv sts-c-done" id="sts-n-done">0</span><span class="sts-sl">Done</span></div>' +
-            '<div class="sts-stat"><span class="sts-sv sts-c-err" id="sts-n-err">0</span><span class="sts-sl">Errors</span></div>' +
-            '<div class="sts-stat"><span class="sts-sv sts-c-total" id="sts-n-total">0</span><span class="sts-sl">Total</span></div>' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-pend" id="sts-n-queue">0</span><span class="sts-sl">Queue</span></div>' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-done" id="sts-n-typed">0</span><span class="sts-sl">Typed</span></div>' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-rdy" id="sts-n-done">0</span><span class="sts-sl">Done</span></div>' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-sent" id="sts-n-sent">0</span><span class="sts-sl">Sent</span></div>' +
           '</div>' +
           '<!-- Tabs -->' +
           '<div class="sts-tabs">' +
@@ -975,7 +978,7 @@
       });
 
       // Per-scene retry buttons (delegated)
-      panel.addEventListener('click', function(e) {
+      $id('sts-panel').addEventListener('click', function(e) {
         var btn = e.target.closest('.sts-retry-scene-btn');
         if (!btn) return;
         var sceneKey = btn.getAttribute('data-scene');
@@ -1033,6 +1036,11 @@
       if (headDot) headDot.classList.toggle('on', wsOn);
       var headProj = $id('sts-head-proj');
       if (headProj) { headProj.textContent = S.projectId || ''; headProj.style.display = S.projectId ? '' : 'none'; }
+      try {
+        var portMatch = S.wsUrl.match(/:(\d+)/);
+        var headPort = $id('sts-head-port');
+        if (headPort) { headPort.textContent = portMatch ? ':' + portMatch[1] : ''; headPort.style.display = portMatch ? '' : 'none'; }
+      } catch(e) {}
       var headAr = $id('sts-head-ar');
       if (headAr) { headAr.textContent = S.aspectRatio || ''; headAr.style.display = S.aspectRatio ? '' : 'none'; }
 
@@ -1040,12 +1048,16 @@
       var connBar = $id('sts-conn-bar');
       if (connBar) {
         connBar.style.display = 'flex';
+        var connIcon = $id('sts-conn-icon');
+        var connMsg = $id('sts-conn-msg');
         if (wsOn) {
           connBar.classList.add('ok');
-          var connMsg = $id('sts-conn-msg'); if (connMsg) connMsg.textContent = 'Connected';
+          if (connIcon) connIcon.textContent = '\u2713';
+          if (connMsg) connMsg.textContent = 'Connected';
         } else {
           connBar.classList.remove('ok');
-          var connMsg2 = $id('sts-conn-msg'); if (connMsg2) connMsg2.textContent = 'Disconnected';
+          if (connIcon) connIcon.textContent = '\u26A0';
+          if (connMsg) connMsg.textContent = 'Disconnected';
         }
       }
 
@@ -1064,9 +1076,13 @@
       }
 
       // Stats
+      var queued = tq.filter(function(q) { return q.status === 'queued'; }).length;
+      var typed = tq.filter(function(q) { return q.status === 'completed' || q.status === 'generating'; }).length;
+      var sent = tq.filter(function(q) { return q.status === 'sent'; }).length;
+      var nQueue = $id('sts-n-queue'); if (nQueue) nQueue.textContent = queued;
+      var nTyped = $id('sts-n-typed'); if (nTyped) nTyped.textContent = typed;
       var nDone = $id('sts-n-done'); if (nDone) nDone.textContent = completed;
-      var nErr = $id('sts-n-err'); if (nErr) nErr.textContent = failed;
-      var nTotal = $id('sts-n-total'); if (nTotal) nTotal.textContent = total;
+      var nSent = $id('sts-n-sent'); if (nSent) nSent.textContent = sent;
 
       // Progress
       var fill = $id('sts-prog-fill'); if (fill) fill.style.width = pct + '%';
@@ -1090,7 +1106,7 @@
         } else if (S.typing.starting) {
           btn.textContent = 'Starting...'; btn.className = 'sts-btn sts-btn-primary'; btn.disabled = true;
         } else {
-          btn.textContent = 'Start Typing'; btn.className = 'sts-btn sts-btn-primary'; btn.disabled = false;
+          btn.textContent = total > 0 ? 'Start Typing' : 'Waiting for Job'; btn.className = 'sts-btn sts-btn-primary'; btn.disabled = false;
         }
       }
 
