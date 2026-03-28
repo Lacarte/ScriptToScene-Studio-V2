@@ -13,11 +13,11 @@ _AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 # story_tone → ordered list of music sub-folders (primary first, fallbacks after)
 TONE_MUSIC_MAP = {
     "suspenseful":   ["dark", "viral-slowed", "cinematic"],
-    "dramatic":      ["cinematic", "dark", "viral-slowed"],
-    "educational":   ["ambient", "cinematic"],
-    "inspirational": ["cinematic", "happy"],
-    "comedic":       ["happy", "viral-hiphop"],
-    "wholesome":     ["happy", "ambient"],
+    "dramatic":      ["cinematic", "dark", "viral-slowed", "viral-lofi"],
+    "educational":   ["ambient", "viral-lofi", "cinematic"],
+    "inspirational": ["cinematic", "viral-lofi", "happy"],
+    "comedic":       ["happy", "viral-hiphop", "viral-lofi"],
+    "wholesome":     ["happy", "ambient", "viral-lofi"],
 }
 
 
