@@ -1415,6 +1415,7 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
     max_wait = 30 * 60
     poll_interval = 10
     start_time = time.time()
+    prev_ready = 0  # Track ready count to detect new completions
 
     while time.time() - start_time < max_wait:
         if _stop_requested(job_id):
@@ -1450,7 +1451,11 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
                 "message": f"Generating storyboard ({project_id})... {ready}/{total} images ready"
                            + (f", {errors} errors" if errors else "")
                            + detail_str,
+                "scene_ready": ready,
+                "scene_total": total,
+                "scene_new": ready > prev_ready,
             })
+            prev_ready = ready
 
             if status_data.get("status") == "done" or pending == 0:
                 logger.success("Pipeline Storyboard: {}/{} ready, {} errors",
@@ -1518,6 +1523,7 @@ def _step_assets(scenes_result, config, project_id, job_id):
     max_wait = 2 * 60 * 60  # 2 hours
     poll_interval = 10  # seconds
     start_time = time.time()
+    prev_ready = 0  # Track ready count to detect new completions
 
     while time.time() - start_time < max_wait:
         if _stop_requested(job_id):
@@ -1538,11 +1544,16 @@ def _step_assets(scenes_result, config, project_id, job_id):
             errors = sum(1 for s in scene_statuses.values() if s.get("status") == "error")
             pending = total - ready - errors
 
+            # Emit with scene_ready/scene_total so frontend can play per-video sounds
             _emit(job_id, {
                 "step": "assets", "status": "running",
                 "message": f"Waiting for assets ({project_id})... {ready}/{total} ready"
                            + (f", {errors} errors" if errors else ""),
+                "scene_ready": ready,
+                "scene_total": total,
+                "scene_new": ready > prev_ready,
             })
+            prev_ready = ready
 
             if status_data.get("status") in ("done", "completed") or pending == 0:
                 logger.success("Pipeline Assets: {}/{} ready, {} errors",

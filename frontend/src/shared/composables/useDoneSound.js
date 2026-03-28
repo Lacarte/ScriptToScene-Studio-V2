@@ -4,13 +4,16 @@
  */
 
 let audioEl = null
+let tickEl = null
 
 export function useDoneSound() {
-  function play() {
-    // Check setting — default to enabled
-    const enabled = localStorage.getItem('sts-sound-enabled')
-    if (enabled === 'false') return
+  function _isEnabled() {
+    return localStorage.getItem('sts-sound-enabled') !== 'false'
+  }
 
+  /** Full pipeline completion sound (louder). */
+  function play() {
+    if (!_isEnabled()) return
     try {
       if (!audioEl) {
         audioEl = new Audio(`${import.meta.env.BASE_URL}sounds/done.mp3`)
@@ -23,5 +26,20 @@ export function useDoneSound() {
     }
   }
 
-  return { play }
+  /** Per-scene completion tick (softer, non-blocking). */
+  function playTick() {
+    if (!_isEnabled()) return
+    try {
+      if (!tickEl) {
+        tickEl = new Audio(`${import.meta.env.BASE_URL}sounds/done.mp3`)
+        tickEl.volume = 0.15
+      }
+      tickEl.currentTime = 0
+      tickEl.play().catch(() => {})
+    } catch {
+      // Audio not available
+    }
+  }
+
+  return { play, playTick }
 }

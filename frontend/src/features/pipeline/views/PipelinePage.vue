@@ -7,6 +7,7 @@ import { CATEGORY_COLORS, withAlpha, categoryColor, statusColor, stepColor, step
 import NichePicker from '../components/NichePicker.vue'
 import ProgressStepper from '../components/ProgressStepper.vue'
 import PipelineLog from '../components/PipelineLog.vue'
+import SceneNotifications from '../components/SceneNotifications.vue'
 import PipelineHistory from '../components/PipelineHistory.vue'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useAssets } from '@/features/assets/composables/useAssets.js'
@@ -568,6 +569,7 @@ const {
   selectNiche, clearNiche, saveNichePreset, deleteNichePreset,
   setVisualStyleOverride, setStoryTone, setNicheCategory,
   pendingProviderUrl, openPendingProvider,
+  sceneNotifications,
   timeAgo,
 } = usePipeline()
 
@@ -704,6 +706,7 @@ const logEl = ref(null)
 const creativeOpen = ref(localStorage.getItem('sts-section-creative') !== 'false')
 const settingsOpen = ref(localStorage.getItem('sts-section-settings') !== 'false')
 const logOpen = ref(false)
+const sceneNotifOpen = ref(true)
 watch(creativeOpen, v => localStorage.setItem('sts-section-creative', String(v)))
 watch(settingsOpen, v => localStorage.setItem('sts-section-settings', String(v)))
 
@@ -1445,6 +1448,16 @@ function logStepLabel(step) {
       <PipelineLog v-show="logOpen" :log="log" />
     </section>
 
+    <!-- Scene Notifications -->
+    <section v-if="sceneNotifications.length" class="card scene-notif-card">
+      <button class="section-toggle section-toggle--compact" @click="sceneNotifOpen = !sceneNotifOpen">
+        <label class="field-label log-label">Scene Progress</label>
+        <span class="section-summary">{{ sceneNotifications.length }} scene{{ sceneNotifications.length !== 1 ? 's' : '' }}</span>
+        <svg class="section-chevron" :class="{ open: sceneNotifOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <SceneNotifications v-show="sceneNotifOpen" :notifications="sceneNotifications" />
+    </section>
+
     <!-- History -->
     <PipelineHistory
       :jobs="jobs"
@@ -1939,6 +1952,9 @@ function logStepLabel(step) {
 
 .progress-card,
 .log-card {
+  margin-bottom: 16px;
+}
+.scene-notif-card {
   margin-bottom: 16px;
 }
 

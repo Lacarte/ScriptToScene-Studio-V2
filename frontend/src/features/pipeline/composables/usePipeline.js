@@ -24,9 +24,11 @@ const failedStep = ref(null)
 const failedProjectId = ref(null)
 const stoppedStep = ref(null)
 const stoppedProjectId = ref(null)
+const sceneNotifications = ref([])
 
 let eventSource = null
 let initialized = false
+let _lastSceneReady = 0
 
 // ── SSE ──
 
@@ -106,6 +108,26 @@ function startSSE(id) {
       return
     }
 
+    // Track per-scene completions and play tick sound
+    if ((step === 'assets' || step === 'storyboard') && event.scene_ready != null) {
+      const ready = event.scene_ready
+      const total = event.scene_total || 0
+      if (event.scene_new && ready > _lastSceneReady) {
+        const label = step === 'assets' ? 'Video' : 'Image'
+        sceneNotifications.value = [...sceneNotifications.value, {
+          id: Date.now(),
+          type: 'success',
+          step,
+          scene: ready,
+          total,
+          message: `${label} ${ready}/${total} ready`,
+          time: new Date(),
+        }]
+        useDoneSound().playTick()
+      }
+      _lastSceneReady = ready
+    }
+
     stepStatus.value = { ...stepStatus.value, [step]: status }
     globalStatus.value = 'running'
   }
@@ -125,6 +147,8 @@ function resetProgress() {
   globalStatus.value = ''
   jobId.value = null
   stopping.value = false
+  sceneNotifications.value = []
+  _lastSceneReady = 0
   const hist = usePipelineHistory()
   hist.lastCompletedProjectId.value = null
   hist.lastCompletedExportFilename.value = null
@@ -404,6 +428,7 @@ export function usePipeline() {
     stepStatus: readonly(stepStatus),
     log: readonly(log),
     globalStatus: readonly(globalStatus),
+    sceneNotifications: readonly(sceneNotifications),
 
     // History
     jobs: hist.jobs,
