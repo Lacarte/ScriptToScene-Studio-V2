@@ -119,7 +119,7 @@ export function useAssets() {
     }
 
     try {
-      const res = await api.post('/api/assets/grabber/start', { body: payload })
+      const res = await api.post('/api/animator/grabber/start', { body: payload })
       grabberRunning.value = true
       grabberJobId.value = res.grabber_id || payload.project_id
       startPolling(payload.project_id)
@@ -149,7 +149,7 @@ export function useAssets() {
 
   async function pollStatus(projectId) {
     try {
-      const res = await api.get(`/api/assets/grabber/status/${projectId}`)
+      const res = await api.get(`/api/animator/grabber/status/${projectId}`)
       if (res.scene_statuses) {
         // Merge so that scenes not in the current job keep their status
         sceneStatuses.value = { ...sceneStatuses.value, ...res.scene_statuses }
@@ -165,13 +165,13 @@ export function useAssets() {
   }
 
   async function redownload(projectId) {
-    return api.post(`/api/assets/redownload/${projectId}`)
+    return api.post(`/api/animator/redownload/${projectId}`)
   }
 
   // ---- History ----
   async function loadHistory() {
     try {
-      history.value = await api.get('/api/assets/history')
+      history.value = await api.get('/api/animator/history')
     } catch (e) {
       console.warn('[Assets] Failed to load history:', e.message)
       history.value = []
@@ -180,7 +180,7 @@ export function useAssets() {
 
   async function loadFromHistory(projectId) {
     try {
-      const data = await api.get(`/api/assets/project/${projectId}`)
+      const data = await api.get(`/api/animator/project/${projectId}`)
       sceneStatuses.value = data.scene_statuses || {}
       analysisData.value = data.analysis || null
       audioUrl.value = data.audio_url || null
@@ -222,7 +222,7 @@ export function useAssets() {
   }
 
   async function reconcile(projectId) {
-    return api.post(`/api/assets/reconcile/${projectId}`)
+    return api.post(`/api/animator/reconcile/${projectId}`)
   }
 
   // ---- Scene card actions ----
@@ -247,7 +247,7 @@ export function useAssets() {
   }
 
   async function openFolder(idx, projectId) {
-    return api.post(`/api/assets/open-folder/${projectId}/${idx}`)
+    return api.post(`/api/animator/open-folder/${projectId}/${idx}`)
   }
 
   async function downloadScene(idx, projectId) {
@@ -255,7 +255,7 @@ export function useAssets() {
     if (!status?.local_files?.length) return
     for (const file of status.local_files) {
       const link = document.createElement('a')
-      link.href = `/output/assets/${file}`
+      link.href = `/output/animator/${file}`
       link.download = file.split('/').pop()
       link.click()
     }
@@ -317,7 +317,7 @@ export function useAssets() {
       ...providerOptions.value,
     }
 
-    const res = await api.post('/api/assets/grabber/start', { body: payload })
+    const res = await api.post('/api/animator/grabber/start', { body: payload })
     grabberRunning.value = true
     grabberJobId.value = res.grabber_id || payload.project_id
     startPolling(payload.project_id)
@@ -344,7 +344,7 @@ export function useAssets() {
 
   // ---- Thumbnails ----
   async function generateThumbnails(projectId) {
-    return api.post(`/api/assets/thumbnails/${projectId}`)
+    return api.post(`/api/animator/thumbnails/${projectId}`)
   }
 
   return {

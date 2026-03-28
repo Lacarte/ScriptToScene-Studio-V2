@@ -19,7 +19,7 @@ import subprocess
 from flask import Blueprint, jsonify, request, send_file
 from loguru import logger
 
-from config import THUMBNAILS_DIR, ASSETS_DIR, EXPORT_DIR, PROJECTS_DIR, SCENES_DIR
+from config import THUMBNAILS_DIR, ANIMATOR_DIR, EXPORT_DIR, PROJECTS_DIR, SCENES_DIR
 from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import safe_json_read
 from studio.security import sanitize_project_id
@@ -82,8 +82,8 @@ def _project_thumb_dir(project_id: str, module: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _generate_assets_thumbs(project_id: str, ffmpeg: str, force: bool = False) -> dict:
-    """Generate thumbnails from scene assets (output/assets/{project_id}/{scene}/)."""
-    asset_root = os.path.join(ASSETS_DIR, project_id)
+    """Generate thumbnails from scene assets (output/animator/{project_id}/{scene}/)."""
+    asset_root = os.path.join(ANIMATOR_DIR, project_id)
     thumb_dir = _project_thumb_dir(project_id, "assets")
     video_exts = (".mp4", ".webm", ".mov", ".mkv", ".m4v")
     media_exts = video_exts + (".jpg", ".jpeg", ".png", ".webp")
@@ -194,7 +194,7 @@ def _generate_editor_thumb(project_id: str, ffmpeg: str, force: bool = False) ->
             continue
 
         # Resolve URL to absolute path
-        # URLs like /output/assets/pp_XXX/0/file.mp4
+        # URLs like /output/animator/pp_XXX/0/file.mp4
         if media_url.startswith("/output/"):
             from config import OUTPUT_DIR
             src_path = os.path.join(OUTPUT_DIR, media_url[len("/output/"):].replace("/", os.sep))

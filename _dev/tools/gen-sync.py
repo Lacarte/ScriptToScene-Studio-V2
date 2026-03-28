@@ -772,7 +772,7 @@ async function typeIntoMJ(text) {
 // ─── API ───
 async function fetchPending() {
   try {
-    const r = await fetch(S.studioUrl + '/api/assets/grabber/pending');
+    const r = await fetch(S.studioUrl + '/api/animator/grabber/pending');
     S.connected = true;
     if (!r.ok) return;
     const d = await r.json();
@@ -803,7 +803,7 @@ async function fetchPending() {
 async function fetchStatus() {
   if (!S.projectId) return;
   try {
-    const r = await fetch(S.studioUrl + '/api/assets/grabber/status/' + encodeURIComponent(S.projectId));
+    const r = await fetch(S.studioUrl + '/api/animator/grabber/status/' + encodeURIComponent(S.projectId));
     S.connected = true;
     if (!r.ok) return;
     const d = await r.json();
@@ -877,7 +877,7 @@ async function sendResults(num, urls) {
   }
 
   try {
-    const r = await fetch(S.studioUrl + '/api/assets/grabber/upload', {
+    const r = await fetch(S.studioUrl + '/api/animator/grabber/upload', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId: S.projectId, scenes: [{ scene: parseInt(num), images }] })
     });

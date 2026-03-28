@@ -49,7 +49,7 @@ _ASPECT_TO_WH = {
 
 def _load_image_models():
     """Load image-models.json config."""
-    config_path = Path(__file__).resolve().parent.parent.parent / "assets" / "image-models.json"
+    config_path = Path(__file__).resolve().parent.parent.parent / "resources" / "image-models.json"
     if config_path.is_file():
         return json.loads(config_path.read_text(encoding="utf-8"))
     return {}

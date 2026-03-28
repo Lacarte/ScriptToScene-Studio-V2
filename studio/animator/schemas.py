@@ -1,4 +1,4 @@
-"""Pydantic schemas for Assets routes."""
+"""Pydantic schemas for Animator grabber routes."""
 
 from typing import Optional
 

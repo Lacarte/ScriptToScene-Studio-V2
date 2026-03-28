@@ -18,7 +18,7 @@ const total = computed(() => props.files.length)
 
 function fileSrc(file) {
   if (file.startsWith('http')) return file
-  return `/output/assets/${file}`
+  return `/output/animator/${file}`
 }
 
 function isImageFile(file) {

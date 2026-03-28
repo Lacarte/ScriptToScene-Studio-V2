@@ -36,6 +36,8 @@ DEFAULT_NEGATIVE_RULES = {
     "solitary_path": ["avoid crowds", "avoid urban settings", "avoid cheerful colors", "avoid close-ups", "avoid lush vegetation"],
     "crimson_silhouette": ["avoid photorealism", "avoid more than 3 colors", "avoid detail inside silhouettes", "avoid blue or cool tones", "avoid close-up shots"],
     "gothic_moonlit": ["avoid modern architecture", "avoid bright daylight", "avoid photorealism", "avoid flat vector art", "avoid cheerful warm tones"],
+    "holographic_entity": ["avoid wireframe mesh", "avoid bright daylight", "avoid warm ambient lighting", "avoid cartoon aesthetic", "avoid multiple figures", "avoid realistic skin or clothing"],
+    "neon_sigil": ["avoid photorealism", "avoid warm colors", "avoid multiple symbols", "avoid busy backgrounds", "avoid human figures", "avoid 3D rendering"],
 }
 
 

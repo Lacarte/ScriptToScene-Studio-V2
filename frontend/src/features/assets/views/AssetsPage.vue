@@ -210,13 +210,13 @@ async function validateAndBuild(project) {
   try {
     // Step 1: Reconcile disk files with metadata
     setStep('Reconciling assets', 'running')
-    await api.post(`/api/assets/reconcile/${pid}`)
+    await api.post(`/api/animator/reconcile/${pid}`)
     setStep('Reconciling assets', 'done')
     await new Promise(r => setTimeout(r, STEP_DELAY))
 
     // Step 2: Validate each scene folder has at least one asset
     setStep('Validating scene assets', 'running')
-    const assetData = await api.get(`/api/assets/project/${pid}`)
+    const assetData = await api.get(`/api/animator/project/${pid}`)
     if (!assetData || assetData.error) {
       setStep('Validating scene assets', 'error')
       setStep('Error: could not load asset data', 'error')

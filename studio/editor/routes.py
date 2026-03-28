@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ASSETS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
+from config import OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.ffmpeg_utils import find_ffprobe
@@ -60,7 +60,7 @@ def _initial_path(project_id: str) -> str:
 
 def _load_asset_metadata(project_id: str) -> dict:
     """Read per-scene asset metadata for a project if it exists."""
-    meta_path = os.path.join(ASSETS_DIR, project_id, "metadata.json")
+    meta_path = os.path.join(ANIMATOR_DIR, project_id, "metadata.json")
     try:
         data = safe_json_read(meta_path)
     except (FileNotFoundError, json.JSONDecodeError):
@@ -99,7 +99,7 @@ def _pick_scene_asset(project_id: str, *scene_keys: str,
             return media_url, media_type
 
     for scene_key in deduped_keys:
-        asset_dir = os.path.join(ASSETS_DIR, project_id, scene_key)
+        asset_dir = os.path.join(ANIMATOR_DIR, project_id, scene_key)
         if not os.path.isdir(asset_dir):
             continue
 
@@ -116,7 +116,7 @@ def _pick_scene_asset(project_id: str, *scene_keys: str,
         video_files = [(t, f) for t, f in files if f.lower().endswith(video_exts)]
         pick = max(video_files) if video_files else max(files)
         _, fname = pick
-        media_url = f"/output/assets/{project_id}/{scene_key}/{fname}"
+        media_url = f"/output/animator/{project_id}/{scene_key}/{fname}"
         if used_urls is not None and media_url in used_urls:
             continue
         media_type = "video" if fname.lower().endswith(video_exts) else "image"
@@ -766,9 +766,9 @@ def _discover_projects() -> list[dict]:
                 continue
 
     # 2. Check assets
-    if os.path.isdir(ASSETS_DIR):
-        for entry in os.listdir(ASSETS_DIR):
-            asset_dir = os.path.join(ASSETS_DIR, entry)
+    if os.path.isdir(ANIMATOR_DIR):
+        for entry in os.listdir(ANIMATOR_DIR):
+            asset_dir = os.path.join(ANIMATOR_DIR, entry)
             if not os.path.isdir(asset_dir):
                 continue
             if entry not in projects:
@@ -1129,8 +1129,8 @@ def export_project_zip(project_id):
             zf.write(scenes_path, f"{prefix}scenes.json")
             manifest["files"].append("scenes.json")
 
-        # 3) Assets — all media files under output/assets/{project_id}/
-        assets_dir = os.path.join(ASSETS_DIR, safe_id)
+        # 3) Assets — all media files under output/animator/{project_id}/
+        assets_dir = os.path.join(ANIMATOR_DIR, safe_id)
         if os.path.isdir(assets_dir):
             for root, _dirs, files in os.walk(assets_dir):
                 for fname in files:
@@ -1293,7 +1293,7 @@ def import_project_zip():
                 elif rel.startswith("assets/"):
                     sub = rel[len("assets/"):]
                     try:
-                        dest = safe_join(os.path.join(ASSETS_DIR, safe_id), sub)
+                        dest = safe_join(os.path.join(ANIMATOR_DIR, safe_id), sub)
                     except ValueError:
                         return jsonify({"error": "Invalid ZIP path in assets"}), 400
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -1370,7 +1370,7 @@ def open_project_folder(project_id):
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
 
     # Try assets dir first, then editor save dir
-    folder = os.path.join(ASSETS_DIR, safe_id)
+    folder = os.path.join(ANIMATOR_DIR, safe_id)
     if not os.path.isdir(folder):
         folder = os.path.join(SCENES_DIR, safe_id)
     if not os.path.isdir(folder):

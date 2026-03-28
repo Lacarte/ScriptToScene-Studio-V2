@@ -27,7 +27,6 @@ ALIGN_DIR = os.path.join(OUTPUT_DIR, "alignments")
 SCENES_DIR = os.path.join(OUTPUT_DIR, "scenes")
 STORIES_DIR = os.path.join(OUTPUT_DIR, "stories")
 PIPELINE_DIR = os.path.join(OUTPUT_DIR, "pipeline")
-ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets")
 ANIMATOR_DIR = os.path.join(OUTPUT_DIR, "animator")
 STORYBOARD_DIR = os.path.join(OUTPUT_DIR, "storyboard")
 SEGMENTER_DIR = os.path.join(OUTPUT_DIR, "segmenters")
@@ -36,18 +35,18 @@ MUSIC_DIR = os.path.join(OUTPUT_DIR, "musics")
 TTS_DIR = os.path.join(OUTPUT_DIR, "tts")
 MODELS_DIR = os.path.join(ROOT_DIR, "models")
 BIN_DIR = os.path.join(ROOT_DIR, "bin")
-FONTS_DIR = os.path.join(ROOT_DIR, "assets", "fonts")
+FONTS_DIR = os.path.join(ROOT_DIR, "resources", "fonts")
 EXPORT_DIR = os.path.join(OUTPUT_DIR, "exports")
 PROJECTS_DIR = os.path.join(OUTPUT_DIR, "projects")
 THUMBNAILS_DIR = os.path.join(OUTPUT_DIR, "thumbnails")
 TMP_DIR = os.path.join(ROOT_DIR, "tmp")
 TTS_CACHE_DIR = os.path.join(TMP_DIR, "tts")
-APP_ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
+APP_ASSETS_DIR = os.path.join(ROOT_DIR, "resources")
 APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app-config.json")
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
-for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, ANIMATOR_DIR,
+for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR,
            STORYBOARD_DIR, SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
            EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR, TTS_CACHE_DIR):
     os.makedirs(_d, exist_ok=True)
@@ -97,7 +96,7 @@ def _collect_existing_project_ids() -> set[str]:
     dir_only_roots = (
         ALIGN_DIR,
         SCENES_DIR,
-        ASSETS_DIR,
+        ANIMATOR_DIR,
         STORYBOARD_DIR,
         SEGMENTER_DIR,
         CAPTIONS_DIR,

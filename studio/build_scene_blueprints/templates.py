@@ -1241,6 +1241,92 @@ SCENE_STYLE_TEMPLATES = [
             "9:16 vertical framing. NO text, NO UI elements, NO solid surfaces."
         ),
     },
+    {
+        "id": "holographic_entity",
+        "type": "visual",
+        "category": None,
+        "name": "Holographic Entity",
+        "description": "Luminous neon humanoid figures with flowing energy lines in dark glass displays",
+        "color": "#00D4FF",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Solid luminous humanoid figure made of flowing energy, covered in undulating wave-like "
+            "particle lines that follow body musculature and contours\n"
+            "- Intense electric blue-white glow with cyan and teal accents — brightest at head, chest, "
+            "and joints, softer on limbs\n"
+            "- Energy lines denser at anatomical landmarks (spine, ribcage, shoulders, forearms), "
+            "smoother on flat body surfaces\n"
+            "- Figure stands inside or in front of a dark glass display case, vitrine, or transparent "
+            "containment frame with subtle metallic edges (chrome, brushed steel, dark titanium)\n"
+            "- Deep black void background with faint atmospheric haze or distant blurred city lights\n"
+            "- The figure IS the primary light source — illuminates glass case edges, casts soft blue "
+            "ambient glow on nearby surfaces\n"
+            "- Subtle lens bloom and light diffusion around brightest areas (head, chest)\n"
+            "- Medium shots from waist up or full body, straight-on or slight low angle\n"
+            "- Figure faces away or in three-quarter view — mysterious, not confrontational\n"
+            "- 9:16 portrait framing\n"
+            "- Mood: otherworldly, contained power, scientific wonder, digital consciousness\n\n"
+            "DO NOT:\n"
+            "- No wireframe or transparent mesh — the figure is solid luminous energy\n"
+            "- No bright daylight or warm ambient lighting\n"
+            "- No busy or detailed environments — keep background near-black\n"
+            "- No text, watermarks, UI elements, or HUD overlays\n"
+            "- No multiple figures — single entity only\n"
+            "- No cartoon or flat illustration aesthetic\n"
+            "- No front-facing direct eye contact\n"
+            "- No realistic skin tones or clothing — pure energy form\n\n"
+            "ALWAYS:\n"
+            "- The figure must glow as the sole light source in the scene\n"
+            "- Flowing energy lines must follow anatomical contours, not random patterns\n"
+            "- Glass display case or containment frame must be present\n"
+            "- Maintain deep contrast between luminous figure and dark environment\n"
+            "- Style: high-end sci-fi concept art meets museum installation art"
+        ),
+    },
+    {
+        "id": "neon_sigil",
+        "type": "visual",
+        "category": None,
+        "name": "Neon Sigil",
+        "description": "Glowing neon symbolic icons on dark geometric grid backgrounds",
+        "color": "#B07CFF",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Single bold symbolic icon as the sole focal point — eyes, keys, skulls, hourglasses, "
+            "pyramids, compasses, spirals, locks, scales, serpents, crowns, masks, moons, suns\n"
+            "- Icon rendered with thick clean outlines and filled with neon glow — glowing from within, "
+            "radiating soft light into surrounding space\n"
+            "- Neon purple/violet/lavender glow as primary color against deep dark indigo/purple background\n"
+            "- Background filled with subtle geometric grid pattern — intersecting diagonal lines, "
+            "sacred geometry, wireframe lattice, or crystalline mesh behind the icon\n"
+            "- Grid lines in muted purple/violet, slightly lighter than the background but much dimmer "
+            "than the glowing icon\n"
+            "- Icon centered in frame, occupying 30-50% of the composition\n"
+            "- Flat 2D illustration style with neon glow effects — NOT 3D, NOT photorealistic\n"
+            "- The icon IS the light source — it illuminates nearby grid lines and casts a soft "
+            "ambient glow halo\n"
+            "- 9:16 portrait framing, perfect vertical symmetry\n"
+            "- Mood: mysterious, occult, conspiratorial, all-seeing, forbidden knowledge\n\n"
+            "DO NOT:\n"
+            "- No photorealism or 3D rendering\n"
+            "- No bright daylight, warm tones, or cheerful colors\n"
+            "- No busy or detailed environments — only geometric grid patterns\n"
+            "- No text, watermarks, labels, or UI elements\n"
+            "- No multiple competing symbols — ONE icon per scene\n"
+            "- No human figures or realistic faces\n"
+            "- No gradients or rainbow color schemes — strict purple/violet monochrome\n"
+            "- No soft organic shapes — keep everything geometric and angular\n"
+            "- No cluttered or noisy backgrounds\n\n"
+            "ALWAYS:\n"
+            "- The symbolic icon must glow as the sole light source\n"
+            "- Geometric grid pattern must be visible in the background\n"
+            "- Maintain strict monochrome purple/violet palette throughout\n"
+            "- Keep the icon bold, simplified, and immediately recognizable as a symbol\n"
+            "- Style: neon iconography meets sacred geometry meets conspiracy aesthetic"
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)

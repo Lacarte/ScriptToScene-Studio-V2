@@ -3956,7 +3956,7 @@ async function loadProjectMediaWithProgress() {
     for (const { scene, idx: sceneNumber } of scenesToProbe) {
         updateLoadingOverlay(`Loading scene ${sceneNumber} (${loadedCount}/${totalScenes})...`);
 
-        const assetsBasePath = `/output/assets/${projectId}/${sceneNumber}/`;
+        const assetsBasePath = `/output/animator/${projectId}/${sceneNumber}/`;
         const pathsToTry = [];
         if (scene.asset_files && scene.asset_files.length) {
             for (const af of scene.asset_files) {
@@ -4008,7 +4008,7 @@ async function loadProjectMediaWithProgress() {
 
         // Ask server to generate _thumb.jpg for all videos in this project
         try {
-            const thumbRes = await fetch(`/api/assets/thumbnails/${projectId}`, { method: 'POST' });
+            const thumbRes = await fetch(`/api/animator/thumbnails/${projectId}`, { method: 'POST' });
             if (thumbRes.ok) {
                 const thumbData = await thumbRes.json();
                 const thumbMap = {};
@@ -4219,7 +4219,7 @@ function _loadNoDataProjects() {
 
     // Fetch both asset projects and saved editor projects in parallel
     Promise.all([
-        fetch('/api/assets/history').then(r => r.json()).catch(() => []),
+        fetch('/api/animator/history').then(r => r.json()).catch(() => []),
         fetch('/api/editor/projects').then(r => r.json()).catch(() => [])
     ]).then(([assetProjects, savedProjects]) => {
         // Re-query elements inside callback (Vue may have re-rendered)
@@ -4520,7 +4520,7 @@ async function loadProjectAssets() {
     slot.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">Loading project assets...</p>';
 
     try {
-        const data = await fetch(`/api/assets/project/${encodeURIComponent(projectId)}`).then(r => r.ok ? r.json() : null);
+        const data = await fetch(`/api/animator/project/${encodeURIComponent(projectId)}`).then(r => r.ok ? r.json() : null);
         if (!data || !data.scenes) {
             slot.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:11px;padding:16px 0;opacity:0.6">No assets found for this project</p>';
             return;
@@ -9074,7 +9074,7 @@ async function randomizeSceneMedia() {
 
     // Always fetch latest to ensure we see newly added files
     try {
-        const resp = await fetch(`/api/assets/project/${encodeURIComponent(projectId)}`);
+        const resp = await fetch(`/api/animator/project/${encodeURIComponent(projectId)}`);
         if (!resp.ok) throw new Error(resp.status);
         EditorState._assetFilesCache = await resp.json();
     } catch (e) {
@@ -9647,7 +9647,7 @@ window.openProjectAssetsFolder = async function () {
     const projectId = EditorState.project?.id;
     if (!projectId) { showToast('No project loaded', 'info'); return; }
     try {
-        await fetch(`/api/assets/open-folder/${encodeURIComponent(projectId)}/0`, { method: 'POST' });
+        await fetch(`/api/animator/open-folder/${encodeURIComponent(projectId)}/0`, { method: 'POST' });
     } catch (_) { /* ignore */ }
 };
 
@@ -9796,7 +9796,7 @@ function renderSfxLibrary(categories) {
     if (countEl) countEl.textContent = String(_sfxAllFiles.length);
 
     if (!_sfxAllFiles.length) {
-        list.innerHTML = '<div class="sfx-library-empty">No sound effects found<br><span>Place .mp3/.wav files in assets/sounds/sfx/</span></div>';
+        list.innerHTML = '<div class="sfx-library-empty">No sound effects found<br><span>Place .mp3/.wav files in resources/sounds/sfx/</span></div>';
         return;
     }
 

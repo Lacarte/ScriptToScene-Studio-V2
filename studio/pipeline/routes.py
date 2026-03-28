@@ -24,7 +24,7 @@ from flask import Blueprint, Response, jsonify, request
 from loguru import logger
 
 from config import (
-    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ASSETS_DIR, EXPORT_DIR,
+    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ANIMATOR_DIR, EXPORT_DIR,
     PIPELINE_DIR, PROJECTS_DIR, STORYBOARD_DIR, N8N_WEBHOOK_URL, generate_project_id,
 )
 from studio.io_utils import safe_json_write, safe_json_read
@@ -477,7 +477,7 @@ def regenerate_assets(project_id):
         payload["grok_duration"] = body.get("grok_duration") or config.get("grok_duration", "6s")
 
     try:
-        resp = http_requests.post(f"{base_url}/api/assets/grabber/start",
+        resp = http_requests.post(f"{base_url}/api/animator/grabber/start",
                                   json=payload, timeout=30)
         resp.raise_for_status()
         grab_data = resp.json()
@@ -1467,8 +1467,8 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
 
 def _step_assets(scenes_result, config, project_id, job_id):
     """Step 6: Start asset grabber and poll until all scenes are ready."""
-    from studio.assets.routes import grabber_start, _get_job, _set_job
-    from studio.assets.schemas import GrabberStartRequest
+    from studio.animator.animation_routes import grabber_start, _get_job, _set_job
+    from studio.animator.schemas import GrabberStartRequest
 
     scenes = scenes_result.get("scenes", [])
     if not scenes:
@@ -1501,7 +1501,7 @@ def _step_assets(scenes_result, config, project_id, job_id):
     base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
     if _stop_requested(job_id):
         raise PipelineStopped(step_name="assets")
-    resp = http_requests.post(f"{base_url}/api/assets/grabber/start",
+    resp = http_requests.post(f"{base_url}/api/animator/grabber/start",
                               json=payload, timeout=30)
     resp.raise_for_status()
     grab_data = resp.json()
@@ -1527,7 +1527,7 @@ def _step_assets(scenes_result, config, project_id, job_id):
             raise PipelineStopped(step_name="assets")
         try:
             status_resp = http_requests.get(
-                f"{base_url}/api/assets/grabber/status/{project_id}", timeout=10)
+                f"{base_url}/api/animator/grabber/status/{project_id}", timeout=10)
             if status_resp.status_code != 200:
                 continue
             status_data = status_resp.json()

@@ -50,7 +50,7 @@ def check_flask():
 def check_grok_extension():
     """Check if Grok extension is connected via WS."""
     try:
-        r = requests.get(f"{FLASK_URL}/api/assets/grabber/status/{PROJECT_ID}", timeout=3)
+        r = requests.get(f"{FLASK_URL}/api/animator/grabber/status/{PROJECT_ID}", timeout=3)
         return True  # endpoint exists
     except Exception:
         return True  # endpoint may 404 but Flask is up
@@ -142,14 +142,14 @@ def send_job(prompts, mode="video", aspect_ratio="9:16", duration="6s", quality=
         "scenes": scenes,
     }
 
-    print(f"\n[SEND] {len(scenes)} scene(s) to {FLASK_URL}/api/assets/grabber/start")
+    print(f"\n[SEND] {len(scenes)} scene(s) to {FLASK_URL}/api/animator/grabber/start")
     print(f"  Mode: {mode} | Aspect: {aspect_ratio} | Duration: {duration} | Quality: {quality}")
     if image_path:
         print(f"  Image: {os.path.basename(image_path)}")
     for s in scenes:
         print(f"  Scene {s['scene']}: {s['prompt'][:80]}...")
 
-    r = requests.post(f"{FLASK_URL}/api/assets/grabber/start", json=payload, timeout=10)
+    r = requests.post(f"{FLASK_URL}/api/animator/grabber/start", json=payload, timeout=10)
     print(f"[RESP] {r.status_code}: {r.text[:200]}")
     return r.status_code in (200, 201, 202)
 

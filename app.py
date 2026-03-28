@@ -17,7 +17,7 @@ from loguru import logger
 from config import (
     LOG_DIR, STATIC_DIR, ALIGN_DIR, TRASH_DIR, N8N_WEBHOOK_URL,
     N8N_ASSET_WEBHOOK_URL, N8N_STORY_WEBHOOK_URL, OUTPUT_DIR,
-    SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, STORYBOARD_DIR,
+    SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR, STORYBOARD_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR, APP_CONFIG_PATH, APP_ASSETS_DIR, TMP_DIR,
 )
@@ -58,7 +58,7 @@ from studio.tts import tts_bp
 from studio.timing import timing_bp
 from studio.segmenter import segmenter_bp
 from studio.build_scene_blueprints import scenes_bp
-from studio.assets import assets_bp
+from studio.animator import animation_bp
 from studio.editor import editor_bp
 from studio.pipeline import pipeline_bp
 from studio.captions import captions_bp
@@ -73,7 +73,7 @@ app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
 app.register_blueprint(scenes_bp)
-app.register_blueprint(assets_bp)
+app.register_blueprint(animation_bp)
 app.register_blueprint(editor_bp)
 app.register_blueprint(pipeline_bp)
 app.register_blueprint(captions_bp)
@@ -211,7 +211,7 @@ _CLEAR_MODULES = [
     {"page": "Alignment", "module": "Force Alignment", "dir": ALIGN_DIR},
     {"page": "Segmenter", "module": "Scene Segmenter", "dir": SEGMENTER_DIR},
     {"page": "Scenes", "module": "Scene Blueprint", "dir": SCENES_DIR},
-    {"page": "Assets", "module": "Asset Manager", "dir": ASSETS_DIR},
+    {"page": "Animator", "module": "Animation Manager", "dir": ANIMATOR_DIR},
     {"page": "Storyboard", "module": "Storyboard Images", "dir": STORYBOARD_DIR},
     {"page": "Captions", "module": "Captions", "dir": CAPTIONS_DIR},
     {"page": "Editor", "module": "Timeline Editor", "dir": PROJECTS_DIR},
@@ -221,7 +221,7 @@ _CLEAR_MODULES = [
     {"page": "Pipeline", "module": "Pipeline Data", "dir": PIPELINE_DIR},
 ]
 _PROJECT_DIRS = [
-    ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ASSETS_DIR, STORYBOARD_DIR,
+    ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR, STORYBOARD_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR,
 ]

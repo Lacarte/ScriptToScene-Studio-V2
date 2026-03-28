@@ -190,7 +190,7 @@ def test_provider_module():
     print("STEP 5: Provider module (generate_image)")
     print(DIVIDER)
 
-    from studio.assets.providers.kie_ai import generate_image
+    from studio.animator.providers.kie_ai import generate_image
 
     try:
         result = generate_image(

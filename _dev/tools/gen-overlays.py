@@ -7,7 +7,7 @@ import random
 from PIL import Image, ImageDraw, ImageFilter
 
 W, H = 1080, 1920
-OUT = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "overlays")
+OUT = os.path.join(os.path.dirname(__file__), "..", "..", "resources", "overlays")
 os.makedirs(OUT, exist_ok=True)
 
 

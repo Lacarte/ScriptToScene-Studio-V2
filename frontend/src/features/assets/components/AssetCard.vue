@@ -99,7 +99,7 @@ function onOpenLightbox(file) {
 function fileSrc(file) {
   if (file.startsWith('http')) return file
   if (file.startsWith('/')) return file
-  return `/output/assets/${file}`
+  return `/output/animator/${file}`
 }
 
 function isImageFile(file) {

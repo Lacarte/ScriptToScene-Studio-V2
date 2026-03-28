@@ -15,7 +15,7 @@ import config as app_config
 import studio.editor.routes as editor_routes
 import studio.pipeline.routes as pipeline_routes
 import studio.timing.routes as timing_routes
-from studio.assets.organizer import reconcile_project
+from studio.animator.organizer import reconcile_project
 from studio.build_scene_blueprints.routes import _apply_segmenter_timing
 
 
@@ -90,7 +90,7 @@ class ReliabilityRegressionTests(unittest.TestCase):
 
         with patch.object(editor_routes, "SCENES_DIR", scenes_dir), \
              patch.object(editor_routes, "PROJECTS_DIR", projects_dir), \
-             patch.object(editor_routes, "ASSETS_DIR", assets_dir), \
+             patch.object(editor_routes, "ANIMATOR_DIR", assets_dir), \
              patch.object(editor_routes, "ALIGN_DIR", align_dir), \
              patch.object(editor_routes, "TTS_DIR", tts_dir), \
              patch.object(editor_routes, "THUMBNAILS_DIR", thumbs_dir):
@@ -144,7 +144,7 @@ class ReliabilityRegressionTests(unittest.TestCase):
                         "0": {
                             "scene": "0",
                             "source_urls": [],
-                            "local_files": ["/output/assets/proj1/0/0.png"],
+                            "local_files": ["/output/animator/proj1/0/0.png"],
                             "file_count": 1,
                         }
                     }

@@ -12,7 +12,7 @@ A complete template requires editing **3-5 files**:
 |------|---------|
 | `studio/build_scene_blueprints/templates.py` | Register the visual style template |
 | `studio/niches/presets.py` | Create niche presets that use it |
-| `assets/image-models.json` | Map the style to image generation models |
+| `resources/image-models.json` | Map the style to image generation models |
 | `studio/build_scene_blueprints/style_compiler.py` | *(optional)* Add negative rules |
 | `frontend/src/features/pipeline/constants/colors.js` | *(optional)* Add category color |
 
@@ -145,7 +145,7 @@ Add an entry to the `_DEFAULTS` list:
 
 ## Step 3: Map Image Generation Models
 
-**File:** `assets/image-models.json`
+**File:** `resources/image-models.json`
 
 Add a key matching your template `id`:
 
@@ -376,7 +376,7 @@ Ask: *If this were a video, how would it move?*
 6. **Write the ALWAYS section** for the non-negotiable rules
 7. **Pick the `color` field** from the dominant accent color in the references
 8. **Choose the `category`** based on what content this style serves best
-9. **Place references** in `assets/templates/references/your_style_id/`
+9. **Place references** in `resources/templates/references/your_style_id/`
 
 **Example extraction from a red paper airplane on white:**
 
@@ -431,7 +431,7 @@ Ask: *If this were a video, how would it move?*
 | `studio/niches/presets.py` | `_DEFAULTS` list |
 | `studio/niches/routes.py` | API endpoints (usually no changes needed) |
 | `studio/niches/schemas.py` | Validation schemas (usually no changes needed) |
-| `assets/image-models.json` | Model mapping |
+| `resources/image-models.json` | Model mapping |
 
 ### Frontend
 

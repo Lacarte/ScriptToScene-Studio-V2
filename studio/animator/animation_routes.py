@@ -1,15 +1,17 @@
-"""Assets Module — Grabber-based Image Generation & Management Routes"""
+"""Animator Module — Grabber-based Video/Image Generation & Management Routes"""
 
 import json
 import os
 import platform
 import subprocess
+import threading
+from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 
-from config import ASSETS_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR, KIE_AI_MODEL, BIN_DIR
+from config import ANIMATOR_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR, KIE_AI_MODEL, BIN_DIR
 from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import safe_json_write, now_iso, JobStore
 from studio.security import is_loopback_remote, sanitize_project_id
@@ -72,7 +74,7 @@ def _video_thumbnail(video_path):
         pass
     return None
 
-assets_bp = Blueprint("assets", __name__)
+animation_bp = Blueprint("animation", __name__)
 
 # In-memory grabber job tracking
 grabber_jobs = JobStore()
@@ -92,7 +94,7 @@ def _save_job(job):
     """Persist grabber job state to disk."""
     try:
         job["updated_at"] = now_iso()
-        safe_json_write(os.path.join(ASSETS_DIR, job["project_id"], "grabber_job.json"), job, indent=2)
+        safe_json_write(os.path.join(ANIMATOR_DIR, job["project_id"], "grabber_job.json"), job, indent=2)
     except Exception as e:
         logger.error("Failed to persist job {}: {}", job.get("grabber_id", "?"), e)
 
@@ -152,14 +154,14 @@ def _mark_job_done(job):
 
 def _load_jobs_from_disk():
     """Load existing grabber jobs from disk on startup."""
-    if not os.path.isdir(ASSETS_DIR):
+    if not os.path.isdir(ANIMATOR_DIR):
         return
-    for entry in os.scandir(ASSETS_DIR):
+    for entry in os.scandir(ANIMATOR_DIR):
         if not entry.is_dir():
             continue
         pid = entry.name
         # Reconcile disk → JSON first (fixes missing scenes in metadata/job)
-        reconcile_project(ASSETS_DIR, pid)
+        reconcile_project(ANIMATOR_DIR, pid)
         # Now load the (possibly updated) job
         job_path = os.path.join(entry.path, "grabber_job.json")
         if not os.path.isfile(job_path):
@@ -180,7 +182,7 @@ _load_jobs_from_disk()
 # Grabber Routes
 # ---------------------------------------------------------------------------
 
-@assets_bp.route("/api/assets/grabber/start", methods=["POST"])
+@animation_bp.route("/api/animator/grabber/start", methods=["POST"])
 @validate_json(GrabberStartRequest)
 def grabber_start(data: GrabberStartRequest):
     """Initialize a grabber job — prepares prompts for Automa to consume."""
@@ -292,7 +294,7 @@ def grabber_start(data: GrabberStartRequest):
     # Payload already contains base64 images from the scene_list build above
     if provider == "grok":
         try:
-            from studio.animator.routes import queue_grabber_start
+            from .routes import queue_grabber_start
             queue_grabber_start({
                 "type": "GRABBER_START",
                 "projectId": project_id,
@@ -368,7 +370,7 @@ def _kie_ai_generate_all(project_id, job):
                 project_id=project_id,
                 scene_num=scene_num,
                 urls=image_urls,
-                assets_dir=ASSETS_DIR,
+                assets_dir=ANIMATOR_DIR,
             )
             if scene_num in job["scene_statuses"]:
                 job["scene_statuses"][scene_num]["status"] = "ready"
@@ -392,7 +394,7 @@ def _kie_ai_generate_all(project_id, job):
         logger.success("Kie AI generation complete for {}", project_id)
 
 
-@assets_bp.route("/api/assets/grabber/pending")
+@animation_bp.route("/api/animator/grabber/pending")
 def grabber_pending():
     """Return the most recent pending grabber payload for Automa to consume."""
     if not is_loopback_remote(request.remote_addr):
@@ -413,7 +415,7 @@ def grabber_pending():
     return jsonify(latest["payload"])
 
 
-@assets_bp.route("/api/assets/grabber/results", methods=["POST"])
+@animation_bp.route("/api/animator/grabber/results", methods=["POST"])
 def grabber_results():
     """Receive scraped image URLs from Automa and download them."""
     if not is_loopback_remote(request.remote_addr):
@@ -471,7 +473,7 @@ def grabber_results():
                         project_id=pid,
                         scene_num=scene_num,
                         urls=urls,
-                        assets_dir=ASSETS_DIR,
+                        assets_dir=ANIMATOR_DIR,
                     )
                     if scene_num in job_ref["scene_statuses"]:
                         job_ref["scene_statuses"][scene_num]["status"] = "ready"
@@ -503,7 +505,7 @@ def grabber_results():
     return jsonify({"status": "downloading", "projects": len(results)})
 
 
-@assets_bp.route("/api/assets/grabber/upload", methods=["POST"])
+@animation_bp.route("/api/animator/grabber/upload", methods=["POST"])
 def grabber_upload():
     """Receive base64 image data from Automa (for CDN URLs that require auth).
 
@@ -566,7 +568,7 @@ def grabber_upload():
                     project_id=pid,
                     scene_num=scene_num,
                     images=images,
-                    assets_dir=ASSETS_DIR,
+                    assets_dir=ANIMATOR_DIR,
                 )
                 if job_ref and scene_num in job_ref["scene_statuses"]:
                     job_ref["scene_statuses"][scene_num]["status"] = "ready"
@@ -602,7 +604,7 @@ def grabber_upload():
     return jsonify({"status": "saving", "scenes": len(scenes)})
 
 
-@assets_bp.route("/api/assets/grabber/status/<project_id>")
+@animation_bp.route("/api/animator/grabber/status/<project_id>")
 def grabber_status(project_id):
     """Poll grabber job status — frontend calls this every 5s."""
     project_id = sanitize_project_id(project_id)
@@ -627,7 +629,7 @@ def grabber_status(project_id):
 # Re-download — retry downloading assets for scenes that failed or are pending
 # ---------------------------------------------------------------------------
 
-@assets_bp.route("/api/assets/redownload/<project_id>", methods=["POST"])
+@animation_bp.route("/api/animator/redownload/<project_id>", methods=["POST"])
 def redownload_assets(project_id):
     """Re-attempt downloads for scenes with URLs but no local files."""
     project_id = sanitize_project_id(project_id)
@@ -638,7 +640,7 @@ def redownload_assets(project_id):
         return jsonify({"error": "No grabber job found"}), 404
 
     # Also check metadata for URLs
-    meta_path = os.path.join(ASSETS_DIR, project_id, "metadata.json")
+    meta_path = os.path.join(ANIMATOR_DIR, project_id, "metadata.json")
     meta = {}
     if os.path.isfile(meta_path):
         with open(meta_path, "r", encoding="utf-8") as f:
@@ -648,7 +650,7 @@ def redownload_assets(project_id):
     for scene_num, ss in job["scene_statuses"].items():
         has_local = ss.get("local_files") and len(ss["local_files"]) > 0
         # Check actual files on disk
-        scene_dir = os.path.join(ASSETS_DIR, project_id, str(scene_num))
+        scene_dir = os.path.join(ANIMATOR_DIR, project_id, str(scene_num))
         has_files = os.path.isdir(scene_dir) and any(
             f.is_file() for f in Path(scene_dir).iterdir()
         )
@@ -682,7 +684,7 @@ def redownload_assets(project_id):
             try:
                 local_files = organize_grabber_assets(
                     project_id=pid, scene_num=sn,
-                    urls=urls, assets_dir=ASSETS_DIR,
+                    urls=urls, assets_dir=ANIMATOR_DIR,
                 )
                 if sn in job_ref["scene_statuses"]:
                     job_ref["scene_statuses"][sn]["status"] = "ready"
@@ -718,15 +720,15 @@ def redownload_assets(project_id):
 # History — list all asset projects
 # ---------------------------------------------------------------------------
 
-@assets_bp.route("/api/assets/history")
+@animation_bp.route("/api/animator/history")
 def assets_history():
     """List all asset projects with metadata summary."""
     projects = []
-    if not os.path.isdir(ASSETS_DIR):
+    if not os.path.isdir(ANIMATOR_DIR):
         return jsonify(projects)
 
     try:
-        entries = sorted(os.scandir(ASSETS_DIR), key=lambda e: e.stat().st_mtime, reverse=True)
+        entries = sorted(os.scandir(ANIMATOR_DIR), key=lambda e: e.stat().st_mtime, reverse=True)
     except OSError:
         return jsonify(projects)
 
@@ -832,13 +834,13 @@ def assets_history():
                         continue
                     lower = fname.lower()
                     if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-                        project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{fname}"
+                        project_info["preview"] = f"/output/animator/{project_id}/{scene_num}/{fname}"
                         break
                     if lower.endswith(VIDEO_EXTS):
                         thumb = _video_thumbnail(fpath)
                         if thumb:
                             thumb_name = os.path.basename(thumb)
-                            project_info["preview"] = f"/output/assets/{project_id}/{scene_num}/{thumb_name}"
+                            project_info["preview"] = f"/output/animator/{project_id}/{scene_num}/{thumb_name}"
                         # Don't set video URL as preview — <img> can't render it
                         break
                 if project_info["preview"]:
@@ -853,16 +855,16 @@ def assets_history():
     return jsonify(projects)
 
 
-@assets_bp.route("/api/assets/reconcile/<project_id>", methods=["POST"])
+@animation_bp.route("/api/animator/reconcile/<project_id>", methods=["POST"])
 def reconcile_assets(project_id):
     """Force reconcile disk files with metadata.json + grabber_job.json."""
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    project_dir = os.path.join(ASSETS_DIR, project_id)
+    project_dir = os.path.join(ANIMATOR_DIR, project_id)
     if not os.path.isdir(project_dir):
         return jsonify({"error": "Project not found"}), 404
-    updated = reconcile_project(ASSETS_DIR, project_id)
+    updated = reconcile_project(ANIMATOR_DIR, project_id)
     # Reload job into memory if it was updated
     if updated > 0:
         job_path = os.path.join(project_dir, "grabber_job.json")
@@ -872,18 +874,18 @@ def reconcile_assets(project_id):
     return jsonify({"updated": updated})
 
 
-@assets_bp.route("/api/assets/project/<project_id>")
+@animation_bp.route("/api/animator/project/<project_id>")
 def get_asset_project(project_id):
     """Get full asset project details — all scenes with local files."""
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    project_dir = os.path.join(ASSETS_DIR, project_id)
+    project_dir = os.path.join(ANIMATOR_DIR, project_id)
     if not os.path.isdir(project_dir):
         return jsonify({"error": "Project not found"}), 404
 
     # Auto-reconcile: sync disk → JSON before returning
-    reconcile_project(ASSETS_DIR, project_id)
+    reconcile_project(ANIMATOR_DIR, project_id)
 
     result = {
         "project_id": project_id,
@@ -932,7 +934,7 @@ def get_asset_project(project_id):
             fpath = os.path.join(scene_path, fname)
             if os.path.isfile(fpath):
                 files_on_disk.append({
-                    "url": f"/output/assets/{project_id}/{scene_num_dir}/{fname}",
+                    "url": f"/output/animator/{project_id}/{scene_num_dir}/{fname}",
                     "filename": fname,
                     "size": os.path.getsize(fpath),
                 })
@@ -948,14 +950,14 @@ def get_asset_project(project_id):
 # Asset serving
 # ---------------------------------------------------------------------------
 
-@assets_bp.route("/api/assets/open-folder/<project_id>/<int:scene_index>", methods=["POST"])
+@animation_bp.route("/api/animator/open-folder/<project_id>/<int:scene_index>", methods=["POST"])
 def open_asset_scene_folder(project_id, scene_index):
     """Open a specific scene's asset folder in the OS file explorer."""
     if not is_loopback_remote(request.remote_addr):
         return jsonify({"error": "Forbidden"}), 403
 
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    folder = os.path.join(ASSETS_DIR, safe_id, str(scene_index))
+    folder = os.path.join(ANIMATOR_DIR, safe_id, str(scene_index))
     if not os.path.isdir(folder):
         return jsonify({"error": "Folder not found"}), 404
     folder = os.path.abspath(folder)
@@ -972,11 +974,11 @@ def open_asset_scene_folder(project_id, scene_index):
         return jsonify({"error": str(e)}), 500
 
 
-@assets_bp.route("/api/assets/thumbnails/<project_id>", methods=["POST"])
+@animation_bp.route("/api/animator/thumbnails/<project_id>", methods=["POST"])
 def generate_video_thumbnails(project_id):
     """Generate _thumb.jpg for all video files in a project that lack one."""
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    project_dir = os.path.join(ASSETS_DIR, safe_id)
+    project_dir = os.path.join(ANIMATOR_DIR, safe_id)
     if not os.path.isdir(project_dir):
         return jsonify({"error": "Project not found"}), 404
 
@@ -995,17 +997,11 @@ def generate_video_thumbnails(project_id):
                 thumb_name = os.path.basename(thumb)
                 generated.append({
                     "scene": scene_dir,
-                    "thumb_url": f"/output/assets/{safe_id}/{scene_dir}/{thumb_name}",
-                    "video_url": f"/output/assets/{safe_id}/{scene_dir}/{fname}",
+                    "thumb_url": f"/output/animator/{safe_id}/{scene_dir}/{thumb_name}",
+                    "video_url": f"/output/animator/{safe_id}/{scene_dir}/{fname}",
                 })
 
     return jsonify({"project_id": safe_id, "thumbnails": generated})
 
 
-@assets_bp.route("/output/assets/<path:filename>")
-def serve_asset(filename):
-    """Serve generated asset files (images and videos)."""
-    resp = send_from_directory(ASSETS_DIR, filename)
-    # Ensure browsers know range requests are supported (needed for video seeking)
-    resp.headers.setdefault("Accept-Ranges", "bytes")
-    return resp
+# Static file serving for /output/animator/ is handled by routes.py (serve_animator_file)

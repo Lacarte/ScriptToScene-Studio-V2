@@ -363,8 +363,8 @@ def _handle_asset_upload_ws(msg):
     logger.info("ASSET_UPLOAD via WS: {} scene {} — {} file(s), ~{} KB",
                 project_id, scene_num, len(images), total_kb)
 
-    from config import ASSETS_DIR
-    from studio.assets.organizer import save_base64_assets
+    from config import ANIMATOR_DIR
+    from studio.animator.organizer import save_base64_assets
 
     def _save():
         try:
@@ -372,12 +372,12 @@ def _handle_asset_upload_ws(msg):
                 project_id=project_id,
                 scene_num=scene_num,
                 images=images,
-                assets_dir=ASSETS_DIR,
+                assets_dir=ANIMATOR_DIR,
             )
             logger.success("ASSET_UPLOAD: {} scene {} — {} files saved", project_id, scene_num, len(local_files))
 
             # Update grabber job status
-            from studio.assets.routes import _get_job, _save_job, _mark_job_done
+            from studio.animator.animation_routes import _get_job, _save_job, _mark_job_done
             job = _get_job(project_id)
             if job and scene_num in job.get("scene_statuses", {}):
                 job["scene_statuses"][scene_num]["status"] = "ready"
@@ -439,8 +439,8 @@ def _handle_asset_result(msg):
 
     logger.info("ASSET_RESULT: downloading {} URL(s) for {} scene {}", len(urls), project_id, scene_num)
 
-    from config import ASSETS_DIR
-    from studio.assets.organizer import organize_grabber_assets
+    from config import ANIMATOR_DIR
+    from studio.animator.organizer import organize_grabber_assets
 
     def _download():
         try:
@@ -448,12 +448,12 @@ def _handle_asset_result(msg):
                 project_id=project_id,
                 scene_num=scene_num,
                 urls=urls,
-                assets_dir=ASSETS_DIR,
+                assets_dir=ANIMATOR_DIR,
             )
             logger.success("ASSET_RESULT: {} scene {} — {} files saved", project_id, scene_num, len(local_files))
 
             # Update grabber job status if one exists
-            from studio.assets.routes import _get_job, _save_job, _mark_job_done
+            from studio.animator.animation_routes import _get_job, _save_job, _mark_job_done
             job = _get_job(project_id)
             if job and scene_num in job.get("scene_statuses", {}):
                 job["scene_statuses"][scene_num]["status"] = "ready"

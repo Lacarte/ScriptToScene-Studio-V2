@@ -151,7 +151,7 @@ class VideoProcessor:
         # Base path for media files (relative to backend folder)
         self.media_base_path = export_data.get('media_base_path', '')
 
-        # Resolve media relative to the repo root where app.py/output/assets live.
+        # Resolve media relative to the repo root where app.py/output/animator live.
         self.backend_dir = os.path.dirname(os.path.abspath(__file__))
         self.project_root = ROOT_DIR
         self.frontend_dir = os.path.join(ROOT_DIR, 'frontend')
@@ -218,7 +218,7 @@ class VideoProcessor:
             logger.error("Absolute media path does not exist: {}", raw_path)
             raise FileNotFoundError(f"Media file not found: {relative_path}")
 
-        # Strip leading slash for URL-style paths (e.g. /output/assets/...)
+        # Strip leading slash for URL-style paths (e.g. /output/animator/...)
         cleaned = candidate_path.lstrip('/\\')
 
         # Try paths relative to project root and frontend folder

@@ -1,7 +1,7 @@
-"""Asset Organizer — Download and organize generated images into project folders.
+"""Animator Organizer — Download and organize generated assets into project folders.
 
 Directory structure (grabber mode):
-  output/assets/{project_id}/
+  output/animator/{project_id}/
     {scene_num}/
       0.png
       1.png
@@ -62,7 +62,7 @@ def _unique_filepath(directory, basename, ext):
 def organize_grabber_assets(project_id, scene_num, urls, assets_dir):
     """Download all image/video URLs for a scene into its subfolder.
 
-    Returns list of local URL paths (e.g. ['/output/assets/proj/1/0.png']).
+    Returns list of local URL paths (e.g. ['/output/animator/proj/1/0.png']).
     """
     scene_dir = os.path.join(assets_dir, project_id, str(scene_num))
     os.makedirs(scene_dir, exist_ok=True)
@@ -87,7 +87,7 @@ def organize_grabber_assets(project_id, scene_num, urls, assets_dir):
                     for chunk in resp.iter_content(chunk_size=65536):
                         f.write(chunk)
 
-                local_url = f"/output/assets/{project_id}/{scene_num}/{filename}"
+                local_url = f"/output/animator/{project_id}/{scene_num}/{filename}"
                 local_files.append(local_url)
                 size_kb = os.path.getsize(filepath) / 1024
                 logger.info(
@@ -153,7 +153,7 @@ def save_base64_assets(project_id, scene_num, images, assets_dir):
         with open(filepath, "wb") as f:
             f.write(data)
 
-        local_url = f"/output/assets/{project_id}/{scene_num}/{filename}"
+        local_url = f"/output/animator/{project_id}/{scene_num}/{filename}"
         local_files.append(local_url)
         source_urls.append(img.get("source_url", f"base64:{i}"))
         size_kb = len(data) / 1024
@@ -248,7 +248,7 @@ def reconcile_project(assets_dir, project_id):
             if os.path.isfile(fpath) and fname.lower().endswith(
                 (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov")
             ):
-                files_on_disk.append(f"/output/assets/{project_id}/{scene_key}/{fname}")
+                files_on_disk.append(f"/output/animator/{project_id}/{scene_key}/{fname}")
 
         if not files_on_disk:
             continue

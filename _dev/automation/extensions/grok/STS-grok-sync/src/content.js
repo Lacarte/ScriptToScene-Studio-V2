@@ -1022,7 +1022,7 @@ function initSync() {
     // Server-side download for failed URLs
     if (failedUrls.length) {
       try {
-        await fetch(S.studioUrl + "/api/assets/grabber/download-urls", {
+        await fetch(S.studioUrl + "/api/animator/grabber/download-urls", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ projectId: S.projectId, scenes: [{ scene: parseInt(num), urls: failedUrls }] }),
         });
@@ -1056,7 +1056,7 @@ function initSync() {
 
     if (!S.wsConnected) {
       try {
-        const r = await fetch(S.studioUrl + "/api/assets/grabber/upload", {
+        const r = await fetch(S.studioUrl + "/api/animator/grabber/upload", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ projectId: S.projectId, scenes: [{ scene: parseInt(num), images }] }),
         });
@@ -1415,7 +1415,7 @@ function initSync() {
   async function fetchPending() {
     if (isJobComplete()) return;
     try {
-      const r = await fetch(S.studioUrl + "/api/assets/grabber/pending");
+      const r = await fetch(S.studioUrl + "/api/animator/grabber/pending");
       S.connected = true;
       S._fetchErrors = 0;
       if (!r.ok) { render(); return; }
@@ -1451,7 +1451,7 @@ function initSync() {
   async function fetchStatus() {
     if (!S.projectId) return;
     try {
-      const r = await fetch(S.studioUrl + "/api/assets/grabber/status/" + encodeURIComponent(S.projectId));
+      const r = await fetch(S.studioUrl + "/api/animator/grabber/status/" + encodeURIComponent(S.projectId));
       S.connected = true;
       if (!r.ok) return;
       const d = await r.json();

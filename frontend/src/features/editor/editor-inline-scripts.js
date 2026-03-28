@@ -21,7 +21,7 @@ export function initEditorInlineScripts() {
             list.innerHTML = '<p style="text-align:center;color:var(--text-muted,#666);font-size:12px;padding:24px 0">Loading...</p>';
 
             Promise.all([
-                fetch('/api/assets/history').then(r => r.json()).catch(() => []),
+                fetch('/api/animator/history').then(r => r.json()).catch(() => []),
                 fetch('/api/editor/projects').then(r => r.json()).catch(() => [])
             ])
                 .then(([assetProjects, savedProjects]) => {
@@ -101,7 +101,7 @@ export function initEditorInlineScripts() {
             try {
                 // Fetch asset project, scene data, and captions in parallel
                 const [assetRes, sceneRes, captionsRes] = await Promise.all([
-                    fetch('/api/assets/project/' + encodeURIComponent(projectId)).then(r => r.ok ? r.json() : null),
+                    fetch('/api/animator/project/' + encodeURIComponent(projectId)).then(r => r.ok ? r.json() : null),
                     fetch('/api/scenes/' + encodeURIComponent(projectId)).then(r => r.ok ? r.json() : null).catch(() => null),
                     fetch('/api/captions/' + encodeURIComponent(projectId)).then(r => r.ok ? r.json() : null).catch(() => null),
                 ]);
