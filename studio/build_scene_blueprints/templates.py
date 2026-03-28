@@ -1466,6 +1466,247 @@ SCENE_STYLE_TEMPLATES = [
             "- Style: neon iconography meets sacred geometry meets conspiracy aesthetic"
         ),
     },
+    {
+        "id": "glowing_core",
+        "type": "visual",
+        "category": None,
+        "name": "Glowing Core",
+        "description": "Simple cartoon figure with luminous inner core floating in abstract colored space",
+        "color": "#9B59B6",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Simple cartoon human figure with a glowing luminous core (chest/center)\n"
+            "- Solid colored background (purple, deep blue, or dark teal) — flat, no gradients\n"
+            "- Figure floating weightlessly in abstract negative space\n"
+            "- Soft, diffused investigative light emanating from the glowing core\n"
+            "- Minimal detail on the figure — simplified anatomy, no facial features\n"
+            "- Core glow casts soft light onto the figure's body and nearby space\n"
+            "- 9:16 portrait framing, figure centered or slightly off-center\n"
+            "- Thoughtful, contemplative body language (arms slightly open, head tilted)\n"
+            "- Clean vector-like rendering with smooth edges\n"
+            "- Limited palette: solid background color + white/warm glow accent\n\n"
+            "DO NOT:\n"
+            "- No busy or detailed backgrounds — solid color only\n"
+            "- No realistic anatomy or photorealism\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No multiple figures — single subject only\n"
+            "- No ground plane, floor, or environmental context\n"
+            "- No harsh shadows or dramatic contrast\n"
+            "- No complex color palettes or rainbow effects\n"
+            "- No detailed facial features — keep the figure abstract/simplified\n"
+            "- No dark or scary mood — maintain calm, thoughtful tone\n\n"
+            "ALWAYS:\n"
+            "- The glowing core must be the brightest element and primary light source\n"
+            "- Background must be a single solid color filling the entire frame\n"
+            "- Figure must appear to float, not stand on any surface\n"
+            "- Maintain a contemplative, investigative mood throughout\n"
+            "- Keep the cartoon style simple and clean, like editorial illustration"
+        ),
+    },
+    {
+        "id": "ethereal_connection",
+        "type": "visual",
+        "category": None,
+        "name": "Ethereal Connection",
+        "description": "Translucent luminous forms connected by flowing light energy on deep dark blue",
+        "color": "#1A3A6B",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Abstract forms (hands, figures, shapes) made entirely of translucent flowing light energy\n"
+            "- Deep dark navy/midnight blue background with subtle gradient to near-black\n"
+            "- Luminous white-blue glow with soft bloom radiating from the subjects\n"
+            "- Flowing wispy light strands and energy threads connecting elements\n"
+            "- Subjects are self-luminous — they ARE the light source, no external lighting\n"
+            "- Translucent, smoke-like quality — you can see through the forms\n"
+            "- 9:16 portrait framing, diagonal or centered composition\n"
+            "- Vast dark negative space (70%+ of frame) surrounding the luminous forms\n"
+            "- Ethereal, mysterious, transcendent mood\n"
+            "- Fine glowing filaments and particle sparkles along the energy flows\n"
+            "- Cool monochrome palette: deep blue + white/ice-blue glow only\n\n"
+            "DO NOT:\n"
+            "- No solid opaque subjects — everything must be translucent and light-made\n"
+            "- No warm colors, no orange, no red, no yellow — strict cool blue/white only\n"
+            "- No realistic skin, clothing, or material textures\n"
+            "- No busy backgrounds or environmental detail\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No flat illustration or cartoon aesthetic — maintain ethereal 3D glow\n"
+            "- No hard edges or sharp outlines — all edges dissolve into light\n"
+            "- No ground plane, horizon, or physical setting\n"
+            "- No bright or fully lit backgrounds — keep the deep dark blue\n"
+            "- No cluttered compositions — maximum two focal elements\n\n"
+            "ALWAYS:\n"
+            "- The luminous forms must glow as the sole light source against darkness\n"
+            "- Maintain the translucent, flowing energy aesthetic throughout\n"
+            "- Background must be deep dark blue, never light or white\n"
+            "- Connection between elements should be visible through light strands/threads\n"
+            "- Keep the mood mysterious and transcendent, never clinical or cold"
+        ),
+    },
+    {
+        "id": "stickman_glow",
+        "type": "visual",
+        "category": None,
+        "name": "Stickman Glow",
+        "description": "Lonely stick-figure with glowing chest core on dark purple, dark particles drifting upward",
+        "color": "#5B2C6F",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Single small stick-figure person drawn with simple black lines\n"
+            "- Glowing warm orb in the figure's chest/core area — the only light source\n"
+            "- Solid dark purple background — flat, matte, no gradient\n"
+            "- Small dark particles or dots drifting upward from the glowing core\n"
+            "- Figure is tiny relative to the frame — 85%+ empty dark purple space\n"
+            "- Simple expressive face (dot eyes, small curved mouth showing concern/sadness)\n"
+            "- Dim overall lighting — the glow only illuminates the figure's immediate body\n"
+            "- 9:16 portrait framing, figure centered slightly below middle\n"
+            "- Vulnerable, lonely, melancholic body language (arms close, shoulders down)\n"
+            "- Black line art for the figure — stickman anatomy, not detailed\n"
+            "- Particle trail rises gently like embers or dissolving matter\n\n"
+            "DO NOT:\n"
+            "- No detailed anatomy or realistic proportions — keep it stickman simple\n"
+            "- No busy backgrounds, scenery, or environmental elements\n"
+            "- No ground plane, shadow, or floor — figure floats in the purple void\n"
+            "- No bright or cheerful colors — mood must stay dim and melancholic\n"
+            "- No multiple figures — single lonely subject only\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No photorealism or 3D rendering\n"
+            "- No complex color palettes — dark purple + warm glow + black lines only\n"
+            "- No action poses — figure should be still and contemplative\n"
+            "- No smiling or happy expressions\n\n"
+            "ALWAYS:\n"
+            "- The glowing core must be warm-toned (amber/white) against the cold purple\n"
+            "- Dark particles must be present, drifting upward from the core\n"
+            "- Background must be solid dark purple, never light or white\n"
+            "- The figure must feel small and isolated in vast empty space\n"
+            "- Maintain a melancholic, vulnerable, emotionally raw mood throughout"
+        ),
+    },
+    {
+        "id": "shadow_pursuit",
+        "type": "visual",
+        "category": None,
+        "name": "Shadow Pursuit",
+        "description": "Stylized cartoon figure fleeing a looming dark cloud on light green background, anxious painterly mood",
+        "color": "#8FBF6F",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Single stylized cartoon human figure in dynamic motion (running, reaching, fleeing)\n"
+            "- Large dark amorphous cloud or shadow mass looming from above or behind\n"
+            "- Light green/sage gradient background — pale, washed-out, overcast feel\n"
+            "- Painterly illustration style with visible brush strokes and soft edges\n"
+            "- Expressive body language — outstretched arms, wind-blown hair, anxious posture\n"
+            "- Anxious, diffused lighting — no harsh shadows, light filtered through overcast sky\n"
+            "- Muted desaturated color palette: sage green, charcoal, teal-grey tones\n"
+            "- 9:16 portrait framing, figure in lower portion, cloud dominating upper portion\n"
+            "- Diagonal composition creating tension between figure and pursuing shadow\n"
+            "- Simplified rolling landscape (gentle hills, small abstract trees) as ground plane\n"
+            "- Dark cloud has organic, bulbous, almost sentient shape — not weather-realistic\n"
+            "- Animated film aesthetic — like a Cartoon Saloon or Laika production\n\n"
+            "DO NOT:\n"
+            "- No photorealism or 3D rendering\n"
+            "- No bright saturated colors — keep the palette muted and anxious\n"
+            "- No cheerful or calm mood — maintain urgency and dread\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No multiple human figures — single protagonist only\n"
+            "- No detailed realistic backgrounds — keep landscape simplified and stylized\n"
+            "- No static poses — the figure must always be in motion\n"
+            "- No clean vector lines — maintain painterly, hand-drawn quality\n"
+            "- No sunny or blue sky — atmosphere must feel heavy and overcast\n"
+            "- No cute or chibi proportions — figure should feel grounded and real-ish\n\n"
+            "ALWAYS:\n"
+            "- The dark cloud/shadow must feel like a living, pursuing force\n"
+            "- Maintain contrast between the light green world and the dark threat above\n"
+            "- The figure's emotion must be readable through body language alone\n"
+            "- Keep the painterly animated-film illustration quality consistent\n"
+            "- Mood must stay anxious, urgent, and emotionally tense throughout"
+        ),
+    },
+    {
+        "id": "white_gaze",
+        "type": "visual",
+        "category": None,
+        "name": "White Gaze",
+        "description": "Single minimalist body part or symbol on vast white space, paper-cut depth, clinical calm",
+        "color": "#B0C4DE",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Single simplified body part or symbolic element as the sole focal point\n"
+            "- Pure white/off-white background — vast, clinical, empty\n"
+            "- 90%+ white negative space surrounding the subject\n"
+            "- Clean minimalist rendering with subtle paper-cut or embossed depth\n"
+            "- Extremely limited palette: white + one muted accent color (steel blue, grey-blue, soft grey)\n"
+            "- Subject centered or near-center, perfectly isolated\n"
+            "- Flat, even, almost shadowless lighting — clinical white illumination\n"
+            "- Stylized simplification — recognizable but not anatomically detailed\n"
+            "- Subtle embossed shadow giving slight 3D paper-cut feel\n"
+            "- 9:16 portrait framing, subject small relative to vast white frame\n"
+            "- Melancholic, observing, quietly unsettling mood\n"
+            "- Clean vector-like lines with smooth curves\n\n"
+            "DO NOT:\n"
+            "- No busy backgrounds or environmental elements — white only\n"
+            "- No photorealistic textures, skin pores, or anatomical detail\n"
+            "- No bright or saturated colors — keep everything muted and clinical\n"
+            "- No multiple competing subjects — single element only\n"
+            "- No text, watermarks, logos, or UI overlays\n"
+            "- No dark or moody backgrounds — must stay bright white\n"
+            "- No gradients, patterns, or textures on the background\n"
+            "- No full faces or full figures — isolated body parts or single symbols\n"
+            "- No warm color temperature — keep it cold and clinical\n"
+            "- No drop shadows or heavy 3D effects — only subtle embossed depth\n\n"
+            "ALWAYS:\n"
+            "- White space must dominate — the emptiness IS the style\n"
+            "- The single subject must be immediately recognizable yet simplified\n"
+            "- Maintain cold, clinical, quietly melancholic tone throughout\n"
+            "- Keep the paper-cut/embossed subtle depth effect consistent\n"
+            "- The subject should feel like it's being observed or is observing — voyeuristic tension"
+        ),
+    },
+    {
+        "id": "white_room",
+        "type": "visual",
+        "category": None,
+        "name": "White Room",
+        "description": "Photorealistic solitary figure in vast white studio space, soft diffused light, contemplative editorial mood",
+        "color": "#D5D8DC",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Single person in a vast, clean white room or studio space\n"
+            "- Photorealistic rendering — editorial photography quality\n"
+            "- Soft, even, diffused lighting from high windows or overhead — almost shadowless\n"
+            "- High-key exposure — the white room glows with gentle light\n"
+            "- Minimal wardrobe in muted neutral tones (grey, off-white, beige)\n"
+            "- Contemplative body language — sitting, leaning, chin on hand, eyes downcast\n"
+            "- Vast white negative space surrounding the figure (70%+ of frame)\n"
+            "- 9:16 portrait framing, varying shot distances (wide establishing to close-up)\n"
+            "- Clean white walls, white floor — seamless studio cyclorama feel\n"
+            "- Simple furniture allowed (wooden chair, stool) — minimal and warm-toned\n"
+            "- Natural skin tones and hair — no stylization, no makeup emphasis\n"
+            "- Quiet, introspective, solitary mood — the person is alone with their thoughts\n\n"
+            "DO NOT:\n"
+            "- No busy environments, props, or decorations — keep the room bare\n"
+            "- No bright or saturated clothing colors — strictly muted neutrals\n"
+            "- No action, movement, or dynamic poses — the figure is still and reflective\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No multiple people — single solitary figure only\n"
+            "- No dark or moody lighting — maintain the bright white high-key feel\n"
+            "- No cartoon, illustration, or stylized rendering — photorealistic only\n"
+            "- No smiling or happy expressions — maintain quiet contemplation\n"
+            "- No colored walls or backgrounds — white room only\n"
+            "- No film grain, lens flare, or heavy post-processing\n\n"
+            "ALWAYS:\n"
+            "- The white room must feel vast and isolating around the solitary figure\n"
+            "- Lighting must be soft, even, and diffused — editorial studio quality\n"
+            "- The person's expression and body language must convey inner thought\n"
+            "- Maintain photorealistic quality with clean, polished finish\n"
+            "- The emptiness of the room is a character — it amplifies the solitude"
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
