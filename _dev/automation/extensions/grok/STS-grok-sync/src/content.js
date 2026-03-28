@@ -1549,9 +1549,6 @@ function initSync() {
     // Header
     const headDot = $id("sts-head-dot");
     if (headDot) headDot.classList.toggle("on", S.connected || S.wsConnected);
-    const headProj = $id("sts-head-proj");
-    if (headProj) { headProj.textContent = S.projectId || ""; headProj.style.display = S.projectId ? "" : "none"; }
-
     // Port
     try {
       const portMatch = S.studioUrl.match(/:(\d+)/);
@@ -1633,7 +1630,15 @@ function initSync() {
         list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x270D;</div>No prompts queued yet.<br>Click Assets Grabber in Studio.</div>';
         return;
       }
-      list.innerHTML = tq.map((q, i) => {
+      // Group items by projectId, preserving original indices
+      let html = "";
+      let lastPid = null;
+      tq.forEach((q, i) => {
+        const pid = q.projectId || "";
+        if (pid !== lastPid) {
+          html += '<div class="sts-group-label">' + escHtml(pid || "Unknown") + '</div>';
+          lastPid = pid;
+        }
         const pr = (q.displayPrompt || "").length > 46 ? q.displayPrompt.substring(0, 46) + "..." : q.displayPrompt || "";
         let sHTML = "", meta = "";
         const isSelected = isTypingSelected(q);
@@ -1647,9 +1652,9 @@ function initSync() {
         const rowCls = "sts-row" + (isCurrent ? " highlight" : "") + ((q.status === "error" || q.status === "failed") ? " error-clickable" : "");
         const thumbHtml = q.imageUrl ? '<img class="sts-row-thumb" src="' + q.imageUrl + '" alt="">' : '<div class="sts-row-thumb sts-row-thumb-empty">' + q.scene + "</div>";
         const checkboxHtml = '<label class="sts-row-check-wrap"><input type="checkbox" class="sts-row-check" data-role="typing-checkbox" data-idx="' + i + '"' + (isSelected ? " checked" : "") + (S.typing.active ? " disabled" : "") + "></label>";
-        const pidLabel = q.projectId ? '<span style="color:#00d4aa;font-size:9px;font-family:monospace;margin-right:4px;">' + q.projectId + '</span>' : '';
-        return '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + pidLabel + escHtml(pr) + '</div><div class="sts-row-meta">' + meta + "</div></div><div class=\"sts-row-status\">" + sHTML + "</div></div>";
-      }).join("");
+        html += '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + escHtml(pr) + '</div><div class="sts-row-meta">' + meta + "</div></div><div class=\"sts-row-status\">" + sHTML + "</div></div>";
+      });
+      list.innerHTML = html;
     } else {
       const keys = Object.keys(S.scenes).sort((a, b) => parseInt(a) - parseInt(b));
       if (!keys.length) {
@@ -1696,7 +1701,6 @@ function initSync() {
     <div class="sts-head-left">
       <div class="sts-head-dot" id="sts-head-dot"></div>
       <h3>STS Grok Sync</h3>
-      <span class="sts-head-proj" id="sts-head-proj" style="display:none;"></span>
       <span class="sts-head-port" id="sts-head-port"></span>
       <span class="sts-head-autotype" id="sts-head-autotype" style="display:none;"></span>
     </div>

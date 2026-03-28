@@ -219,6 +219,13 @@
   display: flex; align-items: center; gap: 8px;
   padding: 6px 16px; border-bottom: 1px solid var(--border); transition: background 0.15s;
 }
+/* ── Group Label ─── */
+.sts-group-label {
+  padding: 6px 16px; font-size: 10px; font-family: var(--mono); font-weight: 600;
+  color: #00d4aa; background: rgba(0,212,170,0.08); border-bottom: 1px solid var(--border);
+  letter-spacing: 0.03em; text-transform: uppercase; position: sticky; top: 0; z-index: 2;
+}
+
 .sts-row:hover { background: var(--bg-hover); }
 .sts-row.highlight { background: rgba(78,205,196,0.04); border-left: 2px solid var(--accent); }
 .sts-row.error-row { border-left: 2px solid var(--red); }

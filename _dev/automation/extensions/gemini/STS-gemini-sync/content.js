@@ -830,7 +830,6 @@
             '<div class="sts-head-left">' +
               '<div class="sts-head-dot" id="sts-head-dot"></div>' +
               '<h3>STS Gemini</h3>' +
-              '<span class="sts-head-proj" id="sts-head-proj" style="display:none;"></span>' +
               '<span class="sts-head-port" id="sts-head-port" style="display:none;"></span>' +
               '<span class="sts-head-ar" id="sts-head-ar" style="display:none;"></span>' +
             '</div>' +
@@ -1046,8 +1045,6 @@
       // Header
       var headDot = $id('sts-head-dot');
       if (headDot) headDot.classList.toggle('on', wsOn);
-      var headProj = $id('sts-head-proj');
-      if (headProj) { headProj.textContent = S.projectId || ''; headProj.style.display = S.projectId ? '' : 'none'; }
       try {
         var portMatch = S.wsUrl.match(/:(\d+)/);
         var headPort = $id('sts-head-port');
@@ -1139,7 +1136,15 @@
           list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F3A8;</div>No scenes loaded yet.</div>';
           return;
         }
-        list.innerHTML = tq.map(function(item, si) {
+        // Group items by projectId
+        var html = '';
+        var lastPid = null;
+        tq.forEach(function(item, si) {
+          var pid = item.projectId || '';
+          if (pid !== lastPid) {
+            html += '<div class="sts-group-label">' + escHtml(pid || 'Unknown') + '</div>';
+            lastPid = pid;
+          }
           var pr = (item.displayPrompt || '').length > 46 ? item.displayPrompt.substring(0, 46) + '...' : item.displayPrompt || '';
           var sHTML = '', meta = '';
           var isCurrent = S.typing.active && si === S.typing.currentIndex;
@@ -1156,18 +1161,18 @@
           var retryHtml = item.status === 'error'
             ? '<button class="sts-retry-scene-btn" data-scene="' + item.scene + '" style="background:#f39c12;color:#0d1117;border:none;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;cursor:pointer;margin-top:2px;">RETRY</button>'
             : '';
-          var pidLabel = item.projectId ? '<span style="color:#00d4aa;font-size:9px;font-family:monospace;margin-right:4px;">' + item.projectId + '</span>' : '';
-          return '<div class="' + rowCls + '">' +
+          html += '<div class="' + rowCls + '">' +
             thumbHtml +
             '<div class="sts-row-num">' + item.scene + '</div>' +
             '<div class="sts-row-info">' +
-              '<div class="sts-row-prompt">' + pidLabel + escHtml(pr) + '</div>' +
+              '<div class="sts-row-prompt">' + escHtml(pr) + '</div>' +
               '<div class="sts-row-meta">' + meta + '</div>' +
               errHtml + retryHtml +
             '</div>' +
             '<div class="sts-row-status">' + sHTML + '</div>' +
           '</div>';
-        }).join('');
+        });
+        list.innerHTML = html;
       } else {
         // ── Sync tab — shows image upload/save status per scene ──
         var sceneKeys = Object.keys(S.scenes).sort(function(a, b) {
@@ -1178,11 +1183,18 @@
           list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F4E1;</div>Waiting for generations...</div>';
           return;
         }
-        list.innerHTML = sceneKeys.map(function(key) {
+        // Group sync scenes by projectId
+        var syncHtml = '';
+        var lastSyncPid = null;
+        sceneKeys.forEach(function(key) {
           var sc = S.scenes[key];
           var parts = key.split('|');
           var sceneNum = parts.length > 1 ? parts[1] : parts[0];
           var pid = sc.projectId || (parts.length > 1 ? parts[0] : '');
+          if (pid !== lastSyncPid) {
+            syncHtml += '<div class="sts-group-label">' + escHtml(pid || 'Unknown') + '</div>';
+            lastSyncPid = pid;
+          }
           var pr = (sc.prompt || '').length > 46 ? sc.prompt.substring(0, 46) + '...' : sc.prompt || '';
           var badgeMap = {
             pending: ['pending', 'pending'],
@@ -1195,17 +1207,17 @@
           var thumbHtml = sc.imageUrl
             ? '<img class="sts-row-thumb" src="' + sc.imageUrl + '" alt="">'
             : '<div class="sts-row-thumb sts-row-thumb-empty">' + sceneNum + '</div>';
-          var pidLabel = pid ? '<span style="color:#00d4aa;font-size:9px;font-family:monospace;margin-right:4px;">' + pid + '</span>' : '';
-          return '<div class="sts-row">' +
+          syncHtml += '<div class="sts-row">' +
             thumbHtml +
             '<div class="sts-row-num">' + sceneNum + '</div>' +
             '<div class="sts-row-info">' +
-              '<div class="sts-row-prompt">' + pidLabel + escHtml(pr) + '</div>' +
+              '<div class="sts-row-prompt">' + escHtml(pr) + '</div>' +
               '<div class="sts-row-meta">' + badge[1] + '</div>' +
             '</div>' +
             '<span class="sts-card-badge sts-badge-' + badge[0] + '">' + badge[1] + '</span>' +
           '</div>';
-        }).join('');
+        });
+        list.innerHTML = syncHtml;
       }
     }
 

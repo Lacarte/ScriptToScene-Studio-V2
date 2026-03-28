@@ -222,6 +222,13 @@
 .sts-list::-webkit-scrollbar-track { background: transparent; }
 .sts-list::-webkit-scrollbar-thumb { background: rgba(78,205,196,0.15); border-radius: 4px; }
 
+/* ── Group Label ─── */
+.sts-group-label {
+  padding: 6px 16px; font-size: 10px; font-family: var(--mono); font-weight: 600;
+  color: #00d4aa; background: rgba(0,212,170,0.08); border-bottom: 1px solid var(--border);
+  letter-spacing: 0.03em; text-transform: uppercase; position: sticky; top: 0; z-index: 2;
+}
+
 /* ── Row ─── */
 .sts-row {
   display: flex; align-items: center; gap: 8px;
