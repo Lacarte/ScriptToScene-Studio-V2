@@ -1,6 +1,6 @@
 // STS Grok Sync — Service Worker
-// Owns the WebSocket connection (bypasses page CSP) and relays messages to content script.
-// Also handles tab activation.
+// Owns the WebSocket connection (bypasses page CSP) and relays to content script.
+// Uses chrome.alarms to survive MV3 service worker idle timeout (30s).
 
 let _ws = null;
 let _wsConnected = false;
@@ -9,6 +9,32 @@ let _wsReconnectAttempts = 0;
 const _WS_PATH = "/ws/animator-grok-video-grabber";
 const _PORT_MIN = 5050;
 const _PORT_MAX = 5060;
+
+// ── MV3 Service Worker Keepalive ────────────────────
+
+const _ALARM_NAME = "sts-grok-keepalive";
+
+function _startKeepAliveAlarm() {
+  chrome.alarms.create(_ALARM_NAME, { periodInMinutes: 0.4 }); // ~24s
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== _ALARM_NAME) return;
+
+  if (_ws && _ws.readyState === WebSocket.OPEN) {
+    try { _ws.send(JSON.stringify({ type: "PONG" })); } catch(e) {}
+  } else {
+    if (_wsConnected) {
+      _wsConnected = false;
+      _broadcastStatus(0);
+    }
+    if (!_wsReconnectTimer) {
+      connectWS(null);
+    }
+  }
+});
+
+_startKeepAliveAlarm();
 
 // ── WebSocket Management ────────────────────────────
 
@@ -40,6 +66,7 @@ function _discoverPort() {
 
 function _relayToContent(msg) {
   chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
+    if (!tabs) return;
     for (const tab of tabs) {
       try {
         chrome.tabs.sendMessage(tab.id, { action: "STS_WS_MESSAGE", payload: msg });
@@ -48,16 +75,12 @@ function _relayToContent(msg) {
   });
 }
 
-function _notifyContentStatus(connected, port) {
+function _broadcastStatus(port) {
   chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
+    if (!tabs) return;
+    const msg = { action: "STS_WS_STATUS", connected: _wsConnected, port: port || 0 };
     for (const tab of tabs) {
-      try {
-        chrome.tabs.sendMessage(tab.id, {
-          action: "STS_WS_STATUS",
-          connected: connected,
-          port: port || 0
-        });
-      } catch(e) {}
+      try { chrome.tabs.sendMessage(tab.id, msg); } catch(e) {}
     }
   });
 }
@@ -66,11 +89,11 @@ function _attachWS(ws, wsUrl, port) {
   _ws = ws;
   ws.onopen = () => {
     if (_ws !== ws) return;
-    console.log("[STS BG WS] Connected to", wsUrl);
+    console.log("[STS BG] Connected to", wsUrl);
     _wsConnected = true;
     _wsReconnectAttempts = 0;
     try { ws.send(JSON.stringify({ type: "EXTENSION_READY", source: "sts-grok-sync" })); } catch(e) {}
-    _notifyContentStatus(true, port);
+    _broadcastStatus(port);
   };
   ws.onmessage = (evt) => {
     if (_ws !== ws) return;
@@ -80,20 +103,21 @@ function _attachWS(ws, wsUrl, port) {
         try { ws.send(JSON.stringify({ type: "PONG" })); } catch(e) {}
         return;
       }
+      if (msg.type === "PONG") return;
       _relayToContent(msg);
     } catch(e) {
-      console.warn("[STS BG WS] Bad message:", e);
+      console.warn("[STS BG] Bad message:", e);
     }
   };
   ws.onclose = () => {
     if (_ws === ws) { _ws = null; }
-    console.log("[STS BG WS] Disconnected");
+    console.log("[STS BG] Disconnected");
     _wsConnected = false;
-    _notifyContentStatus(false, 0);
+    _broadcastStatus(0);
     _scheduleReconnect();
   };
   ws.onerror = () => {
-    _wsConnected = false;
+    if (_ws === ws) _wsConnected = false;
   };
 }
 
@@ -101,25 +125,23 @@ function connectWS(manualWsUrl) {
   if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return;
 
   if (manualWsUrl) {
-    console.log("[STS BG WS] Connecting to manual URL:", manualWsUrl);
+    console.log("[STS BG] Connecting to:", manualWsUrl);
     let ws;
     try { ws = new WebSocket(manualWsUrl); } catch(e) {
-      console.warn("[STS BG WS] Connection failed:", e.message);
       _wsConnected = false; _scheduleReconnect(); return;
     }
     _attachWS(ws, manualWsUrl, 0);
     return;
   }
 
-  console.log("[STS BG WS] Scanning ports " + _PORT_MIN + "-" + _PORT_MAX + "...");
+  console.log("[STS BG] Scanning ports " + _PORT_MIN + "-" + _PORT_MAX + "...");
   _discoverPort().then((result) => {
     if (result) {
-      console.log("[STS BG WS] Discovered server on port " + result.port);
+      console.log("[STS BG] Found server on port " + result.port);
       _attachWS(result.ws, result.url, result.port);
     } else {
-      console.warn("[STS BG WS] No server found");
       _wsConnected = false;
-      _notifyContentStatus(false, 0);
+      _broadcastStatus(0);
       _scheduleReconnect();
     }
   });
@@ -128,14 +150,18 @@ function connectWS(manualWsUrl) {
 function _scheduleReconnect() {
   if (_wsReconnectTimer) return;
   _wsReconnectAttempts++;
-  const delay = _wsReconnectAttempts <= 10 ? 2000 : 5000;
+  const delay = Math.min(_wsReconnectAttempts * 2000, 10000);
   _wsReconnectTimer = setTimeout(() => { _wsReconnectTimer = null; connectWS(null); }, delay);
 }
 
 function sendWS(msg) {
   if (_ws && _ws.readyState === WebSocket.OPEN) {
-    try { _ws.send(JSON.stringify(msg)); } catch(e) { console.warn("[STS BG WS] Send failed:", e.message); }
+    try {
+      _ws.send(typeof msg === "string" ? msg : JSON.stringify(msg));
+      return true;
+    } catch(e) {}
   }
+  return false;
 }
 
 // Auto-connect on service worker start
@@ -145,6 +171,7 @@ connectWS(null);
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[STS Grok Sync] Installed");
+  _startKeepAliveAlarm();
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -156,26 +183,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (sender.tab && sender.tab.id) {
       chrome.tabs.update(sender.tab.id, { active: true });
       chrome.windows.update(sender.tab.windowId, { focused: true });
-      console.log("[STS Grok Sync] Tab activated:", sender.tab.id);
     }
     sendResponse({ ok: true });
     return false;
   }
-  // Content script wants to send a message over WS
   if (msg.action === "STS_WS_SEND") {
-    sendWS(msg.payload);
-    sendResponse({ ok: true });
+    const ok = sendWS(msg.payload);
+    sendResponse({ ok, connected: _wsConnected });
     return false;
   }
-  // Content script asks for current WS status
   if (msg.action === "STS_WS_GET_STATUS") {
     sendResponse({ connected: _wsConnected });
     return false;
   }
-  // Content script wants to reconnect WS
   if (msg.action === "STS_WS_RECONNECT") {
     if (_ws) { try { _ws.close(); } catch(e) {} }
-    _ws = null; _wsConnected = false;
+    _ws = null; _wsConnected = false; _wsReconnectAttempts = 0;
     connectWS(msg.manualWsUrl || null);
     sendResponse({ ok: true });
     return false;

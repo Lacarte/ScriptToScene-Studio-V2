@@ -1,43 +1,51 @@
-document.addEventListener('DOMContentLoaded', () => {
-  const statusBadge = document.getElementById('statusBadge');
-  const statusLabel = document.getElementById('statusLabel');
-  const statusText = document.getElementById('statusText');
+document.addEventListener('DOMContentLoaded', function() {
+  var statusBadge = document.getElementById('statusBadge');
+  var statusLabel = document.getElementById('statusLabel');
+  var statusText = document.getElementById('statusText');
 
-  function setStatus(connected) {
+  function setStatus(connected, detail) {
     if (connected) {
       statusBadge.className = 'status-badge online';
       statusLabel.textContent = 'Connected';
-      statusText.textContent = 'Auto-connected to Flask WS';
+      statusText.textContent = detail || 'WebSocket connected to STS backend';
     } else {
       statusBadge.className = 'status-badge offline';
       statusLabel.textContent = 'Reconnecting';
-      statusText.textContent = 'Waiting for Flask on :5050...';
+      statusText.textContent = detail || 'Scanning for STS backend...';
     }
   }
 
-  // Query the content script for actual WS state
-  async function checkStatus() {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.url.includes('gemini.google.com')) {
-      statusBadge.className = 'status-badge offline';
-      statusLabel.textContent = 'Wrong page';
-      statusText.textContent = 'Open gemini.google.com';
-      return;
-    }
-
-    chrome.tabs.sendMessage(tab.id, { action: 'STS_STATUS' }, (response) => {
-      if (chrome.runtime.lastError || !response) {
-        setStatus(false);
-      } else {
-        setStatus(response.connected);
-        if (response.projectId) {
-          statusText.textContent = 'Project: ' + response.projectId + ' (' + response.sceneCount + ' scenes)';
-        }
+  function checkStatus() {
+    // Query background service worker directly for WS state
+    chrome.runtime.sendMessage({ action: 'STS_WS_GET_STATUS' }, function(bgResp) {
+      if (chrome.runtime.lastError || !bgResp) {
+        setStatus(false, 'Background worker not responding');
+        return;
       }
+
+      // Also get scene info from content script
+      chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        var tab = tabs && tabs[0];
+        if (!tab || !tab.url || tab.url.indexOf('gemini.google.com') === -1) {
+          setStatus(bgResp.connected, bgResp.connected ? 'Open gemini.google.com to use' : null);
+          return;
+        }
+
+        chrome.tabs.sendMessage(tab.id, { action: 'STS_STATUS' }, function(response) {
+          if (chrome.runtime.lastError || !response) {
+            setStatus(bgResp.connected);
+            return;
+          }
+          var detail = '';
+          if (bgResp.connected && response.projectId) {
+            detail = 'Project: ' + response.projectId + ' (' + response.sceneCount + ' scenes)';
+          }
+          setStatus(bgResp.connected, detail || undefined);
+        });
+      });
     });
   }
 
   checkStatus();
-  // Refresh every 2 seconds while popup is open
   setInterval(checkStatus, 2000);
 });

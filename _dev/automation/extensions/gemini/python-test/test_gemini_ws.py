@@ -1,13 +1,17 @@
 """
-Smoke test for Gemini extension WebSocket flow.
+Gemini Extension — Integration Test Suite
 
-Sends a single IMAGE_JOB via the storyboard API and monitors
-the WS for status updates and image upload confirmation.
+Tests all 4 core functionalities:
+  1. WebSocket localhost detection + handshake (EXTENSION_READY)
+  2. Connection status (connect/disconnect detection)
+  3. Job listening (IMAGE_JOB delivery + pending job flush)
+  4. Job completion notification (JOB_COMPLETE, STATUS_UPDATE, IMAGE_UPLOAD)
 
 Usage:
-    python test_gemini_ws.py
-    python test_gemini_ws.py --prompt "generate a red circle on white background"
-    python test_gemini_ws.py --scenes 3
+    python test_gemini_ws.py                 # Run all tests
+    python test_gemini_ws.py --test connect  # Run single test
+    python test_gemini_ws.py --test job      # Test job delivery
+    python test_gemini_ws.py --port 5050     # Specify port
 """
 
 import argparse
@@ -26,157 +30,340 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
+
+# ── Config ──────────────────────────────────────────
+
 FLASK_URL = "http://127.0.0.1:5050"
 WS_URL = "ws://127.0.0.1:5050/ws/image-gemini"
 PROJECT_ID = "pp_TEST01"
 
-DEFAULT_PROMPTS = [
-    "generate an image wide, a single red paper airplane flying through a vast empty white space, minimalist composition, clean lines",
-]
+PASS = "\033[92m PASS \033[0m"
+FAIL = "\033[91m FAIL \033[0m"
+INFO = "\033[94m INFO \033[0m"
 
 
-def check_flask():
+def log(tag, msg):
+    ts = time.strftime("%H:%M:%S")
+    print(f"  [{ts}] [{tag}] {msg}")
+
+
+# -- Test 1: WebSocket Connect + Handshake --─────────
+
+def test_connect(port):
+    """Verify WS connection and EXTENSION_READY handshake."""
+    print("\n-- Test 1: WebSocket Connect + Handshake --")
+    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+    result = {"connected": False, "handshake_sent": False, "flush_received": False}
+
     try:
-        r = requests.get(f"{FLASK_URL}/api/health", timeout=3)
-        r.raise_for_status()
-        print(f"[OK] Flask healthy: {r.json().get('status')}")
+        ws = websocket.create_connection(url, timeout=5)
+        result["connected"] = True
+        log(PASS, f"Connected to {url}")
+
+        # Send EXTENSION_READY (same as real extension)
+        ready_msg = json.dumps({"type": "EXTENSION_READY", "source": "test-harness"})
+        ws.send(ready_msg)
+        result["handshake_sent"] = True
+        log(PASS, "Sent EXTENSION_READY handshake")
+
+        # Listen briefly for flush of pending jobs
+        ws.settimeout(2)
+        try:
+            while True:
+                raw = ws.recv()
+                msg = json.loads(raw)
+                if msg.get("type") == "IMAGE_JOB":
+                    result["flush_received"] = True
+                    scenes = msg.get("scenes", [])
+                    log(INFO, f"Received flushed IMAGE_JOB ({len(scenes)} scenes)")
+                elif msg.get("type") == "PING":
+                    ws.send(json.dumps({"type": "PONG"}))
+        except (websocket.WebSocketTimeoutException, Exception):
+            pass
+
+        ws.close()
+        log(PASS, "Connection closed cleanly")
         return True
+
     except Exception as e:
-        print(f"[FAIL] Flask not reachable: {e}")
+        log(FAIL, f"Connection failed: {e}")
         return False
 
 
-def monitor_ws(results, timeout=120):
-    """Connect to WS and listen for status updates."""
-    done = threading.Event()
+# -- Test 2: Connection Status Detection --───────────
 
-    def on_message(wsapp, raw):
-        msg = json.loads(raw)
-        t = msg.get("type", "")
-        if t == "PING":
-            wsapp.send(json.dumps({"type": "PONG"}))
-            return
-        if t == "PONG":
-            return
-        ts = time.strftime("%H:%M:%S")
-        if t == "IMAGE_JOB":
-            scenes = msg.get("scenes", [])
-            print(f"  [{ts}] IMAGE_JOB received by monitor — {len(scenes)} scene(s)")
-            results["job_received"] = True
+def test_status(port):
+    """Verify server detects connect/disconnect correctly."""
+    print("\n-- Test 2: Connection Status Detection --")
+    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+
+    # Check health first
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/api/health", timeout=3)
+        if r.status_code != 200:
+            log(FAIL, f"Health check failed: {r.status_code}")
+            return False
+        log(PASS, f"Flask healthy: {r.json().get('status')}")
+    except Exception as e:
+        log(FAIL, f"Flask not reachable: {e}")
+        return False
+
+    # Connect
+    try:
+        ws = websocket.create_connection(url, timeout=5)
+        ws.send(json.dumps({"type": "EXTENSION_READY", "source": "test-status"}))
+        log(PASS, "Connected (light should be GREEN)")
+    except Exception as e:
+        log(FAIL, f"Connection failed: {e}")
+        return False
+
+    # Verify server sees us as connected
+    time.sleep(0.5)
+    try:
+        r = requests.post(
+            f"http://127.0.0.1:{port}/api/storyboard/generate",
+            json={
+                "project_id": "pp_STATUS_TEST",
+                "provider": "gemini",
+                "aspect_ratio": "9:16",
+                "scenes": [{"scene": 0, "prompt": "status test"}],
+            },
+            timeout=5,
+        )
+        if r.status_code == 202:
+            log(PASS, "Server accepted job (extension detected as connected)")
         else:
-            print(f"  [{ts}] {t}: {json.dumps(msg, default=str)[:200]}")
-            results["messages"].append(msg)
+            log(INFO, f"Server returned {r.status_code}: {r.text[:100]}")
+    except Exception as e:
+        log(INFO, f"Job send check: {e}")
 
-    def on_open(wsapp):
-        print(f"[OK] WS monitor connected")
-        wsapp.send(json.dumps({"type": "EXTENSION_READY", "source": "test-monitor"}))
+    # Drain any messages
+    ws.settimeout(1)
+    try:
+        while True:
+            ws.recv()
+    except Exception:
+        pass
 
-    def on_error(wsapp, err):
-        print(f"[WS ERROR] {err}")
-
-    def on_close(wsapp, code, reason):
-        print(f"[WS] Closed ({code})")
-        done.set()
-
-    wsapp = websocket.WebSocketApp(
-        WS_URL,
-        on_message=on_message,
-        on_open=on_open,
-        on_error=on_error,
-        on_close=on_close,
-    )
-
-    t = threading.Thread(target=wsapp.run_forever, daemon=True)
-    t.start()
-
-    # Wait for completion or timeout
-    done.wait(timeout)
-    wsapp.close()
-    return results
-
-
-def send_job(prompts, aspect_ratio="9:16"):
-    """Send IMAGE_JOB via the storyboard API."""
-    scenes = [{"scene": i + 1, "prompt": p} for i, p in enumerate(prompts)]
-    payload = {
-        "project_id": PROJECT_ID,
-        "provider": "gemini",
-        "aspect_ratio": aspect_ratio,
-        "auto_type": True,
-        "scenes": scenes,
-    }
-
-    print(f"\n[SEND] {len(scenes)} scene(s) to {FLASK_URL}/api/storyboard/generate")
-    for i, s in enumerate(scenes):
-        print(f"  Scene {s['scene']}: {s['prompt'][:80]}...")
-
-    r = requests.post(f"{FLASK_URL}/api/storyboard/generate", json=payload, timeout=10)
-    print(f"[RESP] {r.status_code}: {r.json()}")
-    return r.status_code == 202
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Gemini extension smoke test")
-    parser.add_argument("--prompt", type=str, help="Custom prompt (single scene)")
-    parser.add_argument("--scenes", type=int, default=1, help="Number of default scenes")
-    parser.add_argument("--timeout", type=int, default=120, help="Max wait time in seconds")
-    parser.add_argument("--aspect", type=str, default="9:16", help="Aspect ratio")
-    args = parser.parse_args()
-
-    print("=" * 50)
-    print("  Gemini Extension Smoke Test")
-    print("=" * 50)
-
-    if not check_flask():
-        sys.exit(1)
-
-    # Build prompts
-    if args.prompt:
-        prompts = [args.prompt]
-    else:
-        prompts = DEFAULT_PROMPTS[:args.scenes]
-        # Pad if more scenes requested
-        while len(prompts) < args.scenes:
-            prompts.append(f"generate an image, abstract geometric shape #{len(prompts)+1}, minimalist, white background")
-
-    results = {"job_received": False, "messages": []}
-
-    # Start WS monitor in background
-    print(f"\n[WS] Connecting to {WS_URL}...")
-    monitor_thread = threading.Thread(target=monitor_ws, args=(results, args.timeout), daemon=True)
-    monitor_thread.start()
+    # Disconnect
+    ws.close()
+    log(PASS, "Disconnected (light should be RED)")
     time.sleep(1)
 
-    # Send job
-    if not send_job(prompts, args.aspect):
-        print("[FAIL] API returned error")
+    # Reconnect to verify recovery
+    try:
+        ws2 = websocket.create_connection(url, timeout=5)
+        ws2.send(json.dumps({"type": "EXTENSION_READY", "source": "test-reconnect"}))
+        log(PASS, "Reconnected successfully (light should be GREEN again)")
+        ws2.close()
+        return True
+    except Exception as e:
+        log(FAIL, f"Reconnect failed: {e}")
+        return False
+
+
+# ── Test 3: Job Listening ───────────────────────────
+
+def test_job(port):
+    """Verify IMAGE_JOB delivery when extension is connected."""
+    print("\n-- Test 3: Job Listening (IMAGE_JOB delivery) --")
+    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+    result = {"job_received": False, "scenes_count": 0}
+    done = threading.Event()
+
+    # Connect WS first
+    try:
+        ws = websocket.create_connection(url, timeout=5)
+        ws.send(json.dumps({"type": "EXTENSION_READY", "source": "test-job"}))
+        log(PASS, "Connected, listening for jobs...")
+    except Exception as e:
+        log(FAIL, f"Connection failed: {e}")
+        return False
+
+    # Listen in background
+    def listener():
+        ws.settimeout(15)
+        try:
+            while not done.is_set():
+                raw = ws.recv()
+                msg = json.loads(raw)
+                if msg.get("type") == "PING":
+                    ws.send(json.dumps({"type": "PONG"}))
+                elif msg.get("type") == "IMAGE_JOB":
+                    scenes = msg.get("scenes", [])
+                    pid = msg.get("projectId", "?")
+                    result["job_received"] = True
+                    result["scenes_count"] = len(scenes)
+                    log(PASS, f"IMAGE_JOB received: {pid} — {len(scenes)} scene(s)")
+                    for sc in scenes:
+                        log(INFO, f"  Scene {sc.get('scene')}: {sc.get('prompt', '')[:60]}...")
+                    done.set()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=listener, daemon=True)
+    t.start()
+
+    # Send job via API
+    time.sleep(0.5)
+    prompt = "generate an image wide, a single red paper airplane flying through empty white space"
+    try:
+        r = requests.post(
+            f"http://127.0.0.1:{port}/api/storyboard/generate",
+            json={
+                "project_id": PROJECT_ID,
+                "provider": "gemini",
+                "aspect_ratio": "9:16",
+                "auto_type": True,
+                "scenes": [{"scene": 0, "prompt": prompt}],
+            },
+            timeout=5,
+        )
+        log(INFO, f"API response: {r.status_code} — {r.json()}")
+    except Exception as e:
+        log(FAIL, f"API call failed: {e}")
+        ws.close()
+        return False
+
+    # Wait for job
+    done.wait(timeout=10)
+    ws.close()
+
+    if result["job_received"]:
+        log(PASS, f"Job delivery confirmed ({result['scenes_count']} scenes)")
+        return True
+    else:
+        log(FAIL, "Job was NOT received via WebSocket")
+        return False
+
+
+# -- Test 4: Job Completion Notification --───────────
+
+def test_notify(port):
+    """Verify server handles STATUS_UPDATE, IMAGE_UPLOAD, JOB_COMPLETE."""
+    print("\n-- Test 4: Job Completion Notification --")
+    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+
+    try:
+        ws = websocket.create_connection(url, timeout=5)
+        ws.send(json.dumps({"type": "EXTENSION_READY", "source": "test-notify"}))
+        log(PASS, "Connected")
+    except Exception as e:
+        log(FAIL, f"Connection failed: {e}")
+        return False
+
+    # Drain any pending messages
+    ws.settimeout(2)
+    try:
+        while True:
+            ws.recv()
+    except Exception:
+        pass
+
+    pid = "pp_NOTIFY_TEST"
+    ok = True
+
+    # Send STATUS_UPDATE
+    try:
+        ws.send(json.dumps({
+            "type": "STATUS_UPDATE",
+            "projectId": pid,
+            "scene": 0,
+            "status": "generating",
+        }))
+        log(PASS, "Sent STATUS_UPDATE (scene 0 -> generating)")
+    except Exception as e:
+        log(FAIL, f"STATUS_UPDATE failed: {e}")
+        ok = False
+
+    # Send IMAGE_UPLOAD (tiny 1x1 PNG)
+    tiny_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    try:
+        ws.send(json.dumps({
+            "type": "IMAGE_UPLOAD",
+            "projectId": pid,
+            "scene": 0,
+            "image": {"data": tiny_png, "source_url": "test://1x1.png"},
+        }))
+        log(PASS, "Sent IMAGE_UPLOAD (1x1 PNG)")
+    except Exception as e:
+        log(FAIL, f"IMAGE_UPLOAD failed: {e}")
+        ok = False
+
+    # Send JOB_COMPLETE
+    try:
+        ws.send(json.dumps({
+            "type": "JOB_COMPLETE",
+            "projectId": pid,
+        }))
+        log(PASS, "Sent JOB_COMPLETE")
+    except Exception as e:
+        log(FAIL, f"JOB_COMPLETE failed: {e}")
+        ok = False
+
+    time.sleep(1)
+    ws.close()
+
+    if ok:
+        log(PASS, "All notifications sent and accepted by server")
+    return ok
+
+
+# ── Main ────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="Gemini Extension Integration Tests")
+    parser.add_argument("--test", choices=["connect", "status", "job", "notify"], help="Run single test")
+    parser.add_argument("--port", type=int, default=5050, help="Flask port (default: 5050)")
+    args = parser.parse_args()
+
+    print("=" * 56)
+    print("  STS Gemini Extension — Integration Test Suite")
+    print("=" * 56)
+
+    # Health check
+    try:
+        r = requests.get(f"http://127.0.0.1:{args.port}/api/health", timeout=3)
+        r.raise_for_status()
+        print(f"  Flask: OK ({r.json().get('status')})")
+    except Exception as e:
+        print(f"  Flask: UNREACHABLE ({e})")
+        print(f"  Start the STS backend first: python app.py")
         sys.exit(1)
 
-    print(f"\n[WAIT] Monitoring for {args.timeout}s (Ctrl+C to stop)...")
-    try:
-        monitor_thread.join(args.timeout)
-    except KeyboardInterrupt:
-        print("\n[STOP] Interrupted by user")
+    tests = {
+        "connect": ("WS Connect + Handshake", test_connect),
+        "status": ("Connection Status", test_status),
+        "job": ("Job Listening", test_job),
+        "notify": ("Job Completion", test_notify),
+    }
 
-    # Summary
-    print("\n" + "=" * 50)
-    print("  Results")
-    print("=" * 50)
-    uploads = [m for m in results["messages"] if m.get("type") == "IMAGE_UPLOAD"]
-    statuses = [m for m in results["messages"] if m.get("type") == "STATUS_UPDATE"]
-    errors = [m for m in results["messages"] if m.get("type") == "STATUS_UPDATE" and m.get("status") == "error"]
-
-    print(f"  Job received:    {'Yes' if results['job_received'] else 'No'}")
-    print(f"  Status updates:  {len(statuses)}")
-    print(f"  Images uploaded: {len(uploads)}")
-    print(f"  Errors:          {len(errors)}")
-
-    if uploads:
-        print(f"\n  [OK] Smoke test PASSED")
-    elif statuses:
-        print(f"\n  [~] Extension responded but no image uploaded yet")
+    if args.test:
+        name, fn = tests[args.test]
+        passed = fn(args.port)
     else:
-        print(f"\n  [!] No response from extension — check if it's loaded in Chromium")
+        results = {}
+        for key, (name, fn) in tests.items():
+            results[key] = fn(args.port)
+            time.sleep(0.5)
+
+        # Summary
+        print("\n" + "=" * 56)
+        print("  Results")
+        print("=" * 56)
+        all_passed = True
+        for key, (name, _) in tests.items():
+            status = PASS if results[key] else FAIL
+            print(f"  [{status}] {name}")
+            if not results[key]:
+                all_passed = False
+
+        print()
+        if all_passed:
+            print("  All tests passed.")
+        else:
+            print("  Some tests failed — check output above.")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

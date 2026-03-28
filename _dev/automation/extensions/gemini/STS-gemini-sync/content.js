@@ -79,25 +79,26 @@
     }
 
     // ── WebSocket (proxied via background service worker) ──
-    // The background worker owns the WS connection to bypass Gemini's page CSP.
+    // Background owns the WS connection to bypass Gemini's page CSP.
     // Content script sends/receives via chrome.runtime messaging.
 
-    // Listen for WS messages and status updates from background
     chrome.runtime.onMessage.addListener(function(bgMsg, sender, sendResponse) {
       if (bgMsg.action === 'STS_WS_MESSAGE') {
-        // Receiving a message means WS is connected
         if (!S.wsConnected) { S.wsConnected = true; S.connected = true; render(); }
         try { handleWSMessage(bgMsg.payload); } catch(e) { console.warn('[STS WS] Bad msg:', e); }
       } else if (bgMsg.action === 'STS_WS_STATUS') {
+        var prev = S.wsConnected;
         S.wsConnected = bgMsg.connected;
-        S.connected = S.connected || bgMsg.connected;
+        S.connected = bgMsg.connected;
         if (bgMsg.wsUrl) S.wsUrl = bgMsg.wsUrl;
+        if (prev !== bgMsg.connected) {
+          console.log('[STS WS] Status changed:', bgMsg.connected ? 'connected' : 'disconnected');
+        }
         render();
       }
     });
 
     function connectWS() {
-      // Ask background to reconnect (it auto-discovers ports)
       var manualUrl = localStorage.getItem('sts-gemini-ws-manual') || null;
       chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl });
     }
@@ -107,14 +108,21 @@
     }
 
     function checkWSStatus() {
-      chrome.runtime.sendMessage({ action: 'STS_WS_GET_STATUS' }, function(resp) {
-        if (resp) {
-          S.wsConnected = resp.connected;
-          S.connected = S.connected || resp.connected;
-          render();
-        }
-      });
+      try {
+        chrome.runtime.sendMessage({ action: 'STS_WS_GET_STATUS' }, function(resp) {
+          if (chrome.runtime.lastError) return;
+          if (resp) {
+            S.wsConnected = resp.connected;
+            S.connected = resp.connected;
+            if (resp.wsUrl) S.wsUrl = resp.wsUrl;
+            render();
+          }
+        });
+      } catch(e) {}
     }
+
+    // Poll status every 3s — handles reconnects, service worker restarts, etc.
+    var _wsStatusPollTimer = setInterval(function() { checkWSStatus(); }, 3000);
 
     function handleWSMessage(msg) {
       switch (msg.type) {
@@ -1008,17 +1016,16 @@
       var headAr = $id('sts-head-ar');
       if (headAr) { headAr.textContent = S.aspectRatio || ''; headAr.style.display = S.aspectRatio ? '' : 'none'; }
 
-      // Connection bar
+      // Connection bar — always visible, reflects real-time WS state
       var connBar = $id('sts-conn-bar');
       if (connBar) {
+        connBar.style.display = 'flex';
         if (wsOn) {
-          connBar.style.display = 'flex'; connBar.classList.add('ok');
-          var connMsg = $id('sts-conn-msg'); if (connMsg) connMsg.textContent = 'WS connected';
-        } else if (!S.connected) {
-          connBar.style.display = 'flex'; connBar.classList.remove('ok');
-          var connMsg2 = $id('sts-conn-msg'); if (connMsg2) connMsg2.textContent = 'Disconnected';
+          connBar.classList.add('ok');
+          var connMsg = $id('sts-conn-msg'); if (connMsg) connMsg.textContent = 'Connected';
         } else {
-          connBar.style.display = 'none';
+          connBar.classList.remove('ok');
+          var connMsg2 = $id('sts-conn-msg'); if (connMsg2) connMsg2.textContent = 'Disconnected';
         }
       }
 
@@ -1147,12 +1154,7 @@
     // ── Boot ─────────────────────────────────────────
     injectUI();
     render();
-    // Background service worker auto-connects; poll status until connected
     checkWSStatus();
-    var _wsStatusPoll = setInterval(function() {
-      if (S.wsConnected) { clearInterval(_wsStatusPoll); return; }
-      checkWSStatus();
-    }, 2000);
     console.log('STS Gemini Synchronizer initialized');
   }
 })();
