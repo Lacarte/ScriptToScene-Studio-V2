@@ -44,6 +44,7 @@ DEFAULT_NEGATIVE_RULES = {
     "shadow_pursuit": ["avoid photorealism", "avoid bright saturated colors", "avoid static poses", "avoid cheerful mood", "avoid sunny skies", "avoid clean vector lines"],
     "white_gaze": ["avoid dark backgrounds", "avoid photorealistic detail", "avoid saturated colors", "avoid multiple subjects", "avoid warm tones", "avoid busy compositions"],
     "white_room": ["avoid dark lighting", "avoid busy environments", "avoid saturated colors", "avoid cartoon or illustration styles", "avoid multiple people", "avoid dynamic action poses"],
+    "ink_fury": ["avoid clean vector lines", "avoid photorealism", "avoid pastel or bright colors", "avoid calm poses", "avoid wide full-body shots", "avoid detailed faces"],
     "body_signal": ["avoid bright backgrounds", "avoid facial features", "avoid warm colors", "avoid dynamic action poses", "avoid cartoon aesthetic", "avoid environmental settings"],
     "neural_glow": ["avoid bright backgrounds", "avoid flat illustration", "avoid human figures", "avoid opaque solid subjects", "avoid warm color temperature", "avoid wireframe rendering"],
     "tension_macro": ["avoid wide shots", "avoid bright lighting", "avoid full face reveals", "avoid cheerful expressions", "avoid busy backgrounds", "avoid photorealism"],

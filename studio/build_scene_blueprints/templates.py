@@ -1707,6 +1707,47 @@ SCENE_STYLE_TEMPLATES = [
             "- The emptiness of the room is a character — it amplifies the solitude"
         ),
     },
+    {
+        "id": "ink_fury",
+        "type": "visual",
+        "category": None,
+        "name": "Ink Fury",
+        "description": "Aggressive ink brush-stroke figures in black and red, extreme close-ups, raw expressionist energy",
+        "color": "#C0392B",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Abstract human torsos, backs, and body fragments rendered in aggressive ink brush strokes\n"
+            "- Bold crimson red as the single accent color slashing across charcoal/black forms\n"
+            "- Extreme close-up framing — tight crops of shoulders, spine, fists, jawlines\n"
+            "- Gestural expressionist painting style with visible brush energy and splatter\n"
+            "- High contrast chiaroscuro lighting — deep blacks against stark white highlights\n"
+            "- Raw charcoal and ink texture — smudges, drips, rough paper feel\n"
+            "- Faceless or obscured faces — emotion conveyed through body tension alone\n"
+            "- Dynamic recoil, rejection, or explosive body language frozen mid-motion\n"
+            "- 9:16 portrait framing, subject filling 60-80% of the frame\n"
+            "- Strict 3-color palette: black/charcoal + crimson red + white\n"
+            "- Ink splatter and paint drips as compositional elements\n"
+            "- Muscular or angular simplified anatomy — not realistic, not cartoon\n\n"
+            "DO NOT:\n"
+            "- No clean lines or vector art — everything must feel raw and gestural\n"
+            "- No photorealism or smooth rendering\n"
+            "- No bright or pastel colors — only black, red, and white\n"
+            "- No calm or peaceful poses — maintain visceral tension\n"
+            "- No full-body wide shots — keep it extreme close-up and cropped\n"
+            "- No detailed facial features or recognizable faces\n"
+            "- No backgrounds with scenery or environments — abstract only\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No soft edges or gentle gradients — maintain hard brush energy\n"
+            "- No multiple figures — single body fragment per scene\n\n"
+            "ALWAYS:\n"
+            "- Red must slash across the composition like a wound or war paint\n"
+            "- Brush strokes must feel aggressive, fast, and emotionally charged\n"
+            "- The body must convey raw primal emotion through posture and tension\n"
+            "- Maintain the ink/charcoal/paint material quality throughout\n"
+            "- Mood must stay intense, visceral, and emotionally violent"
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
