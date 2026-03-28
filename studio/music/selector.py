@@ -52,7 +52,7 @@ def select_music(story_tone):
                         story_tone, folder_name, os.path.basename(chosen))
             return {
                 "path": chosen,
-                "volume": 0.25,
+                "volume": 0.15,
                 "fade_in": 2.0,
                 "fade_out": 3.0,
                 "loop": True,
