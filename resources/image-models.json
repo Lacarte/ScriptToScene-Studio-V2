@@ -269,6 +269,22 @@
       }
     ]
   },
+  "transparent_skeleton": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "openai/gpt-image-1-mini/text-to-image",
+        "name": "GPT Image 1 Mini",
+        "price": 0.02,
+        "config": {}
+      }
+    ]
+  },
   "ink_fury": {
     "models": [
       {

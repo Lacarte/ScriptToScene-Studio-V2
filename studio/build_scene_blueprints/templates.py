@@ -1748,6 +1748,47 @@ SCENE_STYLE_TEMPLATES = [
             "- Mood must stay intense, visceral, and emotionally violent"
         ),
     },
+    {
+        "id": "transparent_skeleton",
+        "type": "visual",
+        "category": None,
+        "name": "Transparent Skeleton",
+        "description": "A single translucent golden skeleton/anatomical figure living among photorealistic people and environments",
+        "color": "#D4A017",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- One main character rendered as a translucent golden skeleton/anatomical figure\n"
+            "- The golden figure has polished amber/gold bones, visible skull, ribcage, and joints\n"
+            "- The golden figure wears the same period-appropriate clothing as everyone else\n"
+            "- All other people, environments, and objects are fully photorealistic\n"
+            "- The golden figure interacts naturally with real people — talking, walking, sitting, gesturing\n"
+            "- Cinematic film-quality lighting and composition\n"
+            "- Rich, detailed environments — historical settings, crowds, architecture, nature\n"
+            "- The golden skeleton catches and reflects ambient light with a subtle warm glow\n"
+            "- Medium shots, close-ups, and wide establishing shots — full cinematic range\n"
+            "- Warm color grading with earthy tones — sand, stone, brown, amber\n"
+            "- The surreal golden figure should feel matter-of-fact, not fantastical\n"
+            "- Treat the golden character as a normal person — no one reacts to their appearance\n"
+            "- 9:16 portrait framing for vertical video\n\n"
+            "DO NOT:\n"
+            "- No cartoon, illustration, or stylized rendering — everything except the golden figure must be photorealistic\n"
+            "- No multiple translucent/golden characters — only ONE golden anatomy figure per scene\n"
+            "- No x-ray or medical imaging aesthetic — the skeleton is solid polished gold, not transparent scan\n"
+            "- No horror or scary treatment of the skeleton — it is elegant and natural\n"
+            "- No glowing aura, magic particles, or supernatural effects around the figure\n"
+            "- No modern settings unless the story demands it — prefer historical or timeless environments\n"
+            "- No empty or minimal backgrounds — the world must feel lived-in and populated\n"
+            "- No text, watermarks, or UI elements\n"
+            "- No other characters with unusual skin or transparency — only the main character is golden\n\n"
+            "ALWAYS:\n"
+            "- The golden anatomical figure is the ONLY surreal element — everything else is grounded reality\n"
+            "- The contrast between the impossible golden being and the realistic world IS the visual identity\n"
+            "- The golden figure must wear clothing appropriate to the scene and setting\n"
+            "- Crowds and bystanders treat the golden figure as completely normal\n"
+            "- Maintain cinematic film quality throughout — this should look like a high-budget production"
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)
