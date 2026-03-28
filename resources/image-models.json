@@ -209,6 +209,66 @@
       }
     ]
   },
+  "body_signal": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1-mini/text-to-image",
+        "name": "GPT Image 1 Mini",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  },
+  "neural_glow": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1-mini/text-to-image",
+        "name": "GPT Image 1 Mini",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  },
+  "tension_macro": {
+    "models": [
+      {
+        "id": "openai/gpt-image-1.5/text-to-image",
+        "name": "GPT Image 1.5",
+        "price": 0.02,
+        "config": {}
+      },
+      {
+        "id": "reve/text-to-image",
+        "name": "Reve",
+        "price": 0.025,
+        "config": {}
+      }
+    ]
+  },
   "gothic_moonlit": {
     "models": [
       {

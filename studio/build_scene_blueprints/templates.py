@@ -1285,6 +1285,145 @@ SCENE_STYLE_TEMPLATES = [
         ),
     },
     {
+        "id": "body_signal",
+        "type": "visual",
+        "category": None,
+        "name": "Body Signal",
+        "description": "Dark human silhouettes with glowing internal signal lines — nervous system, veins, meridians on black void",
+        "color": "#64748B",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Full human body silhouette rendered as a dark matte form — simplified anatomy, "
+            "no facial detail, no clothing, featureless mannequin-like surface\n"
+            "- Glowing internal signal lines visible beneath the skin surface: nervous system pathways, "
+            "veins, neural networks, meridian lines, or energy channels\n"
+            "- Signal lines are fine, luminous, and cool-toned: ice blue, pale cyan, silver-white\n"
+            "- Lines are denser at key anatomical junctions — brain, spine, heart, joints, fingertips — "
+            "and sparser on limbs and flat body areas\n"
+            "- Deep dark gradient background: near-black fading to charcoal, NO environment or ground\n"
+            "- The body silhouette is barely distinguishable from the background — "
+            "only the glowing lines reveal the form\n"
+            "- Bird's-eye or straight frontal anatomical view — body laid out symmetrically, "
+            "arms at sides, legs together or slightly apart\n"
+            "- Subject centered in frame with generous dark space around all edges\n"
+            "- The glowing lines ARE the sole light source — they cast no external illumination\n"
+            "- Optional: faint subtle glow concentration at the brain area (slightly brighter node)\n"
+            "- 9:16 portrait framing, strong vertical symmetry\n"
+            "- Mood: contemplative, clinical, introspective — the body as a signal map\n\n"
+            "DO NOT:\n"
+            "- No bright backgrounds, room settings, or environmental context\n"
+            "- No facial features, expressions, or recognizable identity\n"
+            "- No colorful or warm lighting — strictly cool blue-white glow lines\n"
+            "- No cartoon, flat illustration, or wireframe aesthetic\n"
+            "- No clothing, armor, or accessories on the figure\n"
+            "- No multiple figures — single body per scene\n"
+            "- No text, medical labels, annotations, or UI overlays\n"
+            "- No dynamic poses or action — body is still, contemplative, laid out\n"
+            "- No bright red, green, or warm accent colors\n"
+            "- No translucency or x-ray effect on organs — the body is opaque dark, "
+            "only the signal LINES glow through\n\n"
+            "ALWAYS:\n"
+            "- The dark silhouette must be barely visible against the dark background\n"
+            "- Glowing internal lines must trace anatomically plausible pathways\n"
+            "- Maintain strict bilateral symmetry in composition\n"
+            "- The image should feel like a medical scan of consciousness — clinical yet profound\n"
+            "- Motion hint: very slow push-in zoom or static hold, subtle light pulse traveling "
+            "along signal lines from brain to extremities\n"
+            "- Style: anatomical illustration meets sci-fi body scan — Prometheus medical pod, "
+            "Westworld body print, high-end pharmaceutical visualization"
+        ),
+    },
+    {
+        "id": "neural_glow",
+        "type": "visual",
+        "category": None,
+        "name": "Neural Glow",
+        "description": "Translucent anatomical subjects with glowing red synaptic networks on deep black void",
+        "color": "#FF2D55",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Single anatomical or biological subject rendered as translucent 3D form — brain, heart, "
+            "eye, spine, skull, ribcage, neural cluster, DNA helix, embryo\n"
+            "- Subject is semi-transparent with visible internal structures: neural pathways, veins, "
+            "synaptic connections, dendrite branches rendered as glowing lines\n"
+            "- Glowing red/crimson accent points at synaptic junctions, nerve endings, and connection "
+            "nodes — like embers firing inside the structure\n"
+            "- Base subject color: translucent blue-grey, smoky glass, or pale ice — cool and clinical\n"
+            "- Deep black or near-black void background with NO environment, NO ground plane\n"
+            "- Faint neural dendrite branches or particle trails extending from the subject into the "
+            "surrounding darkness, fading to nothing\n"
+            "- Subject IS the sole light source — it illuminates nothing else, just glows in the void\n"
+            "- Subtle ember-like particles or spark effects drifting away from the brightest glow points\n"
+            "- Medium shot framing: subject fills 40-60% of frame with dark breathing room around it\n"
+            "- 9:16 portrait framing, subject centered or slightly off-center\n"
+            "- Clean 3D render quality — smooth surfaces, volumetric translucency, subtle subsurface scattering\n"
+            "- Mood: clinical tension, scientific awe, something alive and pulsing in the dark\n\n"
+            "DO NOT:\n"
+            "- No bright backgrounds, daylight, or ambient room lighting\n"
+            "- No flat illustration or cartoon aesthetic — must feel volumetric and 3D\n"
+            "- No human figures, faces, or full bodies — isolated anatomical subjects only\n"
+            "- No text, labels, medical annotations, or UI overlays\n"
+            "- No warm color temperature overall — the red glow is an accent, not dominant\n"
+            "- No busy environments, landscapes, or lab settings\n"
+            "- No wireframe or mesh rendering — surfaces must be smooth and translucent\n"
+            "- No multiple subjects — single anatomical form per scene\n"
+            "- No cheerful, playful, or colorful palette\n"
+            "- No opaque solid subjects — translucency is essential\n\n"
+            "ALWAYS:\n"
+            "- The subject must glow from within with visible internal network structure\n"
+            "- Red/crimson synaptic firing points must be present as the brightest accents\n"
+            "- Background must be deep black void — the subject floats in nothingness\n"
+            "- Maintain the x-ray/holographic translucent quality throughout\n"
+            "- Motion hint: slow left-to-right pan with subtle upward tilt, constant speed, "
+            "pulsating red glow flicker on synaptic points\n"
+            "- Style: medical visualization meets sci-fi concept art — Westworld brain sequences, "
+            "Ex Machina internals, high-end pharmaceutical advertising"
+        ),
+    },
+    {
+        "id": "tension_macro",
+        "type": "visual",
+        "category": None,
+        "name": "Tension Macro",
+        "description": "Extreme close-ups of stylized faces, worried eyes, dark shadows, psychological micro-tension",
+        "color": "#1E293B",
+        "style_prompt": (
+            "Generate image prompts following these rules:\n\n"
+            "DO:\n"
+            "- Extreme close-up framing: a single eye, half a face, lips, clenched jaw — never a full head\n"
+            "- Stylized illustration with visible brush planes and angular paint facets on skin\n"
+            "- Heavy dark shadows consuming 50-60% of the frame — chiaroscuro intensity\n"
+            "- One piercing accent color in the iris or a single highlight (ice blue, amber, sickly green)\n"
+            "- Desaturated cool tones: slate grey, bruised purple, ashen skin, cold steel\n"
+            "- Skin texture built from warm ochre and cool shadow blocks, angular brushwork\n"
+            "- Tense micro-expressions: dilated pupil, furrowed brow crease, trembling lip edge, vein in temple\n"
+            "- Shallow depth of field — only the focal feature is sharp, surrounding face melts into blur\n"
+            "- Subject always centered in frame with tight cropping\n"
+            "- 9:16 portrait framing, vertical emphasis\n"
+            "- Mood: dread, paranoia, vulnerability, something is wrong but unsaid\n\n"
+            "DO NOT:\n"
+            "- No full face or full head shots — always fragmentary extreme close-ups\n"
+            "- No bright lighting, daylight, or even illumination\n"
+            "- No photorealism — maintain stylized painted quality\n"
+            "- No cheerful expressions, smiles, or calm faces\n"
+            "- No busy backgrounds or environmental detail — background is pure dark void or blur\n"
+            "- No text, watermarks, or UI overlays\n"
+            "- No multiple subjects — single face fragment only\n"
+            "- No cartoon or flat vector aesthetic — needs painterly depth\n"
+            "- No warm color temperature overall\n"
+            "- No wide shots or medium shots — extreme close-up ONLY\n\n"
+            "ALWAYS:\n"
+            "- The eye (or focal feature) must be the brightest, sharpest element in the frame\n"
+            "- Dark shadows must dominate — light is scarce and directional\n"
+            "- Maintain the feeling of being uncomfortably close to someone's fear\n"
+            "- Motion hint: slow 180° orbit around subject at eye level over 6s, subtle micro-movement "
+            "(eyelid twitch, pupil shift, brow tremor)\n"
+            "- Style: psychological thriller cinematography meets painted graphic novel — Se7en, Mindhunter, Arkham Asylum"
+        ),
+    },
+    {
         "id": "neon_sigil",
         "type": "visual",
         "category": None,

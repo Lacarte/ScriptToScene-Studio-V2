@@ -38,6 +38,9 @@ DEFAULT_NEGATIVE_RULES = {
     "gothic_moonlit": ["avoid modern architecture", "avoid bright daylight", "avoid photorealism", "avoid flat vector art", "avoid cheerful warm tones"],
     "holographic_entity": ["avoid wireframe mesh", "avoid bright daylight", "avoid warm ambient lighting", "avoid cartoon aesthetic", "avoid multiple figures", "avoid realistic skin or clothing"],
     "neon_sigil": ["avoid photorealism", "avoid warm colors", "avoid multiple symbols", "avoid busy backgrounds", "avoid human figures", "avoid 3D rendering"],
+    "body_signal": ["avoid bright backgrounds", "avoid facial features", "avoid warm colors", "avoid dynamic action poses", "avoid cartoon aesthetic", "avoid environmental settings"],
+    "neural_glow": ["avoid bright backgrounds", "avoid flat illustration", "avoid human figures", "avoid opaque solid subjects", "avoid warm color temperature", "avoid wireframe rendering"],
+    "tension_macro": ["avoid wide shots", "avoid bright lighting", "avoid full face reveals", "avoid cheerful expressions", "avoid busy backgrounds", "avoid photorealism"],
 }
 
 
