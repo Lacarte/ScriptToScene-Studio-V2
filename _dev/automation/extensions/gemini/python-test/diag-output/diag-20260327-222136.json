@@ -1,0 +1,34 @@
+{
+  "type": "DIAGNOSE_REPORT",
+  "ts": "2026-03-28T02:21:36.093Z",
+  "bg": {
+    "wsConnected": false,
+    "wsUrl": "ws://localhost:5050/ws/image-gemini",
+    "wsReadyState": 1,
+    "portsActive": 1,
+    "reconnectAttempts": 0
+  },
+  "contentStates": [
+    {
+      "tabId": 2113641274,
+      "state": {
+        "active": true,
+        "wsConnected": false,
+        "connected": false,
+        "wsUrl": "ws://localhost:5050/ws/image-gemini",
+        "projectId": null,
+        "scenesCount": 0,
+        "queueLength": 0,
+        "typingActive": false,
+        "panelExists": true,
+        "connBarDisplay": "flex",
+        "connBarClass": "sts-conn-bar",
+        "connMsgText": "Disconnected",
+        "headDotClass": "sts-head-dot"
+      }
+    }
+  ],
+  "errors": [
+    "Screenshot failed: Either the '<all_urls>' or 'activeTab' permission is required."
+  ]
+}

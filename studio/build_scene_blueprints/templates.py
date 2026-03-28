@@ -1124,6 +1124,123 @@ SCENE_STYLE_TEMPLATES = [
             "- Think children's book simplicity"
         ),
     },
+    {
+        "id": "mystic_glow",
+        "type": "visual",
+        "category": None,
+        "name": "Mystic Glow",
+        "description": "Abstract symbolic subjects, deep purple gradients, soft inner glow, painterly spiral textures",
+        "color": "#7C3AED",
+        "style_prompt": (
+            "Generate image prompts in a mystical, abstract-symbolic style with painterly textures and soft luminous glow. "
+            "Subjects should be iconic, simplified symbols — eyes, hands, doors, keys, orbs, spirals — rendered with visible "
+            "brushwork and textured surfaces (oil paint, impasto, mixed-media feel). NOT photorealistic. "
+            "Each subject floats centered on a deep gradient background (dark purple-to-violet, midnight blue-to-indigo, "
+            "black-to-deep magenta). The background must be clean and atmospheric — NO busy scenery, NO landscapes. "
+            "Lighting: soft inner glow emanating from the subject itself, as if lit from within. Add a subtle halo or "
+            "bloom of warm light around the subject against the dark background. NO harsh directional light. "
+            "Color palette: deep purples, violets, indigos, with accents of warm gold, rose, and dusty pink in the subject. "
+            "Shadows are rich and velvety. Highlights are soft and diffused. "
+            "Texture: surfaces should show visible paint strokes, spiral patterns, and organic imperfections. "
+            "Edges are painterly and slightly rough — NOT clean vector lines, NOT smooth digital rendering. "
+            "Composition: center the subject with generous dark space around it. Use 9:16 vertical framing. "
+            "The subject should feel like a sacred artifact floating in void space. "
+            "Mood: mysterious, contemplative, hypnotic, otherworldly. Think album cover art meets occult illustration. "
+            "Motion hints: if animating, use slow push-in zoom toward the subject, with subtle internal movement "
+            "(pupil dilating, flame flickering, orb pulsing). Focal length ramps from wide to medium (24mm→55mm). "
+            "NO text, NO UI elements, NO realistic environments. Pure symbolic abstraction with painterly craft."
+        ),
+    },
+    {
+        "id": "papercraft_surreal",
+        "type": "visual",
+        "category": None,
+        "name": "Papercraft Surreal",
+        "description": "Folded origami paper figures reaching toward glowing geometric objects on white backdrops",
+        "color": "#2563EB",
+        "style_prompt": (
+            "Generate papercraft origami-style surrealist image prompts. "
+            "Subjects are humanoid figures that look crafted from folded paper — visible creases, angular folds, "
+            "sharp geometric planes, and a tactile matte paper texture. Figures are rendered in a single bold saturated color "
+            "(cobalt blue, deep purple, burnt orange, teal). The paper folds create blocky anatomy: square heads, "
+            "triangular torsos, flat rectangular limbs with crisp fold lines. "
+            "Figures are dynamic — reaching, walking, lunging, striding — frozen in expressive mid-motion poses. "
+            "Environments: pure white seamless studio backdrop, or minimal pale surface with soft shadow beneath the figure. "
+            "No landscape, no horizon line, no scenery — just clean negative space. "
+            "Include one glowing geometric object per scene: a faceted crystalline polyhedron, an icosahedron, "
+            "a luminous origami sphere, a folded paper star. The object floats in the air, emitting soft warm light "
+            "(pale gold, cream, warm white) with gentle bloom and translucency. "
+            "Composition: the figure occupies the lower portion of the frame, reaching or moving toward the floating object. "
+            "Generous negative space above and around. Off-center framing with the object in the upper area. "
+            "Lighting: soft diffused studio light from above and slightly behind, creating gentle shadows on the white surface. "
+            "No harsh directional light. The glowing object provides a secondary warm light source. "
+            "Depth of field: shallow, with the figure sharp and the object slightly soft with bloom. "
+            "Color palette: monochrome figure (one bold color) against pure white, with warm glow from the geometric object. "
+            "Mood: whimsical yet contemplative, tactile, handcrafted, like a stop-motion art film. "
+            "Style: product photography of paper sculptures — crisp, clean, physically plausible paper craft. "
+            "NOT 3D render, NOT digital art — should look like real folded paper photographed in a studio. "
+            "9:16 vertical framing. NO text, NO UI elements."
+        ),
+    },
+    {
+        "id": "lowpoly_surreal",
+        "type": "visual",
+        "category": None,
+        "name": "Low-Poly Surreal",
+        "description": "Faceted 3D figures, vast empty landscapes, glowing symbolic objects",
+        "color": "#7B2D8E",
+        "style_prompt": (
+            "Generate low-poly 3D surrealist image prompts with faceted, geometric figures in vast minimalist landscapes. "
+            "Subjects are low-polygon 3D humanoid figures — visible triangular facets, smooth flat shading per face, "
+            "no textures or skin detail. Figures are rendered in a single bold color (deep purple, teal, burnt orange). "
+            "Environments: endless white salt flats, blank deserts, infinite snowy plains, shallow reflective water surfaces. "
+            "The horizon line is barely visible, blending ground into sky for an ethereal, liminal quality. "
+            "Include one glowing symbolic object per scene: a golden orb, a luminous doorway, a floating geometric shape, "
+            "a beam of light, a crystalline structure. The object emits soft warm light (gold, amber, rose) with subtle bloom. "
+            "Composition: the figure is small in the frame, walking toward or gazing at the distant glowing object. "
+            "Use deep depth of field with atmospheric haze softening the background. "
+            "Camera angles: low-angle behind the figure looking forward, wide establishing shots, "
+            "medium shots with the figure off-center and vast negative space. "
+            "Color palette: muted cool tones (white, pale grey, soft blue) for environments contrasted with "
+            "one saturated color for the figure and warm glow for the symbolic object. "
+            "Lighting: soft overcast ambient light with no harsh shadows, except the warm glow from the symbolic element. "
+            "Mood: solitary, contemplative, quietly epic — a lone journey toward something unknown. "
+            "Style: 3D render aesthetic, clean and crisp, reminiscent of indie art games and abstract 3D art installations. "
+            "9:16 vertical framing. NO text, NO UI elements."
+        ),
+    },
+    {
+        "id": "wireframe_human",
+        "type": "visual",
+        "category": None,
+        "name": "Wireframe Human",
+        "description": "Glowing wireframe mesh figures on dark backgrounds — retro 3D topology aesthetic",
+        "color": "#06B6D4",
+        "style_prompt": (
+            "Generate wireframe 3D human figure image prompts in a retro-digital topology style. "
+            "Subjects are human figures rendered entirely as wireframe mesh — visible polygon grid lines forming "
+            "the body surface with NO solid fill, NO skin, NO textures. Only the mesh edges are visible, "
+            "creating a transparent skeletal topology of the human form. "
+            "Wire color: glowing cyan, teal, or cool blue-green lines against a dark background. "
+            "The wireframe has uniform quad-based topology — clean grid patterns following body contours, "
+            "denser mesh at joints (knees, elbows, fingers, face) and sparser on flat areas (torso, thighs). "
+            "Figures can be in any pose: walking, standing, reaching, running, gesturing — "
+            "the wireframe deforms naturally with the pose showing proper edge flow. "
+            "Background: solid deep dark navy, charcoal black, or very dark blue-grey. "
+            "No environment, no ground plane — the figure floats in void or stands on a subtle grid floor. "
+            "Lighting: the wireframe lines themselves glow with soft luminescence — brighter at edges "
+            "facing the camera, slightly dimmer on receding surfaces. Subtle bloom on the wire edges. "
+            "No fill lighting, no shadows — the mesh IS the light source. "
+            "Optional: faint ambient glow or halo around the figure, subtle gradient in the background "
+            "from slightly lighter behind the figure to darker at edges. "
+            "Camera angles: full body shots, three-quarter views, profile views. "
+            "Medium to wide framing with the figure centered or slightly off-center. "
+            "Mood: clinical, digital, analytical — like viewing a 3D model in a modeling application. "
+            "Style: technical 3D wireframe visualization, reminiscent of early CGI, Tron aesthetics, "
+            "or modern motion capture reference. Clean and precise, not glitchy or distorted. "
+            "9:16 vertical framing. NO text, NO UI elements, NO solid surfaces."
+        ),
+    },
 ]
 
 SCENE_STYLE_TEMPLATES = enrich_templates(SCENE_STYLE_TEMPLATES)

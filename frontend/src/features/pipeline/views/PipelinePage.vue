@@ -897,66 +897,164 @@ function logStepLabel(step) {
   <div class="pipeline-layout">
   <div class="pipeline-page">
 
-    <!-- Background filmstrip watermark -->
-    <svg class="bg-filmstrip" viewBox="0 0 80 520" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="fs-fade" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="white" stop-opacity="1"/>
-          <stop offset="75%" stop-color="white" stop-opacity="0.6"/>
-          <stop offset="100%" stop-color="white" stop-opacity="0"/>
-        </linearGradient>
-        <mask id="fs-mask"><rect width="80" height="520" fill="url(#fs-fade)"/></mask>
-      </defs>
-      <g mask="url(#fs-mask)">
-        <!-- Outer strip -->
-        <rect x="1" y="1" width="78" height="518" rx="4" stroke="currentColor" stroke-width="1.2" fill="none"/>
-        <!-- Sprocket track borders -->
-        <line x1="14" y1="0" x2="14" y2="520" stroke="currentColor" stroke-width="0.4"/>
-        <line x1="66" y1="0" x2="66" y2="520" stroke="currentColor" stroke-width="0.4"/>
-        <!-- Left sprocket holes -->
-        <rect x="5" y="16" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="56" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="96" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="136" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="176" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="216" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="256" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="296" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="336" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="376" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="416" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="456" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="5" y="496" width="6" height="4" rx="1" fill="currentColor"/>
-        <!-- Right sprocket holes -->
-        <rect x="69" y="16" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="56" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="96" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="136" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="176" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="216" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="256" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="296" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="336" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="376" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="416" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="456" width="6" height="4" rx="1" fill="currentColor"/>
-        <rect x="69" y="496" width="6" height="4" rx="1" fill="currentColor"/>
-        <!-- Film frames (rounded) -->
-        <rect x="17" y="5" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="45" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="85" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="125" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="165" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="205" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="245" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="285" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="325" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="365" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="405" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="445" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-        <rect x="17" y="485" width="46" height="30" rx="2" stroke="currentColor" stroke-width="0.6" fill="none"/>
-      </g>
-    </svg>
+    <!-- Background filmstrip watermark — infinite rolling animation -->
+    <div class="bg-filmstrip-wrapper" aria-hidden="true">
+      <svg class="bg-filmstrip-scroll" viewBox="0 0 120 1600" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- Subtle inner glow for film frames -->
+          <radialGradient id="fs-frame-glow" cx="50%" cy="50%" r="60%">
+            <stop offset="0%" stop-color="currentColor" stop-opacity="0.06"/>
+            <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <!-- First copy of film strip (height = 800) -->
+        <g>
+          <!-- Outer strip with double border -->
+          <rect x="2" y="0" width="116" height="800" rx="6" stroke="currentColor" stroke-width="1.8" fill="none"/>
+          <rect x="5" y="3" width="110" height="794" rx="4" stroke="currentColor" stroke-width="0.5" fill="none"/>
+          <!-- Sprocket track borders -->
+          <line x1="20" y1="0" x2="20" y2="800" stroke="currentColor" stroke-width="0.6"/>
+          <line x1="100" y1="0" x2="100" y2="800" stroke="currentColor" stroke-width="0.6"/>
+          <!-- Left sprocket holes (rounded, every 50px) -->
+          <rect x="8" y="20" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="70" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="120" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="170" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="220" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="270" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="320" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="370" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="420" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="470" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="520" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="570" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="620" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="670" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="720" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="770" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <!-- Right sprocket holes -->
+          <rect x="104" y="20" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="70" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="120" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="170" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="220" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="270" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="320" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="370" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="420" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="470" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="520" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="570" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="620" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="670" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="720" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="770" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <!-- Film frames with inner glow (16 frames, every 50px) -->
+          <rect x="24" y="6" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="56" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="106" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="156" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="206" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="256" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="306" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="356" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="406" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="456" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="506" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="556" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="606" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="656" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="706" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="756" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <!-- Frame divider lines (thin horizontal separators between frames) -->
+          <line x1="22" y1="50" x2="98" y2="50" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="100" x2="98" y2="100" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="150" x2="98" y2="150" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="200" x2="98" y2="200" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="250" x2="98" y2="250" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="300" x2="98" y2="300" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="350" x2="98" y2="350" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="400" x2="98" y2="400" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="450" x2="98" y2="450" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="500" x2="98" y2="500" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="550" x2="98" y2="550" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="600" x2="98" y2="600" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="650" x2="98" y2="650" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="700" x2="98" y2="700" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="750" x2="98" y2="750" stroke="currentColor" stroke-width="0.3"/>
+        </g>
+        <!-- Second copy (offset by 800) for seamless loop -->
+        <g transform="translate(0, 800)">
+          <rect x="2" y="0" width="116" height="800" rx="6" stroke="currentColor" stroke-width="1.8" fill="none"/>
+          <rect x="5" y="3" width="110" height="794" rx="4" stroke="currentColor" stroke-width="0.5" fill="none"/>
+          <line x1="20" y1="0" x2="20" y2="800" stroke="currentColor" stroke-width="0.6"/>
+          <line x1="100" y1="0" x2="100" y2="800" stroke="currentColor" stroke-width="0.6"/>
+          <rect x="8" y="20" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="70" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="120" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="170" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="220" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="270" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="320" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="370" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="420" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="470" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="520" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="570" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="620" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="670" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="720" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="8" y="770" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="20" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="70" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="120" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="170" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="220" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="270" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="320" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="370" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="420" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="470" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="520" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="570" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="620" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="670" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="720" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="104" y="770" width="8" height="5" rx="2.5" fill="currentColor"/>
+          <rect x="24" y="6" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="56" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="106" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="156" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="206" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="256" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="306" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="356" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="406" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="456" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="506" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="556" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="606" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="656" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="706" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <rect x="24" y="756" width="72" height="40" rx="3" stroke="currentColor" stroke-width="0.8" fill="url(#fs-frame-glow)"/>
+          <line x1="22" y1="50" x2="98" y2="50" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="100" x2="98" y2="100" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="150" x2="98" y2="150" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="200" x2="98" y2="200" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="250" x2="98" y2="250" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="300" x2="98" y2="300" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="350" x2="98" y2="350" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="400" x2="98" y2="400" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="450" x2="98" y2="450" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="500" x2="98" y2="500" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="550" x2="98" y2="550" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="600" x2="98" y2="600" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="650" x2="98" y2="650" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="700" x2="98" y2="700" stroke="currentColor" stroke-width="0.3"/>
+          <line x1="22" y1="750" x2="98" y2="750" stroke="currentColor" stroke-width="0.3"/>
+        </g>
+      </svg>
+    </div>
 
     <!-- Header -->
     <div class="header">
@@ -1604,16 +1702,30 @@ function logStepLabel(step) {
   position: relative;
 }
 
-.bg-filmstrip {
+.bg-filmstrip-wrapper {
   position: fixed;
-  top: -30px;
-  right: 60px;
-  height: 110vh;
-  width: auto;
-  color: rgba(255, 255, 255, 0.04);
+  top: -60px;
+  right: 40px;
+  height: 120vh;
+  width: 140px;
+  overflow: hidden;
   pointer-events: none;
   z-index: 0;
-  transform: rotate(8deg);
+  transform: rotate(6deg);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, white 8%, white 70%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, white 8%, white 70%, transparent 100%);
+}
+
+.bg-filmstrip-scroll {
+  width: 100%;
+  height: 200%;
+  color: rgba(255, 255, 255, 0.05);
+  animation: filmstrip-roll 60s linear infinite;
+}
+
+@keyframes filmstrip-roll {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-50%); }
 }
 
 /* ---- Header ---- */

@@ -38,4 +38,7 @@ export const STYLE_NAMES = {
   two_choices: 'Two Choices',
   lofi_pixel: 'Lo-Fi Cozy Pixel',
   existential: 'Existential',
+  papercraft_surreal: 'Papercraft Surreal',
+  lowpoly_surreal: 'Low-Poly Surreal',
+  wireframe_human: 'Wireframe Human',
 }
