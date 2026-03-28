@@ -741,7 +741,7 @@
           })
           .then(function() {
             item.status = 'generating';
-            if (S.scenes[item.scene]) S.scenes[item.scene].status = 'generating';
+            if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'generating';
             render();
             sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'generating' });
             return waitForImageGeneration(180000, item.projectId || S.projectId, item.scene);
@@ -750,7 +750,7 @@
             if (S.typing.stopRequested) { item.status = 'queued'; return null; }
             if (imageUrl) {
               seenImageUrls[imageUrl] = true;
-              if (S.scenes[item.scene]) S.scenes[item.scene].status = 'uploading';
+              if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'uploading';
               render();
               console.log('[FLOW] Scene ' + item.scene + ' image found, fetching base64...');
               return fetchImageAsBase64(imageUrl).then(function(b64) {
@@ -758,16 +758,16 @@
                   sendWS({ type: 'IMAGE_UPLOAD', projectId: item.projectId || S.projectId, scene: parseInt(item.scene),
                     image: { data: b64, source_url: imageUrl } });
                   item.status = 'completed'; item.imageUrl = imageUrl; S.typing.typedCount++;
-                  if (S.scenes[item.scene]) { S.scenes[item.scene].status = 'done'; S.scenes[item.scene].imageUrl = imageUrl; }
+                  if (S.scenes[item.queueKey]) { S.scenes[item.queueKey].status = 'done'; S.scenes[item.queueKey].imageUrl = imageUrl; }
                   console.log('Scene ' + item.scene + ' completed');
                 } else {
                   item.status = 'error'; item.error = 'Fetch failed';
-                  if (S.scenes[item.scene]) S.scenes[item.scene].status = 'error';
+                  if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
                 }
               });
             } else {
               item.status = 'error'; item.error = 'Timed out';
-              if (S.scenes[item.scene]) S.scenes[item.scene].status = 'error';
+              if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
             }
             return null;
           })
@@ -1142,14 +1142,20 @@
         }).join('');
       } else {
         // ── Sync tab — shows image upload/save status per scene ──
-        var sceneKeys = Object.keys(S.scenes).sort(function(a, b) { return parseInt(a) - parseInt(b); });
+        var sceneKeys = Object.keys(S.scenes).sort(function(a, b) {
+          var na = parseInt(a.split('|').pop()); var nb = parseInt(b.split('|').pop());
+          return (isNaN(na) ? 0 : na) - (isNaN(nb) ? 0 : nb);
+        });
         if (!sceneKeys.length) {
           list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F4E1;</div>Waiting for generations...</div>';
           return;
         }
-        list.innerHTML = sceneKeys.map(function(num) {
-          var sc = S.scenes[num];
-          var pr = (sc.prompt || '').length > 52 ? sc.prompt.substring(0, 52) + '...' : sc.prompt || '';
+        list.innerHTML = sceneKeys.map(function(key) {
+          var sc = S.scenes[key];
+          var parts = key.split('|');
+          var sceneNum = parts.length > 1 ? parts[1] : parts[0];
+          var pid = sc.projectId || (parts.length > 1 ? parts[0] : '');
+          var pr = (sc.prompt || '').length > 46 ? sc.prompt.substring(0, 46) + '...' : sc.prompt || '';
           var badgeMap = {
             pending: ['pending', 'pending'],
             generating: ['generating', 'generating...'],
@@ -1159,14 +1165,18 @@
           };
           var badge = badgeMap[sc.status] || ['pending', sc.status];
           var thumbHtml = sc.imageUrl
-            ? '<img class="sts-row-thumb" src="' + sc.imageUrl + '" alt="" style="margin-right:8px;">'
-            : '';
-          return '<div class="sts-card"><div class="sts-card-head">' +
+            ? '<img class="sts-row-thumb" src="' + sc.imageUrl + '" alt="">'
+            : '<div class="sts-row-thumb sts-row-thumb-empty">' + sceneNum + '</div>';
+          var pidLabel = pid ? '<span style="color:#00d4aa;font-size:9px;font-family:monospace;margin-right:4px;">' + pid + '</span>' : '';
+          return '<div class="sts-row">' +
             thumbHtml +
-            '<div class="sts-card-num">' + num + '</div>' +
-            '<div class="sts-card-prompt">' + escHtml(pr) + '</div>' +
+            '<div class="sts-row-num">' + sceneNum + '</div>' +
+            '<div class="sts-row-info">' +
+              '<div class="sts-row-prompt">' + pidLabel + escHtml(pr) + '</div>' +
+              '<div class="sts-row-meta">' + badge[1] + '</div>' +
+            '</div>' +
             '<span class="sts-card-badge sts-badge-' + badge[0] + '">' + badge[1] + '</span>' +
-          '</div></div>';
+          '</div>';
         }).join('');
       }
     }
