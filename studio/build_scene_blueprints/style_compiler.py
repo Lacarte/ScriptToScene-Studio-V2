@@ -34,7 +34,7 @@ DEFAULT_NEGATIVE_RULES = {
     "existential": ["avoid visual clutter", "avoid warm cozy aesthetics", "avoid cartoon stylization"],
     "code_cosmos": ["avoid bright daylight", "avoid cartoon aesthetic", "avoid minimal/clean compositions", "avoid warm colors", "avoid empty backgrounds"],
     "solitary_path": ["avoid crowds", "avoid urban settings", "avoid cheerful colors", "avoid close-ups", "avoid lush vegetation"],
-    "crimson_silhouette": ["avoid photorealism", "avoid more than 3 colors", "avoid detail inside silhouettes", "avoid blue or cool tones", "avoid close-up shots"],
+    "crimson_silhouette": ["avoid photorealism", "avoid more than 3 colors", "avoid detail inside silhouettes", "avoid blue or cool tones", "avoid repeating the same composition across scenes"],
     "gothic_moonlit": ["avoid modern architecture", "avoid bright daylight", "avoid photorealism", "avoid flat vector art", "avoid cheerful warm tones"],
     "holographic_entity": ["avoid wireframe mesh", "avoid bright daylight", "avoid warm ambient lighting", "avoid cartoon aesthetic", "avoid multiple figures", "avoid realistic skin or clothing"],
     "neon_sigil": ["avoid photorealism", "avoid warm colors", "avoid multiple symbols", "avoid busy backgrounds", "avoid human figures", "avoid 3D rendering"],

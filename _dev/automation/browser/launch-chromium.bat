@@ -21,6 +21,28 @@ set "GROK_EXT=%PROJECT_DIR%\_dev\automation\extensions\grok\STS-grok-sync"
 set "GEMINI_EXT=%PROJECT_DIR%\_dev\automation\extensions\gemini\STS-gemini-sync"
 set "RECORDER_EXT=%PROJECT_DIR%\_dev\automation\extensions\dom-activity-recorder"
 
+:: ── Read browser tab URLs from .env ────────────────────────────────────
+set "TAB_GROK="
+set "TAB_GEMINI="
+set "TAB_PIPELINE="
+if exist "%PROJECT_DIR%\.env" (
+  for /f "usebackq tokens=1,* delims==" %%A in ("%PROJECT_DIR%\.env") do (
+    if "%%A"=="BROWSER_TAB_GROK" set "TAB_GROK=%%B"
+    if "%%A"=="BROWSER_TAB_GEMINI" set "TAB_GEMINI=%%B"
+    if "%%A"=="BROWSER_TAB_PIPELINE" set "TAB_PIPELINE=%%B"
+  )
+)
+
+:: Build tab list
+set "TABS="
+if defined TAB_PIPELINE set "TABS=!TAB_PIPELINE!"
+if defined TAB_GROK (
+  if defined TABS (set "TABS=!TABS! !TAB_GROK!") else (set "TABS=!TAB_GROK!")
+)
+if defined TAB_GEMINI (
+  if defined TABS (set "TABS=!TABS! !TAB_GEMINI!") else (set "TABS=!TAB_GEMINI!")
+)
+
 echo.
 echo  ============================================
 echo   ScriptToScene - Automation Browser
@@ -110,9 +132,9 @@ echo.
 echo  Launching Chromium...
 
 if defined EXT_LIST (
-  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 --load-extension=%EXT_LIST% "http://localhost:5174/#/pipeline" "https://grok.com/imagine" "https://gemini.google.com/u/1/app?pageId=none"
+  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 --load-extension=%EXT_LIST% %TABS%
 ) else (
-  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 "http://localhost:5174/#/pipeline" "https://grok.com/imagine" "https://gemini.google.com/u/1/app?pageId=none"
+  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 %TABS%
 )
 
 :: Wait for CDP

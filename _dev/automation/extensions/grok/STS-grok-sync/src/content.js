@@ -263,7 +263,7 @@ function initSync() {
           } else if (imgData && !S.scenes[k].imageUrl) {
             S.scenes[k].imageUrl = imgData;
           }
-          const existing = S.typing.queue.find(q => q.scene === k);
+          const existing = S.typing.queue.find(q => q.scene === k && q.projectId === msg.projectId);
           if (!existing) {
             S.typing.queue.push({
               scene: k,
@@ -272,6 +272,7 @@ function initSync() {
               selected: true,
               status: "queued",
               imageUrl: imgData,
+              projectId: msg.projectId,
             });
           } else if (imgData && !existing.imageUrl) {
             existing.imageUrl = imgData;

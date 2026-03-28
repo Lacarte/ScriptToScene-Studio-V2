@@ -25,6 +25,7 @@ _ws_clients = []
 _ws_lock = threading.Lock()
 _pending_jobs = []  # Queue of IMAGE_JOB messages (multi-project)
 _pending_job_lock = threading.Lock()
+_storyboard_json_lock = threading.Lock()  # Protects read-modify-write on storyboard.json
 
 
 def init_gemini_ws(sock):
@@ -210,83 +211,86 @@ def _handle_image_upload(msg):
 
     from config import STORYBOARD_DIR
 
-    def _save():
-        try:
-            scene_dir = os.path.join(STORYBOARD_DIR, project_id, scene_key)
-            os.makedirs(scene_dir, exist_ok=True)
+    try:
+        scene_dir = os.path.join(STORYBOARD_DIR, project_id, scene_key)
+        os.makedirs(scene_dir, exist_ok=True)
 
-            # Strip data URI prefix
-            if "," in image_data:
-                header, b64 = image_data.split(",", 1)
-                ext = ".png"
-                if "jpeg" in header or "jpg" in header:
-                    ext = ".jpeg"
-                elif "webp" in header:
-                    ext = ".webp"
-            else:
-                b64 = image_data
+        # Strip data URI prefix
+        if "," in image_data:
+            header, b64 = image_data.split(",", 1)
+            ext = ".png"
+            if "jpeg" in header or "jpg" in header:
                 ext = ".jpeg"
+            elif "webp" in header:
+                ext = ".webp"
+        else:
+            b64 = image_data
+            ext = ".jpeg"
 
-            filepath = os.path.join(scene_dir, f"image{ext}")
-            with open(filepath, "wb") as f:
-                f.write(base64.b64decode(b64))
+        filepath = os.path.join(scene_dir, f"image{ext}")
+        with open(filepath, "wb") as f:
+            f.write(base64.b64decode(b64))
 
-            size_kb = os.path.getsize(filepath) / 1024
-            logger.success("Saved: {} ({:.0f} KB)", filepath, size_kb)
+        size_kb = os.path.getsize(filepath) / 1024
+        logger.success("Saved: {} ({:.0f} KB)", filepath, size_kb)
 
-            # Remove Gemini watermark
-            from studio.storyboard.watermark import remove_watermark
-            remove_watermark(filepath)
+        # Remove Gemini watermark (in background — non-critical)
+        def _remove_wm():
+            try:
+                from studio.storyboard.watermark import remove_watermark
+                remove_watermark(filepath)
+            except Exception:
+                pass
+        threading.Thread(target=_remove_wm, daemon=True).start()
 
-            # Update storyboard job status
-            _update_scene_status(project_id, scene_num, "ready",
-                                 local_path=f"/output/storyboard/{project_id}/{scene_key}/image{ext}")
-        except Exception as e:
-            logger.error("IMAGE_UPLOAD save failed: {}", e)
-            _update_scene_status(project_id, scene_num, "error")
-
-    threading.Thread(target=_save, daemon=True).start()
+        # Update storyboard job status (synchronous + thread-safe)
+        _update_scene_status(project_id, scene_num, "ready",
+                             local_path=f"/output/storyboard/{project_id}/{scene_key}/image{ext}")
+    except Exception as e:
+        logger.error("IMAGE_UPLOAD save failed: {}", e)
+        _update_scene_status(project_id, scene_num, "error")
 
 
 def _update_scene_status(project_id, scene_num, status, local_path=None):
-    """Update scene status in the storyboard job JSON."""
+    """Update scene status in the storyboard job JSON (thread-safe)."""
     if not project_id:
         return
-    try:
-        from config import STORYBOARD_DIR
-        job_path = os.path.join(STORYBOARD_DIR, project_id, "storyboard.json")
-        if not os.path.isfile(job_path):
-            return
+    with _storyboard_json_lock:
+        try:
+            from config import STORYBOARD_DIR
+            job_path = os.path.join(STORYBOARD_DIR, project_id, "storyboard.json")
+            if not os.path.isfile(job_path):
+                return
 
-        with open(job_path, "r", encoding="utf-8") as f:
-            job = json.load(f)
+            with open(job_path, "r", encoding="utf-8") as f:
+                job = json.load(f)
 
-        scene_key = str(scene_num)
-        statuses = job.get("scene_statuses", {})
-        if scene_key not in statuses:
-            statuses[scene_key] = {}
+            scene_key = str(scene_num)
+            statuses = job.get("scene_statuses", {})
+            if scene_key not in statuses:
+                statuses[scene_key] = {}
 
-        statuses[scene_key]["status"] = status
-        if local_path:
-            statuses[scene_key]["local_path"] = local_path
+            statuses[scene_key]["status"] = status
+            if local_path:
+                statuses[scene_key]["local_path"] = local_path
 
-        job["scene_statuses"] = statuses
+            job["scene_statuses"] = statuses
 
-        # Update ready count and check if all done
-        total = job.get("total", 0)
-        ready = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") in ("ready", "done"))
-        job["ready"] = ready
-        errors = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") == "error")
-        job["errors"] = errors
-        if ready >= total and total > 0:
-            job["status"] = "done"
-            job["completed_at"] = __import__("datetime").datetime.now().astimezone().isoformat()
+            # Update ready count and check if all done
+            total = job.get("total", 0)
+            ready = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") in ("ready", "done"))
+            job["ready"] = ready
+            errors = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") == "error")
+            job["errors"] = errors
+            if ready >= total and total > 0:
+                job["status"] = "done"
+                job["completed_at"] = __import__("datetime").datetime.now().astimezone().isoformat()
 
-        with open(job_path, "w", encoding="utf-8") as f:
-            json.dump(job, f, indent=2)
+            with open(job_path, "w", encoding="utf-8") as f:
+                json.dump(job, f, indent=2)
 
-    except Exception as e:
-        logger.debug("Failed to update storyboard job: {}", e)
+        except Exception as e:
+            logger.debug("Failed to update storyboard job: {}", e)
 
 
 def activate_tab():
@@ -335,19 +339,29 @@ def _save_scene_prompts(project_id, scenes):
 
 def _mark_job_done(project_id):
     """Mark the entire storyboard job as done, then push images+prompts to Grok."""
-    _update_scene_status(project_id, -1, "done")  # Trigger a save
-    try:
-        from config import STORYBOARD_DIR
-        job_path = os.path.join(STORYBOARD_DIR, project_id, "storyboard.json")
-        if os.path.isfile(job_path):
-            with open(job_path, "r", encoding="utf-8") as f:
-                job = json.load(f)
-            job["status"] = "done"
-            with open(job_path, "w", encoding="utf-8") as f:
-                json.dump(job, f, indent=2)
-            logger.info("Storyboard job {} marked done", project_id)
-    except Exception as e:
-        logger.debug("Failed to mark job done: {}", e)
+    with _storyboard_json_lock:
+        try:
+            from config import STORYBOARD_DIR
+            job_path = os.path.join(STORYBOARD_DIR, project_id, "storyboard.json")
+            if os.path.isfile(job_path):
+                with open(job_path, "r", encoding="utf-8") as f:
+                    job = json.load(f)
+                job["status"] = "done"
+                # Recount from actual statuses (handles any earlier race conditions)
+                statuses = job.get("scene_statuses", {})
+                job["ready"] = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") in ("ready", "done"))
+                job["errors"] = sum(1 for k, s in statuses.items() if k != "-1" and s.get("status") == "error")
+                job["completed_at"] = __import__("datetime").datetime.now().astimezone().isoformat()
+                # Set sentinel
+                if "-1" not in statuses:
+                    statuses["-1"] = {}
+                statuses["-1"]["status"] = "done"
+                with open(job_path, "w", encoding="utf-8") as f:
+                    json.dump(job, f, indent=2)
+                logger.info("Storyboard job {} marked done ({}/{} ready)",
+                            project_id, job["ready"], job.get("total", 0))
+        except Exception as e:
+            logger.debug("Failed to mark job done: {}", e)
 
     # Auto-trigger Grok assets step with storyboard images + prompts
     threading.Thread(target=_push_to_grok, args=(project_id,), daemon=True).start()
