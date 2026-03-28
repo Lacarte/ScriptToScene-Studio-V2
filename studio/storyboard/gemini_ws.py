@@ -2,7 +2,7 @@
 Gemini Image Generator — WebSocket handler for storyboard.
 
 Provides:
-  WS  /ws/image-gemini  — WebSocket endpoint for Gemini Chrome extension
+  WS  /ws/storyboard-gemini-image-grabber  — WebSocket endpoint for Gemini Chrome extension
 
 Protocol (Extension → Server):
   { type: "EXTENSION_READY", source: "sts-gemini-ext" }
@@ -28,13 +28,14 @@ _pending_job_lock = threading.Lock()
 
 
 def init_gemini_ws(sock):
-    """Register the /ws/image-gemini WebSocket route."""
+    """Register the /ws/storyboard-gemini-image-grabber WebSocket route."""
 
-    @sock.route("/ws/image-gemini")
+    @sock.route("/ws/storyboard-gemini-image-grabber")
     def gemini_ws(ws):
-        logger.info("Gemini WS client connected")
         with _ws_lock:
             _ws_clients.append(ws)
+            count = len(_ws_clients)
+        logger.info("Gemini WS client connected (clients: {})", count)
 
         # Flush pending job to newly connected client
         _flush_pending_jobs(ws)
@@ -43,19 +44,23 @@ def init_gemini_ws(sock):
             while True:
                 raw = ws.receive()
                 if raw is None:
+                    logger.info("Gemini WS received None — client closed")
                     break
                 try:
                     msg = json.loads(raw)
                 except (json.JSONDecodeError, TypeError):
+                    logger.warning("Gemini WS bad JSON: {}", raw[:120] if raw else "")
                     continue
+                logger.debug("Gemini WS ← {}", msg.get("type", "unknown"))
                 _handle_message(msg, ws)
         except Exception as e:
-            logger.debug("Gemini WS closed: {}", e)
+            logger.info("Gemini WS closed: {}", e)
         finally:
             with _ws_lock:
                 if ws in _ws_clients:
                     _ws_clients.remove(ws)
-            logger.info("Gemini WS client disconnected")
+                count = len(_ws_clients)
+            logger.info("Gemini WS client disconnected (clients: {})", count)
 
 
 def _prune_dead_clients():
@@ -75,7 +80,9 @@ def _prune_dead_clients():
 def is_extension_connected():
     """Check if at least one Gemini extension client is connected."""
     with _ws_lock:
-        return len(_prune_dead_clients()) > 0
+        alive = _prune_dead_clients()
+        logger.info("Gemini WS connection check: {} alive client(s)", len(alive))
+        return len(alive) > 0
 
 
 def queue_image_job(msg):
@@ -91,13 +98,14 @@ def queue_image_job(msg):
 
     sent = False
     with _ws_lock:
+        client_count = len(_ws_clients)
         data = json.dumps(msg)
         for ws in list(_ws_clients):
             try:
                 ws.send(data)
                 sent = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("IMAGE_JOB send failed to a client: {}", e)
 
     pid = msg.get("projectId", "?")
     scenes_count = len(msg.get("scenes", []))
@@ -106,9 +114,9 @@ def queue_image_job(msg):
         with _pending_job_lock:
             if msg in _pending_jobs:
                 _pending_jobs.remove(msg)
-        logger.info("IMAGE_JOB sent to Gemini extension ({} — {} scenes)", pid, scenes_count)
+        logger.info("IMAGE_JOB → Gemini extension ({} — {} scenes, clients: {})", pid, scenes_count, client_count)
     else:
-        logger.info("IMAGE_JOB queued — waiting for Gemini extension ({} — {} scenes)", pid, scenes_count)
+        logger.warning("IMAGE_JOB queued — NO connected clients ({} — {} scenes)", pid, scenes_count)
 
 
 def _flush_pending_jobs(ws):
@@ -132,22 +140,27 @@ def _handle_message(msg, ws):
 
     if msg_type == "EXTENSION_READY":
         source = msg.get("source", "unknown")
-        logger.info("Gemini extension ready (source: {})", source)
+        with _pending_job_lock:
+            pending = len(_pending_jobs)
+        logger.success("Gemini extension HANDSHAKE ← source={}, pending_jobs={}", source, pending)
         _flush_pending_jobs(ws)
 
     elif msg_type == "IMAGE_UPLOAD":
+        pid = msg.get("projectId", "?")
+        scene = msg.get("scene", "?")
+        logger.info("Gemini ← IMAGE_UPLOAD {} scene {}", pid, scene)
         _handle_image_upload(msg)
 
     elif msg_type == "STATUS_UPDATE":
         project_id = msg.get("projectId", "")
         scene = msg.get("scene")
         status = msg.get("status", "")
-        logger.info("Gemini {} scene {} status: {}", project_id or "?", scene, status)
+        logger.info("Gemini ← STATUS_UPDATE {} scene {} → {}", project_id or "?", scene, status)
         _update_scene_status(project_id, scene, status)
 
     elif msg_type == "JOB_COMPLETE":
         project_id = msg.get("projectId", "")
-        logger.success("Gemini job complete: {}", project_id)
+        logger.success("Gemini ← JOB_COMPLETE {}", project_id)
         _mark_job_done(project_id)
 
     elif msg_type in ("DIAGNOSE", "DIAGNOSE_REPORT", "FORCE_DISCONNECT"):
@@ -271,15 +284,18 @@ def activate_tab():
     msg = json.dumps({"type": "ACTIVATE_TAB"})
     sent = False
     with _ws_lock:
-        _prune_dead_clients()
+        alive = _prune_dead_clients()
+        logger.info("ACTIVATE_TAB → {} alive client(s)", len(alive))
         for ws in list(_ws_clients):
             try:
                 ws.send(msg)
                 sent = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("ACTIVATE_TAB send failed: {}", e)
     if sent:
-        logger.info("Sent ACTIVATE_TAB to Gemini extension")
+        logger.info("ACTIVATE_TAB delivered to Gemini extension")
+    else:
+        logger.warning("ACTIVATE_TAB failed — no connected Gemini clients")
     return sent
 
 

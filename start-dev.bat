@@ -201,7 +201,7 @@ if "%CDP_READY%"=="1" (
     echo   %D%~%X% Checking extension connections...
     curl -s http://127.0.0.1:5050/api/health >nul 2>&1
     echo   %G%+%X% Extensions ready
-    echo   %D%    Gemini: ws://localhost:5050/ws/image-gemini%X%
+    echo   %D%    Gemini: ws://localhost:5050/ws/storyboard-gemini-image-grabber%X%
     echo   %D%    Grok:   ws://localhost:5050/ws/animator-grok-video-grabber%X%
 )
 

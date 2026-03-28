@@ -21,7 +21,7 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
-WS_URL = "ws://127.0.0.1:5050/ws/image-gemini"
+WS_URL = "ws://127.0.0.1:5050/ws/storyboard-gemini-image-grabber"
 
 
 def run_diagnose(save_dir):

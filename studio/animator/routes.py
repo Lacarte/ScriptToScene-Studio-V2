@@ -44,6 +44,7 @@ _pending_grabber_lock = threading.Lock()
 def _broadcast(msg):
     """Send a JSON message to all connected WebSocket clients."""
     data = json.dumps(msg)
+    mt = msg.get("type", "?") if isinstance(msg, dict) else "?"
     with _ws_lock:
         dead = []
         for ws in _ws_clients:
@@ -53,6 +54,8 @@ def _broadcast(msg):
                 dead.append(ws)
         for ws in dead:
             _ws_clients.remove(ws)
+        if dead:
+            logger.info("Grok WS broadcast {} — pruned {} dead client(s)", mt, len(dead))
 
 
 def activate_tab():
@@ -70,14 +73,17 @@ def activate_tab():
             except Exception:
                 pass
         _ws_clients[:] = alive
+        logger.info("ACTIVATE_TAB → {} alive Grok client(s)", len(alive))
         for ws in alive:
             try:
                 ws.send(msg)
                 sent = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("ACTIVATE_TAB send failed: {}", e)
     if sent:
-        logger.info("Sent ACTIVATE_TAB to Grok extension")
+        logger.info("ACTIVATE_TAB delivered to Grok extension")
+    else:
+        logger.warning("ACTIVATE_TAB failed — no connected Grok clients")
     return sent
 
 
@@ -96,24 +102,26 @@ def _send_to_extension(msg):
 def queue_grabber_start(msg):
     """Queue a GRABBER_START message. Sends immediately AND keeps queued for late-connecting clients."""
     global _pending_grabber
+    pid = msg.get("projectId", "?")
+    scenes_count = len(msg.get("scenes", []))
     with _pending_grabber_lock:
         _pending_grabber = msg
     # Try to send immediately to already-connected clients
     sent = False
     with _ws_lock:
+        client_count = len(_ws_clients)
         if _ws_clients:
             data = json.dumps(msg)
             for ws in _ws_clients:
                 try:
                     ws.send(data)
                     sent = True
-                except Exception:
-                    pass
-    # Don't clear _pending_grabber — keep it for late-connecting clients (e.g. Automa)
+                except Exception as e:
+                    logger.warning("GRABBER_START send failed to a client: {}", e)
     if sent:
-        logger.info("GRABBER_START sent to connected client(s), still queued for new connections")
+        logger.info("GRABBER_START → Grok extension ({} — {} scenes, clients: {})", pid, scenes_count, client_count)
     else:
-        logger.info("GRABBER_START queued — waiting for client to connect")
+        logger.warning("GRABBER_START queued — NO connected Grok clients ({} — {} scenes)", pid, scenes_count)
 
 
 def _flush_pending_grabber(ws):
@@ -124,11 +132,13 @@ def _flush_pending_grabber(ws):
         if not msg:
             return
         _pending_grabber = None
+    pid = msg.get("projectId", "?")
+    scenes_count = len(msg.get("scenes", []))
     try:
         ws.send(json.dumps(msg))
-        logger.info("Flushed queued GRABBER_START to new client")
-    except Exception:
-        pass
+        logger.info("Flushed queued GRABBER_START to new Grok client ({} — {} scenes)", pid, scenes_count)
+    except Exception as e:
+        logger.warning("Flush GRABBER_START failed: {}", e)
 
 
 # ---------------------------------------------------------------------------
@@ -140,31 +150,37 @@ def init_animator_ws(sock):
 
     @sock.route("/ws/animator-grok-video-grabber")
     def animator_ws(ws):
-        logger.info("Animator WebSocket client connected")
         with _ws_lock:
             _ws_clients.append(ws)
+            count = len(_ws_clients)
+        logger.info("Grok WS client connected (clients: {})", count)
 
         # Send current status on connect
+        pending = _count_pending_jobs()
         try:
             ws.send(json.dumps({
                 "type": "CONNECTED",
                 "message": "STS Animator WebSocket connected",
-                "pendingJobs": _count_pending_jobs(),
+                "pendingJobs": pending,
             }))
-        except Exception:
-            pass
+            logger.info("Grok WS → CONNECTED (pendingJobs: {})", pending)
+        except Exception as e:
+            logger.warning("Grok WS CONNECTED send failed: {}", e)
 
         try:
             while True:
                 raw = ws.receive()
                 if raw is None:
+                    logger.info("Grok WS received None — client closed")
                     break
                 try:
                     msg = json.loads(raw)
                 except (json.JSONDecodeError, TypeError):
+                    logger.warning("Grok WS bad JSON: {}", raw[:120] if raw else "")
                     continue
 
                 mt = msg.get("type", "")
+                logger.debug("Grok WS ← {}", mt)
                 if mt in ("DIAGNOSE", "DIAGNOSE_REPORT", "FORCE_DISCONNECT"):
                     # Relay to all OTHER connected clients
                     data = json.dumps(msg)
@@ -177,12 +193,13 @@ def init_animator_ws(sock):
                 else:
                     _handle_ws_message(msg)
         except Exception as e:
-            logger.debug("Animator WS closed: {}", e)
+            logger.info("Grok WS closed: {}", e)
         finally:
             with _ws_lock:
                 if ws in _ws_clients:
                     _ws_clients.remove(ws)
-            logger.info("Animator WebSocket client disconnected")
+                count = len(_ws_clients)
+            logger.info("Grok WS client disconnected (clients: {})", count)
 
 
 def _count_pending_jobs():
@@ -200,20 +217,38 @@ def _handle_ws_message(msg):
     msg_type = msg.get("type")
 
     if msg_type == "ANIMATE_RESULT":
+        pid = msg.get("projectId", "?")
+        scene = msg.get("sceneIndex", "?")
+        ok = msg.get("success", False)
+        logger.info("Grok ← ANIMATE_RESULT {} scene {} success={}", pid, scene, ok)
         _handle_result(msg)
     elif msg_type == "ANIMATE_PROGRESS":
         _handle_progress(msg)
     elif msg_type == "EXTENSION_READY":
-        logger.info("Extension reported ready (source: {})", msg.get("source", "unknown"))
+        source = msg.get("source", "unknown")
+        with _pending_grabber_lock:
+            has_pending = _pending_grabber is not None
+        with _ws_lock:
+            client_count = len(_ws_clients)
+        logger.success("Grok extension HANDSHAKE ← source={}, clients={}, pending_grabber={}", source, client_count, has_pending)
         # Send any queued grabber data to this client
         with _ws_lock:
             if _ws_clients:
                 _flush_pending_grabber(_ws_clients[-1])
     elif msg_type == "ASSET_UPLOAD":
+        pid = msg.get("projectId", "?")
+        scene = msg.get("scene", "?")
+        count = len(msg.get("images", []))
+        logger.info("Grok ← ASSET_UPLOAD {} scene {} ({} files)", pid, scene, count)
         _handle_asset_upload_ws(msg)
     elif msg_type == "ASSET_UPLOADED":
+        logger.info("Grok ← ASSET_UPLOADED {} scene {}", msg.get("projectId", "?"), msg.get("scene", "?"))
         _handle_asset_uploaded(msg)
     elif msg_type == "ASSET_RESULT":
+        pid = msg.get("projectId", "?")
+        scene = msg.get("scene", "?")
+        urls = len(msg.get("urls", []))
+        logger.info("Grok ← ASSET_RESULT {} scene {} ({} URLs)", pid, scene, urls)
         _handle_asset_result(msg)
     elif msg_type == "PONG":
         pass  # heartbeat response

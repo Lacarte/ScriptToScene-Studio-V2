@@ -6,7 +6,7 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
-URL = "ws://127.0.0.1:5050/ws/image-gemini"
+URL = "ws://127.0.0.1:5050/ws/storyboard-gemini-image-grabber"
 
 print("1. Connecting...")
 ws = websocket.create_connection(URL, timeout=5)

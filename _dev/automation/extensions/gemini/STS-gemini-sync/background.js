@@ -7,7 +7,7 @@ var _wsConnected = false;
 var _wsUrl = '';
 var _wsReconnectTimer = null;
 var _wsReconnectAttempts = 0;
-var _WS_PATH = '/ws/image-gemini';
+var _WS_PATH = '/ws/storyboard-gemini-image-grabber';
 var _PORT_MIN = 5050;
 var _PORT_MAX = 5059; // 5060 is blocked by Chrome (SIP port — ERR_UNSAFE_PORT)
 
@@ -15,18 +15,22 @@ var _PORT_MAX = 5059; // 5060 is blocked by Chrome (SIP port — ERR_UNSAFE_PORT
 // Content scripts connect via chrome.runtime.connect().
 // As long as at least one port is open, the worker stays alive.
 
-var _ports = [];
+var _ports = [];       // { port, tabId }
+var _portTabIds = {};  // tabId → true — tracks tabs with an active port
 
 chrome.runtime.onConnect.addListener(function(port) {
   if (port.name !== 'sts-gemini-alive') return;
-  _ports.push(port);
+  var tabId = (port.sender && port.sender.tab) ? port.sender.tab.id : null;
+  _ports.push({ port: port, tabId: tabId });
+  if (tabId) _portTabIds[tabId] = true;
   console.log('[STS BG] Port connected (' + _ports.length + ' active)');
 
   // Send current status immediately to the newly connected port
   port.postMessage({ type: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl });
 
   port.onDisconnect.addListener(function() {
-    _ports = _ports.filter(function(p) { return p !== port; });
+    _ports = _ports.filter(function(p) { return p.port !== port; });
+    if (tabId) delete _portTabIds[tabId];
     console.log('[STS BG] Port disconnected (' + _ports.length + ' active)');
   });
 
@@ -35,6 +39,8 @@ chrome.runtime.onConnect.addListener(function(port) {
       sendWS(msg.payload);
     } else if (msg.action === 'STS_WS_GET_STATUS') {
       port.postMessage({ type: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl });
+    } else if (msg.action === 'STS_PONG') {
+      // Content script responded to ping — tab is alive (no-op, just prevents timeout)
     } else if (msg.action === 'STS_WS_RECONNECT') {
       if (_ws) { try { _ws.close(); } catch(e) {} }
       _ws = null; _wsConnected = false; _wsReconnectAttempts = 0;
@@ -45,21 +51,29 @@ chrome.runtime.onConnect.addListener(function(port) {
 
 function _broadcastToAllPorts(msg) {
   for (var i = _ports.length - 1; i >= 0; i--) {
-    try { _ports[i].postMessage(msg); }
-    catch(e) { _ports.splice(i, 1); }
+    try { _ports[i].port.postMessage(msg); }
+    catch(e) { if (_ports[i].tabId) delete _portTabIds[_ports[i].tabId]; _ports.splice(i, 1); }
   }
+}
+
+// Send message to tabs that DON'T have an active port and ARE fully loaded
+function _sendToOrphanTabs(tabQuery, msg) {
+  chrome.tabs.query(tabQuery, function(tabs) {
+    if (!tabs) return;
+    for (var i = 0; i < tabs.length; i++) {
+      if (_portTabIds[tabs[i].id]) continue;       // already has a port — skip
+      if (tabs[i].status !== 'complete') continue;  // not loaded yet — skip
+      try {
+        chrome.tabs.sendMessage(tabs[i].id, msg, function() { void chrome.runtime.lastError; });
+      } catch(e) {}
+    }
+  });
 }
 
 function _broadcastStatus() {
   var msg = { type: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl };
   _broadcastToAllPorts(msg);
-  // Also broadcast via tabs.sendMessage as fallback for tabs that haven't opened a port yet
-  chrome.tabs.query({ url: 'https://gemini.google.com/*' }, function(tabs) {
-    if (!tabs) return;
-    for (var i = 0; i < tabs.length; i++) {
-      try { chrome.tabs.sendMessage(tabs[i].id, { action: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl }); } catch(e) {}
-    }
-  });
+  _sendToOrphanTabs({ url: 'https://gemini.google.com/*' }, { action: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl });
 }
 
 // ── WebSocket Management ────────────────────────────
@@ -93,13 +107,8 @@ function _discoverPort() {
 function _relayToContent(msg) {
   // Primary: via persistent ports (faster, more reliable)
   _broadcastToAllPorts({ type: 'STS_WS_MESSAGE', payload: msg });
-  // Fallback: via tabs.sendMessage (for tabs without ports)
-  chrome.tabs.query({ url: 'https://gemini.google.com/*' }, function(tabs) {
-    if (!tabs) return;
-    for (var i = 0; i < tabs.length; i++) {
-      try { chrome.tabs.sendMessage(tabs[i].id, { action: 'STS_WS_MESSAGE', payload: msg }); } catch(e) {}
-    }
-  });
+  // Fallback: only for tabs without an active port
+  _sendToOrphanTabs({ url: 'https://gemini.google.com/*' }, { action: 'STS_WS_MESSAGE', payload: msg });
 }
 
 function _attachWS(ws, wsUrl) {

@@ -350,6 +350,9 @@ if __name__ == "__main__":
     print(f"  {D}-{X} Asset hook   {D}{N8N_ASSET_WEBHOOK_URL}{X}")
     print(f"  {D}-{X} Story hook   {D}{N8N_STORY_WEBHOOK_URL}{X}")
     print(f"  {D}{'-' * 28}{X}")
+    print(f"  {D}-{X} Gemini WS    {D}ws://localhost:{port}/ws/storyboard-gemini-image-grabber{X}")
+    print(f"  {D}-{X} Grok WS      {D}ws://localhost:{port}/ws/animator-grok-video-grabber{X}")
+    print(f"  {D}{'-' * 28}{X}")
     print()
 
     if not os.environ.get("STS_NO_BROWSER"):

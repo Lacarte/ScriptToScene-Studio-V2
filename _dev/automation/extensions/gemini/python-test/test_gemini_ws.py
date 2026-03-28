@@ -34,7 +34,7 @@ except ImportError:
 # ── Config ──────────────────────────────────────────
 
 FLASK_URL = "http://127.0.0.1:5050"
-WS_URL = "ws://127.0.0.1:5050/ws/image-gemini"
+WS_URL = "ws://127.0.0.1:5050/ws/storyboard-gemini-image-grabber"
 PROJECT_ID = "pp_TEST01"
 
 PASS = "\033[92m PASS \033[0m"
@@ -52,7 +52,7 @@ def log(tag, msg):
 def test_connect(port):
     """Verify WS connection and EXTENSION_READY handshake."""
     print("\n-- Test 1: WebSocket Connect + Handshake --")
-    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+    url = f"ws://127.0.0.1:{port}/ws/storyboard-gemini-image-grabber"
     result = {"connected": False, "handshake_sent": False, "flush_received": False}
 
     try:
@@ -95,7 +95,7 @@ def test_connect(port):
 def test_status(port):
     """Verify server detects connect/disconnect correctly."""
     print("\n-- Test 2: Connection Status Detection --")
-    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+    url = f"ws://127.0.0.1:{port}/ws/storyboard-gemini-image-grabber"
 
     # Check health first
     try:
@@ -167,7 +167,7 @@ def test_status(port):
 def test_job(port):
     """Verify IMAGE_JOB delivery when extension is connected."""
     print("\n-- Test 3: Job Listening (IMAGE_JOB delivery) --")
-    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+    url = f"ws://127.0.0.1:{port}/ws/storyboard-gemini-image-grabber"
     result = {"job_received": False, "scenes_count": 0}
     done = threading.Event()
 
@@ -242,7 +242,7 @@ def test_job(port):
 def test_notify(port):
     """Verify server handles STATUS_UPDATE, IMAGE_UPLOAD, JOB_COMPLETE."""
     print("\n-- Test 4: Job Completion Notification --")
-    url = f"ws://127.0.0.1:{port}/ws/image-gemini"
+    url = f"ws://127.0.0.1:{port}/ws/storyboard-gemini-image-grabber"
 
     try:
         ws = websocket.create_connection(url, timeout=5)

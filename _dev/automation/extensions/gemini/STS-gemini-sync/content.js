@@ -71,7 +71,7 @@
     window.__stsGeminiActive = true;
 
     var S = {
-      wsUrl: wsUrlOverride || localStorage.getItem('sts-gemini-ws') || 'ws://localhost:5050/ws/image-gemini',
+      wsUrl: wsUrlOverride || localStorage.getItem('sts-gemini-ws') || 'ws://localhost:5050/ws/storyboard-gemini-image-grabber',
       connected: false,
       collapsed: localStorage.getItem('sts-gemini-collapsed') === 'true',
       showSettings: false,

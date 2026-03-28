@@ -12,17 +12,21 @@ const _PORT_MAX = 5059; // 5060 is blocked by Chrome (SIP port — ERR_UNSAFE_PO
 
 // ── Persistent Port (keeps service worker alive) ────
 
-let _ports = [];
+let _ports = [];       // { port, tabId }
+let _portTabIds = {};  // tabId → true — tracks tabs with an active port
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "sts-grok-alive") return;
-  _ports.push(port);
+  const tabId = (port.sender && port.sender.tab) ? port.sender.tab.id : null;
+  _ports.push({ port, tabId });
+  if (tabId) _portTabIds[tabId] = true;
   console.log("[STS BG] Port connected (" + _ports.length + " active)");
 
   port.postMessage({ type: "STS_WS_STATUS", connected: _wsConnected });
 
   port.onDisconnect.addListener(() => {
-    _ports = _ports.filter(p => p !== port);
+    _ports = _ports.filter(p => p.port !== port);
+    if (tabId) delete _portTabIds[tabId];
     console.log("[STS BG] Port disconnected (" + _ports.length + " active)");
   });
 
@@ -41,20 +45,29 @@ chrome.runtime.onConnect.addListener((port) => {
 
 function _broadcastToAllPorts(msg) {
   for (let i = _ports.length - 1; i >= 0; i--) {
-    try { _ports[i].postMessage(msg); }
-    catch(e) { _ports.splice(i, 1); }
+    try { _ports[i].port.postMessage(msg); }
+    catch(e) { if (_ports[i].tabId) delete _portTabIds[_ports[i].tabId]; _ports.splice(i, 1); }
   }
+}
+
+// Send message to tabs that DON'T have an active port and ARE fully loaded
+function _sendToOrphanTabs(tabQuery, msg) {
+  chrome.tabs.query(tabQuery, (tabs) => {
+    if (!tabs) return;
+    for (const tab of tabs) {
+      if (_portTabIds[tab.id]) continue;       // already has a port — skip
+      if (tab.status !== "complete") continue;  // not loaded yet — skip
+      try {
+        chrome.tabs.sendMessage(tab.id, msg, () => { void chrome.runtime.lastError; });
+      } catch(e) {}
+    }
+  });
 }
 
 function _broadcastStatus(port) {
   const msg = { type: "STS_WS_STATUS", connected: _wsConnected, port: port || 0 };
   _broadcastToAllPorts(msg);
-  chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
-    if (!tabs) return;
-    for (const tab of tabs) {
-      try { chrome.tabs.sendMessage(tab.id, { action: "STS_WS_STATUS", connected: _wsConnected, port: port || 0 }); } catch(e) {}
-    }
-  });
+  _sendToOrphanTabs({ url: "*://grok.com/*" }, { action: "STS_WS_STATUS", connected: _wsConnected, port: port || 0 });
 }
 
 // ── WebSocket Management ────────────────────────────
@@ -87,12 +100,7 @@ function _discoverPort() {
 
 function _relayToContent(msg) {
   _broadcastToAllPorts({ type: "STS_WS_MESSAGE", payload: msg });
-  chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
-    if (!tabs) return;
-    for (const tab of tabs) {
-      try { chrome.tabs.sendMessage(tab.id, { action: "STS_WS_MESSAGE", payload: msg }); } catch(e) {}
-    }
-  });
+  _sendToOrphanTabs({ url: "*://grok.com/*" }, { action: "STS_WS_MESSAGE", payload: msg });
 }
 
 function _attachWS(ws, wsUrl, port) {
