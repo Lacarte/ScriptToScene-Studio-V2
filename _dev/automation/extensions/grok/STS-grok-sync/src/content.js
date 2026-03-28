@@ -134,21 +134,55 @@ function initSync() {
   // The background worker owns the WS connection to bypass page CSP.
   // Content script sends/receives via chrome.runtime messaging.
 
+  // ── Persistent port to background (keeps service worker alive) ──
+
+  let _bgPort = null;
+
+  function _handleBgMessage(msg) {
+    if (msg.type === "STS_WS_STATUS") {
+      const prev = S.wsConnected;
+      S.wsConnected = msg.connected;
+      S.connected = msg.connected;
+      if (msg.connected) S._fetchErrors = 0;
+      if (msg.port) {
+        S.studioUrl = "http://localhost:" + msg.port;
+        localStorage.setItem("sts-url", S.studioUrl);
+      }
+      if (prev !== msg.connected) {
+        console.log("[STS WS]", msg.connected ? "Connected" : "Disconnected");
+      }
+      render();
+    } else if (msg.type === "STS_WS_MESSAGE") {
+      if (!S.wsConnected) { S.wsConnected = true; S.connected = true; S._fetchErrors = 0; render(); }
+      try { handleWSMessage(msg.payload); } catch(e) { console.warn("[STS WS] Bad msg:", e); }
+    }
+  }
+
+  function _connectPort() {
+    try { _bgPort = chrome.runtime.connect({ name: "sts-grok-alive" }); }
+    catch(e) { return; }
+
+    _bgPort.onMessage.addListener(_handleBgMessage);
+
+    _bgPort.onDisconnect.addListener(() => {
+      _bgPort = null;
+      S.wsConnected = false; S.connected = false; render();
+      setTimeout(_connectPort, 1000);
+    });
+  }
+
+  // Fallback listener via chrome.runtime.onMessage
   chrome.runtime.onMessage.addListener((bgMsg, sender, sendResponse) => {
     if (bgMsg.action === "STS_WS_MESSAGE") {
       if (!S.wsConnected) { S.wsConnected = true; S.connected = true; S._fetchErrors = 0; render(); }
-      try { handleWSMessage(bgMsg.payload); } catch(e) { console.warn("[STS WS] Bad msg:", e); }
+      try { handleWSMessage(bgMsg.payload); } catch(e) {}
     } else if (bgMsg.action === "STS_WS_STATUS") {
-      const prev = S.wsConnected;
       S.wsConnected = bgMsg.connected;
-      S.connected = bgMsg.connected || S.connected;
+      S.connected = bgMsg.connected;
       if (bgMsg.connected) S._fetchErrors = 0;
       if (bgMsg.port) {
         S.studioUrl = "http://localhost:" + bgMsg.port;
         localStorage.setItem("sts-url", S.studioUrl);
-      }
-      if (prev !== bgMsg.connected) {
-        console.log("[STS WS] Status:", bgMsg.connected ? "connected" : "disconnected");
       }
       render();
     }
@@ -157,28 +191,22 @@ function initSync() {
   function connectWS() {
     const manualUrl = localStorage.getItem("sts-url-manual");
     const manualWsUrl = manualUrl ? manualUrl.replace(/^http/, "ws") + "/ws/animator-grok-video-grabber" : null;
-    chrome.runtime.sendMessage({ action: "STS_WS_RECONNECT", manualWsUrl });
+    if (_bgPort) {
+      _bgPort.postMessage({ action: "STS_WS_RECONNECT", manualWsUrl });
+    } else {
+      chrome.runtime.sendMessage({ action: "STS_WS_RECONNECT", manualWsUrl });
+    }
   }
 
   function sendWS(msg) {
-    chrome.runtime.sendMessage({ action: "STS_WS_SEND", payload: msg });
+    if (_bgPort) {
+      _bgPort.postMessage({ action: "STS_WS_SEND", payload: msg });
+    } else {
+      chrome.runtime.sendMessage({ action: "STS_WS_SEND", payload: msg });
+    }
   }
 
-  function checkWSStatus() {
-    try {
-      chrome.runtime.sendMessage({ action: "STS_WS_GET_STATUS" }, (resp) => {
-        if (chrome.runtime.lastError) return;
-        if (resp) {
-          S.wsConnected = resp.connected;
-          S.connected = resp.connected || S.connected;
-          render();
-        }
-      });
-    } catch(e) {}
-  }
-
-  // Poll status every 3s — handles reconnects, service worker restarts
-  setInterval(() => { checkWSStatus(); }, 3000);
+  _connectPort();
 
   function handleWSMessage(msg) {
     switch (msg.type) {
@@ -1836,7 +1864,6 @@ function initSync() {
   injectUI();
   renderAutoType();
   window.__stsGrokState = S;
-  checkWSStatus();
 
   // Start polling
   (async () => {

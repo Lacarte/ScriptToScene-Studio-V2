@@ -1,6 +1,6 @@
 // STS Gemini — Background Service Worker
 // Owns the WebSocket connection (bypasses page CSP) and relays to content script.
-// Uses chrome.alarms to survive MV3 service worker idle timeout (30s).
+// Content script holds a persistent port to keep the service worker alive (MV3).
 
 var _ws = null;
 var _wsConnected = false;
@@ -11,35 +11,56 @@ var _WS_PATH = '/ws/image-gemini';
 var _PORT_MIN = 5050;
 var _PORT_MAX = 5060;
 
-// ── MV3 Service Worker Keepalive ────────────────────
-// chrome.alarms fires even when the service worker is idle,
-// waking it up and giving us a chance to check/reconnect WS.
+// ── Persistent Port (keeps service worker alive) ────
+// Content scripts connect via chrome.runtime.connect().
+// As long as at least one port is open, the worker stays alive.
 
-var _ALARM_NAME = 'sts-gemini-keepalive';
+var _ports = [];
 
-function _startKeepAliveAlarm() {
-  chrome.alarms.create(_ALARM_NAME, { periodInMinutes: 0.4 }); // ~24s
-}
+chrome.runtime.onConnect.addListener(function(port) {
+  if (port.name !== 'sts-gemini-alive') return;
+  _ports.push(port);
+  console.log('[STS BG] Port connected (' + _ports.length + ' active)');
 
-chrome.alarms.onAlarm.addListener(function(alarm) {
-  if (alarm.name !== _ALARM_NAME) return;
+  // Send current status immediately to the newly connected port
+  port.postMessage({ type: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl });
 
-  // Check if WS is still alive
-  if (_ws && _ws.readyState === WebSocket.OPEN) {
-    try { _ws.send(JSON.stringify({ type: 'PONG' })); } catch(e) {}
-  } else {
-    // WS died or was never connected — reconnect
-    if (_wsConnected) {
-      _wsConnected = false;
-      _broadcastStatus();
+  port.onDisconnect.addListener(function() {
+    _ports = _ports.filter(function(p) { return p !== port; });
+    console.log('[STS BG] Port disconnected (' + _ports.length + ' active)');
+  });
+
+  port.onMessage.addListener(function(msg) {
+    if (msg.action === 'STS_WS_SEND') {
+      sendWS(msg.payload);
+    } else if (msg.action === 'STS_WS_GET_STATUS') {
+      port.postMessage({ type: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl });
+    } else if (msg.action === 'STS_WS_RECONNECT') {
+      if (_ws) { try { _ws.close(); } catch(e) {} }
+      _ws = null; _wsConnected = false; _wsReconnectAttempts = 0;
+      connectWS(msg.manualUrl || null);
     }
-    if (!_wsReconnectTimer) {
-      connectWS(null);
-    }
-  }
+  });
 });
 
-_startKeepAliveAlarm();
+function _broadcastToAllPorts(msg) {
+  for (var i = _ports.length - 1; i >= 0; i--) {
+    try { _ports[i].postMessage(msg); }
+    catch(e) { _ports.splice(i, 1); }
+  }
+}
+
+function _broadcastStatus() {
+  var msg = { type: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl };
+  _broadcastToAllPorts(msg);
+  // Also broadcast via tabs.sendMessage as fallback for tabs that haven't opened a port yet
+  chrome.tabs.query({ url: 'https://gemini.google.com/*' }, function(tabs) {
+    if (!tabs) return;
+    for (var i = 0; i < tabs.length; i++) {
+      try { chrome.tabs.sendMessage(tabs[i].id, { action: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl }); } catch(e) {}
+    }
+  });
+}
 
 // ── WebSocket Management ────────────────────────────
 
@@ -70,22 +91,13 @@ function _discoverPort() {
 }
 
 function _relayToContent(msg) {
-  chrome.tabs.query({ url: 'https://gemini.google.com/*' }, function(tabs) {
-    if (!tabs || !tabs.length) return;
-    for (var i = 0; i < tabs.length; i++) {
-      try {
-        chrome.tabs.sendMessage(tabs[i].id, { action: 'STS_WS_MESSAGE', payload: msg });
-      } catch(e) {}
-    }
-  });
-}
-
-function _broadcastStatus() {
+  // Primary: via persistent ports (faster, more reliable)
+  _broadcastToAllPorts({ type: 'STS_WS_MESSAGE', payload: msg });
+  // Fallback: via tabs.sendMessage (for tabs without ports)
   chrome.tabs.query({ url: 'https://gemini.google.com/*' }, function(tabs) {
     if (!tabs) return;
-    var msg = { action: 'STS_WS_STATUS', connected: _wsConnected, wsUrl: _wsUrl };
     for (var i = 0; i < tabs.length; i++) {
-      try { chrome.tabs.sendMessage(tabs[i].id, msg); } catch(e) {}
+      try { chrome.tabs.sendMessage(tabs[i].id, { action: 'STS_WS_MESSAGE', payload: msg }); } catch(e) {}
     }
   });
 }
@@ -135,17 +147,14 @@ function connectWS(manualUrl) {
   if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return;
 
   if (manualUrl) {
-    console.log('[STS BG] Connecting to manual URL:', manualUrl);
     var ws;
     try { ws = new WebSocket(manualUrl); } catch(e) {
-      console.warn('[STS BG] Connection failed:', e.message);
       _wsConnected = false; _scheduleReconnect(); return;
     }
     _attachWS(ws, manualUrl);
     return;
   }
 
-  console.log('[STS BG] Scanning ports ' + _PORT_MIN + '-' + _PORT_MAX + '...');
   _discoverPort().then(function(result) {
     if (result) {
       console.log('[STS BG] Found server on port ' + result.port);
@@ -173,9 +182,7 @@ function sendWS(msg) {
     try {
       _ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
       return true;
-    } catch(e) {
-      console.warn('[STS BG] Send failed:', e.message);
-    }
+    } catch(e) {}
   }
   return false;
 }
@@ -183,7 +190,7 @@ function sendWS(msg) {
 // Auto-connect on service worker start
 connectWS(null);
 
-// ── Message Handler ─────────────────────────────────
+// ── Legacy Message Handler (for popup, tab activation, image fetch) ──
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.type === 'ACTIVATE_TAB') {
@@ -195,21 +202,19 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return false;
   }
 
+  // Fallback for content scripts not using port yet
   if (request.action === 'STS_WS_SEND') {
-    var ok = sendWS(request.payload);
-    sendResponse({ ok: ok, connected: _wsConnected });
+    sendWS(request.payload);
+    sendResponse({ ok: true, connected: _wsConnected });
     return false;
   }
-
   if (request.action === 'STS_WS_GET_STATUS') {
     sendResponse({ connected: _wsConnected, wsUrl: _wsUrl });
     return false;
   }
-
   if (request.action === 'STS_WS_RECONNECT') {
     if (_ws) { try { _ws.close(); } catch(e) {} }
-    _ws = null; _wsConnected = false;
-    _wsReconnectAttempts = 0;
+    _ws = null; _wsConnected = false; _wsReconnectAttempts = 0;
     connectWS(request.manualUrl || null);
     sendResponse({ ok: true });
     return false;
@@ -223,33 +228,24 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       { credentials: 'include', redirect: 'follow' },
       {},
     ];
-
     var attempt = 0;
     function tryNext() {
       if (attempt >= strategies.length) {
         sendResponse({ success: false, error: 'All fetch strategies failed' });
         return;
       }
-      var opts = strategies[attempt];
-      attempt++;
-
+      var opts = strategies[attempt++];
       fetch(url, opts)
-        .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.blob();
-        })
+        .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
         .then(function(blob) {
           var reader = new FileReader();
-          reader.onload = function() {
-            sendResponse({ success: true, data: reader.result });
-          };
+          reader.onload = function() { sendResponse({ success: true, data: reader.result }); };
           reader.onerror = function() { tryNext(); };
           reader.readAsDataURL(blob);
         })
         .catch(function() { tryNext(); });
     }
-
     tryNext();
-    return true; // Keep channel open for async response
+    return true;
   }
 });

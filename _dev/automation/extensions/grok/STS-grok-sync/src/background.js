@@ -1,6 +1,6 @@
 // STS Grok Sync — Service Worker
 // Owns the WebSocket connection (bypasses page CSP) and relays to content script.
-// Uses chrome.alarms to survive MV3 service worker idle timeout (30s).
+// Content script holds a persistent port to keep the service worker alive (MV3).
 
 let _ws = null;
 let _wsConnected = false;
@@ -10,41 +10,62 @@ const _WS_PATH = "/ws/animator-grok-video-grabber";
 const _PORT_MIN = 5050;
 const _PORT_MAX = 5060;
 
-// ── MV3 Service Worker Keepalive ────────────────────
+// ── Persistent Port (keeps service worker alive) ────
 
-const _ALARM_NAME = "sts-grok-keepalive";
+let _ports = [];
 
-function _startKeepAliveAlarm() {
-  chrome.alarms.create(_ALARM_NAME, { periodInMinutes: 0.4 }); // ~24s
-}
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "sts-grok-alive") return;
+  _ports.push(port);
+  console.log("[STS BG] Port connected (" + _ports.length + " active)");
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== _ALARM_NAME) return;
+  port.postMessage({ type: "STS_WS_STATUS", connected: _wsConnected });
 
-  if (_ws && _ws.readyState === WebSocket.OPEN) {
-    try { _ws.send(JSON.stringify({ type: "PONG" })); } catch(e) {}
-  } else {
-    if (_wsConnected) {
-      _wsConnected = false;
-      _broadcastStatus(0);
+  port.onDisconnect.addListener(() => {
+    _ports = _ports.filter(p => p !== port);
+    console.log("[STS BG] Port disconnected (" + _ports.length + " active)");
+  });
+
+  port.onMessage.addListener((msg) => {
+    if (msg.action === "STS_WS_SEND") {
+      sendWS(msg.payload);
+    } else if (msg.action === "STS_WS_GET_STATUS") {
+      port.postMessage({ type: "STS_WS_STATUS", connected: _wsConnected });
+    } else if (msg.action === "STS_WS_RECONNECT") {
+      if (_ws) { try { _ws.close(); } catch(e) {} }
+      _ws = null; _wsConnected = false; _wsReconnectAttempts = 0;
+      connectWS(msg.manualWsUrl || null);
     }
-    if (!_wsReconnectTimer) {
-      connectWS(null);
-    }
-  }
+  });
 });
 
-_startKeepAliveAlarm();
+function _broadcastToAllPorts(msg) {
+  for (let i = _ports.length - 1; i >= 0; i--) {
+    try { _ports[i].postMessage(msg); }
+    catch(e) { _ports.splice(i, 1); }
+  }
+}
+
+function _broadcastStatus(port) {
+  const msg = { type: "STS_WS_STATUS", connected: _wsConnected, port: port || 0 };
+  _broadcastToAllPorts(msg);
+  chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
+    if (!tabs) return;
+    for (const tab of tabs) {
+      try { chrome.tabs.sendMessage(tab.id, { action: "STS_WS_STATUS", connected: _wsConnected, port: port || 0 }); } catch(e) {}
+    }
+  });
+}
 
 // ── WebSocket Management ────────────────────────────
 
-function _tryPort(port) {
+function _tryPort(p) {
   return new Promise((resolve) => {
-    const url = "ws://localhost:" + port + _WS_PATH;
+    const url = "ws://localhost:" + p + _WS_PATH;
     let ws;
     try { ws = new WebSocket(url); } catch(e) { resolve(null); return; }
     const timer = setTimeout(() => { try { ws.close(); } catch(e) {} resolve(null); }, 1500);
-    ws.onopen = () => { clearTimeout(timer); resolve({ ws, url, port }); };
+    ws.onopen = () => { clearTimeout(timer); resolve({ ws, url, port: p }); };
     ws.onerror = () => { clearTimeout(timer); resolve(null); };
   });
 }
@@ -65,22 +86,11 @@ function _discoverPort() {
 }
 
 function _relayToContent(msg) {
+  _broadcastToAllPorts({ type: "STS_WS_MESSAGE", payload: msg });
   chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
     if (!tabs) return;
     for (const tab of tabs) {
-      try {
-        chrome.tabs.sendMessage(tab.id, { action: "STS_WS_MESSAGE", payload: msg });
-      } catch(e) {}
-    }
-  });
-}
-
-function _broadcastStatus(port) {
-  chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
-    if (!tabs) return;
-    const msg = { action: "STS_WS_STATUS", connected: _wsConnected, port: port || 0 };
-    for (const tab of tabs) {
-      try { chrome.tabs.sendMessage(tab.id, msg); } catch(e) {}
+      try { chrome.tabs.sendMessage(tab.id, { action: "STS_WS_MESSAGE", payload: msg }); } catch(e) {}
     }
   });
 }
@@ -99,10 +109,7 @@ function _attachWS(ws, wsUrl, port) {
     if (_ws !== ws) return;
     try {
       const msg = JSON.parse(evt.data);
-      if (msg.type === "PING") {
-        try { ws.send(JSON.stringify({ type: "PONG" })); } catch(e) {}
-        return;
-      }
+      if (msg.type === "PING") { try { ws.send(JSON.stringify({ type: "PONG" })); } catch(e) {} return; }
       if (msg.type === "PONG") return;
       _relayToContent(msg);
     } catch(e) {
@@ -125,7 +132,6 @@ function connectWS(manualWsUrl) {
   if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return;
 
   if (manualWsUrl) {
-    console.log("[STS BG] Connecting to:", manualWsUrl);
     let ws;
     try { ws = new WebSocket(manualWsUrl); } catch(e) {
       _wsConnected = false; _scheduleReconnect(); return;
@@ -134,7 +140,6 @@ function connectWS(manualWsUrl) {
     return;
   }
 
-  console.log("[STS BG] Scanning ports " + _PORT_MIN + "-" + _PORT_MAX + "...");
   _discoverPort().then((result) => {
     if (result) {
       console.log("[STS BG] Found server on port " + result.port);
@@ -164,44 +169,28 @@ function sendWS(msg) {
   return false;
 }
 
-// Auto-connect on service worker start
 connectWS(null);
 
-// ── Message Handler ─────────────────────────────────
+// ── Legacy Message Handler ──────────────────────────
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("[STS Grok Sync] Installed");
-  _startKeepAliveAlarm();
-});
+chrome.runtime.onInstalled.addListener(() => { console.log("[STS Grok Sync] Installed"); });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === "PING") {
-    sendResponse({ pong: true, from: "background" });
-    return false;
-  }
+  if (msg.type === "PING") { sendResponse({ pong: true }); return false; }
   if (msg.type === "ACTIVATE_TAB") {
     if (sender.tab && sender.tab.id) {
       chrome.tabs.update(sender.tab.id, { active: true });
       chrome.windows.update(sender.tab.windowId, { focused: true });
     }
-    sendResponse({ ok: true });
-    return false;
+    sendResponse({ ok: true }); return false;
   }
-  if (msg.action === "STS_WS_SEND") {
-    const ok = sendWS(msg.payload);
-    sendResponse({ ok, connected: _wsConnected });
-    return false;
-  }
-  if (msg.action === "STS_WS_GET_STATUS") {
-    sendResponse({ connected: _wsConnected });
-    return false;
-  }
+  if (msg.action === "STS_WS_SEND") { sendWS(msg.payload); sendResponse({ ok: true }); return false; }
+  if (msg.action === "STS_WS_GET_STATUS") { sendResponse({ connected: _wsConnected }); return false; }
   if (msg.action === "STS_WS_RECONNECT") {
     if (_ws) { try { _ws.close(); } catch(e) {} }
     _ws = null; _wsConnected = false; _wsReconnectAttempts = 0;
     connectWS(msg.manualWsUrl || null);
-    sendResponse({ ok: true });
-    return false;
+    sendResponse({ ok: true }); return false;
   }
   return false;
 });

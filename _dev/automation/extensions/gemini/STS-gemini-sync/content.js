@@ -79,50 +79,70 @@
     }
 
     // ── WebSocket (proxied via background service worker) ──
-    // Background owns the WS connection to bypass Gemini's page CSP.
-    // Content script sends/receives via chrome.runtime messaging.
+    // Background owns the WS. Content script holds a persistent port
+    // to keep the service worker alive (MV3 kills idle workers after 30s).
 
+    var _bgPort = null;
+
+    function _connectPort() {
+      try { _bgPort = chrome.runtime.connect({ name: 'sts-gemini-alive' }); }
+      catch(e) { console.warn('[STS WS] Port connect failed:', e); return; }
+
+      _bgPort.onMessage.addListener(function(msg) {
+        if (msg.type === 'STS_WS_STATUS') {
+          var prev = S.wsConnected;
+          S.wsConnected = msg.connected;
+          S.connected = msg.connected;
+          if (msg.wsUrl) S.wsUrl = msg.wsUrl;
+          if (prev !== msg.connected) {
+            console.log('[STS WS]', msg.connected ? 'Connected' : 'Disconnected');
+          }
+          render();
+        } else if (msg.type === 'STS_WS_MESSAGE') {
+          if (!S.wsConnected) { S.wsConnected = true; S.connected = true; render(); }
+          try { handleWSMessage(msg.payload); } catch(e) { console.warn('[STS WS] Bad msg:', e); }
+        }
+      });
+
+      _bgPort.onDisconnect.addListener(function() {
+        console.log('[STS WS] Port lost — reconnecting in 1s');
+        _bgPort = null;
+        S.wsConnected = false; S.connected = false; render();
+        setTimeout(_connectPort, 1000);
+      });
+    }
+
+    // Also listen via chrome.runtime.onMessage as fallback
     chrome.runtime.onMessage.addListener(function(bgMsg, sender, sendResponse) {
       if (bgMsg.action === 'STS_WS_MESSAGE') {
         if (!S.wsConnected) { S.wsConnected = true; S.connected = true; render(); }
-        try { handleWSMessage(bgMsg.payload); } catch(e) { console.warn('[STS WS] Bad msg:', e); }
+        try { handleWSMessage(bgMsg.payload); } catch(e) {}
       } else if (bgMsg.action === 'STS_WS_STATUS') {
-        var prev = S.wsConnected;
         S.wsConnected = bgMsg.connected;
         S.connected = bgMsg.connected;
         if (bgMsg.wsUrl) S.wsUrl = bgMsg.wsUrl;
-        if (prev !== bgMsg.connected) {
-          console.log('[STS WS] Status changed:', bgMsg.connected ? 'connected' : 'disconnected');
-        }
         render();
       }
     });
 
     function connectWS() {
       var manualUrl = localStorage.getItem('sts-gemini-ws-manual') || null;
-      chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl });
+      if (_bgPort) {
+        _bgPort.postMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl });
+      } else {
+        chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl });
+      }
     }
 
     function sendWS(msg) {
-      chrome.runtime.sendMessage({ action: 'STS_WS_SEND', payload: msg });
+      if (_bgPort) {
+        _bgPort.postMessage({ action: 'STS_WS_SEND', payload: msg });
+      } else {
+        chrome.runtime.sendMessage({ action: 'STS_WS_SEND', payload: msg });
+      }
     }
 
-    function checkWSStatus() {
-      try {
-        chrome.runtime.sendMessage({ action: 'STS_WS_GET_STATUS' }, function(resp) {
-          if (chrome.runtime.lastError) return;
-          if (resp) {
-            S.wsConnected = resp.connected;
-            S.connected = resp.connected;
-            if (resp.wsUrl) S.wsUrl = resp.wsUrl;
-            render();
-          }
-        });
-      } catch(e) {}
-    }
-
-    // Poll status every 3s — handles reconnects, service worker restarts, etc.
-    var _wsStatusPollTimer = setInterval(function() { checkWSStatus(); }, 3000);
+    _connectPort();
 
     function handleWSMessage(msg) {
       switch (msg.type) {
@@ -1154,7 +1174,6 @@
     // ── Boot ─────────────────────────────────────────
     injectUI();
     render();
-    checkWSStatus();
     console.log('STS Gemini Synchronizer initialized');
   }
 })();
