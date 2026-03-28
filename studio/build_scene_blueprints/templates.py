@@ -271,6 +271,48 @@ SCENE_STYLE_TEMPLATES = [
         ),
     },
     {
+        "id": "bold_cartoon",
+        "type": "visual",
+        "category": None,
+        "name": "Bold Cartoon",
+        "description": "Thick black outlines, flat vibrant colors, dynamic energy lines, solid backgrounds",
+        "color": "#FBBF24",
+        "style_prompt": (
+            "Generate image prompts in bold cartoon illustration style with thick black outlines and flat vibrant colors. "
+            "Subjects should be stylized and slightly exaggerated — expressive hands, confident poses, iconic gestures. "
+            "Use simple solid-color backgrounds (bright yellow, electric blue, hot pink, vivid orange) with NO complex scenery. "
+            "Add dynamic energy lines, motion swooshes, and small white highlight bursts around the subject for visual punch. "
+            "Color palette: bold, saturated primaries and secondaries — flat fills with minimal shading or gradients. "
+            "Outlines must be thick, confident, and uniform — think marker pen illustration, not pencil sketch. "
+            "Composition: center the subject prominently, use 9:16 vertical framing, generous negative space around edges. "
+            "Mood: confident, energetic, punchy, attention-grabbing. Think social media graphics meets editorial cartoon. "
+            "NO halftone dots, NO comic panels, NO speech bubbles, NO text. Pure illustration with graphic impact."
+        ),
+    },
+    {
+        "id": "painted_graphic",
+        "type": "visual",
+        "category": None,
+        "name": "Painted Graphic Novel",
+        "description": "Faceted brushwork portraits, angular planes, deep moody tones, graphic novel intensity",
+        "color": "#166534",
+        "style_prompt": (
+            "Generate image prompts in a painted graphic novel style with angular, faceted brushwork. "
+            "Faces and bodies are rendered with visible geometric brush planes — NOT smooth blending. "
+            "Skin tones are built from warm ochre, burnt sienna, and cool shadow blocks, applied in flat angular strokes. "
+            "Eyes should be piercing and unnaturally vivid (ice blue, amber, emerald) to create intense focal points. "
+            "Backgrounds are simple, moody washes of a single deep color (forest green, midnight blue, oxblood, charcoal) "
+            "with loose vertical brush strokes visible in the texture. "
+            "Lighting: strong directional light from one side, creating hard-edged shadow planes across the face. "
+            "Outlines are bold but painterly — thick dark edges that feel brushed, not vector-clean. "
+            "Composition: tight crops and extreme close-ups favored. Subjects often off-center or partially cropped. "
+            "Use 9:16 vertical framing. Fill the frame with the subject — minimal negative space. "
+            "Mood: intense, brooding, confrontational. The subject feels like they're staring directly at the viewer. "
+            "Style reference: graphic novel cover art meets oil painting meets concept art portraiture. "
+            "NO photorealism, NO smooth gradients, NO soft airbrushing. Every surface should show angular brush facets."
+        ),
+    },
+    {
         "id": "comic_book",
         "type": "visual",
         "category": None,

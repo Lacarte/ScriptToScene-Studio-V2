@@ -14,6 +14,8 @@ export const STYLE_NAMES = {
   fantasy_epic: 'Fantasy / Epic',
   sci_fi: 'Sci-Fi / Space',
   watercolor: 'Watercolor / Painted',
+  bold_cartoon: 'Bold Cartoon',
+  painted_graphic: 'Painted Graphic Novel',
   comic_book: 'Comic Book / Pop Art',
   gothic: 'Gothic / Victorian',
   vaporwave: 'Vaporwave / Aesthetic',
