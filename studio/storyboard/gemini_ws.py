@@ -96,6 +96,7 @@ def queue_image_job(msg):
     with _pending_job_lock:
         _pending_jobs.append(msg)
 
+    # Send immediately but keep in _pending_jobs until JOB_COMPLETE confirms delivery
     sent = False
     with _ws_lock:
         client_count = len(_ws_clients)
@@ -110,28 +111,24 @@ def queue_image_job(msg):
     pid = msg.get("projectId", "?")
     scenes_count = len(msg.get("scenes", []))
     if sent:
-        # Remove from pending since it was delivered
-        with _pending_job_lock:
-            if msg in _pending_jobs:
-                _pending_jobs.remove(msg)
-        logger.info("IMAGE_JOB → Gemini extension ({} — {} scenes, clients: {})", pid, scenes_count, client_count)
+        logger.info("IMAGE_JOB → Gemini extension ({} — {} scenes, clients: {}, awaiting JOB_RECEIVED)", pid, scenes_count, client_count)
     else:
         logger.warning("IMAGE_JOB queued — NO connected clients ({} — {} scenes)", pid, scenes_count)
 
 
 def _flush_pending_jobs(ws):
-    """Send all queued jobs to a newly connected client."""
+    """Re-send all pending jobs to a newly connected client (kept until JOB_COMPLETE)."""
     with _pending_job_lock:
         jobs = list(_pending_jobs)
-        _pending_jobs.clear()
 
     for msg in jobs:
         try:
             ws.send(json.dumps(msg))
             pid = msg.get("projectId", "?")
-            logger.info("Flushed queued IMAGE_JOB to new Gemini client ({})", pid)
-        except Exception:
-            pass
+            scenes_count = len(msg.get("scenes", []))
+            logger.info("Flushed pending IMAGE_JOB to new Gemini client ({} — {} scenes)", pid, scenes_count)
+        except Exception as e:
+            logger.warning("Flush IMAGE_JOB failed: {}", e)
 
 
 def _handle_message(msg, ws):
@@ -158,8 +155,21 @@ def _handle_message(msg, ws):
         logger.info("Gemini ← STATUS_UPDATE {} scene {} → {}", project_id or "?", scene, status)
         _update_scene_status(project_id, scene, status)
 
+    elif msg_type == "JOB_RECEIVED":
+        # Extension confirmed it received the job — remove from pending queue
+        project_id = msg.get("projectId", "")
+        scenes_count = msg.get("scenes", 0)
+        with _pending_job_lock:
+            before = len(_pending_jobs)
+            _pending_jobs[:] = [j for j in _pending_jobs if j.get("projectId") != project_id]
+            removed = before - len(_pending_jobs)
+        logger.success("Gemini ← JOB_RECEIVED {} ({} scenes, cleared {} pending)", project_id, scenes_count, removed)
+
     elif msg_type == "JOB_COMPLETE":
         project_id = msg.get("projectId", "")
+        # Also clean pending in case JOB_RECEIVED was missed
+        with _pending_job_lock:
+            _pending_jobs[:] = [j for j in _pending_jobs if j.get("projectId") != project_id]
         logger.success("Gemini ← JOB_COMPLETE {}", project_id)
         _mark_job_done(project_id)
 

@@ -102,10 +102,21 @@
     // ── WebSocket (proxied via background service worker) ──
     // Port keeps the service worker alive. sendMessage handles all communication.
 
-    // Keep service worker alive with a persistent port
+    // Keep service worker alive with a persistent port + receive WS messages
     (function keepAlive() {
       try {
         var port = chrome.runtime.connect({ name: 'sts-gemini-alive' });
+        port.onMessage.addListener(function(msg) {
+          if (msg.type === 'STS_WS_MESSAGE') {
+            if (!S.wsConnected) { S.wsConnected = true; S.connected = true; render(); }
+            try { handleWSMessage(msg.payload); } catch(e) { console.warn('[STS WS] Bad port msg:', e); }
+          } else if (msg.type === 'STS_WS_STATUS') {
+            S.wsConnected = msg.connected;
+            S.connected = msg.connected;
+            if (msg.wsUrl) S.wsUrl = msg.wsUrl;
+            render();
+          }
+        });
         port.onDisconnect.addListener(function() { setTimeout(keepAlive, 1000); });
       } catch(e) { setTimeout(keepAlive, 2000); }
     })();
@@ -178,6 +189,7 @@
             }
           }
           render();
+          sendWS({ type: 'JOB_RECEIVED', projectId: pid, scenes: scenes.length });
           chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB' });
           if (msg.autoType && !S.typing.active && !S.typing.starting) {
             console.log('[STS WS] Auto-starting typing');

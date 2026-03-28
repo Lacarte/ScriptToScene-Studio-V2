@@ -119,24 +119,22 @@ def queue_grabber_start(msg):
                 except Exception as e:
                     logger.warning("GRABBER_START send failed to a client: {}", e)
     if sent:
-        logger.info("GRABBER_START → Grok extension ({} — {} scenes, clients: {})", pid, scenes_count, client_count)
+        logger.info("GRABBER_START → Grok extension ({} — {} scenes, clients: {}, awaiting JOB_RECEIVED)", pid, scenes_count, client_count)
     else:
         logger.warning("GRABBER_START queued — NO connected Grok clients ({} — {} scenes)", pid, scenes_count)
 
 
 def _flush_pending_grabber(ws):
-    """Send any queued GRABBER_START to a newly connected client."""
-    global _pending_grabber
+    """Re-send queued GRABBER_START to a newly connected client (kept until JOB_RECEIVED)."""
     with _pending_grabber_lock:
         msg = _pending_grabber
         if not msg:
             return
-        _pending_grabber = None
     pid = msg.get("projectId", "?")
     scenes_count = len(msg.get("scenes", []))
     try:
         ws.send(json.dumps(msg))
-        logger.info("Flushed queued GRABBER_START to new Grok client ({} — {} scenes)", pid, scenes_count)
+        logger.info("Flushed pending GRABBER_START to new Grok client ({} — {} scenes)", pid, scenes_count)
     except Exception as e:
         logger.warning("Flush GRABBER_START failed: {}", e)
 
@@ -214,6 +212,7 @@ def _count_pending_jobs():
 
 def _handle_ws_message(msg):
     """Handle incoming messages from the Chrome extension."""
+    global _pending_grabber
     msg_type = msg.get("type")
 
     if msg_type == "ANIMATE_RESULT":
@@ -235,6 +234,23 @@ def _handle_ws_message(msg):
         with _ws_lock:
             if _ws_clients:
                 _flush_pending_grabber(_ws_clients[-1])
+    elif msg_type == "JOB_RECEIVED":
+        # Extension confirmed it received the GRABBER_START — clear pending
+        pid = msg.get("projectId", "?")
+        scenes_count = msg.get("scenes", 0)
+        with _pending_grabber_lock:
+            had_pending = _pending_grabber is not None
+            _pending_grabber = None
+        logger.success("Grok ← JOB_RECEIVED {} ({} scenes, cleared_pending={})", pid, scenes_count, had_pending)
+    elif msg_type == "JOB_COMPLETE":
+        pid = msg.get("projectId", "?")
+        typed = msg.get("typed", 0)
+        total = msg.get("total", 0)
+        failed = msg.get("failed", 0)
+        # Also clear pending in case JOB_RECEIVED was missed
+        with _pending_grabber_lock:
+            _pending_grabber = None
+        logger.success("Grok ← JOB_COMPLETE {} ({}/{} typed, {} failed)", pid, typed, total, failed)
     elif msg_type == "ASSET_UPLOAD":
         pid = msg.get("projectId", "?")
         scene = msg.get("scene", "?")
@@ -250,6 +266,11 @@ def _handle_ws_message(msg):
         urls = len(msg.get("urls", []))
         logger.info("Grok ← ASSET_RESULT {} scene {} ({} URLs)", pid, scene, urls)
         _handle_asset_result(msg)
+    elif msg_type == "STATUS_UPDATE":
+        pid = msg.get("projectId", "?")
+        scene = msg.get("scene", "?")
+        status = msg.get("status", "?")
+        logger.info("Grok ← STATUS_UPDATE {} scene {} → {}", pid, scene, status)
     elif msg_type == "PONG":
         pass  # heartbeat response
     elif msg_type == "RATE_LIMITED":

@@ -160,6 +160,21 @@ function initSync() {
   (function keepAlive() {
     try {
       const port = chrome.runtime.connect({ name: "sts-grok-alive" });
+      port.onMessage.addListener((msg) => {
+        if (msg.type === "STS_WS_MESSAGE") {
+          if (!S.wsConnected) { S.wsConnected = true; S.connected = true; S._fetchErrors = 0; render(); }
+          try { handleWSMessage(msg.payload); } catch(e) { console.warn("[STS WS] Bad port msg:", e); }
+        } else if (msg.type === "STS_WS_STATUS") {
+          S.wsConnected = msg.connected;
+          S.connected = msg.connected;
+          if (msg.connected) S._fetchErrors = 0;
+          if (msg.port) {
+            S.studioUrl = "http://localhost:" + msg.port;
+            localStorage.setItem("sts-url", S.studioUrl);
+          }
+          render();
+        }
+      });
       port.onDisconnect.addListener(() => { setTimeout(keepAlive, 1000); });
     } catch(e) { setTimeout(keepAlive, 2000); }
   })();
@@ -264,6 +279,7 @@ function initSync() {
         }
 
         render();
+        sendWS({ type: "JOB_RECEIVED", projectId: msg.projectId, scenes: scenes.length });
         chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
         if (S.autoType && !S.typing.active && !S.typing.starting) {
           console.log("[STS WS] Auto-starting typing from grabber push");
@@ -1146,6 +1162,7 @@ function initSync() {
 
       S.typing.currentIndex = i;
       item.status = "typing";
+      sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "typing" });
       render();
 
       try {
@@ -1185,6 +1202,7 @@ function initSync() {
         }
 
         item.status = "generating";
+        sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "generating" });
         render();
 
         const genResult = await waitForGeneration(item.scene, seenVideoUrls, undefined, runId);
@@ -1251,6 +1269,7 @@ function initSync() {
       for (const item of failedItems) {
         if (shouldStopTyping(runId)) break;
         item.status = "typing";
+        sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "typing" });
         S.typing.currentIndex = tq.indexOf(item);
         render();
 
@@ -1261,6 +1280,7 @@ function initSync() {
           await sleep(500);
           captureContainerForScene(item.scene);
           item.status = "generating";
+          sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "generating" });
           render();
 
           const genResult = await waitForGeneration(item.scene, seenVideoUrls, undefined, runId);
@@ -1337,6 +1357,7 @@ function initSync() {
     const finalTyped = finalScope.filter(q => q.status === "typed").length;
     const finalFailed = finalScope.filter(q => q.status === "error" || q.status === "failed").length;
     console.log("=== BATCH COMPLETE:", finalTyped, "/", finalScope.length, "succeeded,", finalFailed, "failed ===");
+    sendWS({ type: "JOB_COMPLETE", projectId: S.projectId, typed: finalTyped, total: finalScope.length, failed: finalFailed });
 
     try {
       if (Notification.permission === "granted") {

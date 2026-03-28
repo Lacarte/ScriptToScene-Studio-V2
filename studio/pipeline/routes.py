@@ -1434,10 +1434,22 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
             errors = status_data.get("errors", 0)
             pending = total - ready - errors
 
+            # Include scene-level status details from extension
+            scene_statuses = status_data.get("scene_statuses", {})
+            scene_details = []
+            for sk, sv in sorted(scene_statuses.items()):
+                if sk == "-1":
+                    continue
+                ss = sv.get("status", "pending")
+                if ss not in ("ready", "done"):
+                    scene_details.append(f"s{sk}:{ss}")
+            detail_str = f" [{', '.join(scene_details)}]" if scene_details else ""
+
             _emit(job_id, {
                 "step": "storyboard", "status": "running",
                 "message": f"Generating storyboard ({project_id})... {ready}/{total} images ready"
-                           + (f", {errors} errors" if errors else ""),
+                           + (f", {errors} errors" if errors else "")
+                           + detail_str,
             })
 
             if status_data.get("status") == "done" or pending == 0:
