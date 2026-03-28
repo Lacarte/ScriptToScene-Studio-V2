@@ -22,9 +22,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   } else if (request.action === 'STS_STOP') {
     if (window.__stsGrokState) {
       window.__stsGrokState.typing.stopRequested = true;
-      if (window.__stsGrokState.ws) {
-        try { window.__stsGrokState.ws.close(); } catch(e) {}
-      }
     }
     var panel = document.getElementById('sts-sync');
     if (panel) panel.remove();
@@ -75,9 +72,7 @@ function initSync() {
       rateLimitEndAt: 0,
       rateLimitTimerInterval: null,
     },
-    ws: null,
     wsConnected: false,
-    wsReconnectTimer: null,
   };
 
   // ── Helpers ────────────────────────────────────────────
@@ -135,114 +130,47 @@ function initSync() {
     return -1;
   }
 
-  // ── WebSocket ──────────────────────────────────────────
-  const _WS_PATH = "/ws/animator-grok-video-grabber";
-  const _PORT_MIN = 5050;
-  const _PORT_MAX = 5060;
+  // ── WebSocket (proxied via background service worker) ──
+  // The background worker owns the WS connection to bypass page CSP.
+  // Content script sends/receives via chrome.runtime messaging.
 
-  function _tryPort(port) {
-    return new Promise((resolve) => {
-      const url = "ws://localhost:" + port + _WS_PATH;
-      let ws;
-      try { ws = new WebSocket(url); } catch(e) { resolve(null); return; }
-      const timer = setTimeout(() => { try { ws.close(); } catch(e) {} resolve(null); }, 1500);
-      ws.onopen = () => { clearTimeout(timer); resolve({ ws, url, port }); };
-      ws.onerror = () => { clearTimeout(timer); resolve(null); };
-    });
-  }
-
-  function _discoverPort() {
-    const promises = [];
-    for (let p = _PORT_MIN; p <= _PORT_MAX; p++) promises.push(_tryPort(p));
-    return Promise.all(promises).then((results) => {
-      let winner = null;
-      for (const r of results) {
-        if (r) {
-          if (!winner) { winner = r; }
-          else { try { r.ws.close(); } catch(e) {} }
-        }
+  // Listen for WS messages and status updates from background
+  chrome.runtime.onMessage.addListener((bgMsg, sender, sendResponse) => {
+    if (bgMsg.action === "STS_WS_MESSAGE") {
+      // Receiving a message means WS is connected
+      if (!S.wsConnected) { S.wsConnected = true; S.connected = true; S._fetchErrors = 0; render(); }
+      try { handleWSMessage(bgMsg.payload); } catch(e) { console.warn("[STS WS] Bad msg:", e); }
+    } else if (bgMsg.action === "STS_WS_STATUS") {
+      S.wsConnected = bgMsg.connected;
+      S.connected = S.connected || bgMsg.connected;
+      if (bgMsg.connected) S._fetchErrors = 0;
+      if (bgMsg.port) {
+        S.studioUrl = "http://localhost:" + bgMsg.port;
+        localStorage.setItem("sts-url", S.studioUrl);
       }
-      return winner;
-    });
-  }
+      render();
+    }
+  });
 
   function connectWS() {
-    if (S.ws && (S.ws.readyState === WebSocket.OPEN || S.ws.readyState === WebSocket.CONNECTING)) return;
-
-    // If user manually set a URL, use it directly
+    // Ask background to reconnect
     const manualUrl = localStorage.getItem("sts-url-manual");
-    if (manualUrl) {
-      const wsUrl = manualUrl.replace(/^http/, "ws") + _WS_PATH;
-      console.log("[STS WS] Connecting to manual URL:", wsUrl);
-      _connectToUrl(wsUrl);
-      return;
-    }
-
-    // Auto-discover port
-    console.log("[STS WS] Scanning ports " + _PORT_MIN + "-" + _PORT_MAX + "...");
-    _discoverPort().then((result) => {
-      if (result) {
-        console.log("[STS WS] Discovered server on port " + result.port);
-        S.studioUrl = "http://localhost:" + result.port;
-        localStorage.setItem("sts-url", S.studioUrl);
-        _attachWS(result.ws);
-      } else {
-        console.warn("[STS WS] No server found on ports " + _PORT_MIN + "-" + _PORT_MAX);
-        S.wsConnected = false; render(); scheduleWSReconnect();
-      }
-    });
-  }
-
-  function _connectToUrl(wsUrl) {
-    let ws;
-    try { ws = new WebSocket(wsUrl); } catch (e) {
-      console.warn("[STS WS] Connection failed:", e.message);
-      S.wsConnected = false; scheduleWSReconnect(); return;
-    }
-    _attachWS(ws);
-  }
-
-  function _attachWS(ws) {
-    S.ws = ws;
-    ws.onopen = () => {
-      console.log("[STS WS] Connected to", S.studioUrl);
-      S.wsConnected = true;
-      S._fetchErrors = 0;
-      S.connected = true;
-      _wsReconnectAttempts = 0;
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "EXTENSION_READY", source: "sts-grok-sync" }));
-      }
-      render();
-    };
-    ws.onmessage = (evt) => {
-      try { handleWSMessage(JSON.parse(evt.data)); } catch (e) { console.warn("[STS WS] Bad message:", e); }
-    };
-    ws.onclose = () => {
-      console.log("[STS WS] Disconnected");
-      S.wsConnected = false;
-      if (S.ws === ws) S.ws = null;
-      render();
-      scheduleWSReconnect();
-    };
-    ws.onerror = () => { S.wsConnected = false; };
-  }
-
-  let _wsReconnectAttempts = 0;
-  function scheduleWSReconnect() {
-    if (S.wsReconnectTimer) return;
-    _wsReconnectAttempts++;
-    const delay = _wsReconnectAttempts <= 10 ? 2000 : 5000;
-    S.wsReconnectTimer = setTimeout(() => {
-      S.wsReconnectTimer = null;
-      connectWS();
-    }, delay);
+    const manualWsUrl = manualUrl ? manualUrl.replace(/^http/, "ws") + "/ws/animator-grok-video-grabber" : null;
+    chrome.runtime.sendMessage({ action: "STS_WS_RECONNECT", manualWsUrl });
   }
 
   function sendWS(msg) {
-    if (S.ws && S.ws.readyState === WebSocket.OPEN) {
-      try { S.ws.send(JSON.stringify(msg)); } catch (e) { console.warn("[STS WS] Send failed:", e.message); }
-    }
+    chrome.runtime.sendMessage({ action: "STS_WS_SEND", payload: msg });
+  }
+
+  function checkWSStatus() {
+    chrome.runtime.sendMessage({ action: "STS_WS_GET_STATUS" }, (resp) => {
+      if (resp) {
+        S.wsConnected = resp.connected;
+        S.connected = S.connected || resp.connected;
+        render();
+      }
+    });
   }
 
   function handleWSMessage(msg) {
@@ -1828,8 +1756,9 @@ function initSync() {
         // Clear manual override → re-enable auto-discovery
         localStorage.removeItem("sts-url-manual");
       }
-      if (S.ws) { try { S.ws.close(); } catch(e) {} }
-      S.ws = null; S.wsConnected = false; connectWS(); render();
+      S.wsConnected = false;
+      connectWS();
+      render();
     });
 
     $id("sts-head-autotype").addEventListener("click", () => {
@@ -1901,7 +1830,8 @@ function initSync() {
   injectUI();
   renderAutoType();
   window.__stsGrokState = S;
-  connectWS();
+  // Background service worker auto-connects; just check current status
+  checkWSStatus();
 
   // Start polling
   (async () => {

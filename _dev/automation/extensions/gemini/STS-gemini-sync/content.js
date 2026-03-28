@@ -28,9 +28,6 @@
       console.log('[STS Gemini] STOP received');
       if (window.__stsGeminiState) {
         window.__stsGeminiState.typing.stopRequested = true;
-        if (window.__stsGeminiState.ws) {
-          try { window.__stsGeminiState.ws.close(); } catch(e) {}
-        }
       }
       var panel = document.getElementById('sts-sync');
       if (panel) panel.remove();
@@ -61,9 +58,7 @@
       projectId: null,
       aspectRatio: '',
       scenes: {},
-      ws: null,
       wsConnected: false,
-      wsReconnectTimer: null,
       typing: {
         active: false, starting: false, queue: [], runId: 0,
         currentIndex: -1, typedCount: 0, stopRequested: false, toolsEnabled: false,
@@ -83,106 +78,42 @@
       }
     }
 
-    // ── WebSocket ─────────────────────────────────────
-    var _WS_PATH = '/ws/image-gemini';
-    var _PORT_MIN = 5050;
-    var _PORT_MAX = 5060;
+    // ── WebSocket (proxied via background service worker) ──
+    // The background worker owns the WS connection to bypass Gemini's page CSP.
+    // Content script sends/receives via chrome.runtime messaging.
 
-    function _tryPort(port) {
-      return new Promise(function(resolve) {
-        var url = 'ws://localhost:' + port + _WS_PATH;
-        var ws;
-        try { ws = new WebSocket(url); } catch(e) { resolve(null); return; }
-        var timer = setTimeout(function() { try { ws.close(); } catch(e) {} resolve(null); }, 1500);
-        ws.onopen = function() { clearTimeout(timer); resolve({ ws: ws, url: url, port: port }); };
-        ws.onerror = function() { clearTimeout(timer); resolve(null); };
-      });
-    }
-
-    function _discoverPort() {
-      // Try all ports in parallel, first one to connect wins
-      var promises = [];
-      for (var p = _PORT_MIN; p <= _PORT_MAX; p++) promises.push(_tryPort(p));
-      return Promise.all(promises).then(function(results) {
-        var winner = null;
-        for (var i = 0; i < results.length; i++) {
-          if (results[i]) {
-            if (!winner) { winner = results[i]; }
-            else { try { results[i].ws.close(); } catch(e) {} }
-          }
-        }
-        return winner;
-      });
-    }
+    // Listen for WS messages and status updates from background
+    chrome.runtime.onMessage.addListener(function(bgMsg, sender, sendResponse) {
+      if (bgMsg.action === 'STS_WS_MESSAGE') {
+        // Receiving a message means WS is connected
+        if (!S.wsConnected) { S.wsConnected = true; S.connected = true; render(); }
+        try { handleWSMessage(bgMsg.payload); } catch(e) { console.warn('[STS WS] Bad msg:', e); }
+      } else if (bgMsg.action === 'STS_WS_STATUS') {
+        S.wsConnected = bgMsg.connected;
+        S.connected = S.connected || bgMsg.connected;
+        if (bgMsg.wsUrl) S.wsUrl = bgMsg.wsUrl;
+        render();
+      }
+    });
 
     function connectWS() {
-      if (S.ws && (S.ws.readyState === WebSocket.OPEN || S.ws.readyState === WebSocket.CONNECTING)) return;
-
-      // If user manually set a URL, use it directly
-      var manualUrl = localStorage.getItem('sts-gemini-ws-manual');
-      if (manualUrl) {
-        console.log('[STS WS] Connecting to manual URL:', manualUrl);
-        _connectToUrl(manualUrl);
-        return;
-      }
-
-      // Auto-discover port
-      console.log('[STS WS] Scanning ports ' + _PORT_MIN + '-' + _PORT_MAX + '...');
-      _discoverPort().then(function(result) {
-        if (result) {
-          console.log('[STS WS] Discovered server on port ' + result.port);
-          S.wsUrl = result.url;
-          localStorage.setItem('sts-gemini-ws', result.url);
-          _attachWS(result.ws);
-        } else {
-          console.warn('[STS WS] No server found on ports ' + _PORT_MIN + '-' + _PORT_MAX);
-          S.wsConnected = false; render(); scheduleWSReconnect();
-        }
-      });
-    }
-
-    function _connectToUrl(url) {
-      var ws;
-      try { ws = new WebSocket(url); } catch (e) {
-        console.warn('[STS WS] Connection failed:', e.message);
-        S.wsConnected = false; scheduleWSReconnect(); return;
-      }
-      _attachWS(ws);
-    }
-
-    function _attachWS(ws) {
-      S.ws = ws;
-      ws.onopen = function() {
-        if (S.ws !== ws) return;
-        console.log('[STS WS] Connected to', S.wsUrl);
-        S.wsConnected = true; S.connected = true; _wsReconnectAttempts = 0;
-        try { ws.send(JSON.stringify({ type: 'EXTENSION_READY', source: 'sts-gemini-ext' })); } catch(e) {}
-        render();
-      };
-      ws.onmessage = function(evt) {
-        if (S.ws !== ws) return;
-        try { handleWSMessage(JSON.parse(evt.data)); } catch (e) { console.warn('[STS WS] Bad msg:', e); }
-      };
-      ws.onclose = function() {
-        if (S.ws === ws) { S.ws = null; }
-        console.log('[STS WS] Disconnected');
-        S.wsConnected = false; render(); scheduleWSReconnect();
-      };
-      ws.onerror = function() { S.wsConnected = false; };
-    }
-
-    var _wsReconnectAttempts = 0;
-    function scheduleWSReconnect() {
-      if (S.wsReconnectTimer) return;
-      _wsReconnectAttempts++;
-      var delay = _wsReconnectAttempts <= 10 ? 2000 : 5000;
-      S.wsReconnectTimer = setTimeout(function() { S.wsReconnectTimer = null; connectWS(); }, delay);
+      // Ask background to reconnect (it auto-discovers ports)
+      var manualUrl = localStorage.getItem('sts-gemini-ws-manual') || null;
+      chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: manualUrl });
     }
 
     function sendWS(msg) {
-      if (S.ws && S.ws.readyState === WebSocket.OPEN) {
-        try { S.ws.send(JSON.stringify(msg)); } catch (e) { console.warn('[STS WS] Send failed:', e.message); }
-      }
+      chrome.runtime.sendMessage({ action: 'STS_WS_SEND', payload: msg });
+    }
+
+    function checkWSStatus() {
+      chrome.runtime.sendMessage({ action: 'STS_WS_GET_STATUS' }, function(resp) {
+        if (resp) {
+          S.wsConnected = resp.connected;
+          S.connected = S.connected || resp.connected;
+          render();
+        }
+      });
     }
 
     function handleWSMessage(msg) {
@@ -963,14 +894,13 @@
           S.wsUrl = val;
           localStorage.setItem('sts-gemini-ws', val);
           localStorage.setItem('sts-gemini-ws-manual', val);
-          if (S.ws) { try { S.ws.close(); } catch(ex) {} }
-          S.ws = null; S.wsConnected = false; connectWS(); render();
         } else {
           // Clear manual override → re-enable auto-discovery
           localStorage.removeItem('sts-gemini-ws-manual');
-          if (S.ws) { try { S.ws.close(); } catch(ex) {} }
-          S.ws = null; S.wsConnected = false; connectWS(); render();
         }
+        S.wsConnected = false;
+        chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: val || null });
+        render();
       });
       // Tabs
       var tabs = root.querySelectorAll('.sts-tab');
@@ -1217,7 +1147,8 @@
     // ── Boot ─────────────────────────────────────────
     injectUI();
     render();
-    connectWS();
+    // Background service worker auto-connects; just check current status
+    checkWSStatus();
     console.log('STS Gemini Synchronizer initialized');
   }
 })();
