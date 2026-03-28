@@ -12,7 +12,8 @@
       "Bash(curl -s http://127.0.0.1:5050/api/health)",
       "Bash(grep -r \"visual_style\\\\|style_prompt\\\\|image_prompt\" /d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/frontend/src --include=*.ts --include=*.tsx --include=*.js)",
       "Bash(grep -E \"\\\\.\\(json|js|py|md\\)$\")",
-      "Bash(ls -d d:/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/*/)"
+      "Bash(ls -d d:/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/*/)",
+      "Bash(find /d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/resources -type f \\\\\\(-name *.yml -o -name *.yaml -o -name *.json \\\\\\))"
     ]
   },
   "enableAgentTeam": true,

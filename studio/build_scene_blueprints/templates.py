@@ -649,6 +649,7 @@ SCENE_STYLE_TEMPLATES = [
             "Environments are minimal — a few lines for ground, simple shapes for buildings, stick trees. "
             "Color palette: primarily black lines on white, with occasional single-color highlights (red circle, blue arrow). "
             "Composition: centered action, comic-strip panel layouts, before/after comparisons. "
+            "Lines must be bold, clean strokes — thick confident lines, no artifacts, no noise, no rendering glitches. "
             "Style: XKCD meets whiteboard explainer videos — charming simplicity, humor through minimalism."
         ),
     },
@@ -1564,9 +1565,11 @@ SCENE_STYLE_TEMPLATES = [
             "- 9:16 portrait framing, figure centered slightly below middle\n"
             "- Vulnerable, lonely, melancholic body language (arms close, shoulders down)\n"
             "- Black line art for the figure — stickman anatomy, not detailed\n"
+            "- Bold, clean stroke lines — thick confident lines, no artifacts, no noise, no rendering glitches\n"
             "- Particle trail rises gently like embers or dissolving matter\n\n"
             "DO NOT:\n"
             "- No detailed anatomy or realistic proportions — keep it stickman simple\n"
+            "- No thin, scratchy, or broken lines — strokes must be bold and artifact-free\n"
             "- No busy backgrounds, scenery, or environmental elements\n"
             "- No ground plane, shadow, or floor — figure floats in the purple void\n"
             "- No bright or cheerful colors — mood must stay dim and melancholic\n"
