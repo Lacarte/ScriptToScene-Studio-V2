@@ -836,6 +836,31 @@ export const EDITOR_SHELL_HTML = `
                                     min="0.5" step="0.5" value="2.0">
                             </label>
 
+                            <div class="text-tool-field">
+                                <span>Display Mode</span>
+                                <div class="text-tool-mode-buttons">
+                                    <button class="text-tool-mode-btn" id="text-tool-mode-full" title="Show complete text with fade animation">Full Text</button>
+                                    <button class="text-tool-mode-btn active" id="text-tool-mode-emphasis" title="Show only key emphasis words">Emphasis</button>
+                                </div>
+                            </div>
+
+                            <label class="text-tool-field">
+                                <span>Animation</span>
+                                <select id="text-tool-animation" class="text-tool-select">
+                                    <option value="fade">Fade</option>
+                                    <option value="flicker">Flicker (Suspenseful)</option>
+                                    <option value="slam">Slam (Dramatic)</option>
+                                    <option value="typewriter">Typewriter (Educational)</option>
+                                    <option value="rise">Rise (Inspirational)</option>
+                                    <option value="bounce">Bounce (Comedic)</option>
+                                    <option value="glow_pulse">Glow Pulse (Wholesome)</option>
+                                    <option value="hard_cut">Hard Cut</option>
+                                    <option value="scale_pop">Scale Pop</option>
+                                    <option value="slide_up">Slide Up</option>
+                                    <option value="blur_in">Blur In</option>
+                                </select>
+                            </label>
+
                             <div id="text-tool-target" class="text-tool-target"></div>
 
                             <div class="text-tool-actions">

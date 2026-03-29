@@ -109,6 +109,90 @@ const LOCAL_CAPTION_PRESETS = {
 };
 let captionPresetMap = { ...LOCAL_CAPTION_PRESETS };
 
+// ---------------------------------------------------------------------------
+// Text display mode & tone-based animation presets
+// ---------------------------------------------------------------------------
+
+const TEXT_DISPLAY_MODES = {
+    full: 'Complete Text',
+    emphasis: 'Emphasis Words'
+};
+
+// Stop-words filtered out in emphasis mode
+const EMPHASIS_STOP_WORDS = new Set([
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'am', 'do', 'does', 'did', 'has', 'have', 'had', 'having',
+    'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'it',
+    'him', 'her', 'his', 'its', 'they', 'them', 'their',
+    'this', 'that', 'these', 'those', 'what', 'which', 'who', 'whom',
+    'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
+    'up', 'out', 'if', 'or', 'and', 'but', 'not', 'no', 'nor',
+    'so', 'as', 'just', 'about', 'into', 'than', 'then', 'also',
+    'very', 'can', 'will', 'would', 'could', 'should', 'may', 'might',
+    'shall', 'must', 'here', 'there', 'when', 'where', 'how', 'all',
+    'each', 'both', 'few', 'more', 'most', 'some', 'any', 'such',
+    'only', 'own', 'same', 'too', 'still', 'already', 'yet'
+]);
+
+/**
+ * Extract emphasis words from text by removing articles and low-sentiment words.
+ * Returns the filtered string.
+ */
+function extractEmphasisWords(text) {
+    if (!text) return '';
+    const words = text.split(/\s+/);
+    const kept = words.filter(w => {
+        const clean = w.replace(/[^a-zA-Z]/g, '').toLowerCase();
+        return clean.length > 0 && !EMPHASIS_STOP_WORDS.has(clean);
+    });
+    return kept.length > 0 ? kept.join(' ') : text;
+}
+
+// Animation presets mapped to story tones
+const TEXT_ANIMATIONS = {
+    // Tone-specific animations
+    fade:        { label: 'Fade',        desc: 'Gentle fade in / fade out' },
+    flicker:     { label: 'Flicker',     desc: 'Glitch flicker — suspenseful, uneasy' },
+    slam:        { label: 'Slam',        desc: 'Scale slam — dramatic impact' },
+    typewriter:  { label: 'Typewriter',  desc: 'Letter-by-letter reveal — educational' },
+    rise:        { label: 'Rise',        desc: 'Float upward with fade — inspirational' },
+    bounce:      { label: 'Bounce',      desc: 'Playful bounce-in — comedic' },
+    glow_pulse:  { label: 'Glow Pulse',  desc: 'Soft glow pulse — wholesome, warm' },
+    // General-purpose
+    hard_cut:    { label: 'Hard Cut',    desc: 'Instant appear / disappear' },
+    scale_pop:   { label: 'Scale Pop',   desc: 'Pop in with scale overshoot' },
+    slide_up:    { label: 'Slide Up',    desc: 'Slide in from below' },
+    blur_in:     { label: 'Blur In',     desc: 'De-blur into focus' },
+};
+
+// Default animation per story tone
+const TONE_ANIMATION_MAP = {
+    suspenseful:  'flicker',
+    dramatic:     'slam',
+    educational:  'typewriter',
+    inspirational:'rise',
+    comedic:      'bounce',
+    wholesome:    'glow_pulse',
+};
+
+/**
+ * Return the best default animation for the current project tone.
+ */
+function getDefaultTextAnimation() {
+    const tone = EditorState.project?.storyTone || '';
+    return TONE_ANIMATION_MAP[tone] || 'fade';
+}
+
+/**
+ * Build <option> HTML for the text animation select dropdown.
+ */
+function _buildTextAnimationOptions(selectedId) {
+    return Object.entries(TEXT_ANIMATIONS).map(([id, a]) => {
+        const sel = id === selectedId ? ' selected' : '';
+        return '<option value="' + id + '"' + sel + ' title="' + a.desc + '">' + a.label + '</option>';
+    }).join('');
+}
+
 function prettifyPresetName(presetId) {
     return String(presetId || '')
         .replace(/_/g, ' ')
@@ -705,10 +789,14 @@ function getTextToolPayload() {
     const durationInput = document.getElementById('text-tool-duration');
     const text = (textarea?.value || '').trim();
     const duration = Math.max(MIN_TEXT_OVERLAY_DURATION, parseFloat(durationInput?.value || '2') || 2);
-    return { textarea, text, duration };
+    const modeFullBtn = document.getElementById('text-tool-mode-full');
+    const displayMode = modeFullBtn?.classList.contains('active') ? 'full' : 'emphasis';
+    const animationSelect = document.getElementById('text-tool-animation');
+    const animation = animationSelect?.value || getDefaultTextAnimation();
+    return { textarea, text, duration, displayMode, animation };
 }
 
-function buildTextSceneFromTool(text, duration) {
+function buildTextSceneFromTool(text, duration, displayMode, animation) {
     const scene = {
         id: getNextSceneId(),
         type: 'text',
@@ -723,6 +811,8 @@ function buildTextSceneFromTool(text, duration) {
         vertical_align: 'center',
         text_background_enabled: true,
         text_background_color: '#000000',
+        text_display_mode: displayMode || 'emphasis',
+        text_animation: animation || getDefaultTextAnimation(),
         text_timeline_offset: 0,
         text_overlay_duration: duration,
         visual_fx: 'static',
@@ -779,13 +869,13 @@ function addTextSceneFromTool() {
         return;
     }
 
-    const { textarea, text, duration } = getTextToolPayload();
+    const { textarea, text, duration, displayMode, animation } = getTextToolPayload();
     if (!text) {
         showToast('Enter text first', 'warning');
         return;
     }
 
-    const newScene = buildTextSceneFromTool(text, duration);
+    const newScene = buildTextSceneFromTool(text, duration, displayMode, animation);
     const insertIndex = getTextToolInsertIndex();
     EditorState.scenes.splice(insertIndex, 0, newScene);
     recordEdit(`Add text scene (Scene ${newScene.id})`, newScene.id, 'scene_add', null, cloneScene(newScene));
@@ -802,7 +892,7 @@ function addTextOverlayFromTool() {
         return;
     }
 
-    const { textarea, text, duration } = getTextToolPayload();
+    const { textarea, text, duration, displayMode, animation } = getTextToolPayload();
     if (!text) {
         showToast('Enter text first', 'warning');
         return;
@@ -837,6 +927,8 @@ function addTextOverlayFromTool() {
     scene.vertical_align = scene.vertical_align || 'center';
     if (typeof scene.text_background_enabled !== 'boolean') scene.text_background_enabled = false;
     scene.text_background_color = scene.text_background_color || '#000000';
+    if (!scene.text_display_mode) scene.text_display_mode = displayMode || 'emphasis';
+    if (!scene.text_animation) scene.text_animation = animation || getDefaultTextAnimation();
     normalizeSceneTextOverlay(scene);
 
     recordEdit(`Add text overlay (Scene ${scene.id})`, scene.id, 'text_overlay', oldValue, {
@@ -873,6 +965,28 @@ function setupTextTool() {
     durationInput.addEventListener('input', renderTextToolState);
     addSceneBtn.addEventListener('click', addTextSceneFromTool);
     addOverlayBtn.addEventListener('click', addTextOverlayFromTool);
+
+    // Display mode toggle buttons
+    const modeFullBtn = document.getElementById('text-tool-mode-full');
+    const modeEmphasisBtn = document.getElementById('text-tool-mode-emphasis');
+    modeFullBtn?.addEventListener('click', () => {
+        modeFullBtn.classList.add('active');
+        modeEmphasisBtn?.classList.remove('active');
+    });
+    modeEmphasisBtn?.addEventListener('click', () => {
+        modeEmphasisBtn.classList.add('active');
+        modeFullBtn?.classList.remove('active');
+    });
+
+    // Set default animation based on project tone
+    const animSelect = document.getElementById('text-tool-animation');
+    if (animSelect) {
+        const defaultAnim = getDefaultTextAnimation();
+        if (animSelect.querySelector(`option[value="${defaultAnim}"]`)) {
+            animSelect.value = defaultAnim;
+        }
+    }
+
     renderTextToolState();
 }
 
@@ -1452,7 +1566,9 @@ function saveProjectEdits() {
         text_timeline_offset: scene.text_timeline_offset ?? 0,
         text_overlay_duration: scene.text_overlay_duration ?? null,
         text_background_enabled: !!scene.text_background_enabled,
-        text_background_color: scene.text_background_color || '#000000'
+        text_background_color: scene.text_background_color || '#000000',
+        text_display_mode: scene.text_display_mode || null,
+        text_animation: scene.text_animation || null
     }));
 
     // Include audio settings if audio is loaded
@@ -1554,6 +1670,8 @@ function _buildSavePayload() {
             text_overlay_duration: s.text_overlay_duration ?? null,
             text_background_enabled: !!s.text_background_enabled,
             text_background_color: s.text_background_color || '#000000',
+            text_display_mode: s.text_display_mode || null,
+            text_animation: s.text_animation || null,
             timestamp: s.timestamp || 0, status: s.status || 'ready',
             isVideo: !!s.isVideo, script: s.script || '',
             narrative_role: s.narrative_role || s.scene_type || '',
@@ -1664,6 +1782,8 @@ function loadProjectEdits() {
                 if (edit.text_overlay_duration !== undefined) scene.text_overlay_duration = edit.text_overlay_duration;
                 if (edit.text_background_enabled !== undefined) scene.text_background_enabled = edit.text_background_enabled;
                 if (edit.text_background_color !== undefined) scene.text_background_color = edit.text_background_color;
+                if (edit.text_display_mode !== undefined) scene.text_display_mode = edit.text_display_mode;
+                if (edit.text_animation !== undefined) scene.text_animation = edit.text_animation;
                 normalizeSceneTextOverlay(scene);
                 appliedCount++;
             }
@@ -2827,6 +2947,7 @@ async function loadProjectFromServer(projectId) {
         style_name: styleName,
         style_color: styleColor,
         source_folder: saved.source_folder || '',
+        story_tone: saved.story_tone || '',
         total_duration: saved.total_duration || 0,
         scene_count: saved.scene_count || saved.scenes?.length || 0,
         staged_at: saved.saved_at,
@@ -2851,6 +2972,8 @@ async function loadProjectFromServer(projectId) {
             text_overlay_duration: s.text_overlay_duration ?? null,
             text_background_enabled: !!s.text_background_enabled,
             text_background_color: s.text_background_color || '#000000',
+            text_display_mode: s.text_display_mode || null,
+            text_animation: s.text_animation || null,
             script: s.script || '',
             narrative_role: s.narrative_role || '',
             isVideo: s.isVideo || false,
@@ -2984,6 +3107,8 @@ function _applyExtraState(saved) {
             if (ss.text_overlay_duration !== undefined) scene.text_overlay_duration = ss.text_overlay_duration;
             if (ss.text_background_enabled !== undefined) scene.text_background_enabled = ss.text_background_enabled;
             if (ss.text_background_color !== undefined) scene.text_background_color = ss.text_background_color;
+            if (ss.text_display_mode !== undefined) scene.text_display_mode = ss.text_display_mode;
+            if (ss.text_animation !== undefined) scene.text_animation = ss.text_animation;
             if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
             if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
             normalizeSceneTextOverlay(scene);
@@ -3127,6 +3252,8 @@ function _restoreSavedEditorState() {
             if (ss.text_overlay_duration !== undefined) scene.text_overlay_duration = ss.text_overlay_duration;
             if (ss.text_background_enabled !== undefined) scene.text_background_enabled = ss.text_background_enabled;
             if (ss.text_background_color !== undefined) scene.text_background_color = ss.text_background_color;
+            if (ss.text_display_mode !== undefined) scene.text_display_mode = ss.text_display_mode;
+            if (ss.text_animation !== undefined) scene.text_animation = ss.text_animation;
             if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
             if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
             normalizeSceneTextOverlay(scene);
@@ -3282,6 +3409,8 @@ function buildBootProjectData(raw) {
             text_overlay_duration: scene.text_overlay_duration ?? null,
             text_background_enabled: !!scene.text_background_enabled,
             text_background_color: scene.text_background_color || '#000000',
+            text_display_mode: scene.text_display_mode || null,
+            text_animation: scene.text_animation || null,
             script: scene.script || scene.segment_words || '',
             narrative_role: scene.narrative_role || '',
             isVideo: scene.isVideo ?? ((scene.type || scene.type_of_scene) === 'video'),
@@ -3301,6 +3430,7 @@ function buildBootProjectData(raw) {
         style_name: raw.style_name || '',
         style_color: raw.style_color || '',
         source_folder: raw.source_folder || '',
+        story_tone: raw.story_tone || '',
         total_duration: raw.total_duration || scenes.reduce((sum, scene) => sum + (scene.duration || 0), 0),
         scene_count: raw.scene_count || scenes.length,
         staged_at: raw.staged_at || raw.saved_at || new Date().toISOString(),
@@ -3694,6 +3824,7 @@ async function loadProjectData(data) {
         styleName: data.style_name || '',
         styleColor: data.style_color || '',
         sourceFolder: data.source_folder || '',
+        storyTone: data.story_tone || '',
         totalDuration: data.total_duration,
         sceneCount: data.scene_count,
         stagedAt: data.staged_at
@@ -7381,6 +7512,30 @@ function renderSceneProperties() {
 
         <div class="property-section-divider"></div>
 
+        <div class="property-section-label">Display &amp; Animation</div>
+
+        <div class="property-group">
+            <label>Display Mode</label>
+            <div class="property-mode-buttons">
+                <button class="property-mode-btn${(scene.text_display_mode || 'emphasis') === 'full' ? ' active' : ''}"
+                        id="prop-text-mode-full" title="Show the complete text with fade animation">
+                    Full Text
+                </button>
+                <button class="property-mode-btn${(scene.text_display_mode || 'emphasis') !== 'full' ? ' active' : ''}"
+                        id="prop-text-mode-emphasis" title="Show only emphasis/key words from the text">
+                    Emphasis
+                </button>
+            </div>
+        </div>
+        <div class="property-group">
+            <label>Animation</label>
+            <select class="property-select" id="prop-text-animation">
+                ${_buildTextAnimationOptions(scene.text_animation || getDefaultTextAnimation())}
+            </select>
+        </div>
+
+        <div class="property-section-divider"></div>
+
         <div class="property-section-label">Typography</div>
 
         <div class="property-group">
@@ -7554,6 +7709,38 @@ function renderSceneProperties() {
     const textBgSolidBtn = document.getElementById('prop-text-bg-solid');
     const convertTextOverlayBtn = document.getElementById('convert-text-overlay-to-scene');
     const convertTextSceneBtn = document.getElementById('convert-text-scene-to-overlay');
+    const textDisplayModeFullBtn = document.getElementById('prop-text-mode-full');
+    const textDisplayModeEmphasisBtn = document.getElementById('prop-text-mode-emphasis');
+    const textAnimationSelect = document.getElementById('prop-text-animation');
+
+    // Display mode toggle
+    textDisplayModeFullBtn?.addEventListener('click', () => {
+        const old = scene.text_display_mode;
+        scene.text_display_mode = 'full';
+        textDisplayModeFullBtn.classList.add('active');
+        textDisplayModeEmphasisBtn?.classList.remove('active');
+        recordEdit(`Set display mode to Full (Scene ${scene.id})`, scene.id, 'text_display_mode', old, 'full');
+        saveProjectEdits();
+        if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
+    });
+    textDisplayModeEmphasisBtn?.addEventListener('click', () => {
+        const old = scene.text_display_mode;
+        scene.text_display_mode = 'emphasis';
+        textDisplayModeEmphasisBtn.classList.add('active');
+        textDisplayModeFullBtn?.classList.remove('active');
+        recordEdit(`Set display mode to Emphasis (Scene ${scene.id})`, scene.id, 'text_display_mode', old, 'emphasis');
+        saveProjectEdits();
+        if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
+    });
+
+    // Text animation select
+    textAnimationSelect?.addEventListener('change', (e) => {
+        const old = scene.text_animation;
+        scene.text_animation = e.target.value;
+        recordEdit(`Change text animation (Scene ${scene.id})`, scene.id, 'text_animation', old, e.target.value);
+        saveProjectEdits();
+        if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
+    });
 
     durationInput?.addEventListener('change', (e) => {
         const oldValue = scene.duration;

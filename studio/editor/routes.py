@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR
+from config import OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR, PIPELINE_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.ffmpeg_utils import find_ffprobe
@@ -440,6 +440,19 @@ def _get_source_folder(project_id: str) -> str | None:
         return None
 
 
+def _get_story_tone(project_id: str) -> str | None:
+    """Look up story_tone from pipeline.json for a given project."""
+    pipeline_path = os.path.join(PIPELINE_DIR, project_id, "pipeline.json")
+    try:
+        with open(pipeline_path, "r", encoding="utf-8") as f:
+            return json.load(f).get("story_tone") or None
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, OSError) as error:
+        logger.debug("Could not read story_tone from {}: {}", pipeline_path, error)
+        return None
+
+
 def _resolve_audio_url(source_folder: str) -> dict | None:
     """Resolve audio file URL from the alignment or TTS folder."""
     # Try alignment folder first (post-timing audio)
@@ -663,6 +676,11 @@ def editor_load_project(project_id):
     source_folder = _get_source_folder(safe_id)
     if source_folder:
         data["source_folder"] = source_folder
+
+    # Inject story_tone from pipeline so the editor can auto-select animations
+    story_tone = _get_story_tone(safe_id)
+    if story_tone:
+        data["story_tone"] = story_tone
 
     # Resolve correct audio from scenes.json source_folder to prevent
     # cross-project audio bleed (saved voice track may belong to another project).

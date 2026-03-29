@@ -800,6 +800,55 @@
     color: var(--text);
 }
 
+.text-tool-mode-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.text-tool-mode-btn {
+    flex: 1;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-darkest, #0d0d14);
+    color: var(--text-muted);
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.text-tool-mode-btn:hover {
+    background: rgba(78, 205, 196, 0.06);
+    border-color: var(--border-hover);
+    color: var(--text-secondary);
+}
+
+.text-tool-mode-btn.active {
+    background: rgba(78, 205, 196, 0.12);
+    border-color: rgba(78, 205, 196, 0.4);
+    color: var(--accent);
+}
+
+.text-tool-select {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--bg-darkest, #0d0d14);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.72rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    cursor: pointer;
+}
+
+.text-tool-select:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(78, 205, 196, 0.12);
+}
+
 .text-tool-hint {
     margin: -4px 0 0;
     font-size: 0.62rem;

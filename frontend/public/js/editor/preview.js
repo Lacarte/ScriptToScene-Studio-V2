@@ -3,6 +3,32 @@
  * Handles rendering scenes to canvas for real-time preview
  */
 
+// Stop-words filtered out in emphasis display mode
+const _EMPHASIS_STOP_WORDS = new Set([
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'am', 'do', 'does', 'did', 'has', 'have', 'had', 'having',
+    'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'it',
+    'him', 'her', 'his', 'its', 'they', 'them', 'their',
+    'this', 'that', 'these', 'those', 'what', 'which', 'who', 'whom',
+    'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
+    'up', 'out', 'if', 'or', 'and', 'but', 'not', 'no', 'nor',
+    'so', 'as', 'just', 'about', 'into', 'than', 'then', 'also',
+    'very', 'can', 'will', 'would', 'could', 'should', 'may', 'might',
+    'shall', 'must', 'here', 'there', 'when', 'where', 'how', 'all',
+    'each', 'both', 'few', 'more', 'most', 'some', 'any', 'such',
+    'only', 'own', 'same', 'too', 'still', 'already', 'yet'
+]);
+
+function _extractEmphasisWords(text) {
+    if (!text) return '';
+    const words = text.split(/\s+/);
+    const kept = words.filter(w => {
+        const clean = w.replace(/[^a-zA-Z]/g, '').toLowerCase();
+        return clean.length > 0 && !_EMPHASIS_STOP_WORDS.has(clean);
+    });
+    return kept.length > 0 ? kept.join(' ') : text;
+}
+
 export class CanvasPreview {
     constructor(canvas, options = {}) {
         this.canvas = canvas;
@@ -584,7 +610,9 @@ export class CanvasPreview {
             textAlign: scene.text_align || 'center',
             verticalAlign: scene.vertical_align || 'center',
             textX: scene.text_x,
-            textY: scene.text_y
+            textY: scene.text_y,
+            displayMode: scene.text_display_mode || 'emphasis',
+            animation: scene.text_animation || 'fade'
         });
 
         this.currentTextScene = scene;
@@ -692,7 +720,9 @@ export class CanvasPreview {
                 textAlign: scene.text_align || 'center',
                 verticalAlign: scene.vertical_align || 'center',
                 textX: scene.text_x,
-                textY: scene.text_y
+                textY: scene.text_y,
+                displayMode: scene.text_display_mode || 'emphasis',
+                animation: scene.text_animation || 'fade'
             });
         }
 
@@ -712,6 +742,8 @@ export class CanvasPreview {
             options = { color: options };
         }
 
+        const displayMode = options.displayMode || 'emphasis';
+        const animation = options.animation || 'fade';
         const textColor = options.color || 'white';
         const textSize = options.size || 48;
         const fontStyle = options.style || 'bold';
@@ -722,12 +754,15 @@ export class CanvasPreview {
         const textX = options.textX;
         const textY = options.textY;
 
+        // Apply display mode — emphasis filters out stop words
+        if (displayMode === 'emphasis') {
+            text = _extractEmphasisWords(text);
+        }
+
         this.ctx.save();
 
-        // Apply fade effect based on progress
-        const fadeIn = Math.min(1, progress * 4); // Fade in during first 25%
-        const fadeOut = Math.min(1, (1 - progress) * 4); // Fade out during last 25%
-        this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+        // Apply animation based on type
+        this._applyTextAnimation(animation, progress);
 
         // Text styling — support named presets and arbitrary hex
         this.ctx.fillStyle = textColor === 'white' ? '#ffffff'
@@ -844,6 +879,153 @@ export class CanvasPreview {
         });
 
         this.ctx.restore();
+    }
+
+    /**
+     * Apply animation transform/alpha to the canvas context.
+     * Called inside renderTextOverlay before text is drawn.
+     * @param {string} animation - Animation type
+     * @param {number} progress - 0-1 progress through the scene
+     */
+    _applyTextAnimation(animation, progress) {
+        switch (animation) {
+            case 'fade': {
+                const fadeIn = Math.min(1, progress * 4);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                break;
+            }
+            case 'flicker': {
+                // Glitch flicker — rapid alpha oscillation during entry
+                const fadeIn = Math.min(1, progress * 5);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                let alpha = Math.min(fadeIn, fadeOut);
+                if (progress < 0.2) {
+                    // Flicker during first 20%
+                    const flickerPhase = Math.sin(progress * 80) * 0.5 + 0.5;
+                    alpha *= flickerPhase;
+                }
+                this.ctx.globalAlpha = alpha;
+                break;
+            }
+            case 'slam': {
+                // Scale slam — overshoots then settles
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                let scale = 1;
+                if (progress < 0.15) {
+                    // Scale from 3x down to 1x with overshoot
+                    const t = progress / 0.15;
+                    scale = 3 - 2 * t;
+                } else if (progress < 0.25) {
+                    const t = (progress - 0.15) / 0.1;
+                    scale = 1 + 0.08 * Math.sin(t * Math.PI);
+                }
+                this.ctx.globalAlpha = fadeOut;
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(scale, scale);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'typewriter': {
+                // Reveal effect — we fade in progressively, fade out at end
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                const reveal = Math.min(1, progress * 3);
+                this.ctx.globalAlpha = reveal * fadeOut;
+                break;
+            }
+            case 'rise': {
+                // Float upward with fade
+                const fadeIn = Math.min(1, progress * 4);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                const offsetY = progress < 0.25
+                    ? (1 - progress / 0.25) * this.height * 0.05
+                    : 0;
+                this.ctx.translate(0, offsetY);
+                break;
+            }
+            case 'bounce': {
+                // Playful bounce-in
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                let scale = 1;
+                if (progress < 0.1) {
+                    scale = progress / 0.1;
+                } else if (progress < 0.2) {
+                    const t = (progress - 0.1) / 0.1;
+                    scale = 1 + 0.2 * Math.sin(t * Math.PI);
+                } else if (progress < 0.3) {
+                    const t = (progress - 0.2) / 0.1;
+                    scale = 1 + 0.08 * Math.sin(t * Math.PI);
+                }
+                this.ctx.globalAlpha = fadeOut;
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(scale, scale);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'glow_pulse': {
+                // Soft glow pulse — gentle alpha oscillation
+                const fadeIn = Math.min(1, progress * 4);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                const pulse = 0.85 + 0.15 * Math.sin(progress * Math.PI * 6);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut) * pulse;
+                break;
+            }
+            case 'hard_cut': {
+                // Instant appear/disappear
+                this.ctx.globalAlpha = (progress > 0.02 && progress < 0.98) ? 1 : 0;
+                break;
+            }
+            case 'scale_pop': {
+                // Pop in with scale overshoot
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                let scale = 1;
+                if (progress < 0.1) {
+                    scale = (progress / 0.1) * 1.15;
+                } else if (progress < 0.2) {
+                    const t = (progress - 0.1) / 0.1;
+                    scale = 1.15 - 0.15 * t;
+                }
+                this.ctx.globalAlpha = fadeOut;
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(scale, scale);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'slide_up': {
+                // Slide in from below
+                const fadeIn = Math.min(1, progress * 5);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                const offsetY = progress < 0.2
+                    ? (1 - progress / 0.2) * this.height * 0.15
+                    : 0;
+                this.ctx.translate(0, offsetY);
+                break;
+            }
+            case 'blur_in': {
+                // Simulate blur via alpha ramp (canvas has no native blur for text)
+                const fadeIn = Math.min(1, progress * 6);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                // Slight scale to simulate de-blur
+                if (progress < 0.15) {
+                    const t = progress / 0.15;
+                    const s = 1.04 - 0.04 * t;
+                    this.ctx.translate(this.width / 2, this.height / 2);
+                    this.ctx.scale(s, s);
+                    this.ctx.translate(-this.width / 2, -this.height / 2);
+                }
+                break;
+            }
+            default: {
+                // Fallback to standard fade
+                const fadeIn = Math.min(1, progress * 4);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                break;
+            }
+        }
     }
 
     /**
