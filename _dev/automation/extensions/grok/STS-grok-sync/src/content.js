@@ -291,6 +291,10 @@ function initSync() {
       case "ACTIVATE_TAB":
         chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
         break;
+      case "STOP_TYPING":
+        console.log("[STS WS] STOP_TYPING received from server");
+        if (S.typing.active || S.typing.starting) stopTyping();
+        break;
       case "PING":
         sendWS({ type: "PONG" });
         break;
@@ -1687,11 +1691,11 @@ function initSync() {
 <!-- Collapsed Pill -->
 <div class="sts-pill" id="sts-pill">
   <div class="sts-pill-dot" id="sts-pill-dot"></div>
-  <span class="sts-pill-label">STS</span>
+  <span class="sts-pill-label">STS Grok</span>
   <span class="sts-pill-proj" id="sts-pill-proj"></span>
   <div class="sts-pill-counts">
-    <span class="sts-c-pend" id="sts-pill-p">0</span>
-    <span class="sts-c-rdy" id="sts-pill-r">0</span>
+    <span class="sts-pill-count-label">Q</span><span class="sts-c-pend" id="sts-pill-p">0</span>
+    <span class="sts-pill-count-label">R</span><span class="sts-c-rdy" id="sts-pill-r">0</span>
   </div>
 </div>
 

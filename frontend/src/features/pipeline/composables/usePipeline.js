@@ -1,6 +1,7 @@
 import { ref, readonly } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { useActivityFeed } from '@/shared/composables/useActivityFeed.js'
 import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
 import { timeAgo } from '@/shared/utils/format.js'
 import { useDoneSound } from '@/shared/composables/useDoneSound.js'
@@ -48,6 +49,8 @@ function startSSE(id) {
   jobId.value = id
   eventSource = new EventSource(`/api/pipeline/progress/${id}`)
 
+  const activity = useActivityFeed()
+
   eventSource.onmessage = (e) => {
     const event = JSON.parse(e.data)
     log.value = [...log.value, event]
@@ -67,6 +70,7 @@ function startSSE(id) {
       stoppedProjectId.value = null
       lastCompletedProjectId.value = summary.scenes?.project_id || event.project_id || null
       lastCompletedExportFilename.value = summary.export?.filename || null
+      activity.push('Pipeline complete', 'success', { source: 'pipeline' })
       useDoneSound().play()
       setTimeout(() => loadHistory(), 500)
       return
@@ -81,6 +85,7 @@ function startSSE(id) {
         || inferResumeStep(stepStatus.value)
         || null
       stoppedProjectId.value = event.project_id || stoppedProjectId.value || null
+      activity.push(`Pipeline stopped at ${stoppedStep.value || 'unknown step'}`, 'warning', { source: 'pipeline' })
       setTimeout(() => loadHistory(), 500)
       return
     }
@@ -104,11 +109,12 @@ function startSSE(id) {
         if (pidMatch) failedProjectId.value = pidMatch[1]
       }
 
+      activity.push(event.message || `Pipeline error at ${errorStep || 'unknown step'}`, 'error', { source: 'pipeline' })
       setTimeout(() => usePipelineHistory().loadHistory(), 500)
       return
     }
 
-    // Track per-scene completions and play tick sound
+    // Track per-scene completions (no sound — sound only on final export done)
     if ((step === 'assets' || step === 'storyboard') && event.scene_ready != null) {
       const ready = event.scene_ready
       const total = event.scene_total || 0
@@ -123,9 +129,14 @@ function startSSE(id) {
           message: `${label} ${ready}/${total} ready`,
           time: new Date(),
         }]
-        useDoneSound().playTick()
+        activity.push(`${label} ${ready}/${total} ready`, 'success', { source: 'pipeline', step })
       }
       _lastSceneReady = ready
+    }
+
+    // Push step progress to activity feed
+    if (event.message) {
+      activity.push(event.message, 'pipeline', { source: 'pipeline', step })
     }
 
     stepStatus.value = { ...stepStatus.value, [step]: status }

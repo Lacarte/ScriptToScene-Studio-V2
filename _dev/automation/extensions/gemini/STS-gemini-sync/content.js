@@ -159,49 +159,87 @@
     function handleWSMessage(msg) {
       switch (msg.type) {
         case 'IMAGE_JOB': {
+          var prevProjectId = S.projectId;
           S.projectId = msg.projectId;
           S.aspectRatio = msg.aspectRatio || S.aspectRatio || '';
           var scenes = msg.scenes || [];
           var pid = msg.projectId;
-          console.log('[STS WS] IMAGE_JOB:', pid, '-', scenes.length, 'scenes', 'aspect:', S.aspectRatio);
-          for (var si = 0; si < scenes.length; si++) {
-            var sc = scenes[si];
-            var k = String(sc.scene);
-            var queueKey = pid + '|' + k; // Unique key per project+scene
-            var scAspect = sc.aspectRatio || S.aspectRatio || '';
-            // Populate scenes for sync tab
-            if (!S.scenes[queueKey]) {
-              S.scenes[queueKey] = { prompt: sc.prompt, status: 'pending', imageUrl: null, projectId: pid };
+          var isNewProject = prevProjectId && prevProjectId !== pid;
+          console.log('[STS WS] IMAGE_JOB:', pid, '-', scenes.length, 'scenes', 'aspect:', S.aspectRatio, isNewProject ? '(NEW PROJECT)' : '');
+
+          // Click "New chat" for each new project to get a fresh conversation
+          var setupPromise = isNewProject
+            ? clickNewChat().then(function() { S.typing.toolsEnabled = false; })
+            : Promise.resolve();
+
+          setupPromise.then(function() {
+            for (var si = 0; si < scenes.length; si++) {
+              var sc = scenes[si];
+              var k = String(sc.scene);
+              var queueKey = pid + '|' + k; // Unique key per project+scene
+              var scAspect = sc.aspectRatio || S.aspectRatio || '';
+              // Populate scenes for sync tab
+              if (!S.scenes[queueKey]) {
+                S.scenes[queueKey] = { prompt: sc.prompt, status: 'pending', imageUrl: null, projectId: pid };
+              }
+              var exists = false;
+              for (var qi = 0; qi < S.typing.queue.length; qi++) {
+                if (S.typing.queue[qi].queueKey === queueKey) { exists = true; break; }
+              }
+              if (!exists) {
+                var arSuffix = scAspect ? ' ' + scAspect : '';
+                S.typing.queue.push({
+                  scene: k, queueKey: queueKey, projectId: pid,
+                  displayPrompt: sc.prompt,
+                  aspectRatio: scAspect,
+                  fullPrompt: sc.prompt + arSuffix,
+                  selected: true, status: 'queued', error: null,
+                });
+              }
             }
-            var exists = false;
-            for (var qi = 0; qi < S.typing.queue.length; qi++) {
-              if (S.typing.queue[qi].queueKey === queueKey) { exists = true; break; }
+            render();
+            sendWS({ type: 'JOB_RECEIVED', projectId: pid, scenes: scenes.length });
+            chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB' });
+            if (msg.autoType && !S.typing.active && !S.typing.starting) {
+              console.log('[STS WS] Auto-starting typing');
+              setTimeout(function() { startTyping(); }, 2000);
             }
-            if (!exists) {
-              var arSuffix = scAspect ? ' ' + scAspect : '';
-              S.typing.queue.push({
-                scene: k, queueKey: queueKey, projectId: pid,
-                displayPrompt: sc.prompt,
-                aspectRatio: scAspect,
-                fullPrompt: sc.prompt + arSuffix,
-                selected: true, status: 'queued', error: null,
-              });
-            }
-          }
-          render();
-          sendWS({ type: 'JOB_RECEIVED', projectId: pid, scenes: scenes.length });
-          chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB' });
-          if (msg.autoType && !S.typing.active && !S.typing.starting) {
-            console.log('[STS WS] Auto-starting typing');
-            setTimeout(function() { startTyping(); }, 2000);
-          }
+          });
           break;
         }
         case 'ACTIVATE_TAB':
           chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB' });
           break;
+        case 'STOP_TYPING':
+          console.log('[STS WS] STOP_TYPING received from server');
+          if (S.typing.active || S.typing.starting) stopTyping();
+          break;
         case 'PONG': break;
       }
+    }
+
+    // ── Click "New chat" for a fresh conversation ────
+    function clickNewChat() {
+      return new Promise(function(resolve) {
+        // Primary: the exact selector from the Gemini sidebar
+        var newChatBtn = document.querySelector('side-nav-action-button a[data-test-id="expanded-button"][href="/app"]');
+        // Fallback: any link with aria-label "New chat"
+        if (!newChatBtn) newChatBtn = document.querySelector('a[aria-label="New chat"]');
+        // Fallback: mat-icon with edit_square
+        if (!newChatBtn) {
+          var icon = document.querySelector('mat-icon[fonticon="edit_square"]');
+          if (icon) newChatBtn = icon.closest('a') || icon.closest('button');
+        }
+        if (newChatBtn) {
+          console.log('[STS Gemini] Clicking "New chat" for fresh conversation');
+          smartClick(newChatBtn);
+          // Wait for the new chat page to load
+          setTimeout(resolve, 2000);
+        } else {
+          console.warn('[STS Gemini] "New chat" button not found — may already be on a fresh page');
+          resolve();
+        }
+      });
     }
 
     // ── Enable Image Tool (once) ─────────────────────
@@ -819,8 +857,8 @@
           '<span class="sts-pill-label">STS Gemini</span>' +
           '<span class="sts-pill-proj" id="sts-pill-proj"></span>' +
           '<div class="sts-pill-counts">' +
-            '<span class="sts-c-done" id="sts-pill-done">0</span>' +
-            '<span class="sts-c-total" id="sts-pill-total">0</span>' +
+            '<span class="sts-pill-count-label">Q</span><span class="sts-c-pend" id="sts-pill-p">0</span>' +
+            '<span class="sts-pill-count-label">R</span><span class="sts-c-rdy" id="sts-pill-r">0</span>' +
           '</div>' +
         '</div>' +
         '<!-- Expanded Panel -->' +
@@ -1037,10 +1075,11 @@
       if (pillDot) pillDot.classList.toggle('on', wsOn);
       var pillProj = $id('sts-pill-proj');
       if (pillProj) pillProj.textContent = S.projectId || '';
-      var pillDone = $id('sts-pill-done');
-      if (pillDone) pillDone.textContent = completed;
-      var pillTotal = $id('sts-pill-total');
-      if (pillTotal) pillTotal.textContent = total;
+      var queued = tq.filter(function(q) { return q.status === 'queued'; }).length;
+      var pillP = $id('sts-pill-p');
+      if (pillP) pillP.textContent = queued;
+      var pillR = $id('sts-pill-r');
+      if (pillR) pillR.textContent = completed;
 
       // Header
       var headDot = $id('sts-head-dot');

@@ -68,8 +68,9 @@
   font-size: 11px; font-family: var(--mono); font-weight: 500; color: var(--accent);
   opacity: 0.9; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.sts-pill-counts { display: flex; gap: 10px; font-family: var(--mono); font-size: 11px; font-weight: 500; }
+.sts-pill-counts { display: flex; gap: 6px; align-items: center; font-family: var(--mono); font-size: 11px; font-weight: 500; }
 .sts-pill-counts span { opacity: 0.8; }
+.sts-pill-count-label { font-size: 9px; font-weight: 700; color: var(--text-dim); opacity: 0.5; letter-spacing: 0.05em; margin-right: -2px; }
 .sts-c-pend { color: #ffffff; }
 .sts-c-proc { color: var(--amber); }
 .sts-c-rdy { color: var(--green); }

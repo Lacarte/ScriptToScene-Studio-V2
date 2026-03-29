@@ -802,12 +802,33 @@ watch(globalStatus, (status) => {
   }
 })
 
-// Close Jobs pane and scroll to progress when pipeline starts
-watch(running, async (isRunning) => {
+// Scroll to progress — double nextTick ensures the v-if component is mounted
+function scrollToProgress() {
+  nextTick(() => nextTick(() => {
+    progressRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }))
+}
+
+// Pipeline starts → close jobs pane, scroll to progress
+watch(running, (isRunning) => {
   if (isRunning) {
     showJobPane.value = false
-    await nextTick()
-    progressRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    scrollToProgress()
+  }
+})
+
+// Pipeline finishes (done / error / stopped) → scroll to show final status
+watch(globalStatus, (status) => {
+  if (status === 'done' || status === 'error' || status === 'stopped') {
+    scrollToProgress()
+  }
+})
+
+// Job queue launches → close jobs pane, scroll to progress
+watch(jobQueueRunning, (isRunning) => {
+  if (isRunning) {
+    showJobPane.value = false
+    scrollToProgress()
   }
 })
 
@@ -820,7 +841,7 @@ const lastEvent = computed(() => {
   return log.value.length ? log.value[log.value.length - 1] : null
 })
 
-const showProgress = computed(() => globalStatus.value !== '')
+const showProgress = computed(() => globalStatus.value !== '' || Object.keys(stepStatus.value).length > 0)
 const showLog = computed(() => log.value.length > 0)
 
 function dotColor(stepId) {
@@ -1450,15 +1471,6 @@ function logStepLabel(step) {
       @resume="resumeStopped"
     />
 
-    <!-- Log (expandable) -->
-    <section v-if="log.length" class="card log-card">
-      <button class="section-toggle section-toggle--compact" @click="logOpen = !logOpen">
-        <label class="field-label log-label">Log</label>
-        <span class="section-summary">{{ log.length }} entries</span>
-        <svg class="section-chevron" :class="{ open: logOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-      </button>
-      <PipelineLog v-show="logOpen" :log="log" />
-    </section>
 
     <!-- Scene Notifications -->
     <section v-if="sceneNotifications.length" class="card scene-notif-card">
@@ -4188,39 +4200,6 @@ function logStepLabel(step) {
   flex: 1;
   height: 2px;
   margin: 0 4px;
-}
-
-.current-step {
-  min-height: 24px;
-}
-
-.current-step-inner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.step-spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(78, 205, 196, 0.3);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-  flex-shrink: 0;
-}
-
-.current-step-msg {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.current-step-msg.is-error {
-  color: #FF6B6B;
-}
-
-.current-step-msg.is-stopped {
-  color: #FFB347;
 }
 
 /* ---- Log ---- */

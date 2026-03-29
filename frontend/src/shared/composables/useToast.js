@@ -1,12 +1,16 @@
 import { ref } from 'vue'
+import { useActivityFeed } from './useActivityFeed.js'
 
 const toasts = ref([])
 let nextId = 0
 
 export function useToast() {
+  const activity = useActivityFeed()
+
   function show(message, type = 'info', duration = 3000) {
     const id = nextId++
     toasts.value.push({ id, message, type })
+    activity.push(message, type)
     if (duration > 0) {
       setTimeout(() => dismiss(id), duration)
     }

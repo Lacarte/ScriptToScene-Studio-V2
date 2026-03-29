@@ -517,7 +517,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
         captions: captionData ? (() => {
             const cleanEnabled = document.getElementById('cap-clean-text-toggle')?.checked;
             const clean = cleanEnabled
-                ? (t) => t.replace(/[^\p{L}\p{N}\s!?]/gu, '').replace(/\s{2,}/g, ' ').trim()
+                ? (t) => t.replace(/[^\p{L}\p{N}\s!?\[\]]/gu, '').replace(/\s{2,}/g, ' ').trim()
                 : (t) => t;
             return {
                 style: captionData.style || {},

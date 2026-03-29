@@ -1031,7 +1031,7 @@ export const EDITOR_SHELL_HTML = `
                                     <div class="cap-section-label">Options</div>
                                     <label class="cap-option-row">
                                         <input type="checkbox" id="cap-clean-text-toggle" checked>
-                                        Clean special characters
+                                        Clean special characters except ! ? [ ]
                                     </label>
                                 </div>
 

@@ -37,7 +37,10 @@ function connectorColor(idx) {
 <template>
   <section class="card progress-card">
     <div class="progress-header">
-      <label class="field-label progress-label">Progress</label>
+      <div class="progress-header-left">
+        <label class="field-label progress-label">Progress</label>
+        <p class="progress-desc">8-step pipeline from script to final video export.</p>
+      </div>
       <div class="progress-header-right">
         <span v-if="activeProjectId" class="progress-project font-mono">{{ activeProjectId }}</span>
         <button v-if="running || stopping" class="progress-stop-btn" :disabled="stopping" @click="emit('stop')">
@@ -63,20 +66,14 @@ function connectorColor(idx) {
         <div v-if="i < steps.length - 1" class="step-connector" :style="{ background: connectorColor(i) }"></div>
       </template>
     </div>
-    <div v-if="lastEvent" class="current-step">
-      <div class="current-step-inner">
-        <div v-if="globalStatus === 'running'" class="step-spinner"></div>
-        <span class="current-step-msg" :class="{ 'is-error': lastEvent.step === 'error', 'is-stopped': lastEvent.step === 'stopped' || lastEvent.status === 'stopped' }">
-          {{ lastEvent.step === 'done' ? 'Pipeline complete' : lastEvent.message || '' }}
-        </span>
-      </div>
-    </div>
   </section>
 </template>
 
 <style scoped>
-.progress-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.progress-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
+.progress-header-left { display: flex; flex-direction: column; gap: 2px; }
 .progress-label { margin: 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
+.progress-desc { margin: 0; font-size: 11px; color: var(--text-muted); opacity: 0.7; }
 .progress-header-right { display: flex; align-items: center; gap: 10px; }
 .progress-project { font-size: 11px; color: var(--accent); }
 
@@ -99,12 +96,6 @@ function connectorColor(idx) {
 .step-label { font-size: 10px; font-weight: 600; margin-top: 4px; }
 .step-connector { flex: 1; height: 2px; margin: 0 4px; }
 
-.current-step { min-height: 24px; }
-.current-step-inner { display: flex; align-items: center; gap: 8px; }
-.step-spinner { width: 12px; height: 12px; border: 2px solid rgba(78,205,196,0.3); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
-.current-step-msg { font-size: 12px; color: var(--text-secondary); }
-.current-step-msg.is-error { color: #FF6B6B; }
-.current-step-msg.is-stopped { color: #FFB347; }
 
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(78,205,196,0.4); } 50% { box-shadow: 0 0 0 6px rgba(78,205,196,0); } }
 @keyframes spin { to { transform: rotate(360deg); } }

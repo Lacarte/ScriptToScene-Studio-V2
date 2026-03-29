@@ -363,8 +363,42 @@ def _mark_job_done(project_id):
         except Exception as e:
             logger.debug("Failed to mark job done: {}", e)
 
+    # Sweep all images for watermarks before pushing to Grok
+    _sweep_watermarks(project_id)
+
     # Auto-trigger Grok assets step with storyboard images + prompts
     threading.Thread(target=_push_to_grok, args=(project_id,), daemon=True).start()
+
+
+def _sweep_watermarks(project_id):
+    """Verify and remove watermarks from all storyboard images for a project."""
+    from config import STORYBOARD_DIR
+    image_exts = (".jpg", ".jpeg", ".png", ".webp")
+    project_dir = os.path.join(STORYBOARD_DIR, project_id)
+    if not os.path.isdir(project_dir):
+        return
+
+    try:
+        from studio.storyboard.watermark import remove_watermark
+    except Exception as e:
+        logger.warning("Watermark remover not available: {}", e)
+        return
+
+    cleaned = 0
+    for scene in os.listdir(project_dir):
+        scene_dir = os.path.join(project_dir, scene)
+        if not os.path.isdir(scene_dir):
+            continue
+        for fname in os.listdir(scene_dir):
+            if fname.startswith("image") and fname.lower().endswith(image_exts):
+                filepath = os.path.join(scene_dir, fname)
+                try:
+                    remove_watermark(filepath)
+                    cleaned += 1
+                except Exception as e:
+                    logger.debug("Watermark sweep failed for {}: {}", filepath, e)
+
+    logger.info("[{}] Watermark sweep complete — {} images checked", project_id, cleaned)
 
 
 def _push_to_grok(project_id):

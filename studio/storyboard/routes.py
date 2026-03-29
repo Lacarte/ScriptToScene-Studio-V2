@@ -459,6 +459,16 @@ def serve_image(project_id, filename):
     return send_from_directory(project_dir, filename)
 
 
+@storyboard_bp.route("/api/storyboard/remove-watermarks/<project_id>", methods=["POST"])
+def remove_watermarks(project_id):
+    """Sweep all storyboard images for a project and remove any Gemini watermarks."""
+    project_id = sanitize_project_id(project_id)
+    from .gemini_ws import _sweep_watermarks
+    import threading
+    threading.Thread(target=_sweep_watermarks, args=(project_id,), daemon=True).start()
+    return jsonify({"status": "started", "project_id": project_id}), 202
+
+
 @storyboard_bp.route("/api/storyboard/grab", methods=["POST"])
 @validate_json(StoryboardGrabOneRequest)
 def grab_one(data: StoryboardGrabOneRequest):

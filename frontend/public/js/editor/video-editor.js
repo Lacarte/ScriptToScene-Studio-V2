@@ -1350,6 +1350,7 @@ const EditorState = {
     audioElement: null,  // DEPRECATED — use audioTracks[0].element
     audioTracks: [],     // Universal multi-track audio array
     isMuted: false,  // Audio mute state
+    videoAudioEnabled: false,  // Video embedded audio (muted by default, user can enable)
     editHistory: [],  // History of edits for undo
     historyIndex: -1,  // Current position in history (-1 = no history)
     sceneErrors: new Map(),  // Map of sceneId -> [error messages]
@@ -6800,11 +6801,11 @@ function _capSyncStyleUI() {
 
 /**
  * Strip all punctuation/symbols from caption text, keeping only
- * letters, numbers, spaces, ! and ?
+ * letters, numbers, spaces, !, ?, [ and ]
  */
 function _cleanCaptionSpecialChars(text) {
     return text
-        .replace(/[^\p{L}\p{N}\s!?]/gu, '')
+        .replace(/[^\p{L}\p{N}\s!?\[\]]/gu, '')
         .replace(/\s{2,}/g, ' ')
         .trim();
 }

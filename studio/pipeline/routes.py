@@ -62,6 +62,30 @@ def _emit(job_id, event):
             job.setdefault("step_statuses", {})[step] = status
 
 
+def _stop_extensions():
+    """Broadcast STOP_TYPING to both Grok and Gemini extensions via WebSocket."""
+    stop_msg = {"type": "STOP_TYPING"}
+    try:
+        from studio.animator.routes import _broadcast as grok_broadcast
+        grok_broadcast(stop_msg)
+        logger.info("STOP_TYPING → Grok extension")
+    except Exception as e:
+        logger.debug("STOP_TYPING to Grok failed: {}", e)
+    try:
+        from studio.storyboard.gemini_ws import _ws_clients as gemini_clients, _ws_lock as gemini_lock
+        import json as _json
+        data = _json.dumps(stop_msg)
+        with gemini_lock:
+            for ws in list(gemini_clients):
+                try:
+                    ws.send(data)
+                except Exception:
+                    pass
+        logger.info("STOP_TYPING → Gemini extension")
+    except Exception as e:
+        logger.debug("STOP_TYPING to Gemini failed: {}", e)
+
+
 def _cleanup_old_jobs(max_age_s=600):
     now = time.time()
     with _jobs_lock:
@@ -237,6 +261,10 @@ def stop_pipeline(job_id):
 
     logger.info("[{}] Stop requested for pipeline job {} at step {}",
                 project_id, job_id, current_step or resume_from or "?")
+
+    # Broadcast STOP_TYPING to both Grok and Gemini extensions
+    _stop_extensions()
+
     return jsonify({
         "status": "stopping",
         "job_id": job_id,
