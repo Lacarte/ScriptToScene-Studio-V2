@@ -183,6 +183,34 @@ def activate_chromium_tab():
     return jsonify({"ok": False, "error": f"No {target} extension connected"}), 404
 
 
+@app.route("/api/pipeline/preflight", methods=["POST"])
+def pipeline_preflight():
+    """Check extension connectivity before starting a pipeline run."""
+    data = request.get_json(silent=True) or {}
+    stop_after = data.get("stop_after", "")
+    storyboard_provider = data.get("storyboard_provider", "gemini")
+    asset_provider = data.get("asset_provider", "grok")
+
+    issues = []
+
+    # Determine which extensions are needed based on pipeline scope
+    needs_storyboard = stop_after in ("", "storyboard", "assets", "assemble", "export")
+    needs_assets = stop_after in ("", "assets", "assemble", "export")
+
+    if needs_storyboard and storyboard_provider == "gemini":
+        from studio.storyboard.gemini_ws import is_extension_connected as gemini_connected
+        if not gemini_connected():
+            issues.append({"target": "gemini", "message": "Gemini extension not connected"})
+
+    if needs_assets and asset_provider == "grok":
+        from studio.animator.routes import _ws_clients as grok_clients, _ws_lock as grok_lock
+        with grok_lock:
+            if not grok_clients:
+                issues.append({"target": "grok", "message": "Grok extension not connected"})
+
+    return jsonify({"ok": len(issues) == 0, "issues": issues})
+
+
 @app.route("/api/open-folder", methods=["POST"])
 def open_folder():
     if not is_loopback_remote(request.remote_addr):

@@ -170,6 +170,27 @@ async function start() {
     toast.error('Speed must be between 0.5 and 2.0'); return
   }
 
+  // Preflight: check extension connectivity before starting
+  const storyboardProvider = localStorage.getItem('sts-storyboard-provider') || 'gemini'
+  const assetProvider = localStorage.getItem('sts-asset-provider') || 'grok'
+  try {
+    const preflight = await api.post('/api/pipeline/preflight', {
+      body: {
+        stop_after: form.stopAfter.value || '',
+        storyboard_provider: storyboardProvider,
+        asset_provider: assetProvider,
+      },
+    })
+    if (!preflight.ok && preflight.issues?.length) {
+      for (const issue of preflight.issues) {
+        toast.error(`${issue.message} — open the ${issue.target} tab first`, 6000)
+      }
+      return
+    }
+  } catch {
+    // Preflight endpoint unavailable — proceed anyway
+  }
+
   resetProgress()
   running.value = true
   stopping.value = false
@@ -186,9 +207,9 @@ async function start() {
     stop_after: form.stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     image_model: form.imageModel.value || undefined,
-    storyboard_provider: localStorage.getItem('sts-storyboard-provider') || 'gemini',
+    storyboard_provider: storyboardProvider,
     prompt_prefix: localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ',
-    provider: localStorage.getItem('sts-asset-provider') || 'grok',
+    provider: assetProvider,
     auto_type: true,
   }
 

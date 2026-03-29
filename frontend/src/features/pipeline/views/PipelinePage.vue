@@ -375,6 +375,7 @@ async function runJobQueue() {
 function stopJobQueue() {
   jobQueueRunning.value = false
   jobQueueCurrent.value = null
+  clearQueue()
   if (running.value) stop()
 }
 
@@ -707,6 +708,7 @@ const creativeOpen = ref(localStorage.getItem('sts-section-creative') !== 'false
 const settingsOpen = ref(localStorage.getItem('sts-section-settings') !== 'false')
 const logOpen = ref(false)
 const sceneNotifOpen = ref(true)
+const progressRef = ref(null)
 watch(creativeOpen, v => localStorage.setItem('sts-section-creative', String(v)))
 watch(settingsOpen, v => localStorage.setItem('sts-section-settings', String(v)))
 
@@ -797,6 +799,15 @@ watch(globalStatus, (status) => {
     setTimeout(() => {
       router.push({ path: dest, query })
     }, 1500)
+  }
+})
+
+// Close Jobs pane and scroll to progress when pipeline starts
+watch(running, async (isRunning) => {
+  if (isRunning) {
+    showJobPane.value = false
+    await nextTick()
+    progressRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 })
 
@@ -1425,6 +1436,7 @@ function logStepLabel(step) {
 
     <!-- Progress -->
     <ProgressStepper
+      ref="progressRef"
       v-if="showProgress"
       :steps="STEPS"
       :step-status="stepStatus"
@@ -1486,6 +1498,11 @@ function logStepLabel(step) {
     </button>
 
     <template v-if="showJobPane">
+      <div class="jobs-header">
+        <h3 class="jobs-header-title">Jobs</h3>
+        <p class="jobs-header-desc">Queue presets for batch production or save stories for quick re-runs.</p>
+      </div>
+
       <!-- Tab bar -->
       <div class="jobs-tabs">
         <button class="jobs-tab" :class="{ active: jobPaneTab === 'queue' }" @click="jobPaneTab = 'queue'">
@@ -2119,7 +2136,24 @@ function logStepLabel(step) {
   width: 100%;
 }
 .jobs-sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
-.jobs-sidebar--open .jobs-sidebar-toggle { margin-bottom: 10px; }
+.jobs-sidebar--open .jobs-sidebar-toggle { margin-bottom: 0; }
+
+.jobs-header {
+  padding: 6px 2px 10px;
+}
+.jobs-header-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.jobs-header-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 3px 0 0;
+}
 
 .jobs-sidebar-label { display: none; }
 .jobs-sidebar--open .jobs-sidebar-label { display: inline; }

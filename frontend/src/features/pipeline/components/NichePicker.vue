@@ -294,7 +294,7 @@ const CATEGORY_COLORS = {
                   @mousemove="moveTooltip"
                   @mouseleave="hideTooltip"
                 >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="11"/><circle cx="12" cy="7.5" r="0.5" fill="currentColor" stroke="none"/></svg>
                 </span>
                 <span
                   v-if="p.custom"
@@ -799,16 +799,22 @@ const CATEGORY_COLORS = {
   position: relative;
   flex-shrink: 0;
   color: var(--text-muted);
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: help;
-  transition: opacity 0.15s, color 0.15s;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: transparent;
 }
 
 .card-info:hover {
   opacity: 1;
   color: var(--accent);
+  background: rgba(78, 205, 196, 0.1);
 }
 
 
