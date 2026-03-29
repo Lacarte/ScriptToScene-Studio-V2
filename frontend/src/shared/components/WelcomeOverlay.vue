@@ -49,27 +49,27 @@ const welcome = useWelcomeOverlay()
         </svg>
 
         <!-- Film strip (left-center) -->
-        <svg style="position:absolute;top:45%;left:5%;width:72px;height:72px;opacity:0.04;animation:welcomeFloat 11s ease-in-out 2s infinite" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.3">
+        <svg style="position:absolute;top:45%;left:5%;width:72px;height:72px;opacity:0.10;animation:welcomeFloat 11s ease-in-out 2s infinite" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.3">
           <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/>
         </svg>
 
         <!-- Scissors (bottom-left) -->
-        <svg style="position:absolute;bottom:25%;left:15%;width:52px;height:52px;opacity:0.05;animation:welcomeFloat 10s ease-in-out 3s infinite,welcomeSpin 40s linear infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
+        <svg style="position:absolute;bottom:25%;left:15%;width:52px;height:52px;opacity:0.12;animation:welcomeFloat 10s ease-in-out 3s infinite,welcomeSpin 40s linear infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
           <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>
         </svg>
 
         <!-- Audio wave (right-center) -->
-        <svg style="position:absolute;top:55%;right:8%;width:60px;height:60px;opacity:0.05;animation:welcomeFloat 7s ease-in-out 1.5s infinite" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.5" stroke-linecap="round">
+        <svg style="position:absolute;top:55%;right:8%;width:60px;height:60px;opacity:0.12;animation:welcomeFloat 7s ease-in-out 1.5s infinite" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.5" stroke-linecap="round">
           <rect x="1" y="8" width="3" height="8" rx="1" style="animation:welcomeBar 1.5s ease-in-out infinite"/><rect x="5.5" y="5" width="3" height="14" rx="1" style="animation:welcomeBar 1.5s ease-in-out 0.2s infinite"/><rect x="10" y="2" width="3" height="20" rx="1" style="animation:welcomeBar 1.5s ease-in-out 0.4s infinite"/><rect x="14.5" y="6" width="3" height="12" rx="1" style="animation:welcomeBar 1.5s ease-in-out 0.6s infinite"/><rect x="19" y="9" width="3" height="6" rx="1" style="animation:welcomeBar 1.5s ease-in-out 0.8s infinite"/>
         </svg>
 
         <!-- Gear 3 (small, center-top) -->
-        <svg style="position:absolute;top:8%;left:45%;width:40px;height:40px;opacity:0.035;animation:welcomeSpin 15s linear infinite,welcomeFloat 6s ease-in-out 4s infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
+        <svg style="position:absolute;top:8%;left:45%;width:40px;height:40px;opacity:0.09;animation:welcomeSpin 15s linear infinite,welcomeFloat 6s ease-in-out 4s infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
           <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
         </svg>
 
         <!-- Camera 2 (bottom-center, small) -->
-        <svg style="position:absolute;bottom:10%;left:40%;width:44px;height:44px;opacity:0.035;animation:welcomeFloat 13s ease-in-out 5s infinite,welcomeDrift 35s linear infinite reverse" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
+        <svg style="position:absolute;bottom:10%;left:40%;width:44px;height:44px;opacity:0.09;animation:welcomeFloat 13s ease-in-out 5s infinite,welcomeDrift 35s linear infinite reverse" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
           <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
         </svg>
       </div>
@@ -84,7 +84,7 @@ const welcome = useWelcomeOverlay()
           viewBox="0 0 80 80"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
-          style="filter:drop-shadow(0 0 30px rgba(78,205,196,0.3))"
+          style="filter:drop-shadow(0 0 40px rgba(78,205,196,0.45))"
         >
           <rect x="4" y="4" width="72" height="72" rx="16" fill="#0f1520" stroke="url(#welcome-stroke-grad)" stroke-width="2" />
           <path d="M24 4v72" stroke="url(#welcome-stroke-grad)" stroke-width="2" opacity="0.6" style="stroke-dasharray:72;stroke-dashoffset:72;animation:welcomeStroke 2s ease 0.6s forwards" />
@@ -112,18 +112,18 @@ const welcome = useWelcomeOverlay()
         </div>
 
         <div
-          style="width:120px;height:1px;background:linear-gradient(90deg,transparent,rgba(78,205,196,0.6),transparent);opacity:0;animation:welcomeFadeUp 0.6s ease 1.4s forwards"
+          style="width:120px;height:1px;background:linear-gradient(90deg,transparent,rgba(78,205,196,0.8),transparent);opacity:0;animation:welcomeFadeUp 0.6s ease 1.4s forwards"
         ></div>
 
         <p
           id="welcome-quote"
-          style="font-family:'DM Sans',system-ui,sans-serif;font-size:clamp(13px,1.5vw,15px);font-weight:400;color:#8899aa;max-width:520px;text-align:center;line-height:1.7;padding:0 24px;opacity:0;animation:welcomeFadeUp 0.8s ease 1.6s forwards"
+          style="font-family:'DM Sans',system-ui,sans-serif;font-size:clamp(13px,1.5vw,15px);font-weight:400;color:#b8c8d8;max-width:520px;text-align:center;line-height:1.7;padding:0 24px;opacity:0;animation:welcomeFadeUp 0.8s ease 1.6s forwards"
         >
           {{ welcome.quote.value }}
         </p>
 
         <p
-          style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:rgba(136,153,170,0.4);opacity:0;animation:welcomeFadeUp 0.6s ease 2s forwards"
+          style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:rgba(136,153,170,0.65);opacity:0;animation:welcomeFadeUp 0.6s ease 2s forwards"
         >
           Create. Align. Segment. Visualize.
         </p>
@@ -132,7 +132,7 @@ const welcome = useWelcomeOverlay()
           id="welcome-enter-btn"
           class="welcome-enter-btn"
           @click="welcome.dismissWelcome()"
-          style="margin-top:10px;padding:12px 40px;font-family:'Space Grotesk',system-ui,sans-serif;font-size:13px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:#0f1520;border:none;border-radius:12px;cursor:pointer;background:linear-gradient(135deg,#4ECDC4,#5edfd6);box-shadow:0 4px 24px rgba(78,205,196,0.3),inset 0 1px 0 rgba(255,255,255,0.2);opacity:0;animation:welcomeFadeUp 0.6s ease 2.4s forwards;transition:transform 0.2s,box-shadow 0.2s"
+          style="margin-top:10px;padding:12px 40px;font-family:'Space Grotesk',system-ui,sans-serif;font-size:13px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:#0f1520;border:none;border-radius:12px;cursor:pointer;background:linear-gradient(135deg,#4ECDC4,#5edfd6);box-shadow:0 4px 30px rgba(78,205,196,0.45),inset 0 1px 0 rgba(255,255,255,0.25);opacity:0;animation:welcomeFadeUp 0.6s ease 2.4s forwards;transition:transform 0.2s,box-shadow 0.2s"
         >
           Enter Studio
         </button>
