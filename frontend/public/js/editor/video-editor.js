@@ -8183,6 +8183,19 @@ function setupEventListeners() {
         });
     });
 
+    // Video audio toggle — enable/disable embedded video audio (muted by default)
+    const videoAudioToggle = document.getElementById('video-audio-toggle');
+    videoAudioToggle?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        EditorState.videoAudioEnabled = !EditorState.videoAudioEnabled;
+        videoAudioToggle.classList.toggle('muted', !EditorState.videoAudioEnabled);
+        videoAudioToggle.title = EditorState.videoAudioEnabled ? 'Video Audio (on)' : 'Video Audio (muted)';
+        if (EditorState.preview) {
+            EditorState.preview.setVideoAudioEnabled(EditorState.videoAudioEnabled);
+        }
+        showToast(EditorState.videoAudioEnabled ? 'Video audio enabled' : 'Video audio muted', 'info');
+    });
+
     // Add Track row — click anywhere on the row to show dropdown
     const addTrackRow = document.getElementById('add-track-row');
     addTrackRow?.addEventListener('mousedown', (e) => {

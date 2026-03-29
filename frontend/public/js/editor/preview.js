@@ -41,6 +41,9 @@ export class CanvasPreview {
 
         // Disabled tracks set — synced from EditorState
         this.disabledTracks = new Set();
+
+        // Video embedded audio — muted by default, can be toggled
+        this.videoAudioEnabled = false;
     }
 
     /**
@@ -592,6 +595,9 @@ export class CanvasPreview {
      * Plays during playback, pauses+seeks during scrubbing.
      */
     _syncVideo(video, localTime) {
+        // Sync muted state based on videoAudioEnabled flag
+        video.muted = !this.videoAudioEnabled;
+
         if (this.isPlaying) {
             if (video.paused) video.play().catch(() => { });
         } else {
@@ -599,6 +605,19 @@ export class CanvasPreview {
             // Only seek if far enough from current (avoid jitter)
             if (Math.abs(video.currentTime - localTime) > 0.1) {
                 video.currentTime = localTime % (video.duration || 1);
+            }
+        }
+    }
+
+    /**
+     * Enable or disable embedded video audio
+     */
+    setVideoAudioEnabled(enabled) {
+        this.videoAudioEnabled = !!enabled;
+        // Update all cached video elements immediately
+        for (const [, el] of this.imageCache) {
+            if (el._isVideo) {
+                el.muted = !this.videoAudioEnabled;
             }
         }
     }
