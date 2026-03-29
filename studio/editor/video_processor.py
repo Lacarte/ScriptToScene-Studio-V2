@@ -29,6 +29,27 @@ FFMPEG_BIN = find_ffmpeg() or "ffmpeg"
 FFPROBE_BIN = find_ffprobe() or "ffprobe"
 
 
+# Word emphasis: color palettes per emphasis type (used in PIL rendering)
+# Each maps to a list of hex colors applied cyclically to emphasized words.
+# None = no emphasis (draw all words in base color).
+_EMPHASIS_COLOR_MAP = {
+    'color_pop':       ['#FF6B6B', '#4ECDC4', '#FFB347', '#A78BFA', '#56CCF2', '#26DE81', '#FF8ED4'],
+    'scale_burst':     ['#FFB347'],
+    'wave':            ['#4ECDC4'],
+    'glow_color':      ['#FF6B6B', '#4ECDC4', '#A78BFA', '#FFB347'],
+    'shake_word':      ['#FF6B6B'],
+    'typewriter_word': ['#4ECDC4'],
+    'split_color':     ['#FF6B6B', '#4ECDC4'],
+    'bounce_word':     ['#FFB347'],
+    'fade_stagger':    ['#A78BFA'],
+    'rise_word':       ['#56CCF2'],
+    'underline_sweep': ['#FFB347'],
+    'disintegrate':    ['#FF6B6B'],
+    'neon':            ['#FF6B6B', '#4ECDC4', '#A78BFA', '#FF8ED4'],
+    'bold_highlight':  ['#4ECDC4'],
+}
+
+
 # Font family mapping: frontend name -> system font paths by OS
 # These match the fonts available in the frontend preview.js
 FONT_MAP = {
@@ -271,6 +292,8 @@ class VideoProcessor:
                 'font_family': text_config.get('font_family', 'Inter'),
                 'font_size': text_config.get('font_size', 48),
                 'font_style': text_config.get('font_style', 'bold'),
+                'animation': text_config.get('animation', 'fade'),
+                'emphasis': text_config.get('emphasis', 'none'),
                 'position': text_config.get('position', {}) or {},
                 'text_align': text_config.get('text_align', 'center'),
                 'vertical_align': text_config.get('vertical_align', 'center'),
@@ -349,6 +372,67 @@ class VideoProcessor:
         logger.warning("No font file found for '{}', using PIL default", font_family)
         return ImageFont.load_default()
 
+    # ── Word emphasis: stop words (same as frontend) ─────────
+    _EMPHASIS_STOP = frozenset([
+        'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'am', 'do', 'does', 'did', 'has', 'have', 'had', 'having',
+        'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'it',
+        'him', 'her', 'his', 'its', 'they', 'them', 'their',
+        'this', 'that', 'these', 'those', 'what', 'which', 'who', 'whom',
+        'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from',
+        'up', 'out', 'if', 'or', 'and', 'but', 'not', 'no', 'nor',
+        'so', 'as', 'just', 'about', 'into', 'than', 'then', 'also',
+        'very', 'can', 'will', 'would', 'could', 'should', 'may', 'might',
+        'shall', 'must', 'here', 'there', 'when', 'where', 'how', 'all',
+        'each', 'both', 'few', 'more', 'most', 'some', 'any', 'such',
+        'only', 'own', 'same', 'too', 'still', 'already', 'yet',
+    ])
+
+    def _is_emphasis_word(self, word):
+        clean = ''.join(c for c in word if c.isalpha()).lower()
+        return len(clean) > 2 and clean not in self._EMPHASIS_STOP
+
+    def _draw_line_with_emphasis(self, draw, line, x, y, font, font_family,
+                                  font_size, font_style, base_color,
+                                  emphasis_colors, emphasis_type):
+        """Draw a line word-by-word, applying emphasis colors to keywords."""
+        import re
+        tokens = re.split(r'(\s+)', line)
+        cursor_x = x
+        word_idx = 0
+
+        # Load a slightly larger bold font for emphasized words
+        emphasis_font = self._load_font(font_family, int(font_size * 1.05), 'bold')
+
+        for token in tokens:
+            if not token.strip():
+                # Whitespace — measure and advance
+                bbox = draw.textbbox((0, 0), token, font=font)
+                cursor_x += bbox[2] - bbox[0]
+                continue
+
+            if self._is_emphasis_word(token):
+                color = emphasis_colors[word_idx % len(emphasis_colors)]
+                use_font = emphasis_font
+
+                if emphasis_type == 'bold_highlight':
+                    # Draw highlight box behind word
+                    bbox = draw.textbbox((cursor_x, y), token, font=use_font)
+                    pad = 4
+                    draw.rectangle(
+                        [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad],
+                        fill=color + '40'  # 25% opacity hex
+                    )
+
+                draw.text((cursor_x, y), token, fill=color, font=use_font)
+                bbox = draw.textbbox((0, 0), token, font=use_font)
+                word_idx += 1
+            else:
+                draw.text((cursor_x, y), token, fill=base_color, font=font)
+                bbox = draw.textbbox((0, 0), token, font=font)
+
+            cursor_x += bbox[2] - bbox[0]
+
     def _render_text_image(self, text_config, output_path):
         """Render text overlay on background image or solid color"""
         content = text_config.get('content', '')
@@ -414,6 +498,9 @@ class VideoProcessor:
             else:
                 y = (self.height - total_height) / 2
 
+        emphasis = text_config.get('emphasis', 'none') or 'none'
+        emphasis_colors = _EMPHASIS_COLOR_MAP.get(emphasis)
+
         for line in lines:
             bbox = draw.textbbox((0, 0), line, font=font)
             text_width = bbox[2] - bbox[0]
@@ -429,11 +516,19 @@ class VideoProcessor:
                     x = (self.width - text_width) / 2
 
             x = max(padding / 2, min(x, self.width - text_width - padding / 2))
-            draw.text((x, y), line, fill=color_hex, font=font)
+
+            if emphasis_colors:
+                # Word-level emphasis: draw each word with emphasis color on keywords
+                self._draw_line_with_emphasis(
+                    draw, line, x, y, font, font_family, font_size, font_style,
+                    color_hex, emphasis_colors, emphasis
+                )
+            else:
+                draw.text((x, y), line, fill=color_hex, font=font)
             y += line_height
 
         img.save(output_path, 'PNG')
-        logger.debug("Text image saved: {}", output_path)
+        logger.debug("Text image saved (emphasis={}): {}", emphasis, output_path)
 
     def _probe_duration(self, video_path):
         """Get duration of a video file in seconds via ffprobe."""
@@ -448,8 +543,163 @@ class VideoProcessor:
         except Exception:
             return 0.0
 
+    def _build_text_animation_filter(self, animation, start_time, duration, end_time):
+        """Build FFmpeg filter chain for text animation on overlay input [1:v].
+
+        Returns (overlay_prep_filter, overlay_x_expr, overlay_y_expr, alpha_filters)
+        where overlay_prep_filter is applied to [1:v] before overlay, and
+        alpha_filters are fade filters applied before the overlay filter.
+        """
+        S = f"{start_time:.3f}"
+        E = f"{end_time:.3f}"
+        D = f"{duration:.3f}"
+        fade_in_d = min(0.4, duration * 0.15)
+        fade_out_d = min(0.4, duration * 0.15)
+        fade_out_st = max(start_time, end_time - fade_out_d)
+
+        # Default: simple fade in/out, centered overlay at 0,0 (image is pre-positioned)
+        alpha = f"fade=t=in:st={S}:d={fade_in_d:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+        prep = ""
+        x_expr = "0"
+        y_expr = "0"
+
+        anim = animation or "fade"
+
+        if anim == "fade":
+            pass  # default alpha is fine
+
+        elif anim == "stoic_fade":
+            slow_in = min(1.0, duration * 0.3)
+            slow_out = min(1.0, duration * 0.3)
+            slow_out_st = max(start_time, end_time - slow_out)
+            alpha = f"fade=t=in:st={S}:d={slow_in:.3f}:alpha=1,fade=t=out:st={slow_out_st:.3f}:d={slow_out:.3f}:alpha=1"
+
+        elif anim == "slide_up":
+            fin = min(0.5, duration * 0.2)
+            # Slide from 15% below to 0
+            y_expr = f"if(lt(t,{start_time + fin:.3f}),(1-((t-{S})/{fin:.3f}))*h*0.15,0)"
+            alpha = f"fade=t=in:st={S}:d={fin:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "slide_left":
+            fin = min(0.5, duration * 0.2)
+            x_expr = f"if(lt(t,{start_time + fin:.3f}),(1-((t-{S})/{fin:.3f}))*W*0.2,0)"
+            alpha = f"fade=t=in:st={S}:d={fin:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "slide_right":
+            fin = min(0.5, duration * 0.2)
+            x_expr = f"if(lt(t,{start_time + fin:.3f}),-(1-((t-{S})/{fin:.3f}))*W*0.2,0)"
+            alpha = f"fade=t=in:st={S}:d={fin:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "drop_in":
+            fin = min(0.4, duration * 0.15)
+            y_expr = f"if(lt(t,{start_time + fin:.3f}),-(1-((t-{S})/{fin:.3f}))*H*0.3,0)"
+            alpha = f"fade=t=in:st={S}:d={fin:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "rise":
+            fin = min(0.6, duration * 0.25)
+            y_expr = f"if(lt(t,{start_time + fin:.3f}),(1-((t-{S})/{fin:.3f}))*h*0.05,0)"
+            alpha = f"fade=t=in:st={S}:d={fin:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim in ("slam", "zoom_burst", "scale_pop", "expand", "bounce"):
+            # Scale animations — use zoompan or scale on the overlay before overlay
+            # Scale from 1.3x to 1x quickly (slam effect)
+            scale_d = min(0.3, duration * 0.12)
+            if anim == "slam":
+                prep = f"scale=iw*1.3:ih*1.3:eval=init,fade=t=in:st={S}:d=0.08:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+            elif anim == "zoom_burst":
+                prep = f"scale=iw*1.4:ih*1.4:eval=init,fade=t=in:st={S}:d=0.06:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+            elif anim == "bounce":
+                prep = f"scale=iw*1.15:ih*1.15:eval=init,fade=t=in:st={S}:d=0.1:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+            elif anim == "expand":
+                prep = f"fade=t=in:st={S}:d={min(0.6, duration * 0.25):.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+            else:  # scale_pop
+                prep = f"scale=iw*1.12:ih*1.12:eval=init,fade=t=in:st={S}:d=0.1:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+            # Center the scaled overlay
+            x_expr = "(W-w)/2"
+            y_expr = "(H-h)/2"
+            alpha = ""  # already in prep
+
+        elif anim == "movie_title":
+            # Slow fade in, slight zoom via scale
+            slow_in = min(0.8, duration * 0.3)
+            slow_out = min(0.6, duration * 0.25)
+            slow_out_st = max(start_time, end_time - slow_out)
+            prep = f"scale=iw*1.04:ih*1.04:eval=init,fade=t=in:st={S}:d={slow_in:.3f}:alpha=1,fade=t=out:st={slow_out_st:.3f}:d={slow_out:.3f}:alpha=1"
+            x_expr = "(W-w)/2"
+            y_expr = "(H-h)/2"
+            alpha = ""
+
+        elif anim == "shake":
+            # Shake via oscillating x/y offset
+            x_expr = f"if(between(t,{S},{E}),4*sin(t*60),0)"
+            y_expr = f"if(between(t,{S},{E}),2*cos(t*47),0)"
+
+        elif anim == "drift":
+            # Gentle lateral drift
+            x_expr = f"if(between(t,{S},{E}),sin((t-{S})*3.14*2)*W*0.015,0)"
+            y_expr = f"if(between(t,{S},{E}),cos((t-{S})*3.14*1.5)*H*0.008,0)"
+            slow_in = min(0.6, duration * 0.2)
+            slow_out = min(0.6, duration * 0.2)
+            slow_out_st = max(start_time, end_time - slow_out)
+            alpha = f"fade=t=in:st={S}:d={slow_in:.3f}:alpha=1,fade=t=out:st={slow_out_st:.3f}:d={slow_out:.3f}:alpha=1"
+
+        elif anim == "pulse":
+            # Rhythmic scale pulse — approximated with slight x/y jitter
+            x_expr = f"if(between(t,{S},{E}),sin(t*25)*2,0)"
+            y_expr = f"if(between(t,{S},{E}),cos(t*25)*1,0)"
+
+        elif anim in ("flicker", "glitch"):
+            # Flicker/glitch — rapid alpha toggling via very short fade cycles
+            flicker_in = min(0.15, duration * 0.1)
+            alpha = (
+                f"fade=t=in:st={S}:d={flicker_in:.3f}:alpha=1,"
+                f"fade=t=out:st={start_time + flicker_in:.3f}:d=0.03:alpha=1,"
+                f"fade=t=in:st={start_time + flicker_in + 0.03:.3f}:d=0.02:alpha=1,"
+                f"fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+            )
+            if anim == "glitch":
+                x_expr = f"if(between(t,{S},{start_time + 0.3:.3f}),sin(t*120)*6,0)"
+
+        elif anim == "breathe":
+            # Gentle slow fade
+            slow_in = min(0.7, duration * 0.25)
+            slow_out = min(0.7, duration * 0.25)
+            slow_out_st = max(start_time, end_time - slow_out)
+            alpha = f"fade=t=in:st={S}:d={slow_in:.3f}:alpha=1,fade=t=out:st={slow_out_st:.3f}:d={slow_out:.3f}:alpha=1"
+
+        elif anim == "rotate_in":
+            # Rotation not easily done with overlay alone; use fade + slide
+            fin = min(0.4, duration * 0.2)
+            x_expr = f"if(lt(t,{start_time + fin:.3f}),(1-((t-{S})/{fin:.3f}))*W*0.05,0)"
+            y_expr = f"if(lt(t,{start_time + fin:.3f}),(1-((t-{S})/{fin:.3f}))*H*-0.02,0)"
+            alpha = f"fade=t=in:st={S}:d={fin:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "split_reveal":
+            # Vertical scale reveal — approximated with fast fade
+            fast_in = min(0.2, duration * 0.1)
+            alpha = f"fade=t=in:st={S}:d={fast_in:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "hard_cut":
+            alpha = ""  # No fade at all — just enable/disable via overlay timing
+
+        elif anim == "typewriter":
+            # Fast fade in, hold, clean fade out
+            fast_in = min(0.15, duration * 0.08)
+            alpha = f"fade=t=in:st={S}:d={fast_in:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "glow_pulse":
+            # Gentle fade with slightly longer hold
+            alpha = f"fade=t=in:st={S}:d={fade_in_d:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        elif anim == "blur_in":
+            # Longer fade in to simulate de-blur
+            blur_in = min(0.5, duration * 0.2)
+            alpha = f"fade=t=in:st={S}:d={blur_in:.3f}:alpha=1,fade=t=out:st={fade_out_st:.3f}:d={fade_out_d:.3f}:alpha=1"
+
+        return prep, x_expr, y_expr, alpha
+
     def _apply_scene_text_overlay(self, input_path, output_path, overlay_config, temp_dir, index):
-        """Burn a timed text overlay onto a rendered image/video scene clip."""
+        """Burn a timed, animated text overlay onto a rendered image/video scene clip."""
         duration = max(0.0, float(overlay_config.get('duration', 0) or 0))
         if duration <= 0:
             shutil.copy2(input_path, output_path)
@@ -462,6 +712,7 @@ class VideoProcessor:
             'font_family': overlay_config.get('font_family', 'Inter'),
             'font_size': overlay_config.get('font_size', 48),
             'font_style': overlay_config.get('font_style', 'bold'),
+            'emphasis': overlay_config.get('emphasis', 'none'),
             'position': overlay_config.get('position', {}) or {},
             'text_align': overlay_config.get('text_align', 'center'),
             'vertical_align': overlay_config.get('vertical_align', 'center'),
@@ -474,20 +725,32 @@ class VideoProcessor:
         overlay_image_path = os.path.join(temp_dir, f"scene_{index:03d}_text_overlay.png")
         self._render_text_image(overlay_text_cfg, overlay_image_path)
 
-        # Probe the input video duration to cap the looped overlay input.
-        # -loop 1 on a still image creates an infinite stream; without an
-        # explicit -t, -shortest is unreliable with -filter_complex and FFmpeg
-        # hangs until the timeout fires.
         video_dur = self._probe_duration(input_path)
         if video_dur <= 0:
-            video_dur = 120  # safe fallback cap
+            video_dur = 120
 
         start_time = max(0.0, float(overlay_config.get('start_time', 0) or 0))
         end_time = start_time + duration
-        filter_complex = (
-            f"[1:v]format=rgba[ov];"
-            f"[0:v][ov]overlay=0:0:enable='between(t,{start_time:.3f},{end_time:.3f})'[v]"
+        animation = overlay_config.get('animation', 'fade') or 'fade'
+
+        prep, x_expr, y_expr, alpha_filters = self._build_text_animation_filter(
+            animation, start_time, duration, end_time
         )
+
+        # Build filter chain for overlay input
+        ov_chain = "[1:v]format=rgba"
+        if prep:
+            ov_chain += f",{prep}"
+        if alpha_filters:
+            ov_chain += f",{alpha_filters}"
+        ov_chain += "[ov]"
+
+        enable = f"enable='between(t,{start_time:.3f},{end_time:.3f})'"
+        filter_complex = (
+            f"{ov_chain};"
+            f"[0:v][ov]overlay={x_expr}:{y_expr}:{enable}:format=auto[v]"
+        )
+
         cmd = [
             FFMPEG_BIN, '-y',
             '-i', input_path,
@@ -503,10 +766,10 @@ class VideoProcessor:
         ]
         result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:
-            logger.error("Scene text overlay failed: {}", result.stderr[-700:] if result.stderr else '')
+            logger.error("Scene text overlay failed (anim={}): {}", animation, result.stderr[-700:] if result.stderr else '')
             shutil.copy2(input_path, output_path)
         else:
-            logger.info("Scene text overlay applied: {}", os.path.basename(output_path))
+            logger.info("Scene text overlay applied (anim={}): {}", animation, os.path.basename(output_path))
 
     def _wrap_text(self, text, font, max_width, draw):
         """Wrap text to fit within max_width"""

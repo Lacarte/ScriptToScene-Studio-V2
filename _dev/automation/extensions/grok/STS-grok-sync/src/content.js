@@ -1372,6 +1372,9 @@ function initSync() {
       }
     } catch {}
 
+    // Switch to ScriptToScene Studio tab after job completes
+    try { chrome.runtime.sendMessage({ type: "FOCUS_STUDIO_TAB" }); } catch {}
+
     S.typing.active = false;
     S.typing.stopRequested = false;
     S.typing.currentIndex = -1;

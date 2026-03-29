@@ -3,6 +3,8 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ExportCard from '../components/ExportCard.vue'
 import DeleteExportDialog from '../components/DeleteExportDialog.vue'
+import LibraryAnalytics from '../components/LibraryAnalytics.vue'
+import LibrarySearch from '../components/LibrarySearch.vue'
 import { useExportLibrary, aspectRatioFromDimensions } from '../composables/useExportLibrary.js'
 import { formatBytes, timeAgo, fmtDuration, fmtTime } from '@/shared/utils/format.js'
 
@@ -19,6 +21,7 @@ const {
   filterStyle,
   filterRatio,
   filterDuration,
+  searchQuery,
   filteredItems,
   SORT_OPTIONS,
   DURATION_FILTERS,
@@ -256,7 +259,7 @@ const extendedStats = computed(() => {
       </div>
     </Transition>
 
-    <!-- Stats bar -->
+    <!-- Stats bar (compact) -->
     <div v-if="items.length" class="stats-bar">
       <div class="stat">
         <span class="stat-num" style="color: var(--accent)">{{ extendedStats.total }}</span>
@@ -298,28 +301,29 @@ const extendedStats = computed(() => {
       </template>
     </div>
 
-    <!-- Filter bar -->
-    <div v-if="items.length" class="filter-bar">
-      <select v-model="sortBy" class="filter-select">
-        <option v-for="opt in SORT_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-      </select>
-      <select v-model="filterStyle" class="filter-select">
-        <option value="">All styles</option>
-        <option v-for="s in styleOptions.filter(v => v)" :key="s" :value="s">{{ styleLabel(s) }}</option>
-      </select>
-      <select v-model="filterRatio" class="filter-select">
-        <option value="">All ratios</option>
-        <option v-for="r in ratioOptions.filter(v => v)" :key="r" :value="r">{{ r }}</option>
-      </select>
-      <select v-model="filterDuration" class="filter-select">
-        <option v-for="d in DURATION_FILTERS" :key="d.value" :value="d.value">{{ d.label }}</option>
-      </select>
-      <button v-if="hasActiveFilters" class="clear-btn" @click="clearFilters">Clear</button>
-      <span class="filter-count">
-        <template v-if="filteredItems.length < items.length">{{ filteredItems.length }} / {{ items.length }}</template>
-        <template v-else>{{ items.length }} video{{ items.length !== 1 ? 's' : '' }}</template>
-      </span>
-    </div>
+    <!-- Analytics dashboard -->
+    <LibraryAnalytics v-if="items.length" :items="items" />
+
+    <!-- Search & Filter -->
+    <LibrarySearch
+      v-if="items.length"
+      :items="items"
+      :sort-by="sortBy"
+      :filter-style="filterStyle"
+      :filter-ratio="filterRatio"
+      :filter-duration="filterDuration"
+      :sort-options="SORT_OPTIONS"
+      :duration-filters="DURATION_FILTERS"
+      :style-options="styleOptions"
+      :ratio-options="ratioOptions"
+      :filtered-count="filteredItems.length"
+      @update:sort-by="sortBy = $event"
+      @update:filter-style="filterStyle = $event"
+      @update:filter-ratio="filterRatio = $event"
+      @update:filter-duration="filterDuration = $event"
+      @search="searchQuery = $event"
+      @clear="clearFilters"
+    />
 
     <!-- States -->
     <div v-if="loading && items.length === 0" class="state-msg">Loading export library...</div>
@@ -693,57 +697,7 @@ const extendedStats = computed(() => {
   flex-shrink: 0;
 }
 
-/* ---- Filter Bar ---- */
-.filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.filter-select {
-  background: var(--bg-darkest);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.15s;
-}
-
-.filter-select:hover,
-.filter-select:focus {
-  border-color: var(--border-hover);
-}
-
-.clear-btn {
-  padding: 5px 10px;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: var(--font-mono);
-  border: 1px solid rgba(255, 107, 107, 0.3);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--coral);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.clear-btn:hover {
-  background: rgba(255, 107, 107, 0.08);
-  border-color: var(--coral);
-}
-
-.filter-count {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-left: auto;
-}
+/* (Filter bar moved to LibrarySearch component) */
 
 /* ---- States ---- */
 .state-msg {

@@ -300,6 +300,20 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return false;
   }
 
+  if (request.type === 'FOCUS_STUDIO_TAB') {
+    chrome.tabs.query({}, function(tabs) {
+      var studio = tabs.find(function(t) {
+        return t.url && (t.url.indexOf('localhost:5174') !== -1 || t.url.indexOf('localhost:5050') !== -1 || t.url.indexOf('ScriptToScene') !== -1);
+      });
+      if (studio) {
+        chrome.tabs.update(studio.id, { active: true });
+        chrome.windows.update(studio.windowId, { focused: true });
+      }
+    });
+    sendResponse({ ok: true });
+    return false;
+  }
+
   // Fallback for content scripts not using port yet
   if (request.action === 'STS_WS_SEND') {
     sendWS(request.payload);

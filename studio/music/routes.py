@@ -88,6 +88,28 @@ def upload_music():
     })
 
 
+@music_bp.route("/api/music/auto-select")
+def auto_select_music():
+    """Pick a random music track based on story_tone query param."""
+    story_tone = request.args.get("tone", "").strip()
+    if not story_tone:
+        return jsonify({"error": "Missing 'tone' query parameter"}), 400
+
+    from studio.music.selector import select_music
+    result = select_music(story_tone)
+    if not result:
+        return jsonify({"error": f"No music for tone '{story_tone}'"}), 404
+
+    # Convert absolute path to a servable URL
+    abs_path = result["path"]
+    from config import APP_ASSETS_DIR
+    if abs_path.startswith(APP_ASSETS_DIR):
+        rel = abs_path[len(APP_ASSETS_DIR):].replace("\\", "/").lstrip("/")
+        result["path"] = f"/assets/{rel}"
+    result["filename"] = os.path.basename(abs_path)
+    return jsonify(result)
+
+
 @music_bp.route("/output/musics/<path:filename>")
 def serve_music(filename):
     """Serve music files for playback."""

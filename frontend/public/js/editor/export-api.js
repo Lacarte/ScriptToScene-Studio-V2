@@ -458,6 +458,8 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     font_style: scene.font_style || 'bold',
                     color: scene.text_color || 'white',
                     color_hex: _resolveColorHex(scene.text_color || 'white'),
+                    animation: scene.text_animation || getDefaultTextAnimation() || 'fade',
+                    emphasis: scene.text_emphasis || 'none',
                     position: {
                         x: scene.text_x ?? null,
                         y: scene.text_y ?? null
@@ -487,6 +489,8 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     font_style: scene.font_style || 'bold',
                     color: scene.text_color || 'white',
                     color_hex: _resolveColorHex(scene.text_color || 'white'),
+                    animation: scene.text_animation || getDefaultTextAnimation() || 'fade',
+                    emphasis: scene.text_emphasis || 'none',
                     position: {
                         x: scene.text_x ?? null,
                         y: scene.text_y ?? null

@@ -18,7 +18,7 @@ import zipfile
 from flask import Blueprint, send_from_directory, request, jsonify, send_file
 from loguru import logger
 
-from config import OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR, PIPELINE_DIR
+from config import OUTPUT_DIR, BIN_DIR, APP_ASSETS_DIR, SCENES_DIR, ALIGN_DIR, TTS_DIR, ANIMATOR_DIR, EXPORT_DIR, CAPTIONS_DIR, PROJECTS_DIR, APP_CONFIG_PATH, TRASH_DIR, THUMBNAILS_DIR, PIPELINE_DIR, STORYBOARD_DIR
 from studio.security import sanitize_folder_name, sanitize_project_id, safe_join
 from studio.fonts import FONT_REGISTRY, get_font_path, get_font_url
 from studio.ffmpeg_utils import find_ffprobe
@@ -2015,6 +2015,55 @@ def export_library_list():
 
     items.sort(key=lambda it: it.get("modified_at", ""), reverse=True)
     return jsonify({"items": items, "count": len(items)})
+
+
+@editor_bp.route("/api/export/library/prompts/<project_id>", methods=["GET"])
+def export_library_prompts(project_id):
+    """Return scene-level prompt details for analytics / prompt inspection."""
+    from studio.security import sanitize_project_id
+    pid = sanitize_project_id(project_id)
+
+    result = {"project_id": pid, "style": "", "scenes": []}
+
+    # Read scenes.json
+    scenes_path = os.path.join(SCENES_DIR, pid, "scenes.json")
+    if os.path.isfile(scenes_path):
+        sd = safe_json_read(scenes_path)
+        result["style"] = sd.get("style", "")
+
+    # Read initial.json for full scene data
+    initial_path = _initial_path(pid)
+    if os.path.isfile(initial_path):
+        pd = safe_json_read(initial_path)
+        result["style"] = result["style"] or pd.get("style", "")
+        for i, s in enumerate(pd.get("scenes") or []):
+            if not isinstance(s, dict):
+                continue
+            result["scenes"].append({
+                "index": i,
+                "script": s.get("script", ""),
+                "image_prompt": s.get("image_prompt", s.get("prompt", "")),
+                "narrative_role": s.get("narrative_role", ""),
+                "duration": s.get("duration", 0),
+                "visual_fx": s.get("visual_fx", ""),
+                "scene_type": s.get("type", ""),
+                "isVideo": s.get("isVideo", False),
+            })
+
+    # Read storyboard prompts if available
+    storyboard_prompts_path = os.path.join(STORYBOARD_DIR, pid, "scene_prompts.json")
+    if os.path.isfile(storyboard_prompts_path):
+        try:
+            sp = safe_json_read(storyboard_prompts_path)
+            if isinstance(sp, list):
+                for entry in sp:
+                    idx = entry.get("scene", -1)
+                    if 0 <= idx < len(result["scenes"]):
+                        result["scenes"][idx]["storyboard_prompt"] = entry.get("prompt", "")
+        except Exception:
+            pass
+
+    return jsonify(result)
 
 
 @editor_bp.route("/api/export/library/trash", methods=["POST"])

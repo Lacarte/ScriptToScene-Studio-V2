@@ -150,29 +150,56 @@ function extractEmphasisWords(text) {
 
 // Animation presets mapped to story tones
 const TEXT_ANIMATIONS = {
-    // Tone-specific animations
-    fade:        { label: 'Fade',        desc: 'Gentle fade in / fade out' },
-    flicker:     { label: 'Flicker',     desc: 'Glitch flicker — suspenseful, uneasy' },
-    slam:        { label: 'Slam',        desc: 'Scale slam — dramatic impact' },
-    typewriter:  { label: 'Typewriter',  desc: 'Letter-by-letter reveal — educational' },
-    rise:        { label: 'Rise',        desc: 'Float upward with fade — inspirational' },
-    bounce:      { label: 'Bounce',      desc: 'Playful bounce-in — comedic' },
-    glow_pulse:  { label: 'Glow Pulse',  desc: 'Soft glow pulse — wholesome, warm' },
-    // General-purpose
-    hard_cut:    { label: 'Hard Cut',    desc: 'Instant appear / disappear' },
-    scale_pop:   { label: 'Scale Pop',   desc: 'Pop in with scale overshoot' },
-    slide_up:    { label: 'Slide Up',    desc: 'Slide in from below' },
-    blur_in:     { label: 'Blur In',     desc: 'De-blur into focus' },
+    // ── Tone-matched (auto-selected based on story tone) ──
+    fade:         { label: 'Fade',         desc: 'Gentle fade in / fade out' },
+    flicker:      { label: 'Flicker',      desc: 'Glitch flicker — suspenseful, uneasy' },
+    slam:         { label: 'Slam',         desc: 'Scale slam — dramatic impact' },
+    typewriter:   { label: 'Typewriter',   desc: 'Letter-by-letter reveal — educational' },
+    rise:         { label: 'Rise',         desc: 'Float upward with fade — inspirational' },
+    bounce:       { label: 'Bounce',       desc: 'Playful bounce-in — comedic' },
+    glow_pulse:   { label: 'Glow Pulse',   desc: 'Soft glow pulse — wholesome, warm' },
+    stoic_fade:   { label: 'Stoic Fade',   desc: 'Ultra-slow deliberate fade — philosophical' },
+    breathe:      { label: 'Breathe',      desc: 'Slow inhale/exhale scale — meditative' },
+    shake:        { label: 'Shake',        desc: 'Earthquake jitter — horror, tension' },
+    glitch:       { label: 'Glitch',       desc: 'Digital slice jitter — cyberpunk, chaotic' },
+    movie_title:  { label: 'Movie Title',  desc: 'Cinematic slow zoom — epic, narrative' },
+    drift:        { label: 'Drift',        desc: 'Gentle lateral sway — dreamy, nostalgic' },
+    // ── General-purpose ──
+    hard_cut:     { label: 'Hard Cut',     desc: 'Instant appear / disappear' },
+    scale_pop:    { label: 'Scale Pop',    desc: 'Pop in with scale overshoot' },
+    slide_up:     { label: 'Slide Up',     desc: 'Slide in from below' },
+    slide_left:   { label: 'Slide Left',   desc: 'Slide in from right side' },
+    slide_right:  { label: 'Slide Right',  desc: 'Slide in from left side' },
+    blur_in:      { label: 'Blur In',      desc: 'De-blur into focus' },
+    zoom_burst:   { label: 'Zoom Burst',   desc: 'Explosive zoom with overshoot' },
+    drop_in:      { label: 'Drop In',      desc: 'Fall from above with bounce' },
+    rotate_in:    { label: 'Rotate In',    desc: 'Subtle rotation entry' },
+    split_reveal: { label: 'Split Reveal', desc: 'Scale from center line outward' },
+    pulse:        { label: 'Pulse',        desc: 'Rhythmic heartbeat — urgent, intense' },
+    expand:       { label: 'Expand',       desc: 'Smooth scale reveal — revelation, epiphany' },
 };
 
 // Default animation per story tone
 const TONE_ANIMATION_MAP = {
-    suspenseful:  'flicker',
-    dramatic:     'slam',
-    educational:  'typewriter',
-    inspirational:'rise',
-    comedic:      'bounce',
-    wholesome:    'glow_pulse',
+    suspenseful:   'flicker',
+    dramatic:      'slam',
+    educational:   'typewriter',
+    inspirational: 'rise',
+    comedic:       'bounce',
+    wholesome:     'glow_pulse',
+    philosophical: 'stoic_fade',
+    meditative:    'breathe',
+    horror:        'shake',
+    dark:          'glitch',
+    epic:          'movie_title',
+    nostalgic:     'drift',
+    melancholic:   'drift',
+    motivational:  'expand',
+    urgent:        'pulse',
+    mysterious:    'blur_in',
+    romantic:      'breathe',
+    cinematic:     'movie_title',
+    stoic:         'stoic_fade',
 };
 
 /**
@@ -190,6 +217,60 @@ function _buildTextAnimationOptions(selectedId) {
     return Object.entries(TEXT_ANIMATIONS).map(([id, a]) => {
         const sel = id === selectedId ? ' selected' : '';
         return '<option value="' + id + '"' + sel + ' title="' + a.desc + '">' + a.label + '</option>';
+    }).join('');
+}
+
+// ── Word Emphasis Presets ────────────────────────────────
+const WORD_EMPHASIS = {
+    none:            { label: 'None',             desc: 'No word emphasis' },
+    color_pop:       { label: 'Color Pop',        desc: 'Key words in rotating vivid colors' },
+    scale_burst:     { label: 'Scale Burst',      desc: 'Words pulse larger then settle' },
+    wave:            { label: 'Wave',             desc: 'Words bob up and down in a wave' },
+    glow_color:      { label: 'Glow Color',       desc: 'Colored glow halo around key words' },
+    shake_word:      { label: 'Shake',            desc: 'Key words jitter with tension' },
+    typewriter_word: { label: 'Typewriter',       desc: 'Words revealed character by character' },
+    split_color:     { label: 'Split Color',      desc: 'Word halves in contrasting colors' },
+    bounce_word:     { label: 'Bounce',           desc: 'Words bounce in playfully' },
+    fade_stagger:    { label: 'Fade Stagger',     desc: 'Words fade in one after another' },
+    rise_word:       { label: 'Rise',             desc: 'Words float upward as they appear' },
+    underline_sweep: { label: 'Underline Sweep',  desc: 'Animated underline draws across key words' },
+    disintegrate:    { label: 'Disintegrate',     desc: 'Words scatter into particles at end' },
+    neon:            { label: 'Neon',             desc: 'Pulsing neon glow on key words' },
+    bold_highlight:  { label: 'Bold Highlight',   desc: 'Highlighted box behind key words' },
+};
+
+// Default word emphasis per story tone
+const TONE_EMPHASIS_MAP = {
+    suspenseful:   'shake_word',
+    dramatic:      'scale_burst',
+    educational:   'bold_highlight',
+    inspirational: 'rise_word',
+    comedic:       'bounce_word',
+    wholesome:     'glow_color',
+    philosophical: 'fade_stagger',
+    meditative:    'wave',
+    horror:        'disintegrate',
+    dark:          'neon',
+    epic:          'scale_burst',
+    nostalgic:     'fade_stagger',
+    melancholic:   'wave',
+    motivational:  'color_pop',
+    urgent:        'shake_word',
+    mysterious:    'neon',
+    romantic:      'glow_color',
+    cinematic:     'underline_sweep',
+    stoic:         'bold_highlight',
+};
+
+function getDefaultWordEmphasis() {
+    const tone = EditorState.project?.storyTone || '';
+    return TONE_EMPHASIS_MAP[tone] || 'none';
+}
+
+function _buildWordEmphasisOptions(selectedId) {
+    return Object.entries(WORD_EMPHASIS).map(([id, e]) => {
+        const sel = id === selectedId ? ' selected' : '';
+        return '<option value="' + id + '"' + sel + ' title="' + e.desc + '">' + e.label + '</option>';
     }).join('');
 }
 
@@ -3652,7 +3733,14 @@ async function bootstrapProjectIntoEditor(projectData, options = {}) {
         applySceneErrorStyles();
         const finalValidation = validateLoadedEditorState({ mediaReport, voiceReport });
         if (!finalValidation.ok) {
-            throw new Error(finalValidation.errors[0]);
+            // Only hard-fail if scenes are truly empty — otherwise warn and continue
+            if (!Array.isArray(EditorState.scenes) || EditorState.scenes.length === 0) {
+                throw new Error(finalValidation.errors[0]);
+            }
+            console.warn('Editor bootstrap: soft validation errors (continuing):', finalValidation.errors);
+            finalValidation.warnings.unshift(...finalValidation.errors);
+            finalValidation.errors = [];
+            finalValidation.ok = true;
         }
 
         await hideLoadingOverlay(bootId);
@@ -3668,6 +3756,9 @@ async function bootstrapProjectIntoEditor(projectData, options = {}) {
         if (readyMessage) {
             showToast(readyMessage, 'success');
         }
+
+        // Auto-select background music if none loaded and project has a story_tone
+        _autoSelectBgMusic();
 
         return { projectValidation, mediaReport, voiceReport, finalValidation };
     } catch (error) {
@@ -7533,6 +7624,12 @@ function renderSceneProperties() {
                 ${_buildTextAnimationOptions(scene.text_animation || getDefaultTextAnimation())}
             </select>
         </div>
+        <div class="property-group">
+            <label>Word Emphasis</label>
+            <select class="property-select" id="prop-word-emphasis">
+                ${_buildWordEmphasisOptions(scene.text_emphasis || getDefaultWordEmphasis())}
+            </select>
+        </div>
 
         <div class="property-section-divider"></div>
 
@@ -7738,6 +7835,16 @@ function renderSceneProperties() {
         const old = scene.text_animation;
         scene.text_animation = e.target.value;
         recordEdit(`Change text animation (Scene ${scene.id})`, scene.id, 'text_animation', old, e.target.value);
+        saveProjectEdits();
+        if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
+    });
+
+    // Word emphasis select
+    const wordEmphasisSelect = document.getElementById('prop-word-emphasis');
+    wordEmphasisSelect?.addEventListener('change', (e) => {
+        const old = scene.text_emphasis;
+        scene.text_emphasis = e.target.value;
+        recordEdit(`Change word emphasis (Scene ${scene.id})`, scene.id, 'text_emphasis', old, e.target.value);
         saveProjectEdits();
         if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
     });
@@ -9960,6 +10067,28 @@ window.selectBgMusic = function (filename, path, duration) {
     window.editorCloseMusicPicker();
     showToast('Music track added', 'success');
 };
+
+/**
+ * Auto-select background music based on project story_tone.
+ * Only adds music if no music track is already loaded.
+ */
+async function _autoSelectBgMusic() {
+    const tone = EditorState.project?.storyTone;
+    if (!tone) return;
+    // Skip if a music track already exists
+    if (EditorState.audioTracks.some(t => t.type === 'music' && t.loaded)) return;
+
+    try {
+        const res = await fetch(`/api/music/auto-select?tone=${encodeURIComponent(tone)}`);
+        if (!res.ok) return;
+        const music = await res.json();
+        if (!music?.path) return;
+        console.log('[Editor] Auto-selected bgMusic:', music.filename, 'for tone:', tone);
+        window.selectBgMusic(music.filename, music.path, music.duration || 0);
+    } catch (e) {
+        console.warn('[Editor] Auto-music selection failed:', e);
+    }
+}
 
 // Legacy stubs — delegate to universal system
 function renderBgMusicTrack() { renderAllAudioTracks(); }

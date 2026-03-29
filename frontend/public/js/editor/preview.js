@@ -19,6 +19,203 @@ const _EMPHASIS_STOP_WORDS = new Set([
     'only', 'own', 'same', 'too', 'still', 'already', 'yet'
 ]);
 
+// ── Word emphasis: keyword detection ─────────────────────
+function _detectEmphasisKeywords(word) {
+    const clean = word.replace(/[^a-zA-Z']/g, '').toLowerCase();
+    if (clean.length <= 2) return false;
+    return !_EMPHASIS_STOP_WORDS.has(clean);
+}
+
+// ── Word emphasis presets ────────────────────────────────
+// Each preset has:
+//   apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx, canvasW, canvasH)
+//   detectWords(word) → boolean (optional, defaults to _detectEmphasisKeywords)
+const WORD_EMPHASIS_PRESETS = {
+    color_pop: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const colors = ['#FF6B6B', '#4ECDC4', '#FFB347', '#A78BFA', '#56CCF2', '#26DE81', '#FF8ED4'];
+            ctx.fillStyle = colors[wordIdx % colors.length];
+            ctx.font = `700 ${fontSize * 1.05}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y);
+        }
+    },
+    scale_burst: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx, W, H) {
+            const wordPhase = (progress * 3 + wordIdx * 0.15) % 1;
+            const scale = wordPhase < 0.1 ? 1 + 0.3 * (wordPhase / 0.1) : wordPhase < 0.2 ? 1.3 - 0.3 * ((wordPhase - 0.1) / 0.1) : 1;
+            ctx.fillStyle = '#FFB347';
+            ctx.font = `700 ${fontSize * scale}px "${fontFamily}", sans-serif`;
+            const yOff = (1 - scale) * fontSize * 0.3;
+            ctx.fillText(word, x, y + yOff);
+        }
+    },
+    wave: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const wave = Math.sin(progress * Math.PI * 6 + wordIdx * 0.8) * fontSize * 0.12;
+            ctx.fillStyle = '#4ECDC4';
+            ctx.font = `${fontWeight} ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y + wave);
+        }
+    },
+    glow_color: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const colors = ['#FF6B6B', '#4ECDC4', '#A78BFA', '#FFB347'];
+            const color = colors[wordIdx % colors.length];
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12 + Math.sin(progress * Math.PI * 4 + wordIdx) * 6;
+            ctx.fillStyle = color;
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y);
+            ctx.shadowBlur = 0;
+        }
+    },
+    shake_word: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const shakeX = Math.sin(progress * 80 + wordIdx * 7) * 2;
+            const shakeY = Math.cos(progress * 60 + wordIdx * 5) * 1.5;
+            ctx.fillStyle = '#FF6B6B';
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x + shakeX, y + shakeY);
+        }
+    },
+    typewriter_word: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            // Each emphasized word fades in sequentially
+            const wordDelay = wordIdx * 0.08;
+            const wordProgress = Math.max(0, Math.min(1, (progress - wordDelay) * 5));
+            const chars = Math.floor(word.length * wordProgress);
+            const visible = word.slice(0, chars);
+            ctx.fillStyle = '#4ECDC4';
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillText(visible, x, y);
+            // Cursor blink
+            if (chars < word.length && Math.sin(progress * 30) > 0) {
+                const cursorX = x + ctx.measureText(visible).width;
+                ctx.fillRect(cursorX, y - fontSize * 0.4, 2, fontSize * 0.8);
+            }
+        }
+    },
+    split_color: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            // Top half one color, bottom half another — simulated by drawing twice with clipping
+            const mid = Math.floor(word.length / 2);
+            const topWord = word.slice(0, mid);
+            const botWord = word.slice(mid);
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillStyle = '#FF6B6B';
+            ctx.fillText(topWord, x, y);
+            const topW = ctx.measureText(topWord).width;
+            ctx.fillStyle = '#4ECDC4';
+            ctx.fillText(botWord, x + topW, y);
+        }
+    },
+    bounce_word: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const bouncePhase = (progress * 4 + wordIdx * 0.2) % 1;
+            const bounceY = bouncePhase < 0.3 ? -Math.sin(bouncePhase / 0.3 * Math.PI) * fontSize * 0.2 : 0;
+            const scale = bouncePhase < 0.3 ? 1 + 0.1 * Math.sin(bouncePhase / 0.3 * Math.PI) : 1;
+            ctx.fillStyle = '#FFB347';
+            ctx.font = `700 ${fontSize * scale}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y + bounceY);
+        }
+    },
+    fade_stagger: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const delay = wordIdx * 0.06;
+            const alpha = Math.max(0, Math.min(1, (progress - delay) * 4));
+            ctx.globalAlpha *= alpha;
+            ctx.fillStyle = '#A78BFA';
+            ctx.font = `700 ${fontSize * 1.05}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y);
+        }
+    },
+    rise_word: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const delay = wordIdx * 0.05;
+            const wp = Math.max(0, Math.min(1, (progress - delay) * 3));
+            const riseY = (1 - wp) * fontSize * 0.5;
+            ctx.globalAlpha *= wp;
+            ctx.fillStyle = '#56CCF2';
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y + riseY);
+        }
+    },
+    underline_sweep: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            ctx.fillStyle = '#FFB347';
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y);
+            // Animated underline sweep
+            const wordW = ctx.measureText(word).width;
+            const sweepW = wordW * Math.min(1, progress * 3);
+            ctx.fillStyle = '#FFB347';
+            ctx.fillRect(x, y + fontSize * 0.45, sweepW, 2);
+        }
+    },
+    disintegrate: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            // Draw each character with random offset that increases over time
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            let cx = x;
+            for (let i = 0; i < word.length; i++) {
+                const charProgress = Math.max(0, progress - 0.6); // starts disintegrating at 60%
+                const scatter = charProgress * 30;
+                const dx = (Math.sin(i * 7.3 + progress * 20) * scatter);
+                const dy = (Math.cos(i * 5.1 + progress * 15) * scatter) - charProgress * fontSize * 0.5;
+                const alpha = Math.max(0, 1 - charProgress * 3);
+                ctx.globalAlpha = alpha * (ctx.globalAlpha || 1);
+                ctx.fillStyle = '#FF6B6B';
+                ctx.fillText(word[i], cx + dx, y + dy);
+                ctx.globalAlpha = 1;
+                cx += ctx.measureText(word[i]).width;
+            }
+        }
+    },
+    neon: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            const colors = ['#FF6B6B', '#4ECDC4', '#A78BFA', '#FF8ED4'];
+            const color = colors[wordIdx % colors.length];
+            const pulse = 8 + Math.sin(progress * Math.PI * 6 + wordIdx * 1.2) * 8;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = pulse;
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `700 ${fontSize}px "${fontFamily}", sans-serif`;
+            ctx.fillText(word, x, y);
+            // Double draw for stronger glow
+            ctx.fillStyle = color;
+            ctx.globalAlpha *= 0.4;
+            ctx.fillText(word, x, y);
+            ctx.shadowBlur = 0;
+        }
+    },
+    bold_highlight: {
+        detectWords: _detectEmphasisKeywords,
+        apply(ctx, word, x, y, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx) {
+            // Draw highlight box behind word
+            ctx.font = `700 ${fontSize * 1.05}px "${fontFamily}", sans-serif`;
+            const wordW = ctx.measureText(word).width;
+            const pad = 4;
+            ctx.fillStyle = 'rgba(78, 205, 196, 0.25)';
+            ctx.fillRect(x - pad, y - fontSize * 0.45, wordW + pad * 2, fontSize * 0.9);
+            ctx.fillStyle = '#4ECDC4';
+            ctx.fillText(word, x, y);
+        }
+    },
+};
+
 function _extractEmphasisWords(text) {
     if (!text) return '';
     const words = text.split(/\s+/);
@@ -612,7 +809,8 @@ export class CanvasPreview {
             textX: scene.text_x,
             textY: scene.text_y,
             displayMode: scene.text_display_mode || 'emphasis',
-            animation: scene.text_animation || 'fade'
+            animation: scene.text_animation || 'fade',
+            emphasis: scene.text_emphasis || 'none'
         });
 
         this.currentTextScene = scene;
@@ -722,7 +920,8 @@ export class CanvasPreview {
                 textX: scene.text_x,
                 textY: scene.text_y,
                 displayMode: scene.text_display_mode || 'emphasis',
-                animation: scene.text_animation || 'fade'
+                animation: scene.text_animation || 'fade',
+                emphasis: scene.text_emphasis || 'none'
             });
         }
 
@@ -872,13 +1071,77 @@ export class CanvasPreview {
             lineHeight: lineHeight
         };
 
-        // Draw each line
+        // Draw each line — with word emphasis if configured
+        const emphasis = options.emphasis || 'none';
         this.ctx.font = fontString;
-        lines.forEach((line, index) => {
-            this.ctx.fillText(line, finalX, finalY + index * lineHeight);
-        });
+
+        if (emphasis !== 'none') {
+            this._drawLinesWithEmphasis(lines, finalX, finalY, lineHeight, baseFontSize, fontString, fontWeight, fontFamily, textColor, emphasis, progress);
+        } else {
+            lines.forEach((line, index) => {
+                this.ctx.fillText(line, finalX, finalY + index * lineHeight);
+            });
+        }
 
         this.ctx.restore();
+    }
+
+    /**
+     * Draw text lines with per-word emphasis effects.
+     */
+    _drawLinesWithEmphasis(lines, x, y, lineHeight, fontSize, fontString, fontWeight, fontFamily, baseColor, emphasis, progress) {
+        const emphasisDef = WORD_EMPHASIS_PRESETS[emphasis];
+        if (!emphasisDef) {
+            lines.forEach((line, i) => this.ctx.fillText(line, x, y + i * lineHeight));
+            return;
+        }
+
+        // Detect which words should be emphasized
+        const emphasisWords = emphasisDef.detectWords || _detectEmphasisKeywords;
+
+        lines.forEach((line, lineIdx) => {
+            const words = line.split(/(\s+)/);
+            const lineY = y + lineIdx * lineHeight;
+
+            // Measure full line width for centering
+            this.ctx.font = fontString;
+            const fullWidth = this.ctx.measureText(line).width;
+            const align = this.ctx.textAlign;
+            let cursorX;
+            if (align === 'center') cursorX = x - fullWidth / 2;
+            else if (align === 'right') cursorX = x - fullWidth;
+            else cursorX = x;
+
+            // Save text align and switch to left for word-by-word
+            const origAlign = this.ctx.textAlign;
+            this.ctx.textAlign = 'left';
+
+            words.forEach((word, wordIdx) => {
+                if (!word.trim()) {
+                    // whitespace — just advance
+                    this.ctx.font = fontString;
+                    cursorX += this.ctx.measureText(word).width;
+                    return;
+                }
+
+                const isEmphasized = emphasisWords(word);
+
+                if (isEmphasized) {
+                    this.ctx.save();
+                    emphasisDef.apply(this.ctx, word, cursorX, lineY, fontSize, fontWeight, fontFamily, baseColor, progress, wordIdx, this.width, this.height);
+                    this.ctx.restore();
+                } else {
+                    this.ctx.font = fontString;
+                    this.ctx.fillStyle = baseColor.startsWith('#') ? baseColor : '#ffffff';
+                    this.ctx.fillText(word, cursorX, lineY);
+                }
+
+                this.ctx.font = fontString;
+                cursorX += this.ctx.measureText(word).width;
+            });
+
+            this.ctx.textAlign = origAlign;
+        });
     }
 
     /**
@@ -1016,6 +1279,178 @@ export class CanvasPreview {
                     this.ctx.scale(s, s);
                     this.ctx.translate(-this.width / 2, -this.height / 2);
                 }
+                break;
+            }
+            case 'movie_title': {
+                // Cinematic movie title — slow scale up with letterbox fade
+                const fadeIn = Math.min(1, progress * 2.5);
+                const fadeOut = Math.min(1, (1 - progress) * 3);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                const scaleT = Math.min(1, progress * 1.5);
+                const s = 1 + 0.06 * scaleT; // slow subtle zoom
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(s, s);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'shake': {
+                // Earthquake shake — jitters during hold
+                const fadeIn = Math.min(1, progress * 5);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                if (progress > 0.05 && progress < 0.9) {
+                    const intensity = 4 * Math.sin(progress * 60);
+                    const iy = 2 * Math.cos(progress * 47);
+                    this.ctx.translate(intensity, iy);
+                }
+                break;
+            }
+            case 'slide_left': {
+                // Slide in from the right side
+                const fadeIn = Math.min(1, progress * 5);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                const offsetX = progress < 0.2
+                    ? (1 - progress / 0.2) * this.width * 0.2
+                    : 0;
+                this.ctx.translate(offsetX, 0);
+                break;
+            }
+            case 'slide_right': {
+                // Slide in from the left side
+                const fadeIn = Math.min(1, progress * 5);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                const offsetX = progress < 0.2
+                    ? -(1 - progress / 0.2) * this.width * 0.2
+                    : 0;
+                this.ctx.translate(offsetX, 0);
+                break;
+            }
+            case 'zoom_burst': {
+                // Explosive zoom from tiny to overshoot then settle
+                const fadeOut = Math.min(1, (1 - progress) * 3);
+                let scale = 1;
+                if (progress < 0.08) {
+                    scale = (progress / 0.08) * 1.6;
+                } else if (progress < 0.16) {
+                    const t = (progress - 0.08) / 0.08;
+                    scale = 1.6 - 0.6 * t;
+                } else if (progress < 0.22) {
+                    const t = (progress - 0.16) / 0.06;
+                    scale = 1 + 0.1 * Math.sin(t * Math.PI);
+                }
+                this.ctx.globalAlpha = fadeOut;
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(scale, scale);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'drop_in': {
+                // Fall from above with slight bounce
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                let offsetY = 0;
+                if (progress < 0.12) {
+                    offsetY = -(1 - progress / 0.12) * this.height * 0.3;
+                } else if (progress < 0.2) {
+                    const t = (progress - 0.12) / 0.08;
+                    offsetY = 6 * Math.sin(t * Math.PI);
+                }
+                this.ctx.globalAlpha = Math.min(progress < 0.12 ? progress / 0.12 : 1, fadeOut);
+                this.ctx.translate(0, offsetY);
+                break;
+            }
+            case 'rotate_in': {
+                // Subtle rotation entry
+                const fadeIn = Math.min(1, progress * 5);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                if (progress < 0.2) {
+                    const t = progress / 0.2;
+                    const angle = (1 - t) * -0.08; // radians (~4.5 degrees)
+                    this.ctx.translate(this.width / 2, this.height / 2);
+                    this.ctx.rotate(angle);
+                    this.ctx.translate(-this.width / 2, -this.height / 2);
+                }
+                break;
+            }
+            case 'split_reveal': {
+                // Scale from center line outward
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                let scaleY = 1;
+                if (progress < 0.15) {
+                    scaleY = progress / 0.15;
+                }
+                this.ctx.globalAlpha = Math.min(progress < 0.15 ? progress / 0.15 : 1, fadeOut);
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(1, scaleY);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'pulse': {
+                // Rhythmic heartbeat pulse during hold
+                const fadeIn = Math.min(1, progress * 4);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                const beat = 1 + 0.04 * Math.sin(progress * Math.PI * 8);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(beat, beat);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'glitch': {
+                // Digital glitch — horizontal slices jitter
+                const fadeIn = Math.min(1, progress * 5);
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                if (progress < 0.25) {
+                    const jitter = Math.sin(progress * 120) * 6;
+                    this.ctx.translate(jitter, 0);
+                } else if (Math.random() < 0.06) {
+                    this.ctx.translate(Math.random() * 4 - 2, 0);
+                }
+                break;
+            }
+            case 'breathe': {
+                // Slow inhale/exhale scale — meditative, calm
+                const fadeIn = Math.min(1, progress * 3);
+                const fadeOut = Math.min(1, (1 - progress) * 3);
+                const breathe = 1 + 0.025 * Math.sin(progress * Math.PI * 4);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(breathe, breathe);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
+                break;
+            }
+            case 'stoic_fade': {
+                // Ultra-slow deliberate fade — philosophical weight
+                const fadeIn = Math.min(1, progress * 1.8);
+                const fadeOut = Math.min(1, (1 - progress) * 2);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                break;
+            }
+            case 'drift': {
+                // Gentle lateral drift during hold — dreamy, nostalgic
+                const fadeIn = Math.min(1, progress * 3);
+                const fadeOut = Math.min(1, (1 - progress) * 3);
+                this.ctx.globalAlpha = Math.min(fadeIn, fadeOut);
+                const driftX = Math.sin(progress * Math.PI * 2) * this.width * 0.015;
+                const driftY = Math.cos(progress * Math.PI * 1.5) * this.height * 0.008;
+                this.ctx.translate(driftX, driftY);
+                break;
+            }
+            case 'expand': {
+                // Scale from 0 to 100% with deceleration — revelation, epiphany
+                const fadeOut = Math.min(1, (1 - progress) * 4);
+                let scale = 1;
+                if (progress < 0.25) {
+                    const t = progress / 0.25;
+                    scale = t * t * (3 - 2 * t); // smoothstep
+                }
+                this.ctx.globalAlpha = Math.min(progress < 0.25 ? progress / 0.25 : 1, fadeOut);
+                this.ctx.translate(this.width / 2, this.height / 2);
+                this.ctx.scale(scale, scale);
+                this.ctx.translate(-this.width / 2, -this.height / 2);
                 break;
             }
             default: {

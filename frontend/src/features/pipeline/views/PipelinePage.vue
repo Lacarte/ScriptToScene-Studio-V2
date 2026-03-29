@@ -304,6 +304,43 @@ function clearQueue() {
   _persistJobQueue()
 }
 
+// ── Drag-to-reorder queue ──
+const dragIdx = ref(null)
+const dropIdx = ref(null)
+
+function onQueueDragStart(e, idx) {
+  dragIdx.value = idx
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData('text/plain', idx)
+  e.target.closest('.q-card')?.classList.add('q-card--dragging')
+}
+function onQueueDragOver(e, idx) {
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'move'
+  if (dropIdx.value !== idx) dropIdx.value = idx
+}
+function onQueueDragLeave() {
+  dropIdx.value = null
+}
+function onQueueDrop(e, idx) {
+  e.preventDefault()
+  const from = dragIdx.value
+  if (from != null && from !== idx) {
+    const items = [...jobQueue.value]
+    const [moved] = items.splice(from, 1)
+    items.splice(idx, 0, moved)
+    jobQueue.value = items
+    _persistJobQueue()
+  }
+  dragIdx.value = null
+  dropIdx.value = null
+}
+function onQueueDragEnd(e) {
+  e.target.closest('.q-card')?.classList.remove('q-card--dragging')
+  dragIdx.value = null
+  dropIdx.value = null
+}
+
 const totalQueuedJobs = computed(() => jobQueue.value.reduce((sum, q) => sum + q.count, 0))
 
 function requestLaunchQueue() {
@@ -805,7 +842,9 @@ watch(globalStatus, (status) => {
 // Scroll to progress — double nextTick ensures the v-if component is mounted
 function scrollToProgress() {
   nextTick(() => nextTick(() => {
-    progressRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setTimeout(() => {
+      progressRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 150)
   }))
 }
 
@@ -841,8 +880,35 @@ const lastEvent = computed(() => {
   return log.value.length ? log.value[log.value.length - 1] : null
 })
 
-const showProgress = computed(() => globalStatus.value !== '' || Object.keys(stepStatus.value).length > 0)
+const showProgress = computed(() => running.value || globalStatus.value !== '' || Object.keys(stepStatus.value).length > 0)
 const showLog = computed(() => log.value.length > 0)
+
+// ── Live pipeline status for Jobs pane ──
+const STEP_LABELS = { tts: 'TTS', timing: 'Alignment', segment: 'Segment', scenes: 'Scenes', storyboard: 'Storyboard', assets: 'Animator', assemble: 'Build', export: 'Export' }
+
+const pipelineStepLabel = computed(() => {
+  const ev = lastEvent.value
+  if (!ev || !running.value) return ''
+  return STEP_LABELS[ev.step] || ev.step || ''
+})
+
+const pipelineStepProgress = computed(() => {
+  const ev = lastEvent.value
+  if (!ev?.message) return -1
+  const m = ev.message.match(/(\d+)%/)
+  return m ? parseInt(m[1]) : -1
+})
+
+const pipelineStepMessage = computed(() => {
+  const ev = lastEvent.value
+  if (!ev?.message) return ''
+  // Strip the [pp_XXXXX] prefix for compact display
+  return ev.message.replace(/^\[pp_\w+\]\s*/, '')
+})
+
+const pipelineStepsCompleted = computed(() => {
+  return Object.values(stepStatus.value).filter(s => s === 'done').length
+})
 
 function dotColor(stepId) {
   return stepColor(stepStatus.value[stepId])
@@ -1502,9 +1568,10 @@ function logStepLabel(step) {
 
   <!-- Right sidebar: Jobs Pane -->
   <aside class="jobs-sidebar" :class="{ 'jobs-sidebar--open': showJobPane }">
-    <button class="jobs-sidebar-toggle" :title="showJobPane ? '' : 'Jobs'" @click="showJobPane = !showJobPane">
+    <button class="jobs-sidebar-toggle" :class="{ 'jobs-sidebar-toggle--active': running || jobQueueRunning }" :title="showJobPane ? '' : 'Jobs'" @click="showJobPane = !showJobPane">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 3v18"/><path d="M16 3v18"/></svg>
       <span class="jobs-sidebar-label">Jobs</span>
+      <span v-if="running || jobQueueRunning" class="jobs-running-dot"></span>
       <span v-if="totalQueuedJobs" class="jobs-count">{{ totalQueuedJobs }}</span>
       <svg class="jobs-sidebar-chevron" :class="{ rotated: showJobPane }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 6 15 12 9 18"/></svg>
     </button>
@@ -1532,8 +1599,9 @@ function logStepLabel(step) {
       <!-- TAB 1: Auto Queue -->
       <div v-if="jobPaneTab === 'queue'" class="jobs-tab-content">
 
-        <!-- Running status — cinematic progress bar -->
+        <!-- Running status — live pipeline progress -->
         <div v-if="jobQueueRunning && jobQueueCurrent" class="q-live">
+          <!-- Overall queue progress -->
           <div class="q-live-track">
             <div class="q-live-fill" :style="{ width: Math.round((jobQueueCurrent.index / jobQueueCurrent.total) * 100) + '%' }"></div>
           </div>
@@ -1547,6 +1615,32 @@ function logStepLabel(step) {
               <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
               Abort
             </button>
+          </div>
+          <!-- Per-step detail -->
+          <div v-if="running && pipelineStepLabel" class="q-live-detail">
+            <div class="q-live-steps">
+              <span class="q-live-step-label">{{ pipelineStepLabel }}</span>
+              <span class="q-live-step-count">{{ pipelineStepsCompleted }}<span class="q-live-sep">/</span>8</span>
+            </div>
+            <div v-if="pipelineStepProgress >= 0" class="q-live-step-track">
+              <div class="q-live-step-fill" :style="{ width: pipelineStepProgress + '%' }"></div>
+            </div>
+            <div v-if="pipelineStepMessage" class="q-live-msg">{{ pipelineStepMessage }}</div>
+          </div>
+        </div>
+
+        <!-- Inline pipeline status when running a single job (not queue) -->
+        <div v-else-if="running && pipelineStepLabel" class="q-live q-live--single">
+          <div class="q-live-detail" style="border-top: none; padding-top: 8px;">
+            <div class="q-live-steps">
+              <span class="q-live-pulse"></span>
+              <span class="q-live-step-label">{{ pipelineStepLabel }}</span>
+              <span class="q-live-step-count">{{ pipelineStepsCompleted }}<span class="q-live-sep">/</span>8</span>
+            </div>
+            <div v-if="pipelineStepProgress >= 0" class="q-live-step-track">
+              <div class="q-live-step-fill" :style="{ width: pipelineStepProgress + '%' }"></div>
+            </div>
+            <div v-if="pipelineStepMessage" class="q-live-msg">{{ pipelineStepMessage }}</div>
           </div>
         </div>
 
@@ -1567,10 +1661,20 @@ function logStepLabel(step) {
 
           <TransitionGroup name="q-card" tag="div" class="q-cards">
             <div
-              v-for="item in jobQueue"
+              v-for="(item, qIdx) in jobQueue"
               :key="item.presetId"
               class="q-card"
+              :class="{
+                'q-card--drop-target': dropIdx === qIdx && dragIdx !== qIdx,
+                'q-card--running': jobQueueRunning && jobQueueCurrent?.presetId === item.presetId,
+              }"
               :style="{ '--q-color': styleColor(nichePresets[item.presetId]?.visual_style) || 'var(--accent)' }"
+              draggable="true"
+              @dragstart="onQueueDragStart($event, qIdx)"
+              @dragover="onQueueDragOver($event, qIdx)"
+              @dragleave="onQueueDragLeave"
+              @drop="onQueueDrop($event, qIdx)"
+              @dragend="onQueueDragEnd"
             >
               <div class="q-card-glow"></div>
               <div class="q-card-body">
@@ -1766,6 +1870,16 @@ function logStepLabel(step) {
               <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
               Abort
             </button>
+          </div>
+          <div v-if="running && pipelineStepLabel" class="q-live-detail">
+            <div class="q-live-steps">
+              <span class="q-live-step-label">{{ pipelineStepLabel }}</span>
+              <span class="q-live-step-count">{{ pipelineStepsCompleted }}<span class="q-live-sep">/</span>8</span>
+            </div>
+            <div v-if="pipelineStepProgress >= 0" class="q-live-step-track">
+              <div class="q-live-step-fill" :style="{ width: pipelineStepProgress + '%' }"></div>
+            </div>
+            <div v-if="pipelineStepMessage" class="q-live-msg">{{ pipelineStepMessage }}</div>
           </div>
         </div>
 
@@ -2148,7 +2262,15 @@ function logStepLabel(step) {
   width: 100%;
 }
 .jobs-sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.jobs-sidebar-toggle--active { border-color: rgba(78, 205, 196, 0.3) !important; }
 .jobs-sidebar--open .jobs-sidebar-toggle { margin-bottom: 0; }
+.jobs-running-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: q-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
 
 .jobs-header {
   padding: 6px 2px 10px;
@@ -2362,6 +2484,71 @@ function logStepLabel(step) {
   box-shadow: 0 0 10px rgba(255, 107, 107, 0.15);
 }
 
+/* Live detail: per-step progress inside q-live */
+.q-live-detail {
+  border-top: 1px solid rgba(78, 205, 196, 0.08);
+  padding: 7px 12px 9px;
+}
+.q-live-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.q-live-step-label {
+  font: 600 11px/1 'JetBrains Mono', monospace;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.q-live-step-count {
+  font: 500 10px/1 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.q-live-step-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(78, 205, 196, 0.08);
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+.q-live-step-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 1px;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 6px rgba(78, 205, 196, 0.35);
+}
+.q-live-msg {
+  font: 400 10px/1.35 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+.q-live--single {
+  background: linear-gradient(135deg, rgba(78, 205, 196, 0.04), transparent);
+  border-color: rgba(78, 205, 196, 0.12);
+}
+
+/* Running card highlight */
+.q-card--running {
+  border-color: color-mix(in srgb, var(--q-color) 50%, transparent) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--q-color) 20%, transparent),
+              0 2px 16px color-mix(in srgb, var(--q-color) 12%, transparent);
+  animation: q-card-running-pulse 2s ease-in-out infinite;
+}
+.q-card--running .q-card-dot {
+  animation: q-pulse 1.2s ease-in-out infinite;
+  box-shadow: 0 0 6px var(--q-color);
+}
+@keyframes q-card-running-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--q-color) 20%, transparent), 0 2px 16px color-mix(in srgb, var(--q-color) 8%, transparent); }
+  50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--q-color) 35%, transparent), 0 2px 20px color-mix(in srgb, var(--q-color) 16%, transparent); }
+}
+
 /* ── Dispatch Section ── */
 .q-dispatch {
   margin-bottom: 14px;
@@ -2440,6 +2627,13 @@ function logStepLabel(step) {
 .q-card:hover {
   border-color: color-mix(in srgb, var(--q-color) 30%, transparent);
   box-shadow: 0 2px 12px color-mix(in srgb, var(--q-color) 8%, transparent);
+}
+.q-card[draggable="true"] { cursor: grab; }
+.q-card[draggable="true"]:active { cursor: grabbing; }
+.q-card--dragging { opacity: 0.4; }
+.q-card--drop-target {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 12px rgba(78, 205, 196, 0.15);
 }
 
 /* Subtle left-edge accent stripe */

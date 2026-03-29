@@ -9,6 +9,17 @@ const { entries, latest, count, clear, urgentPing } = useActivityFeed()
 const app = useAppStore()
 const expanded = ref(false)
 const listEl = ref(null)
+const showScrollTop = ref(false)
+
+function onLogScroll() {
+  if (listEl.value) showScrollTop.value = listEl.value.scrollTop > 80
+}
+
+function scrollToTop() {
+  if (listEl.value) {
+    listEl.value.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
 
 const hasEntries = computed(() => count.value > 0)
 
@@ -68,7 +79,8 @@ function handleClear() {
               <button class="snackbar-clear" @click="handleClear">Clear</button>
             </div>
           </div>
-          <div class="snackbar-log" ref="listEl">
+          <div class="snackbar-log-wrap">
+          <div class="snackbar-log" ref="listEl" @scroll="onLogScroll">
             <div
               v-for="entry in entries"
               :key="entry.id"
@@ -78,6 +90,10 @@ function handleClear() {
               <span class="log-icon">{{ entryIcon(entry.type) }}</span>
               <span class="log-msg">{{ entry.message }}</span>
             </div>
+          </div>
+          <Transition name="fade">
+            <button v-if="showScrollTop" class="scroll-top-btn" @click="scrollToTop" title="Scroll to top">&#8593;</button>
+          </Transition>
           </div>
         </div>
       </Transition>
@@ -240,6 +256,40 @@ function handleClear() {
   color: var(--accent-error);
   border-color: var(--accent-error);
 }
+
+/* ── Log wrapper (relative anchor for scroll-top btn) ── */
+.snackbar-log-wrap {
+  position: relative;
+}
+
+.scroll-top-btn {
+  position: absolute;
+  bottom: 16px;
+  right: 24px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: all 0.15s;
+  z-index: 2;
+}
+.scroll-top-btn:hover {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fade-enter-active, .fade-leave-active { transition: opacity 0.15s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* ── Log container (mirrors PipelineLog) ── */
 .snackbar-log {

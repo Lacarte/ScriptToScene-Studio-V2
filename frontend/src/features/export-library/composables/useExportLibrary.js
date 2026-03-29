@@ -69,6 +69,7 @@ export function useExportLibrary() {
   const filterStyle = ref('')
   const filterRatio = ref('')
   const filterDuration = ref('')
+  const searchQuery = ref('')
 
   /* ── Derived option lists from data ──────────────── */
 
@@ -93,6 +94,17 @@ export function useExportLibrary() {
 
   const filteredItems = computed(() => {
     let list = [...items.value]
+
+    // Text search
+    if (searchQuery.value) {
+      const q = searchQuery.value.toLowerCase()
+      list = list.filter(i =>
+        (i.project_id || '').toLowerCase().includes(q) ||
+        (i.project_name || '').toLowerCase().includes(q) ||
+        (i.video_name || '').toLowerCase().includes(q) ||
+        (i.style || '').toLowerCase().includes(q)
+      )
+    }
 
     // Style filter
     if (filterStyle.value) {
@@ -317,6 +329,7 @@ export function useExportLibrary() {
     filterStyle,
     filterRatio,
     filterDuration,
+    searchQuery,
     filteredItems,
 
     // Options

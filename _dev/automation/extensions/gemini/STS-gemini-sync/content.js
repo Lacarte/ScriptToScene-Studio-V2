@@ -737,7 +737,11 @@
           var completed = 0, failed = 0;
           tq.forEach(function(q) { if (q.status === 'completed') completed++; if (q.status === 'error') failed++; });
           console.log('=== Done: ' + completed + ' ok, ' + failed + ' failed ===');
-          if (completed === tq.length) sendWS({ type: 'JOB_COMPLETE', projectId: S.projectId });
+          if (completed === tq.length) {
+            sendWS({ type: 'JOB_COMPLETE', projectId: S.projectId });
+            // Switch to ScriptToScene Studio tab after job completes
+            try { chrome.runtime.sendMessage({ type: 'FOCUS_STUDIO_TAB' }); } catch(e) {}
+          }
           return;
         }
         var item = tq[idx];

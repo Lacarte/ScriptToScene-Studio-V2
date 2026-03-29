@@ -237,6 +237,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     sendResponse({ ok: true }); return false;
   }
+  if (msg.type === "FOCUS_STUDIO_TAB") {
+    // Find and activate the ScriptToScene Studio tab
+    chrome.tabs.query({}, (tabs) => {
+      const studio = tabs.find(t =>
+        t.url && (t.url.includes("localhost:5174") || t.url.includes("localhost:5050") || t.url.includes("ScriptToScene"))
+      );
+      if (studio) {
+        chrome.tabs.update(studio.id, { active: true });
+        chrome.windows.update(studio.windowId, { focused: true });
+      }
+    });
+    sendResponse({ ok: true }); return false;
+  }
   if (msg.action === "STS_WS_SEND") { sendWS(msg.payload); sendResponse({ ok: true }); return false; }
   if (msg.action === "STS_WS_GET_STATUS") { sendResponse({ connected: _wsConnected }); return false; }
   if (msg.action === "STS_WS_RECONNECT") {
