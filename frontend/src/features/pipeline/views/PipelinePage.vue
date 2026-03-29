@@ -1471,6 +1471,11 @@ function logStepLabel(step) {
 
   </div>
 
+  <!-- Backdrop overlay when Jobs pane is open -->
+  <Transition name="backdrop-fade">
+    <div v-if="showJobPane" class="jobs-backdrop" @click="showJobPane = false" />
+  </Transition>
+
   <!-- Right sidebar: Jobs Pane -->
   <aside class="jobs-sidebar" :class="{ 'jobs-sidebar--open': showJobPane }">
     <button class="jobs-sidebar-toggle" :title="showJobPane ? '' : 'Jobs'" @click="showJobPane = !showJobPane">
@@ -2058,6 +2063,19 @@ function logStepLabel(step) {
 }
 
 /* ── Jobs Sidebar ── */
+.jobs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.backdrop-fade-enter-active,
+.backdrop-fade-leave-active { transition: opacity 0.2s ease; }
+.backdrop-fade-enter-from,
+.backdrop-fade-leave-to { opacity: 0; }
+
 .jobs-sidebar {
   position: fixed;
   top: 0;
@@ -2066,18 +2084,19 @@ function logStepLabel(step) {
   width: 52px;
   flex-shrink: 0;
   padding: 32px 0 32px 0;
-  transition: width 0.2s ease;
+  transition: width 0.25s ease, box-shadow 0.25s ease;
   overflow: hidden;
   z-index: 100;
   background: var(--bg-surface, #0f1117);
 }
 .jobs-sidebar--open {
-  width: 320px;
+  width: 24vw;
   border-left: 1px solid var(--border);
-  padding: 32px 16px;
+  padding: 32px 24px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,0.08) transparent;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
 }
 .jobs-sidebar--open::-webkit-scrollbar { width: 4px; }
 .jobs-sidebar--open::-webkit-scrollbar-track { background: transparent; }

@@ -18,33 +18,33 @@ const welcome = useWelcomeOverlay()
       <div style="position:absolute;inset:0;overflow:hidden">
         <div
           id="welcome-gradient"
-          style="position:absolute;inset:-50%;width:200%;height:200%;background:linear-gradient(135deg,#0a0e13 0%,#0f1a2a 15%,#132a35 25%,rgba(78,205,196,0.12) 35%,#0f1520 45%,#1a1535 55%,rgba(167,139,250,0.10) 65%,#0f1520 75%,rgba(78,205,196,0.08) 85%,#0a0e13 100%);background-size:200% 200%;animation:welcomeGradient 12s ease infinite"
+          style="position:absolute;inset:-50%;width:200%;height:200%;background:linear-gradient(135deg,#0a0e13 0%,#0f1a2a 10%,#163040 20%,rgba(78,205,196,0.22) 35%,#0f1520 45%,#221a45 55%,rgba(167,139,250,0.18) 65%,#0f1520 75%,rgba(78,205,196,0.15) 85%,#0a0e13 100%);background-size:200% 200%;animation:welcomeGradient 12s ease infinite"
         ></div>
 
         <div
-          style="position:absolute;inset:0;background-image:linear-gradient(rgba(78,205,196,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(78,205,196,0.03) 1px,transparent 1px);background-size:60px 60px"
+          style="position:absolute;inset:0;background-image:linear-gradient(rgba(78,205,196,0.06) 1px,transparent 1px),linear-gradient(90deg,rgba(78,205,196,0.06) 1px,transparent 1px);background-size:60px 60px"
         ></div>
 
         <div
-          style="position:absolute;top:20%;left:15%;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(78,205,196,0.08),transparent 70%);animation:welcomeFloat 8s ease-in-out infinite"
+          style="position:absolute;top:20%;left:15%;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,rgba(78,205,196,0.15),transparent 70%);animation:welcomeFloat 8s ease-in-out infinite"
         ></div>
         <div
-          style="position:absolute;bottom:20%;right:15%;width:250px;height:250px;border-radius:50%;background:radial-gradient(circle,rgba(167,139,250,0.06),transparent 70%);animation:welcomeFloat 10s ease-in-out infinite reverse"
+          style="position:absolute;bottom:20%;right:15%;width:250px;height:250px;border-radius:50%;background:radial-gradient(circle,rgba(167,139,250,0.14),transparent 70%);animation:welcomeFloat 10s ease-in-out infinite reverse"
         ></div>
 
         <!-- Floating studio icons -->
         <!-- Gear 1 (top-left) -->
-        <svg style="position:absolute;top:12%;left:8%;width:64px;height:64px;opacity:0.06;animation:welcomeSpin 20s linear infinite,welcomeFloat 8s ease-in-out infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
+        <svg style="position:absolute;top:12%;left:8%;width:64px;height:64px;opacity:0.14;animation:welcomeSpin 20s linear infinite,welcomeFloat 8s ease-in-out infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
           <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
         </svg>
 
         <!-- Gear 2 (bottom-right, larger, slower) -->
-        <svg style="position:absolute;bottom:18%;right:10%;width:90px;height:90px;opacity:0.04;animation:welcomeSpin 30s linear infinite reverse,welcomeFloat 12s ease-in-out infinite reverse" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.2">
+        <svg style="position:absolute;bottom:18%;right:10%;width:90px;height:90px;opacity:0.10;animation:welcomeSpin 30s linear infinite reverse,welcomeFloat 12s ease-in-out infinite reverse" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="1.2">
           <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
         </svg>
 
         <!-- Camera (top-right) -->
-        <svg style="position:absolute;top:22%;right:18%;width:56px;height:56px;opacity:0.05;animation:welcomeFloat 9s ease-in-out 1s infinite,welcomeDrift 25s linear infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
+        <svg style="position:absolute;top:22%;right:18%;width:56px;height:56px;opacity:0.12;animation:welcomeFloat 9s ease-in-out 1s infinite,welcomeDrift 25s linear infinite" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="1.5">
           <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/>
         </svg>
 

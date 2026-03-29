@@ -4,6 +4,7 @@ flask-sock
 loguru
 numpy
 Pillow
+py-gemini-watermark-remover
 pydantic
 requests
 soundfile
