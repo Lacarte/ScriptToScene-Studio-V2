@@ -241,11 +241,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Find and activate the ScriptToScene Studio tab
     chrome.tabs.query({}, (tabs) => {
       const studio = tabs.find(t =>
-        t.url && (t.url.includes("localhost:5174") || t.url.includes("localhost:5050") || t.url.includes("ScriptToScene"))
+        (t.url && (t.url.includes("localhost:5174") || t.url.includes("localhost:5050") || t.url.includes("localhost:5173")))
+        || (t.title && t.title.includes("ScriptToScene"))
       );
       if (studio) {
         chrome.tabs.update(studio.id, { active: true });
         chrome.windows.update(studio.windowId, { focused: true });
+        console.log("[STS BG] Focused studio tab:", studio.id, studio.title || studio.url);
+      } else {
+        console.warn("[STS BG] No ScriptToScene Studio tab found");
       }
     });
     sendResponse({ ok: true }); return false;

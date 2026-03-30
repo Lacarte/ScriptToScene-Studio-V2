@@ -376,27 +376,37 @@
       // Look for the quota disclaimer element
       var disclaimer = document.querySelector('image-generation-quota-disclaimer');
       if (!disclaimer) return null;
-      var titleEl = disclaimer.querySelector('.title');
-      if (!titleEl || titleEl.textContent.indexOf('reached your image generation limit') === -1) return null;
 
-      // Extract reset time from the text: "Your limit resets on Mar 24, 6:17 PM"
-      var textEl = disclaimer.querySelector('.main-text span');
+      // Check all text content inside disclaimer for rate limit messages
+      var allText = disclaimer.textContent || '';
+      if (allText.indexOf('reached your image generation limit') === -1) return null;
+
+      // Extract reset time — supports both formats:
+      //   "Your limit resets on Mar 24, 6:17 PM."
+      //   "You've reached your image generation limit until Mar 30, 11:34 AM."
+      var textEl = disclaimer.querySelector('.main-text span') || disclaimer.querySelector('.main-text');
+      var rawText = textEl ? textEl.textContent.trim() : allText;
       var resetTime = null;
-      if (textEl) {
-        var match = textEl.textContent.match(/resets on\s+(.+?)\./);
-        if (match) {
-          try {
-            // Parse the date string — add current year
-            var dateStr = match[1].trim();
-            var year = new Date().getFullYear();
-            resetTime = new Date(dateStr + ' ' + year);
-            // If parsed date is in the past, try next year
-            if (resetTime < new Date()) resetTime = new Date(dateStr + ' ' + (year + 1));
-          } catch(e) { /* parsing failed */ }
-        }
+
+      // Try "until <date>" format first (newer Gemini)
+      var match = rawText.match(/until\s+(.+?)\.?\s*$/);
+      // Fallback to "resets on <date>" format
+      if (!match) match = rawText.match(/resets on\s+(.+?)\./);
+
+      if (match) {
+        try {
+          var dateStr = match[1].trim();
+          var year = new Date().getFullYear();
+          resetTime = new Date(dateStr + ' ' + year);
+          // If parsed date is in the past, try next year
+          if (resetTime < new Date()) resetTime = new Date(dateStr + ' ' + (year + 1));
+          // Sanity: if still invalid, null it
+          if (isNaN(resetTime.getTime())) resetTime = null;
+        } catch(e) { /* parsing failed */ }
       }
-      console.log('[RATE LIMIT] Detected! Reset:', resetTime ? resetTime.toLocaleString() : 'unknown');
-      return { resetTime: resetTime, text: textEl ? textEl.textContent.trim() : 'Rate limited' };
+
+      console.log('[RATE LIMIT] Detected! Reset:', resetTime ? resetTime.toLocaleString() : 'unknown', '| Raw:', rawText);
+      return { resetTime: resetTime, text: rawText };
     }
 
     function waitForRateLimitReset(resetTime) {

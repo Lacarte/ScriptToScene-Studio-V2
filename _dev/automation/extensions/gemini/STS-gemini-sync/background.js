@@ -303,11 +303,15 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.type === 'FOCUS_STUDIO_TAB') {
     chrome.tabs.query({}, function(tabs) {
       var studio = tabs.find(function(t) {
-        return t.url && (t.url.indexOf('localhost:5174') !== -1 || t.url.indexOf('localhost:5050') !== -1 || t.url.indexOf('ScriptToScene') !== -1);
+        return (t.url && (t.url.indexOf('localhost:5174') !== -1 || t.url.indexOf('localhost:5050') !== -1 || t.url.indexOf('localhost:5173') !== -1))
+          || (t.title && t.title.indexOf('ScriptToScene') !== -1);
       });
       if (studio) {
         chrome.tabs.update(studio.id, { active: true });
         chrome.windows.update(studio.windowId, { focused: true });
+        console.log('[STS BG] Focused studio tab:', studio.id, studio.title || studio.url);
+      } else {
+        console.warn('[STS BG] No ScriptToScene Studio tab found');
       }
     });
     sendResponse({ ok: true });

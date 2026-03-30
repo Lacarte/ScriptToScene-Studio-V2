@@ -32,44 +32,32 @@ FFPROBE_BIN = find_ffprobe() or "ffprobe"
 # Hook animation fallback map (resolves hook_animation → animation + emphasis
 # when the frontend sends only the hook ID without resolved keys)
 _HOOK_ANIMATION_MAP = {
-    "tension_flicker":  ("flicker",     "shake_word"),
-    "shadow_pulse":     ("pulse",       "neon"),
+    # Reveal family
     "creep_reveal":     ("blur_in",     "fade_stagger"),
-    "dramatic_slam":    ("slam",        "scale_burst"),
-    "power_drop":       ("drop_in",     "bold_highlight"),
-    "storm_shake":      ("shake",       "color_pop"),
-    "force_expand":     ("expand",      "scale_burst"),
-    "movie_title":      ("movie_title", "underline_sweep"),
-    "epic_rise":        ("rise",        "scale_burst"),
-    "legend_zoom":      ("zoom_burst",  "glow_color"),
-    "bouncy_pop":       ("bounce",      "bounce_word"),
-    "cartoon_slide":    ("slide_left",  "color_pop"),
-    "gag_drop":         ("drop_in",     "scale_burst"),
-    "uplift_rise":      ("rise",        "rise_word"),
-    "dawn_glow":        ("glow_pulse",  "glow_color"),
-    "horizon_fade":     ("fade",        "fade_stagger"),
-    "teach_type":       ("typewriter",  "bold_highlight"),
-    "chalk_slide":      ("slide_up",    "underline_sweep"),
-    "focus_pop":        ("scale_pop",   "color_pop"),
-    "dread_shake":      ("shake",       "disintegrate"),
-    "nightmare_glitch": ("glitch",      "neon"),
-    "void_fade":        ("stoic_fade",  "shake_word"),
-    "warm_glow":        ("glow_pulse",  "glow_color"),
-    "gentle_wave":      ("breathe",     "wave"),
-    "heart_rise":       ("rise",        "glow_color"),
-    "memory_drift":     ("drift",       "fade_stagger"),
-    "echo_blur":        ("blur_in",     "wave"),
-    "wistful_fade":     ("fade",        "fade_stagger"),
-    "zen_breathe":      ("breathe",     "wave"),
-    "thought_fade":     ("stoic_fade",  "fade_stagger"),
-    "stoic_reveal":     ("stoic_fade",  "bold_highlight"),
-    "neon_pulse":       ("pulse",       "color_pop"),
-    "rally_slam":       ("slam",        "scale_burst"),
-    "rush_slide":       ("slide_left",  "shake_word"),
-    "alarm_flicker":    ("flicker",     "neon"),
-    "dark_glitch":      ("glitch",      "neon"),
-    "cipher_blur":      ("blur_in",     "neon"),
-    "story_reveal":     ("movie_title", "underline_sweep"),
+    "slow_reveal":      ("stoic_fade",  "fade_stagger"),
+    "soft_reveal":      ("fade",        "fade_stagger"),
+    "deep_reveal":      ("blur_in",     "rise_word"),
+    # Rise family
+    "epic_rise":        ("rise",        "fade_stagger"),
+    "gentle_rise":      ("rise",        "rise_word"),
+    # Cinematic family
+    "movie_title":      ("movie_title", "fade_stagger"),
+    "title_card":       ("movie_title", "underline_sweep"),
+    # Atmospheric family
+    "drift_fade":       ("drift",       "fade_stagger"),
+    "glow_emerge":      ("glow_pulse",  "glow_color"),
+    "breathe_in":       ("breathe",     "fade_stagger"),
+    # Impact family
+    "hard_cut":         ("hard_cut",    "fade_stagger"),
+    "drop_in":          ("drop_in",     "fade_stagger"),
+    "slam_in":          ("slam",        "scale_burst"),
+    # Slide family
+    "slide_in":         ("slide_left",  "fade_stagger"),
+    "slide_up":         ("slide_up",    "fade_stagger"),
+    # Dark / tension family
+    "flicker_in":       ("flicker",     "fade_stagger"),
+    "glitch_in":        ("glitch",      "neon"),
+    "void_emerge":      ("stoic_fade",  "disintegrate"),
 }
 
 
@@ -494,6 +482,9 @@ class VideoProcessor:
     def _render_text_image(self, text_config, output_path):
         """Render text overlay on background image or solid color"""
         content = text_config.get('content', '')
+        # Clean text: strip special chars (keep letters, numbers, spaces, ! ? [ ]) and uppercase
+        content = re.sub(r'[^\w\s!?\[\]]', '', content)
+        content = re.sub(r'\s{2,}', ' ', content).strip().upper()
         color_hex = text_config.get('color_hex', '#ffffff')
         background = text_config.get('background', {})
         transparent_bg = bool(background.get('transparent'))
@@ -758,9 +749,8 @@ class VideoProcessor:
 
     def _render_sequential_word_overlay(self, input_path, output_path, overlay_config, temp_dir, index):
         """Render emphasis words sequentially — one at a time as separate overlays."""
-        import re
         content = overlay_config.get('content', '')
-        content = re.sub(r'[^\w\s?!]', '', content).strip()  # sanitize
+        content = re.sub(r'[^\w\s!?\[\]]', '', content).strip().upper()
         duration = max(0.0, float(overlay_config.get('duration', 0) or 0))
         start_time = max(0.0, float(overlay_config.get('start_time', 0) or 0))
 

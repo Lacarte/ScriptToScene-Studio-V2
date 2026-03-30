@@ -779,7 +779,7 @@ export class CanvasPreview {
     }
 
     renderSceneTextOverlay(scene, localTime, progress) {
-        const text = (scene.text_content || '').trim();
+        const text = (scene.text_content || '').replace(/[^\w\s!?\[\]]/g, '').replace(/  +/g, ' ').trim().toUpperCase();
         if (!text || ['text', 'cta'].includes(scene.type)) {
             this.currentTextScene = null;
             return;
@@ -901,7 +901,8 @@ export class CanvasPreview {
         }
 
         // Render text on top with fade effect
-        const textContent = scene.text_content || scene.script;
+        let textContent = scene.text_content || scene.script;
+        if (textContent) textContent = textContent.replace(/[^\w\s!?\[\]]/g, '').replace(/  +/g, ' ').trim().toUpperCase();
         const start = Math.max(0, Number(scene.text_timeline_offset) || 0);
         const duration = Math.max(0, Number(scene.text_overlay_duration) || (scene.duration - start));
         const showText = !!textContent && duration > 0 && localTime >= start && localTime <= start + duration;
@@ -957,6 +958,9 @@ export class CanvasPreview {
         if (displayMode === 'emphasis') {
             text = _extractEmphasisWords(text);
         }
+
+        // Clean text: strip special chars (keep letters, numbers, spaces, ! ? [ ]) and uppercase
+        text = text.replace(/[^\w\s!?\[\]]/g, '').replace(/  +/g, ' ').trim().toUpperCase();
 
         this.ctx.save();
 

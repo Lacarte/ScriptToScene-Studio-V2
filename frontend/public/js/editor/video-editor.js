@@ -152,81 +152,55 @@ function extractEmphasisWords(text) {
 // ── Hook Animations (unified scene animation + word emphasis) ──
 // Each hook pairs a scene-level animation key with a word emphasis key.
 const HOOK_ANIMATIONS = {
-    // Suspenseful
-    tension_flicker:    { label: 'Tension Flicker',    animation: 'flicker',     emphasis: 'shake_word',      tone: 'suspenseful' },
-    shadow_pulse:       { label: 'Shadow Pulse',       animation: 'pulse',       emphasis: 'neon',            tone: 'suspenseful' },
+    // ── Reveal family (blur/fade in variations) ──
     creep_reveal:       { label: 'Creep Reveal',       animation: 'blur_in',     emphasis: 'fade_stagger',    tone: 'suspenseful' },
-    // Dramatic
-    dramatic_slam:      { label: 'Dramatic Slam',      animation: 'slam',        emphasis: 'scale_burst',     tone: 'dramatic' },
-    power_drop:         { label: 'Power Drop',         animation: 'drop_in',     emphasis: 'bold_highlight',  tone: 'dramatic' },
-    storm_shake:        { label: 'Storm Shake',        animation: 'shake',       emphasis: 'color_pop',       tone: 'dramatic' },
-    force_expand:       { label: 'Force Expand',       animation: 'expand',      emphasis: 'scale_burst',     tone: 'dramatic' },
-    // Epic
-    movie_title:        { label: 'Movie Title',        animation: 'movie_title', emphasis: 'underline_sweep', tone: 'epic' },
-    epic_rise:          { label: 'Epic Rise',          animation: 'rise',        emphasis: 'scale_burst',     tone: 'epic' },
-    legend_zoom:        { label: 'Legend Zoom',         animation: 'zoom_burst',  emphasis: 'glow_color',      tone: 'epic' },
-    // Comedic
-    bouncy_pop:         { label: 'Bouncy Pop',         animation: 'bounce',      emphasis: 'bounce_word',     tone: 'comedic' },
-    cartoon_slide:      { label: 'Cartoon Slide',      animation: 'slide_left',  emphasis: 'color_pop',       tone: 'comedic' },
-    gag_drop:           { label: 'Gag Drop',           animation: 'drop_in',     emphasis: 'scale_burst',     tone: 'comedic' },
-    // Inspirational
-    uplift_rise:        { label: 'Uplift Rise',        animation: 'rise',        emphasis: 'rise_word',       tone: 'inspirational' },
-    dawn_glow:          { label: 'Dawn Glow',          animation: 'glow_pulse',  emphasis: 'glow_color',      tone: 'inspirational' },
-    horizon_fade:       { label: 'Horizon Fade',       animation: 'fade',        emphasis: 'fade_stagger',    tone: 'inspirational' },
-    // Educational
-    teach_type:         { label: 'Teach Type',         animation: 'typewriter',  emphasis: 'bold_highlight',  tone: 'educational' },
-    chalk_slide:        { label: 'Chalk Slide',        animation: 'slide_up',    emphasis: 'underline_sweep', tone: 'educational' },
-    focus_pop:          { label: 'Focus Pop',          animation: 'scale_pop',   emphasis: 'color_pop',       tone: 'educational' },
-    // Horror
-    dread_shake:        { label: 'Dread Shake',        animation: 'shake',       emphasis: 'disintegrate',    tone: 'horror' },
-    nightmare_glitch:   { label: 'Nightmare Glitch',   animation: 'glitch',      emphasis: 'neon',            tone: 'horror' },
-    void_fade:          { label: 'Void Fade',          animation: 'stoic_fade',  emphasis: 'shake_word',      tone: 'horror' },
-    // Wholesome / Romantic
-    warm_glow:          { label: 'Warm Glow',          animation: 'glow_pulse',  emphasis: 'glow_color',      tone: 'wholesome' },
-    gentle_wave:        { label: 'Gentle Wave',        animation: 'breathe',     emphasis: 'wave',            tone: 'wholesome' },
-    heart_rise:         { label: 'Heart Rise',         animation: 'rise',        emphasis: 'glow_color',      tone: 'romantic' },
-    // Nostalgic / Melancholic
-    memory_drift:       { label: 'Memory Drift',       animation: 'drift',       emphasis: 'fade_stagger',    tone: 'nostalgic' },
-    echo_blur:          { label: 'Echo Blur',          animation: 'blur_in',     emphasis: 'wave',            tone: 'nostalgic' },
-    wistful_fade:       { label: 'Wistful Fade',       animation: 'fade',        emphasis: 'fade_stagger',    tone: 'melancholic' },
-    // Meditative / Philosophical / Stoic
-    zen_breathe:        { label: 'Zen Breathe',        animation: 'breathe',     emphasis: 'wave',            tone: 'meditative' },
-    thought_fade:       { label: 'Thought Fade',       animation: 'stoic_fade',  emphasis: 'fade_stagger',    tone: 'philosophical' },
-    stoic_reveal:       { label: 'Stoic Reveal',       animation: 'stoic_fade',  emphasis: 'bold_highlight',  tone: 'stoic' },
-    // Motivational
-    neon_pulse:         { label: 'Neon Pulse',         animation: 'pulse',       emphasis: 'color_pop',       tone: 'motivational' },
-    rally_slam:         { label: 'Rally Slam',         animation: 'slam',        emphasis: 'scale_burst',     tone: 'motivational' },
-    // Urgent
-    rush_slide:         { label: 'Rush Slide',         animation: 'slide_left',  emphasis: 'shake_word',      tone: 'urgent' },
-    alarm_flicker:      { label: 'Alarm Flicker',      animation: 'flicker',     emphasis: 'neon',            tone: 'urgent' },
-    // Dark / Mysterious
-    dark_glitch:        { label: 'Dark Glitch',        animation: 'glitch',      emphasis: 'neon',            tone: 'dark' },
-    cipher_blur:        { label: 'Cipher Blur',        animation: 'blur_in',     emphasis: 'neon',            tone: 'mysterious' },
-    // Cinematic
-    story_reveal:       { label: 'Story Reveal',       animation: 'movie_title', emphasis: 'underline_sweep', tone: 'cinematic' },
+    slow_reveal:        { label: 'Slow Reveal',        animation: 'stoic_fade',  emphasis: 'fade_stagger',    tone: 'dramatic' },
+    soft_reveal:        { label: 'Soft Reveal',        animation: 'fade',        emphasis: 'fade_stagger',    tone: 'wholesome' },
+    deep_reveal:        { label: 'Deep Reveal',        animation: 'blur_in',     emphasis: 'rise_word',       tone: 'cinematic' },
+    // ── Rise family (text rises into place) ──
+    epic_rise:          { label: 'Epic Rise',          animation: 'rise',        emphasis: 'fade_stagger',    tone: 'epic' },
+    gentle_rise:        { label: 'Gentle Rise',        animation: 'rise',        emphasis: 'rise_word',       tone: 'inspirational' },
+    // ── Cinematic family ──
+    movie_title:        { label: 'Movie Title',        animation: 'movie_title', emphasis: 'fade_stagger',    tone: 'cinematic' },
+    title_card:         { label: 'Title Card',         animation: 'movie_title', emphasis: 'underline_sweep', tone: 'epic' },
+    // ── Atmospheric family ──
+    drift_fade:         { label: 'Drift Fade',         animation: 'drift',       emphasis: 'fade_stagger',    tone: 'nostalgic' },
+    glow_emerge:        { label: 'Glow Emerge',        animation: 'glow_pulse',  emphasis: 'glow_color',      tone: 'dramatic' },
+    breathe_in:         { label: 'Breathe In',         animation: 'breathe',     emphasis: 'fade_stagger',    tone: 'meditative' },
+    // ── Impact family (hard entries) ──
+    hard_cut:           { label: 'Hard Cut',           animation: 'hard_cut',    emphasis: 'fade_stagger',    tone: 'urgent' },
+    drop_in:            { label: 'Drop In',            animation: 'drop_in',     emphasis: 'fade_stagger',    tone: 'dramatic' },
+    slam_in:            { label: 'Slam In',            animation: 'slam',        emphasis: 'scale_burst',     tone: 'motivational' },
+    // ── Slide family ──
+    slide_in:           { label: 'Slide In',           animation: 'slide_left',  emphasis: 'fade_stagger',    tone: 'educational' },
+    slide_up:           { label: 'Slide Up',           animation: 'slide_up',    emphasis: 'fade_stagger',    tone: 'inspirational' },
+    // ── Dark / tension family ──
+    flicker_in:         { label: 'Flicker In',         animation: 'flicker',     emphasis: 'fade_stagger',    tone: 'suspenseful' },
+    glitch_in:          { label: 'Glitch In',          animation: 'glitch',      emphasis: 'neon',            tone: 'dark' },
+    void_emerge:        { label: 'Void Emerge',        animation: 'stoic_fade',  emphasis: 'disintegrate',    tone: 'horror' },
 };
 
 // Per-tone subgroups: pipeline picks randomly from these
 const TONE_HOOK_GROUP = {
-    suspenseful:   ['tension_flicker', 'shadow_pulse', 'creep_reveal'],
-    dramatic:      ['dramatic_slam', 'power_drop', 'storm_shake', 'force_expand'],
-    epic:          ['movie_title', 'epic_rise', 'legend_zoom'],
-    comedic:       ['bouncy_pop', 'cartoon_slide', 'gag_drop'],
-    inspirational: ['uplift_rise', 'dawn_glow', 'horizon_fade'],
-    educational:   ['teach_type', 'chalk_slide', 'focus_pop'],
-    horror:        ['dread_shake', 'nightmare_glitch', 'void_fade'],
-    wholesome:     ['warm_glow', 'gentle_wave', 'dawn_glow'],
-    romantic:      ['heart_rise', 'warm_glow', 'gentle_wave'],
-    nostalgic:     ['memory_drift', 'echo_blur', 'wistful_fade'],
-    melancholic:   ['wistful_fade', 'memory_drift', 'echo_blur'],
-    meditative:    ['zen_breathe', 'gentle_wave', 'thought_fade'],
-    philosophical: ['thought_fade', 'stoic_reveal', 'horizon_fade'],
-    stoic:         ['stoic_reveal', 'thought_fade', 'force_expand'],
-    motivational:  ['neon_pulse', 'rally_slam', 'uplift_rise'],
-    urgent:        ['rush_slide', 'alarm_flicker', 'shadow_pulse'],
-    dark:          ['dark_glitch', 'nightmare_glitch', 'void_fade'],
-    mysterious:    ['cipher_blur', 'creep_reveal', 'echo_blur'],
-    cinematic:     ['story_reveal', 'movie_title', 'epic_rise'],
+    suspenseful:   ['creep_reveal', 'flicker_in', 'slow_reveal'],
+    dramatic:      ['slow_reveal', 'drop_in', 'glow_emerge', 'deep_reveal'],
+    epic:          ['epic_rise', 'movie_title', 'title_card'],
+    comedic:       ['hard_cut', 'slide_in', 'drop_in'],
+    inspirational: ['gentle_rise', 'soft_reveal', 'slide_up'],
+    educational:   ['slide_in', 'soft_reveal', 'hard_cut'],
+    horror:        ['void_emerge', 'glitch_in', 'flicker_in'],
+    wholesome:     ['soft_reveal', 'breathe_in', 'gentle_rise'],
+    romantic:      ['soft_reveal', 'gentle_rise', 'breathe_in'],
+    nostalgic:     ['drift_fade', 'slow_reveal', 'creep_reveal'],
+    melancholic:   ['drift_fade', 'slow_reveal', 'creep_reveal'],
+    meditative:    ['breathe_in', 'soft_reveal', 'drift_fade'],
+    philosophical: ['slow_reveal', 'breathe_in', 'drift_fade'],
+    stoic:         ['slow_reveal', 'hard_cut', 'deep_reveal'],
+    motivational:  ['slam_in', 'epic_rise', 'drop_in'],
+    urgent:        ['hard_cut', 'flicker_in', 'slam_in'],
+    dark:          ['glitch_in', 'void_emerge', 'flicker_in'],
+    mysterious:    ['creep_reveal', 'drift_fade', 'deep_reveal'],
+    cinematic:     ['movie_title', 'deep_reveal', 'epic_rise'],
 };
 
 /**

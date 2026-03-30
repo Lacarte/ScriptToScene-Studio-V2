@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "ScriptToScene Studio — in-page Grok asset synchronizer",
   "permissions": ["storage", "tabs"],
-  "host_permissions": ["*://grok.com/*"],
+  "host_permissions": ["*://grok.com/*", "http://localhost/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:*"
   },
