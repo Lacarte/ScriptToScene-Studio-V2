@@ -29,6 +29,63 @@ FFMPEG_BIN = find_ffmpeg() or "ffmpeg"
 FFPROBE_BIN = find_ffprobe() or "ffprobe"
 
 
+# Hook animation fallback map (resolves hook_animation → animation + emphasis
+# when the frontend sends only the hook ID without resolved keys)
+_HOOK_ANIMATION_MAP = {
+    "tension_flicker":  ("flicker",     "shake_word"),
+    "shadow_pulse":     ("pulse",       "neon"),
+    "creep_reveal":     ("blur_in",     "fade_stagger"),
+    "dramatic_slam":    ("slam",        "scale_burst"),
+    "power_drop":       ("drop_in",     "bold_highlight"),
+    "storm_shake":      ("shake",       "color_pop"),
+    "force_expand":     ("expand",      "scale_burst"),
+    "movie_title":      ("movie_title", "underline_sweep"),
+    "epic_rise":        ("rise",        "scale_burst"),
+    "legend_zoom":      ("zoom_burst",  "glow_color"),
+    "bouncy_pop":       ("bounce",      "bounce_word"),
+    "cartoon_slide":    ("slide_left",  "color_pop"),
+    "gag_drop":         ("drop_in",     "scale_burst"),
+    "uplift_rise":      ("rise",        "rise_word"),
+    "dawn_glow":        ("glow_pulse",  "glow_color"),
+    "horizon_fade":     ("fade",        "fade_stagger"),
+    "teach_type":       ("typewriter",  "bold_highlight"),
+    "chalk_slide":      ("slide_up",    "underline_sweep"),
+    "focus_pop":        ("scale_pop",   "color_pop"),
+    "dread_shake":      ("shake",       "disintegrate"),
+    "nightmare_glitch": ("glitch",      "neon"),
+    "void_fade":        ("stoic_fade",  "shake_word"),
+    "warm_glow":        ("glow_pulse",  "glow_color"),
+    "gentle_wave":      ("breathe",     "wave"),
+    "heart_rise":       ("rise",        "glow_color"),
+    "memory_drift":     ("drift",       "fade_stagger"),
+    "echo_blur":        ("blur_in",     "wave"),
+    "wistful_fade":     ("fade",        "fade_stagger"),
+    "zen_breathe":      ("breathe",     "wave"),
+    "thought_fade":     ("stoic_fade",  "fade_stagger"),
+    "stoic_reveal":     ("stoic_fade",  "bold_highlight"),
+    "neon_pulse":       ("pulse",       "color_pop"),
+    "rally_slam":       ("slam",        "scale_burst"),
+    "rush_slide":       ("slide_left",  "shake_word"),
+    "alarm_flicker":    ("flicker",     "neon"),
+    "dark_glitch":      ("glitch",      "neon"),
+    "cipher_blur":      ("blur_in",     "neon"),
+    "story_reveal":     ("movie_title", "underline_sweep"),
+}
+
+
+def _resolve_hook(config):
+    """Resolve hook_animation to animation + emphasis, using fallback map if needed."""
+    hook = config.get("hook_animation") or ""
+    animation = config.get("animation") or ""
+    emphasis = config.get("emphasis") or "none"
+
+    if not animation and hook in _HOOK_ANIMATION_MAP:
+        animation, emphasis = _HOOK_ANIMATION_MAP[hook]
+    if not animation:
+        animation = "fade"
+    return animation, emphasis
+
+
 # Word emphasis: color palettes per emphasis type (used in PIL rendering)
 # Each maps to a list of hex colors applied cyclically to emphasized words.
 # None = no emphasis (draw all words in base color).
@@ -292,6 +349,7 @@ class VideoProcessor:
                 'font_family': text_config.get('font_family', 'Inter'),
                 'font_size': text_config.get('font_size', 48),
                 'font_style': text_config.get('font_style', 'bold'),
+                'hook_animation': text_config.get('hook_animation', ''),
                 'animation': text_config.get('animation', 'fade'),
                 'emphasis': text_config.get('emphasis', 'none'),
                 'position': text_config.get('position', {}) or {},
@@ -498,7 +556,7 @@ class VideoProcessor:
             else:
                 y = (self.height - total_height) / 2
 
-        emphasis = text_config.get('emphasis', 'none') or 'none'
+        _, emphasis = _resolve_hook(text_config)
         emphasis_colors = _EMPHASIS_COLOR_MAP.get(emphasis)
 
         for line in lines:
@@ -698,11 +756,113 @@ class VideoProcessor:
 
         return prep, x_expr, y_expr, alpha
 
+    def _render_sequential_word_overlay(self, input_path, output_path, overlay_config, temp_dir, index):
+        """Render emphasis words sequentially — one at a time as separate overlays."""
+        import re
+        content = overlay_config.get('content', '')
+        content = re.sub(r'[^\w\s?!]', '', content).strip()  # sanitize
+        duration = max(0.0, float(overlay_config.get('duration', 0) or 0))
+        start_time = max(0.0, float(overlay_config.get('start_time', 0) or 0))
+
+        # Extract emphasis words
+        words_raw = content.split()
+        words = [w.upper() for w in words_raw
+                 if len(re.sub(r'[^a-zA-Z]', '', w)) > 2
+                 and re.sub(r'[^a-zA-Z]', '', w).lower() not in self._EMPHASIS_STOP]
+        if not words:
+            words = [w.upper() for w in words_raw if len(w) > 1][:5]
+        if not words:
+            shutil.copy2(input_path, output_path)
+            return
+
+        font_family = overlay_config.get('font_family', 'Inter')
+        font_size = int(overlay_config.get('font_size', 48) * 1.4)
+        color_hex = overlay_config.get('color_hex', '#ffffff')
+
+        video_dur = self._probe_duration(input_path)
+        if video_dur <= 0:
+            video_dur = 120
+
+        # Timing: 85% active, 15% exit buffer
+        active_dur = duration * 0.85
+        slot_dur = active_dur / len(words)
+
+        # Render each word as a separate transparent PNG
+        word_images = []
+        font = self._load_font(font_family, font_size, 'bold')
+        for i, word in enumerate(words):
+            img = Image.new('RGBA', (self.width, self.height), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            bbox = draw.textbbox((0, 0), word, font=font)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            x = (self.width - tw) / 2
+            y = (self.height - th) / 2
+            draw.text((x, y), word, fill=color_hex, font=font)
+            word_path = os.path.join(temp_dir, f"scene_{index:03d}_word_{i:02d}.png")
+            img.save(word_path, 'PNG')
+            word_images.append(word_path)
+
+        # Build FFmpeg filter: each word overlay with timed fade in/out
+        inputs = ['-i', input_path]
+        for wp in word_images:
+            inputs += ['-loop', '1', '-t', f'{video_dur:.3f}', '-i', wp]
+
+        filter_parts = []
+        current = '[0:v]'
+        for i, word in enumerate(words):
+            ws = start_time + i * slot_dur
+            we = ws + slot_dur
+            fade_in = min(0.15, slot_dur * 0.18)
+            fade_out = min(0.2, slot_dur * 0.22)
+            fade_out_st = max(ws, we - fade_out)
+
+            ov_label = f'[{i+1}:v]'
+            prep_label = f'[ov{i}]'
+            out_label = f'[v{i}]'
+
+            filter_parts.append(
+                f"{ov_label}format=rgba,"
+                f"fade=t=in:st={ws:.3f}:d={fade_in:.3f}:alpha=1,"
+                f"fade=t=out:st={fade_out_st:.3f}:d={fade_out:.3f}:alpha=1"
+                f"{prep_label}"
+            )
+            filter_parts.append(
+                f"{current}{prep_label}overlay=0:0:enable='between(t,{ws:.3f},{we:.3f})':format=auto{out_label}"
+            )
+            current = out_label
+
+        filter_complex = ';'.join(filter_parts)
+
+        cmd = [
+            FFMPEG_BIN, '-y',
+            *inputs,
+            '-filter_complex', filter_complex,
+            '-map', current,
+            '-map', '0:a?',
+            '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
+            '-pix_fmt', self.pixel_format,
+            '-c:a', 'copy',
+            '-t', f'{video_dur:.3f}',
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
+        if result.returncode != 0:
+            logger.error("Sequential word overlay failed: {}", result.stderr[-700:] if result.stderr else '')
+            shutil.copy2(input_path, output_path)
+        else:
+            logger.info("Sequential word overlay: {} words rendered for scene {}", len(words), index)
+
     def _apply_scene_text_overlay(self, input_path, output_path, overlay_config, temp_dir, index):
         """Burn a timed, animated text overlay onto a rendered image/video scene clip."""
         duration = max(0.0, float(overlay_config.get('duration', 0) or 0))
         if duration <= 0:
             shutil.copy2(input_path, output_path)
+            return
+
+        # If hook_animation is set, use sequential word rendering
+        hook = overlay_config.get('hook_animation', '')
+        if hook and hook in _HOOK_ANIMATION_MAP:
+            self._render_sequential_word_overlay(input_path, output_path, overlay_config, temp_dir, index)
             return
 
         bg_cfg = overlay_config.get('background', {}) or {}
@@ -731,7 +891,7 @@ class VideoProcessor:
 
         start_time = max(0.0, float(overlay_config.get('start_time', 0) or 0))
         end_time = start_time + duration
-        animation = overlay_config.get('animation', 'fade') or 'fade'
+        animation, _ = _resolve_hook(overlay_config)
 
         prep, x_expr, y_expr, alpha_filters = self._build_text_animation_filter(
             animation, start_time, duration, end_time
@@ -2060,6 +2220,9 @@ class VideoProcessor:
             if not text:
                 continue
 
+            # Strip special characters (keep letters, numbers, spaces, ! ? [ ])
+            text = re.sub(r'[^\w\s!?\[\]]', '', text)
+            text = re.sub(r'\s{2,}', ' ', text).strip()
             if text_transform == 'uppercase':
                 text = text.upper()
 
@@ -2110,9 +2273,11 @@ class VideoProcessor:
                 # Build a flat list of (word_text, begin, end) with uppercase applied
                 word_timings = []
                 for w in words:
-                    wt = w.get('word', '')
+                    wt = re.sub(r'[^\w\s!?\[\]]', '', w.get('word', ''))
                     if text_transform == 'uppercase':
                         wt = wt.upper()
+                    if not wt.strip():
+                        continue
                     word_timings.append({
                         'text': wt,
                         'begin': w.get('begin', start),
@@ -2224,9 +2389,11 @@ class VideoProcessor:
                 if word_by_word_reveal and words:
                     word_timings = []
                     for w in words:
-                        wt = w.get('word', '')
+                        wt = re.sub(r'[^\w\s!?\[\]]', '', w.get('word', ''))
                         if text_transform == 'uppercase':
                             wt = wt.upper()
+                        if not wt.strip():
+                            continue
                         word_timings.append({
                             'text': wt,
                             'begin': w.get('begin', start),

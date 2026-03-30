@@ -642,12 +642,14 @@ SCENE_STYLE_TEMPLATES = [
         "color": "#E5E7EB",
         "style_prompt": (
             "Generate image prompts in stick figure / whiteboard animation style. "
+            "BACKGROUND RULE: The background MUST be solid pure white (#FFFFFF) — completely flat, empty, and uniform edge to edge. "
+            "No gradients, no textures, no paper grain, no shadows, no vignetting, no watermarks, no notebook lines, no chalkboard. "
+            "The entire canvas behind the drawing must be perfectly clean white with zero visual noise or artifacts. "
             "Characters are simple stickmen with circle heads, line bodies, and dot eyes — expressive through pose only. "
-            "Use a clean white or off-white background like a whiteboard, notebook paper, or chalkboard. "
             "Drawings should look hand-sketched with slightly wobbly lines, as if drawn in real-time. "
             "Include simple props drawn in the same style: speech bubbles, arrows, thought clouds, exclamation marks. "
             "Environments are minimal — a few lines for ground, simple shapes for buildings, stick trees. "
-            "Color palette: primarily black lines on white, with occasional single-color highlights (red circle, blue arrow). "
+            "Color palette: black lines on pure white background, with occasional single-color highlights (red circle, blue arrow). "
             "Composition: centered action, comic-strip panel layouts, before/after comparisons. "
             "Lines must be bold, clean strokes — thick confident lines, no artifacts, no noise, no rendering glitches. "
             "Style: XKCD meets whiteboard explainer videos — charming simplicity, humor through minimalism."

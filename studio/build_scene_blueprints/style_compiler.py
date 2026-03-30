@@ -30,7 +30,7 @@ DEFAULT_NEGATIVE_RULES = {
     "documentary": ["avoid glossy commercial polish", "avoid surreal fantasy imagery"],
     "true_crime": ["avoid cartoon stylization", "avoid heroic glamorization"],
     "dark_psychology": ["avoid cozy warmth", "avoid playful color palettes"],
-    "stickman_animation": ["avoid photorealism", "avoid dense backgrounds"],
+    "stickman_animation": ["avoid photorealism", "avoid dense backgrounds", "no gradients or textures in background", "no paper grain or vignetting", "no shadows or artifacts on the background", "background must be solid pure white (#FFFFFF) edge to edge"],
     "existential": ["avoid visual clutter", "avoid warm cozy aesthetics", "avoid cartoon stylization"],
     "code_cosmos": ["avoid bright daylight", "avoid cartoon aesthetic", "avoid minimal/clean compositions", "avoid warm colors", "avoid empty backgrounds"],
     "solitary_path": ["avoid crowds", "avoid urban settings", "avoid cheerful colors", "avoid close-ups", "avoid lush vegetation"],

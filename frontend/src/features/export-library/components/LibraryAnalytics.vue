@@ -350,8 +350,27 @@ const recentExports = computed(() => props.items.slice(0, 20))
           <div v-if="promptProject && !promptLoading" class="a-prompt-detail">
             <div class="a-prompt-header">
               <span class="a-prompt-pid">{{ promptProject.project_id }}</span>
-              <span class="a-prompt-style">{{ styleLabel(promptProject.style) }}</span>
+              <span class="a-prompt-style" :style="promptProject.style_color ? { color: promptProject.style_color } : {}">{{ promptProject.style_name || styleLabel(promptProject.style) }}</span>
               <span class="a-prompt-count">{{ promptProject.scenes.length }} scenes</span>
+            </div>
+
+            <!-- Style template info -->
+            <div v-if="promptProject.style_description || promptProject.style_prompt" class="a-style-block">
+              <div v-if="promptProject.style_description" class="a-prompt-block">
+                <div class="a-prompt-block-head">
+                  <span class="a-prompt-block-label">Style Description</span>
+                </div>
+                <p class="a-prompt-text">{{ promptProject.style_description }}</p>
+              </div>
+              <div v-if="promptProject.style_prompt" class="a-prompt-block a-prompt-block--style">
+                <div class="a-prompt-block-head">
+                  <span class="a-prompt-block-label">Style Prompt (Template)</span>
+                  <button class="a-copy-btn" @click="copyText(promptProject.style_prompt)" title="Copy">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                  </button>
+                </div>
+                <p class="a-prompt-text a-prompt-text--mono">{{ promptProject.style_prompt }}</p>
+              </div>
             </div>
 
             <div v-for="scene in promptProject.scenes" :key="scene.index" class="a-scene-card">
@@ -684,7 +703,12 @@ const recentExports = computed(() => props.items.slice(0, 20))
 .a-scene-role { font-size: 9px; color: var(--text-muted); background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.2); border-radius: 4px; padding: 1px 6px; }
 .a-scene-dur { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); margin-left: auto; }
 
+.a-style-block {
+  background: var(--bg-darkest); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 10px;
+}
 .a-prompt-block { margin-top: 6px; }
+.a-prompt-block--style { border-left: 2px solid rgba(255,179,71,0.3); padding-left: 8px; margin-top: 10px; }
 .a-prompt-block--image { border-left: 2px solid rgba(78,205,196,0.3); padding-left: 8px; }
 .a-prompt-block--storyboard { border-left: 2px solid rgba(167,139,250,0.3); padding-left: 8px; }
 .a-prompt-block-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }

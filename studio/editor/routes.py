@@ -963,6 +963,7 @@ def assemble_project_for_editor(project_id):
             "isVideo": is_video,
             "script": s.get("segment_words", ""),
             "narrative_role": s.get("narrative_role", ""),
+            "text_hook_animation": s.get("text_hook_animation"),
             "filler_shift": 0,
             "segment_start": s.get("segment_start"),
             "segment_end": s.get("segment_end"),
@@ -2023,7 +2024,7 @@ def export_library_prompts(project_id):
     from studio.security import sanitize_project_id
     pid = sanitize_project_id(project_id)
 
-    result = {"project_id": pid, "style": "", "scenes": []}
+    result = {"project_id": pid, "style": "", "style_name": "", "style_description": "", "style_prompt": "", "style_color": "", "scenes": []}
 
     # Read scenes.json
     scenes_path = os.path.join(SCENES_DIR, pid, "scenes.json")
@@ -2049,6 +2050,22 @@ def export_library_prompts(project_id):
                 "scene_type": s.get("type", ""),
                 "isVideo": s.get("isVideo", False),
             })
+
+    # Resolve style template details
+    if result["style"]:
+        try:
+            from studio.build_scene_blueprints.templates import TEMPLATES_BY_ID
+            tmpl = TEMPLATES_BY_ID.get(result["style"])
+            if tmpl:
+                result["style_name"] = tmpl.get("name", "")
+                result["style_description"] = tmpl.get("description", "")
+                result["style_color"] = tmpl.get("color", "")
+                from studio.build_scene_blueprints.style_compiler import normalize_template, compile_style_prompt
+                normalized = normalize_template(tmpl)
+                style_spec = normalized.get("style_spec", {})
+                result["style_prompt"] = compile_style_prompt(style_spec, "")
+        except Exception:
+            pass
 
     # Read storyboard prompts if available
     storyboard_prompts_path = os.path.join(STORYBOARD_DIR, pid, "scene_prompts.json")

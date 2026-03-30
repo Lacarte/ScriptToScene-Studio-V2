@@ -149,129 +149,152 @@ function extractEmphasisWords(text) {
 }
 
 // Animation presets mapped to story tones
-const TEXT_ANIMATIONS = {
-    // ── Tone-matched (auto-selected based on story tone) ──
-    fade:         { label: 'Fade',         desc: 'Gentle fade in / fade out' },
-    flicker:      { label: 'Flicker',      desc: 'Glitch flicker — suspenseful, uneasy' },
-    slam:         { label: 'Slam',         desc: 'Scale slam — dramatic impact' },
-    typewriter:   { label: 'Typewriter',   desc: 'Letter-by-letter reveal — educational' },
-    rise:         { label: 'Rise',         desc: 'Float upward with fade — inspirational' },
-    bounce:       { label: 'Bounce',       desc: 'Playful bounce-in — comedic' },
-    glow_pulse:   { label: 'Glow Pulse',   desc: 'Soft glow pulse — wholesome, warm' },
-    stoic_fade:   { label: 'Stoic Fade',   desc: 'Ultra-slow deliberate fade — philosophical' },
-    breathe:      { label: 'Breathe',      desc: 'Slow inhale/exhale scale — meditative' },
-    shake:        { label: 'Shake',        desc: 'Earthquake jitter — horror, tension' },
-    glitch:       { label: 'Glitch',       desc: 'Digital slice jitter — cyberpunk, chaotic' },
-    movie_title:  { label: 'Movie Title',  desc: 'Cinematic slow zoom — epic, narrative' },
-    drift:        { label: 'Drift',        desc: 'Gentle lateral sway — dreamy, nostalgic' },
-    // ── General-purpose ──
-    hard_cut:     { label: 'Hard Cut',     desc: 'Instant appear / disappear' },
-    scale_pop:    { label: 'Scale Pop',    desc: 'Pop in with scale overshoot' },
-    slide_up:     { label: 'Slide Up',     desc: 'Slide in from below' },
-    slide_left:   { label: 'Slide Left',   desc: 'Slide in from right side' },
-    slide_right:  { label: 'Slide Right',  desc: 'Slide in from left side' },
-    blur_in:      { label: 'Blur In',      desc: 'De-blur into focus' },
-    zoom_burst:   { label: 'Zoom Burst',   desc: 'Explosive zoom with overshoot' },
-    drop_in:      { label: 'Drop In',      desc: 'Fall from above with bounce' },
-    rotate_in:    { label: 'Rotate In',    desc: 'Subtle rotation entry' },
-    split_reveal: { label: 'Split Reveal', desc: 'Scale from center line outward' },
-    pulse:        { label: 'Pulse',        desc: 'Rhythmic heartbeat — urgent, intense' },
-    expand:       { label: 'Expand',       desc: 'Smooth scale reveal — revelation, epiphany' },
+// ── Hook Animations (unified scene animation + word emphasis) ──
+// Each hook pairs a scene-level animation key with a word emphasis key.
+const HOOK_ANIMATIONS = {
+    // Suspenseful
+    tension_flicker:    { label: 'Tension Flicker',    animation: 'flicker',     emphasis: 'shake_word',      tone: 'suspenseful' },
+    shadow_pulse:       { label: 'Shadow Pulse',       animation: 'pulse',       emphasis: 'neon',            tone: 'suspenseful' },
+    creep_reveal:       { label: 'Creep Reveal',       animation: 'blur_in',     emphasis: 'fade_stagger',    tone: 'suspenseful' },
+    // Dramatic
+    dramatic_slam:      { label: 'Dramatic Slam',      animation: 'slam',        emphasis: 'scale_burst',     tone: 'dramatic' },
+    power_drop:         { label: 'Power Drop',         animation: 'drop_in',     emphasis: 'bold_highlight',  tone: 'dramatic' },
+    storm_shake:        { label: 'Storm Shake',        animation: 'shake',       emphasis: 'color_pop',       tone: 'dramatic' },
+    force_expand:       { label: 'Force Expand',       animation: 'expand',      emphasis: 'scale_burst',     tone: 'dramatic' },
+    // Epic
+    movie_title:        { label: 'Movie Title',        animation: 'movie_title', emphasis: 'underline_sweep', tone: 'epic' },
+    epic_rise:          { label: 'Epic Rise',          animation: 'rise',        emphasis: 'scale_burst',     tone: 'epic' },
+    legend_zoom:        { label: 'Legend Zoom',         animation: 'zoom_burst',  emphasis: 'glow_color',      tone: 'epic' },
+    // Comedic
+    bouncy_pop:         { label: 'Bouncy Pop',         animation: 'bounce',      emphasis: 'bounce_word',     tone: 'comedic' },
+    cartoon_slide:      { label: 'Cartoon Slide',      animation: 'slide_left',  emphasis: 'color_pop',       tone: 'comedic' },
+    gag_drop:           { label: 'Gag Drop',           animation: 'drop_in',     emphasis: 'scale_burst',     tone: 'comedic' },
+    // Inspirational
+    uplift_rise:        { label: 'Uplift Rise',        animation: 'rise',        emphasis: 'rise_word',       tone: 'inspirational' },
+    dawn_glow:          { label: 'Dawn Glow',          animation: 'glow_pulse',  emphasis: 'glow_color',      tone: 'inspirational' },
+    horizon_fade:       { label: 'Horizon Fade',       animation: 'fade',        emphasis: 'fade_stagger',    tone: 'inspirational' },
+    // Educational
+    teach_type:         { label: 'Teach Type',         animation: 'typewriter',  emphasis: 'bold_highlight',  tone: 'educational' },
+    chalk_slide:        { label: 'Chalk Slide',        animation: 'slide_up',    emphasis: 'underline_sweep', tone: 'educational' },
+    focus_pop:          { label: 'Focus Pop',          animation: 'scale_pop',   emphasis: 'color_pop',       tone: 'educational' },
+    // Horror
+    dread_shake:        { label: 'Dread Shake',        animation: 'shake',       emphasis: 'disintegrate',    tone: 'horror' },
+    nightmare_glitch:   { label: 'Nightmare Glitch',   animation: 'glitch',      emphasis: 'neon',            tone: 'horror' },
+    void_fade:          { label: 'Void Fade',          animation: 'stoic_fade',  emphasis: 'shake_word',      tone: 'horror' },
+    // Wholesome / Romantic
+    warm_glow:          { label: 'Warm Glow',          animation: 'glow_pulse',  emphasis: 'glow_color',      tone: 'wholesome' },
+    gentle_wave:        { label: 'Gentle Wave',        animation: 'breathe',     emphasis: 'wave',            tone: 'wholesome' },
+    heart_rise:         { label: 'Heart Rise',         animation: 'rise',        emphasis: 'glow_color',      tone: 'romantic' },
+    // Nostalgic / Melancholic
+    memory_drift:       { label: 'Memory Drift',       animation: 'drift',       emphasis: 'fade_stagger',    tone: 'nostalgic' },
+    echo_blur:          { label: 'Echo Blur',          animation: 'blur_in',     emphasis: 'wave',            tone: 'nostalgic' },
+    wistful_fade:       { label: 'Wistful Fade',       animation: 'fade',        emphasis: 'fade_stagger',    tone: 'melancholic' },
+    // Meditative / Philosophical / Stoic
+    zen_breathe:        { label: 'Zen Breathe',        animation: 'breathe',     emphasis: 'wave',            tone: 'meditative' },
+    thought_fade:       { label: 'Thought Fade',       animation: 'stoic_fade',  emphasis: 'fade_stagger',    tone: 'philosophical' },
+    stoic_reveal:       { label: 'Stoic Reveal',       animation: 'stoic_fade',  emphasis: 'bold_highlight',  tone: 'stoic' },
+    // Motivational
+    neon_pulse:         { label: 'Neon Pulse',         animation: 'pulse',       emphasis: 'color_pop',       tone: 'motivational' },
+    rally_slam:         { label: 'Rally Slam',         animation: 'slam',        emphasis: 'scale_burst',     tone: 'motivational' },
+    // Urgent
+    rush_slide:         { label: 'Rush Slide',         animation: 'slide_left',  emphasis: 'shake_word',      tone: 'urgent' },
+    alarm_flicker:      { label: 'Alarm Flicker',      animation: 'flicker',     emphasis: 'neon',            tone: 'urgent' },
+    // Dark / Mysterious
+    dark_glitch:        { label: 'Dark Glitch',        animation: 'glitch',      emphasis: 'neon',            tone: 'dark' },
+    cipher_blur:        { label: 'Cipher Blur',        animation: 'blur_in',     emphasis: 'neon',            tone: 'mysterious' },
+    // Cinematic
+    story_reveal:       { label: 'Story Reveal',       animation: 'movie_title', emphasis: 'underline_sweep', tone: 'cinematic' },
 };
 
-// Default animation per story tone
-const TONE_ANIMATION_MAP = {
-    suspenseful:   'flicker',
-    dramatic:      'slam',
-    educational:   'typewriter',
-    inspirational: 'rise',
-    comedic:       'bounce',
-    wholesome:     'glow_pulse',
-    philosophical: 'stoic_fade',
-    meditative:    'breathe',
-    horror:        'shake',
-    dark:          'glitch',
-    epic:          'movie_title',
-    nostalgic:     'drift',
-    melancholic:   'drift',
-    motivational:  'expand',
-    urgent:        'pulse',
-    mysterious:    'blur_in',
-    romantic:      'breathe',
-    cinematic:     'movie_title',
-    stoic:         'stoic_fade',
+// Per-tone subgroups: pipeline picks randomly from these
+const TONE_HOOK_GROUP = {
+    suspenseful:   ['tension_flicker', 'shadow_pulse', 'creep_reveal'],
+    dramatic:      ['dramatic_slam', 'power_drop', 'storm_shake', 'force_expand'],
+    epic:          ['movie_title', 'epic_rise', 'legend_zoom'],
+    comedic:       ['bouncy_pop', 'cartoon_slide', 'gag_drop'],
+    inspirational: ['uplift_rise', 'dawn_glow', 'horizon_fade'],
+    educational:   ['teach_type', 'chalk_slide', 'focus_pop'],
+    horror:        ['dread_shake', 'nightmare_glitch', 'void_fade'],
+    wholesome:     ['warm_glow', 'gentle_wave', 'dawn_glow'],
+    romantic:      ['heart_rise', 'warm_glow', 'gentle_wave'],
+    nostalgic:     ['memory_drift', 'echo_blur', 'wistful_fade'],
+    melancholic:   ['wistful_fade', 'memory_drift', 'echo_blur'],
+    meditative:    ['zen_breathe', 'gentle_wave', 'thought_fade'],
+    philosophical: ['thought_fade', 'stoic_reveal', 'horizon_fade'],
+    stoic:         ['stoic_reveal', 'thought_fade', 'force_expand'],
+    motivational:  ['neon_pulse', 'rally_slam', 'uplift_rise'],
+    urgent:        ['rush_slide', 'alarm_flicker', 'shadow_pulse'],
+    dark:          ['dark_glitch', 'nightmare_glitch', 'void_fade'],
+    mysterious:    ['cipher_blur', 'creep_reveal', 'echo_blur'],
+    cinematic:     ['story_reveal', 'movie_title', 'epic_rise'],
 };
 
 /**
- * Return the best default animation for the current project tone.
+ * Resolve a hook animation ID into its animation + emphasis keys.
  */
-function getDefaultTextAnimation() {
-    const tone = EditorState.project?.storyTone || '';
-    return TONE_ANIMATION_MAP[tone] || 'fade';
+function _resolveHookParts(hookId) {
+    const hook = HOOK_ANIMATIONS[hookId];
+    if (hook) return { animation: hook.animation, emphasis: hook.emphasis };
+    return { animation: 'fade', emphasis: 'none' };
 }
 
 /**
- * Build <option> HTML for the text animation select dropdown.
+ * Return the first hook from the current project's tone group.
  */
-function _buildTextAnimationOptions(selectedId) {
-    return Object.entries(TEXT_ANIMATIONS).map(([id, a]) => {
-        const sel = id === selectedId ? ' selected' : '';
-        return '<option value="' + id + '"' + sel + ' title="' + a.desc + '">' + a.label + '</option>';
-    }).join('');
-}
-
-// ── Word Emphasis Presets ────────────────────────────────
-const WORD_EMPHASIS = {
-    none:            { label: 'None',             desc: 'No word emphasis' },
-    color_pop:       { label: 'Color Pop',        desc: 'Key words in rotating vivid colors' },
-    scale_burst:     { label: 'Scale Burst',      desc: 'Words pulse larger then settle' },
-    wave:            { label: 'Wave',             desc: 'Words bob up and down in a wave' },
-    glow_color:      { label: 'Glow Color',       desc: 'Colored glow halo around key words' },
-    shake_word:      { label: 'Shake',            desc: 'Key words jitter with tension' },
-    typewriter_word: { label: 'Typewriter',       desc: 'Words revealed character by character' },
-    split_color:     { label: 'Split Color',      desc: 'Word halves in contrasting colors' },
-    bounce_word:     { label: 'Bounce',           desc: 'Words bounce in playfully' },
-    fade_stagger:    { label: 'Fade Stagger',     desc: 'Words fade in one after another' },
-    rise_word:       { label: 'Rise',             desc: 'Words float upward as they appear' },
-    underline_sweep: { label: 'Underline Sweep',  desc: 'Animated underline draws across key words' },
-    disintegrate:    { label: 'Disintegrate',     desc: 'Words scatter into particles at end' },
-    neon:            { label: 'Neon',             desc: 'Pulsing neon glow on key words' },
-    bold_highlight:  { label: 'Bold Highlight',   desc: 'Highlighted box behind key words' },
-};
-
-// Default word emphasis per story tone
-const TONE_EMPHASIS_MAP = {
-    suspenseful:   'shake_word',
-    dramatic:      'scale_burst',
-    educational:   'bold_highlight',
-    inspirational: 'rise_word',
-    comedic:       'bounce_word',
-    wholesome:     'glow_color',
-    philosophical: 'fade_stagger',
-    meditative:    'wave',
-    horror:        'disintegrate',
-    dark:          'neon',
-    epic:          'scale_burst',
-    nostalgic:     'fade_stagger',
-    melancholic:   'wave',
-    motivational:  'color_pop',
-    urgent:        'shake_word',
-    mysterious:    'neon',
-    romantic:      'glow_color',
-    cinematic:     'underline_sweep',
-    stoic:         'bold_highlight',
-};
-
-function getDefaultWordEmphasis() {
+function getDefaultHookAnimation() {
     const tone = EditorState.project?.storyTone || '';
-    return TONE_EMPHASIS_MAP[tone] || 'none';
+    const group = TONE_HOOK_GROUP[tone];
+    return group ? group[0] : 'dramatic_slam';
 }
 
-function _buildWordEmphasisOptions(selectedId) {
-    return Object.entries(WORD_EMPHASIS).map(([id, e]) => {
+// Legacy compat aliases
+function getDefaultTextAnimation() { return _resolveHookParts(getDefaultHookAnimation()).animation; }
+function getDefaultWordEmphasis() { return _resolveHookParts(getDefaultHookAnimation()).emphasis; }
+
+/**
+ * Migrate legacy scenes (text_animation + text_emphasis) to text_hook_animation.
+ */
+function _migrateToHookAnimation(scene) {
+    if (scene.text_hook_animation && HOOK_ANIMATIONS[scene.text_hook_animation]) return;
+    const anim = scene.text_animation || '';
+    const emph = scene.text_emphasis || '';
+    // Find a hook that matches both, or just the animation
+    for (const [id, h] of Object.entries(HOOK_ANIMATIONS)) {
+        if (h.animation === anim && h.emphasis === emph) { scene.text_hook_animation = id; return; }
+    }
+    for (const [id, h] of Object.entries(HOOK_ANIMATIONS)) {
+        if (h.animation === anim) { scene.text_hook_animation = id; return; }
+    }
+    scene.text_hook_animation = getDefaultHookAnimation();
+}
+
+/**
+ * Build <option> HTML for the hook animation select dropdown.
+ */
+function _buildHookAnimationOptions(selectedId) {
+    const tone = EditorState.project?.storyTone || '';
+    const recommended = TONE_HOOK_GROUP[tone] || [];
+    let html = '';
+
+    if (recommended.length) {
+        html += '<optgroup label="Recommended">';
+        for (const id of recommended) {
+            const h = HOOK_ANIMATIONS[id];
+            if (!h) continue;
+            const sel = id === selectedId ? ' selected' : '';
+            html += '<option value="' + id + '"' + sel + ' title="' + h.animation + ' + ' + h.emphasis + '">' + h.label + '</option>';
+        }
+        html += '</optgroup>';
+    }
+
+    html += '<optgroup label="All Hooks">';
+    for (const [id, h] of Object.entries(HOOK_ANIMATIONS)) {
+        if (recommended.includes(id)) continue;
         const sel = id === selectedId ? ' selected' : '';
-        return '<option value="' + id + '"' + sel + ' title="' + e.desc + '">' + e.label + '</option>';
-    }).join('');
+        html += '<option value="' + id + '"' + sel + ' title="' + h.animation + ' + ' + h.emphasis + '">' + h.label + '</option>';
+    }
+    html += '</optgroup>';
+    return html;
 }
 
 function prettifyPresetName(presetId) {
@@ -893,7 +916,9 @@ function buildTextSceneFromTool(text, duration, displayMode, animation) {
         text_background_enabled: true,
         text_background_color: '#000000',
         text_display_mode: displayMode || 'emphasis',
-        text_animation: animation || getDefaultTextAnimation(),
+        text_hook_animation: getDefaultHookAnimation(),
+        text_animation: _resolveHookParts(getDefaultHookAnimation()).animation,
+        text_emphasis: _resolveHookParts(getDefaultHookAnimation()).emphasis,
         text_timeline_offset: 0,
         text_overlay_duration: duration,
         visual_fx: 'static',
@@ -1009,7 +1034,12 @@ function addTextOverlayFromTool() {
     if (typeof scene.text_background_enabled !== 'boolean') scene.text_background_enabled = false;
     scene.text_background_color = scene.text_background_color || '#000000';
     if (!scene.text_display_mode) scene.text_display_mode = displayMode || 'emphasis';
-    if (!scene.text_animation) scene.text_animation = animation || getDefaultTextAnimation();
+    if (!scene.text_hook_animation) {
+        _migrateToHookAnimation(scene);
+        const parts = _resolveHookParts(scene.text_hook_animation);
+        scene.text_animation = parts.animation;
+        scene.text_emphasis = parts.emphasis;
+    }
     normalizeSceneTextOverlay(scene);
 
     recordEdit(`Add text overlay (Scene ${scene.id})`, scene.id, 'text_overlay', oldValue, {
@@ -1649,6 +1679,7 @@ function saveProjectEdits() {
         text_background_enabled: !!scene.text_background_enabled,
         text_background_color: scene.text_background_color || '#000000',
         text_display_mode: scene.text_display_mode || null,
+        text_hook_animation: scene.text_hook_animation || null,
         text_animation: scene.text_animation || null
     }));
 
@@ -1752,6 +1783,7 @@ function _buildSavePayload() {
             text_background_enabled: !!s.text_background_enabled,
             text_background_color: s.text_background_color || '#000000',
             text_display_mode: s.text_display_mode || null,
+            text_hook_animation: s.text_hook_animation || null,
             text_animation: s.text_animation || null,
             timestamp: s.timestamp || 0, status: s.status || 'ready',
             isVideo: !!s.isVideo, script: s.script || '',
@@ -1864,6 +1896,7 @@ function loadProjectEdits() {
                 if (edit.text_background_enabled !== undefined) scene.text_background_enabled = edit.text_background_enabled;
                 if (edit.text_background_color !== undefined) scene.text_background_color = edit.text_background_color;
                 if (edit.text_display_mode !== undefined) scene.text_display_mode = edit.text_display_mode;
+                if (edit.text_hook_animation !== undefined) scene.text_hook_animation = edit.text_hook_animation;
                 if (edit.text_animation !== undefined) scene.text_animation = edit.text_animation;
                 normalizeSceneTextOverlay(scene);
                 appliedCount++;
@@ -2994,6 +3027,12 @@ function buildFontOptions(selectEl, selectedFamily) {
 // ---- Load saved project from server ----
 
 async function loadProjectFromServer(projectId) {
+    // Skip if this project is already loaded and has scenes
+    if (EditorState.project?.id === projectId && EditorState.scenes.length > 0 && !EditorState.activeBootstrapId) {
+        hideNoDataOverlay();
+        showToast('Project already loaded', 'info');
+        return;
+    }
     showLoadingOverlay('Loading saved project...');
     updateLoadingOverlay('Fetching saved project...');
 
@@ -3054,6 +3093,7 @@ async function loadProjectFromServer(projectId) {
             text_background_enabled: !!s.text_background_enabled,
             text_background_color: s.text_background_color || '#000000',
             text_display_mode: s.text_display_mode || null,
+            text_hook_animation: s.text_hook_animation || null,
             text_animation: s.text_animation || null,
             script: s.script || '',
             narrative_role: s.narrative_role || '',
@@ -3189,6 +3229,7 @@ function _applyExtraState(saved) {
             if (ss.text_background_enabled !== undefined) scene.text_background_enabled = ss.text_background_enabled;
             if (ss.text_background_color !== undefined) scene.text_background_color = ss.text_background_color;
             if (ss.text_display_mode !== undefined) scene.text_display_mode = ss.text_display_mode;
+            if (ss.text_hook_animation !== undefined) scene.text_hook_animation = ss.text_hook_animation;
             if (ss.text_animation !== undefined) scene.text_animation = ss.text_animation;
             if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
             if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
@@ -3334,6 +3375,7 @@ function _restoreSavedEditorState() {
             if (ss.text_background_enabled !== undefined) scene.text_background_enabled = ss.text_background_enabled;
             if (ss.text_background_color !== undefined) scene.text_background_color = ss.text_background_color;
             if (ss.text_display_mode !== undefined) scene.text_display_mode = ss.text_display_mode;
+            if (ss.text_hook_animation !== undefined) scene.text_hook_animation = ss.text_hook_animation;
             if (ss.text_animation !== undefined) scene.text_animation = ss.text_animation;
             if (ss.mediaUrl) scene.mediaUrl = ss.mediaUrl;
             if (ss.image_url) scene.mediaUrl = scene.mediaUrl || ss.image_url;
@@ -3491,7 +3533,8 @@ function buildBootProjectData(raw) {
             text_background_enabled: !!scene.text_background_enabled,
             text_background_color: scene.text_background_color || '#000000',
             text_display_mode: scene.text_display_mode || null,
-            text_animation: scene.text_animation || null,
+            text_hook_animation: scene.text_hook_animation || null,
+        text_animation: scene.text_animation || null,
             script: scene.script || scene.segment_words || '',
             narrative_role: scene.narrative_role || '',
             isVideo: scene.isVideo ?? ((scene.type || scene.type_of_scene) === 'video'),
@@ -3767,7 +3810,9 @@ async function bootstrapProjectIntoEditor(projectData, options = {}) {
             if (isEditorBootstrapActive(bootId)) {
                 EditorState.activeBootstrapId = 0;
                 showToast(`${failureMessage}: ${error.message}`, 'error');
-                if (showNoDataOnError) {
+                // Only show import overlay if scenes are truly empty — don't bounce
+                // the user back to import if the project partially loaded
+                if (showNoDataOnError && (!Array.isArray(EditorState.scenes) || EditorState.scenes.length === 0)) {
                     showNoDataOverlay();
                 }
             }
@@ -4416,6 +4461,11 @@ function hideLoadingOverlay(bootId = null) {
  * Show the no data overlay — auto-loads asset list
  */
 function showNoDataOverlay(showProjects = true) {
+    // Never show import overlay if editor has a loaded project with scenes
+    if (EditorState.scenes.length > 0 && EditorState.project?.id) {
+        console.log('[Editor] showNoDataOverlay blocked — project already loaded:', EditorState.project.id, 'with', EditorState.scenes.length, 'scenes');
+        return;
+    }
     setEditorBootState('ready');
     // Tell Vue to render the overlay first
     if (typeof window._vueShowNoData === 'function') window._vueShowNoData();
@@ -7619,15 +7669,9 @@ function renderSceneProperties() {
             </div>
         </div>
         <div class="property-group">
-            <label>Animation</label>
-            <select class="property-select" id="prop-text-animation">
-                ${_buildTextAnimationOptions(scene.text_animation || getDefaultTextAnimation())}
-            </select>
-        </div>
-        <div class="property-group">
-            <label>Word Emphasis</label>
-            <select class="property-select" id="prop-word-emphasis">
-                ${_buildWordEmphasisOptions(scene.text_emphasis || getDefaultWordEmphasis())}
+            <label>Hook Animation</label>
+            <select class="property-select" id="prop-hook-animation">
+                ${_buildHookAnimationOptions(scene.text_hook_animation || getDefaultHookAnimation())}
             </select>
         </div>
 
@@ -7830,21 +7874,16 @@ function renderSceneProperties() {
         if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
     });
 
-    // Text animation select
-    textAnimationSelect?.addEventListener('change', (e) => {
-        const old = scene.text_animation;
-        scene.text_animation = e.target.value;
-        recordEdit(`Change text animation (Scene ${scene.id})`, scene.id, 'text_animation', old, e.target.value);
-        saveProjectEdits();
-        if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
-    });
-
-    // Word emphasis select
-    const wordEmphasisSelect = document.getElementById('prop-word-emphasis');
-    wordEmphasisSelect?.addEventListener('change', (e) => {
-        const old = scene.text_emphasis;
-        scene.text_emphasis = e.target.value;
-        recordEdit(`Change word emphasis (Scene ${scene.id})`, scene.id, 'text_emphasis', old, e.target.value);
+    // Hook animation select (unified animation + emphasis)
+    const hookAnimationSelect = document.getElementById('prop-hook-animation');
+    hookAnimationSelect?.addEventListener('change', (e) => {
+        const old = scene.text_hook_animation;
+        scene.text_hook_animation = e.target.value;
+        // Resolve to legacy fields for backward compat
+        const parts = _resolveHookParts(e.target.value);
+        scene.text_animation = parts.animation;
+        scene.text_emphasis = parts.emphasis;
+        recordEdit(`Change hook animation (Scene ${scene.id})`, scene.id, 'text_hook_animation', old, e.target.value);
         saveProjectEdits();
         if (EditorState.preview) { EditorState.preview.setScenes(EditorState.scenes); EditorState.preview.seek(EditorState.playbackPosition); }
     });

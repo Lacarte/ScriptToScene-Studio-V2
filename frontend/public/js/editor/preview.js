@@ -1941,6 +1941,8 @@ export class CanvasPreview {
         const shadowOffY = (style.shadow_offset_y || 0) * scale;
 
         let text = active.text;
+        // Strip special characters (keep letters, numbers, spaces, ! ? [ ])
+        text = text.replace(/[^\p{L}\p{N}\s!?\[\]]/gu, '').replace(/\s{2,}/g, ' ').trim();
         if (transform === 'uppercase') text = text.toUpperCase();
 
         this.ctx.save();
