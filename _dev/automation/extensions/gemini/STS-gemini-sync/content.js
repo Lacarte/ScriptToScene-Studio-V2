@@ -278,31 +278,48 @@
     }
 
     // ── Type into Gemini (execCommand pattern) ───────
+    function findGeminiInput() {
+      var selectors = [
+        '.ql-editor.textarea',
+        'div[aria-label="Enter a prompt here"]',
+        'rich-textarea .ql-editor[contenteditable="true"]',
+        '.ql-editor[contenteditable="true"]',
+        'div[contenteditable="true"][role="textbox"]',
+      ];
+      for (var si = 0; si < selectors.length; si++) {
+        var el = document.querySelector(selectors[si]);
+        if (el) return el;
+      }
+      return null;
+    }
+
     function typeIntoGemini(text) {
       return new Promise(function(resolve, reject) {
-        var selectors = [
-          '.ql-editor.textarea',
-          'div[aria-label="Enter a prompt here"]',
-          'rich-textarea .ql-editor[contenteditable="true"]',
-          '.ql-editor[contenteditable="true"]',
-          'div[contenteditable="true"][role="textbox"]',
-        ];
-        var inputEl = null;
-        for (var si = 0; si < selectors.length; si++) {
-          inputEl = document.querySelector(selectors[si]);
-          if (inputEl) { console.log('[TYPE] Found input via:', selectors[si]); break; }
-        }
+        var inputEl = findGeminiInput();
         if (!inputEl) { reject(new Error('Gemini text input not found')); return; }
 
         console.log('[TYPE] Focusing input...');
         inputEl.focus();
         setTimeout(function() {
+          // Re-verify focus is on the input
+          if (document.activeElement !== inputEl) {
+            console.log('[TYPE] Focus drifted, re-focusing...');
+            inputEl.focus();
+          }
+
           console.log('[TYPE] Clearing content...');
-          // Select all and delete instead of setting textContent
-          document.execCommand('selectAll', false, null);
+          // Select all within the editor, then delete
+          var range = document.createRange();
+          range.selectNodeContents(inputEl);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
           document.execCommand('delete', false, null);
 
           setTimeout(function() {
+            // Ensure focus is still on input before inserting
+            if (document.activeElement !== inputEl) inputEl.focus();
+
             console.log('[TYPE] Inserting text (' + text.length + ' chars)...');
             var success = document.execCommand('insertText', false, text);
             console.log('[TYPE] execCommand insertText result:', success);
@@ -314,8 +331,14 @@
 
             setTimeout(function() {
               var editorText = inputEl.textContent || '';
-              console.log('[TYPE] Editor content length:', editorText.trim().length);
-              if (editorText.trim().length < 5) { reject(new Error('Prompt did not land in editor')); return; }
+              var landed = editorText.trim().length;
+              var expected = text.trim().length;
+              console.log('[TYPE] Editor content: ' + landed + '/' + expected + ' chars');
+              // Accept if at least 80% of text landed (minor whitespace diffs are ok)
+              if (landed < Math.min(expected * 0.8, expected - 20)) {
+                reject(new Error('Prompt partially landed (' + landed + '/' + expected + ' chars)'));
+                return;
+              }
               console.log('[TYPE] Done. Text in editor, NOT submitting yet.');
               resolve();
             }, 500);
@@ -324,50 +347,96 @@
       });
     }
 
-    // ── Submit ────────────────────────────────────────
-    function submitPrompt() {
-      return new Promise(function(resolve, reject) {
-        console.log('[SUBMIT] Looking for Send button...');
-        var sendBtn = document.querySelector('button.send-button[aria-label="Send message"]');
-        if (!sendBtn) sendBtn = document.querySelector('button[aria-label*="Send"]:not([disabled])');
-        if (!sendBtn) sendBtn = document.querySelector('button.send-button');
-
-        console.log('[SUBMIT] Send button found:', !!sendBtn,
-          sendBtn ? 'disabled=' + sendBtn.disabled + ' aria-disabled=' + sendBtn.getAttribute('aria-disabled') : '');
-
-        if (sendBtn && !sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true') {
-          console.log('[SUBMIT] Clicking Send button NOW');
-          sendBtn.click();
-        } else {
-          console.log('[SUBMIT] No enabled Send button found');
-          reject(new Error('Send button not found or disabled'));
-          return;
-        }
-
-        // Wait for Gemini to accept the prompt — watch for the thinking avatar
-        console.log('[SUBMIT] Waiting for Gemini to start processing...');
+    // ── Wait for Gemini to be idle before submitting ──
+    function waitForGeminiIdle(timeoutMs) {
+      timeoutMs = timeoutMs || 60000;
+      return new Promise(function(resolve) {
+        if (!isGeminiGenerating()) { resolve(); return; }
+        console.log('[IDLE] Waiting for Gemini to finish current generation...');
         var start = Date.now();
-        var checkInterval = setInterval(function() {
-          var thinkingAvatar = document.querySelector('.bard-avatar.thinking');
-          var processing = document.querySelector('.processing-state_container--processing');
-          var stopBtn = document.querySelector('button[aria-label="Stop response"]');
-
-          if (thinkingAvatar || processing || stopBtn) {
-            clearInterval(checkInterval);
-            console.log('[SUBMIT] Gemini accepted prompt —',
-              thinkingAvatar ? 'avatar thinking' : '',
-              processing ? 'processing state' : '',
-              stopBtn ? 'stop button' : '');
+        var poll = setInterval(function() {
+          if (!isGeminiGenerating()) {
+            clearInterval(poll);
+            console.log('[IDLE] Gemini is idle after ' + ((Date.now() - start) / 1000).toFixed(1) + 's');
             resolve();
             return;
           }
-
-          if (Date.now() - start > 10000) {
-            clearInterval(checkInterval);
-            console.warn('[SUBMIT] No thinking state after 10s — proceeding anyway');
+          if (Date.now() - start > timeoutMs) {
+            clearInterval(poll);
+            console.warn('[IDLE] Timed out waiting for Gemini to be idle after ' + (timeoutMs / 1000) + 's');
             resolve();
           }
-        }, 300);
+        }, 500);
+      });
+    }
+
+    // ── Submit ────────────────────────────────────────
+    function findSendButton() {
+      // Find the send button, ensuring it's NOT in Stop state
+      var btn = document.querySelector('button.send-button[aria-label="Send message"]');
+      if (!btn) btn = document.querySelector('button.send-button[aria-label*="Send"]');
+      if (!btn) btn = document.querySelector('button.send-button');
+      if (!btn) return null;
+      // Reject if button is in Stop state (same button toggles send/stop)
+      var label = (btn.getAttribute('aria-label') || '').toLowerCase();
+      var stopIcon = btn.querySelector('mat-icon[fonticon="stop"]');
+      if (label.indexOf('stop') !== -1 || stopIcon) return null;
+      return btn;
+    }
+
+    function submitPrompt() {
+      return new Promise(function(resolve, reject) {
+        console.log('[SUBMIT] Looking for Send button...');
+
+        // Poll for an enabled Send button (Angular may be re-rendering)
+        var attempts = 0;
+        var maxAttempts = 20; // 20 x 250ms = 5s max wait
+        var findPoll = setInterval(function() {
+          attempts++;
+          var sendBtn = findSendButton();
+
+          if (sendBtn && !sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true') {
+            clearInterval(findPoll);
+            console.log('[SUBMIT] Send button found (attempt ' + attempts + '): aria-label=' + sendBtn.getAttribute('aria-label'));
+            smartClick(sendBtn);
+            console.log('[SUBMIT] Clicked Send button');
+
+            // Wait for Gemini to accept the prompt
+            var start = Date.now();
+            var checkInterval = setInterval(function() {
+              var thinkingAvatar = document.querySelector('.bard-avatar.thinking');
+              var processing = document.querySelector('.processing-state_container--processing');
+              var stopBtn = document.querySelector('button[aria-label="Stop response"]');
+              var stopIcon = document.querySelector('button.send-button mat-icon[fonticon="stop"]');
+
+              if (thinkingAvatar || processing || stopBtn || stopIcon) {
+                clearInterval(checkInterval);
+                console.log('[SUBMIT] Gemini accepted prompt —',
+                  thinkingAvatar ? 'avatar thinking' : '',
+                  processing ? 'processing state' : '',
+                  (stopBtn || stopIcon) ? 'stop button' : '');
+                resolve();
+                return;
+              }
+
+              if (Date.now() - start > 10000) {
+                clearInterval(checkInterval);
+                console.warn('[SUBMIT] No thinking state after 10s — proceeding anyway');
+                resolve();
+              }
+            }, 300);
+            return;
+          }
+
+          if (attempts >= maxAttempts) {
+            clearInterval(findPoll);
+            // Check if it's specifically in Stop state vs just missing
+            var anyBtn = document.querySelector('button.send-button');
+            var reason = anyBtn ? 'Send button is in Stop state (Gemini still generating)' : 'Send button not found or disabled';
+            console.log('[SUBMIT] ' + reason + ' (after ' + attempts + ' attempts)');
+            reject(new Error(reason));
+          }
+        }, 250);
       });
     }
 
@@ -476,8 +545,11 @@
       // 4. Classic indicators
       var stopBtn = document.querySelector('button[aria-label="Stop response"]');
       var processingContainer = document.querySelector('.processing-state_container--processing');
+      // 5. Image loader skeleton — .loader inside generated-image means image still rendering
+      //    (animation circle may disappear but skeleton persists until image is ready)
+      var imageLoader = document.querySelector('generated-image .loader');
 
-      return !!(hasActiveProcessing || pendingResponse || pendingAttachment || stopBtn || processingContainer);
+      return !!(hasActiveProcessing || pendingResponse || pendingAttachment || stopBtn || processingContainer || imageLoader);
     }
 
     function isValidImageSrc(src) {
@@ -527,24 +599,19 @@
     var _capturedContainerIds = {};
 
     function captureContainerForScene(sceneKey) {
-      // Count containers BEFORE submit to know how many existed already
-      var countBefore = document.querySelectorAll('.conversation-container').length;
       var attempts = 0;
-      var maxAttempts = 20; // 20 x 500ms = 10s max wait
+      var maxAttempts = 60; // 60 x 500ms = 30s max wait
 
       var poll = setInterval(function() {
         attempts++;
-        // Only match REAL containers (div.conversation-container), NOT pending-request.conversation-container
-        // Gemini creates a temporary <pending-request> container first, then replaces it with the real <div>
+        // Only match REAL containers (div.conversation-container), NOT pending-request
         var containers = document.querySelectorAll('div.conversation-container');
 
         // Look for a container we haven't captured yet (by its id attribute)
         for (var i = containers.length - 1; i >= 0; i--) {
           var c = containers[i];
-          // Skip pending-request containers (Angular will remove them)
-          if (c.tagName === 'PENDING-REQUEST') continue;
-          var cId = c.id || ('idx-' + i);
-          if (!cId || cId.indexOf('idx-') === 0) continue; // Skip containers without a real id
+          var cId = c.id;
+          if (!cId) continue; // Skip containers without a real id
           if (!_capturedContainerIds[cId]) {
             clearInterval(poll);
             _capturedContainerIds[cId] = sceneKey;
@@ -557,13 +624,9 @@
 
         if (attempts >= maxAttempts) {
           clearInterval(poll);
-          // Fallback: use last container even if already captured
-          var last = containers[containers.length - 1];
-          if (last) {
-            sceneContainerMap[sceneKey] = last;
-            console.warn('[TRACK] Fallback: mapped scene ' + sceneKey + ' to last container (attempt ' + attempts + ')');
-            injectSceneBadge(last, sceneKey);
-          }
+          // Do NOT fallback to last container — it may belong to another scene.
+          // waitForImageGeneration handles unmapped containers with a 30s timeout.
+          console.error('[TRACK] Could not find new container for scene ' + sceneKey + ' after ' + (maxAttempts * 0.5) + 's');
         }
       }, 500);
     }
@@ -593,67 +656,93 @@
       return new Promise(function(resolve) {
         var start = Date.now();
         var label = projectId + '|' + sceneNum;
+        var doneSignalSeen = 0; // timestamp when aria-busy=false first seen
         console.log('[IMAGE] Waiting for image for scene ' + label + ' (timeout: ' + (timeoutMs / 1000) + 's)');
 
         var checkInterval = setInterval(function() {
-          // Try mapped container first
+          // Only use the mapped container — never fall back to "last container"
+          // which could belong to a different scene
           var container = sceneContainerMap[sceneNum];
-
-          // Fallback: if container not mapped yet, check the last conversation-container
-          if (!container) {
-            var allContainers = document.querySelectorAll('.conversation-container');
-            if (allContainers.length > 0) {
-              container = allContainers[allContainers.length - 1];
-            }
-          }
-
-          if (container) {
-            var modelResponse = container.querySelector('model-response');
-            if (modelResponse) {
-              var img = findImageInContainer(modelResponse);
-              if (img) {
-                clearInterval(checkInterval);
-                // Also ensure container is mapped if it wasn't
-                if (!sceneContainerMap[sceneNum]) {
-                  sceneContainerMap[sceneNum] = container;
-                  injectSceneBadge(container, sceneNum);
-                }
-                console.log('[IMAGE] Found for scene ' + label + ':', img.substring(0, 80) + '...');
-                resolve(img);
-                return;
-              }
-            }
-          }
-
           var elapsed = Date.now() - start;
 
-          // Check aria-busy="false" on the response's markdown div
-          // This is the most reliable "generation complete" signal (from DOM activity analysis)
-          if (container) {
+          // If container not mapped yet, just wait (captureContainerForScene is polling)
+          if (!container) {
+            if (elapsed > 30000) {
+              clearInterval(checkInterval);
+              console.error('[IMAGE] Container never mapped for scene ' + label + ' after 30s');
+              resolve(null);
+              return;
+            }
+            return;
+          }
+
+          // ── Fast-fail checks ──
+          // Detect stopped responses
+          var stoppedDraft = container.querySelector('[data-test-draft-id*="stopped"]');
+          if (stoppedDraft) {
+            clearInterval(checkInterval);
+            console.error('[IMAGE] Response was stopped for scene ' + label);
+            resolve(null);
+            return;
+          }
+
+          // Detect Gemini refusal (text response without any image/generated-image element)
+          var modelResponse = container.querySelector('model-response');
+          if (modelResponse) {
+            // ── Check for image ──
+            var img = findImageInContainer(modelResponse);
+            if (img) {
+              clearInterval(checkInterval);
+              console.log('[IMAGE] Found for scene ' + label + ':', img.substring(0, 80) + '...');
+              resolve(img);
+              return;
+            }
+
+            // ── Loader skeleton still visible — image rendering, keep waiting ──
+            var loaderEl = container.querySelector('generated-image .loader');
+            if (loaderEl) {
+              if (elapsed > 10000 && elapsed % 10000 < 1100) {
+                console.log('[IMAGE] Loader skeleton present for scene ' + label + ' — waiting... (' + (elapsed / 1000).toFixed(0) + 's)');
+              }
+              return; // Skip all timeout checks
+            }
+
+            // ── Check "done" signals ──
             var markdownDiv = container.querySelector('.markdown[aria-busy="false"]');
             var footerDone = container.querySelector('.response-footer.complete, .response-footer.gap.complete');
             if (markdownDiv || footerDone) {
-              // Generation is confirmed done — if no image found after 10s more, it failed
-              if (elapsed > timeoutMs || elapsed > 30000) {
+              if (!doneSignalSeen) {
+                doneSignalSeen = Date.now();
+                console.log('[IMAGE] Done signal detected for scene ' + label + ' — waiting up to 15s for image to appear...');
+              }
+              // Give 15s after done signal for image to render (blob URL may arrive late)
+              if (Date.now() - doneSignalSeen > 15000) {
                 clearInterval(checkInterval);
-                console.error('[IMAGE] aria-busy=false but no image found for scene ' + label);
+                // Check if Gemini refused — look for text-only response
+                var hasGeneratedImage = container.querySelector('generated-image');
+                if (!hasGeneratedImage) {
+                  console.error('[IMAGE] Gemini responded with text only (no image element) for scene ' + label);
+                } else {
+                  console.error('[IMAGE] Done but no image blob found for scene ' + label);
+                }
                 resolve(null);
                 return;
               }
             }
           }
 
-          // Soft timeout: if past timeout and not generating, give up
+          // ── Timeouts ──
+          // Soft timeout: past limit and Gemini not actively generating
           if (elapsed > timeoutMs && !isGeminiGenerating()) {
             clearInterval(checkInterval);
-            console.error('[IMAGE] Timed out for scene ' + label + ' (soft)');
+            console.error('[IMAGE] Timed out for scene ' + label + ' (soft, ' + (elapsed / 1000).toFixed(0) + 's)');
             resolve(null);
             return;
           }
-          // Hard timeout: 2x the soft timeout — give up no matter what
+          // Hard timeout: 2x — give up no matter what
           if (elapsed > timeoutMs * 2) {
             clearInterval(checkInterval);
-            console.error('[IMAGE] Timed out for scene ' + label + ' (hard)');
+            console.error('[IMAGE] Timed out for scene ' + label + ' (hard, ' + (elapsed / 1000).toFixed(0) + 's)');
             resolve(null);
             return;
           }
@@ -747,15 +836,17 @@
           var completed = 0, failed = 0;
           tq.forEach(function(q) { if (q.status === 'completed') completed++; if (q.status === 'error') failed++; });
           console.log('=== Done: ' + completed + ' ok, ' + failed + ' failed ===');
-          if (completed === tq.length) {
-            sendWS({ type: 'JOB_COMPLETE', projectId: S.projectId });
-            // Switch to ScriptToScene Studio tab after job completes
+          // Notify server when all scenes are resolved (either completed or exhausted retries)
+          if (completed + failed === tq.length) {
+            sendWS({ type: 'JOB_COMPLETE', projectId: S.projectId, completed: completed, failed: failed });
             try { chrome.runtime.sendMessage({ type: 'FOCUS_STUDIO_TAB' }); } catch(e) {}
           }
           return;
         }
         var item = tq[idx];
         if (!item.selected || item.status === 'completed') { idx++; processNext(); return; }
+
+        if (!item.retryCount) item.retryCount = 0;
 
         S.typing.currentIndex = idx; item.status = 'typing'; render();
         sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'typing' });
@@ -775,7 +866,31 @@
           return;
         }
 
-        enableImageTool()
+        function handleSceneFailure(reason) {
+          item.retryCount++;
+          if (item.retryCount < 4 && !S.typing.stopRequested) {
+            var retryDelay = 3000 + (item.retryCount * 2000); // 5s, 7s, 9s
+            console.log('[RETRY] Scene ' + item.scene + ' failed (' + reason + '), attempt ' + item.retryCount + '/4 — retrying in ' + (retryDelay / 1000) + 's...');
+            item.status = 'queued';
+            item.error = reason + ' (retry ' + item.retryCount + '/4)';
+            if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'pending';
+            // Clear stale container mapping so retry gets a fresh mapping
+            delete sceneContainerMap[item.scene];
+            render();
+            setTimeout(processNext, retryDelay); // Same idx — retry same scene
+          } else {
+            console.error('[RETRY] Scene ' + item.scene + ' failed after ' + item.retryCount + ' attempts: ' + reason);
+            item.status = 'error';
+            item.error = reason + (item.retryCount > 1 ? ' (after ' + item.retryCount + ' attempts)' : '');
+            if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
+            render();
+            idx++;
+            setTimeout(processNext, 3000);
+          }
+        }
+
+        waitForGeminiIdle(60000)
+          .then(function() { return enableImageTool(); })
           .then(function() { console.log('[FLOW] Step 1: Typing prompt...'); return typeIntoGemini(item.fullPrompt); })
           .then(function() { console.log('[FLOW] Step 2: Waiting 1s before submit...'); return sleep(1000); })
           .then(function() { console.log('[FLOW] Step 3: Submitting...'); return submitPrompt(); })
@@ -809,9 +924,16 @@
             if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'generating';
             render();
             sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'generating' });
+            // Start DOM monitor on the last model-response container
+            var containers = document.querySelectorAll('div.conversation-container');
+            if (containers.length > 0) {
+              var lastIdx = containers.length;
+              startDOMMonitor('(//div[contains(@class,"conversation-container")])[' + lastIdx + ']//model-response');
+            }
             return waitForImageGeneration(180000, item.projectId || S.projectId, item.scene);
           })
           .then(function(imageUrl) {
+            stopDOMMonitor();
             if (S.typing.stopRequested) { item.status = 'queued'; return null; }
             if (imageUrl) {
               seenImageUrls[imageUrl] = true;
@@ -823,18 +945,16 @@
                   sendWS({ type: 'IMAGE_UPLOAD', projectId: item.projectId || S.projectId, scene: parseInt(item.scene),
                     image: { data: b64, source_url: imageUrl } });
                   item.status = 'completed'; item.imageUrl = imageUrl; S.typing.typedCount++;
+                  item.retryCount = 0; // Reset on success
                   if (S.scenes[item.queueKey]) { S.scenes[item.queueKey].status = 'done'; S.scenes[item.queueKey].imageUrl = imageUrl; }
                   console.log('Scene ' + item.scene + ' completed');
                 } else {
-                  item.status = 'error'; item.error = 'Fetch failed';
-                  if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
+                  return Promise.reject({ autoRetry: true, reason: 'Fetch failed' });
                 }
               });
             } else {
-              item.status = 'error'; item.error = 'Timed out';
-              if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
+              return Promise.reject({ autoRetry: true, reason: 'No image generated' });
             }
-            return null;
           })
           .then(function() {
             render(); idx++;
@@ -845,16 +965,49 @@
             } else { processNext(); }
           })
           .catch(function(e) {
+            stopDOMMonitor();
             if (e === 'RATE_LIMITED_SKIP') return; // Already handled
-            console.error('Error scene ' + item.scene + ':', e.message || e);
-            item.status = 'error'; item.error = e.message || String(e); render();
-            idx++; setTimeout(processNext, 3000);
+            // Auto-retry for recoverable failures
+            if (e && e.autoRetry) {
+              handleSceneFailure(e.reason);
+              return;
+            }
+            var msg = e.message || String(e);
+            handleSceneFailure(msg);
           });
       }
       processNext();
     }
 
     function stopTyping() { S.typing.stopRequested = true; render(); }
+
+    // ── DOM Monitor Integration (dom-activity-recorder) ──
+    // Uses __sarAPI exposed by the DOM Activity Recorder extension
+    function startDOMMonitor(xpath) {
+      if (!window.__sarAPI) {
+        console.warn('[DOM-MON] DOM Activity Recorder not loaded — install the extension to enable monitoring');
+        return false;
+      }
+      if (window.__sarAPI.isRecording()) {
+        window.__sarAPI.stop();
+        window.__sarAPI.clear();
+      }
+      var result = window.__sarAPI.monitor(xpath);
+      if (result && result.ok) {
+        console.log('[DOM-MON] Started monitoring: ' + xpath + ' — ' + result.message);
+        return true;
+      } else {
+        console.warn('[DOM-MON] Failed to monitor: ' + (result ? result.error : 'unknown error'));
+        return false;
+      }
+    }
+
+    function stopDOMMonitor() {
+      if (window.__sarAPI && window.__sarAPI.isRecording()) {
+        window.__sarAPI.stop();
+        console.log('[DOM-MON] Stopped monitoring');
+      }
+    }
 
     // ── UI ───────────────────────────────────────────
     function $id(id) { return document.getElementById(id); }
@@ -936,6 +1089,7 @@
             '<button class="sts-btn sts-btn-primary" id="sts-action-btn">Start Typing</button>' +
             '<button class="sts-btn sts-btn-warn" id="sts-retry-btn" style="display:none;">Retry Failed</button>' +
             '<button class="sts-btn" id="sts-clear-btn" style="background:#374151;color:#9ca3af;font-size:11px;padding:6px 12px;">CLEAR</button>' +
+            '<button class="sts-btn" id="sts-test-btn" style="background:#6366f1;color:#fff;font-size:11px;padding:6px 12px;" title="Test: submit one prompt + DOM monitor">TEST</button>' +
           '</div>' +
         '</div>';
       document.body.appendChild(root);
@@ -1038,6 +1192,77 @@
         console.log('[STS] Retrying ' + retried + ' failed scenes');
         render();
         if (retried > 0 && !S.typing.active) startTyping();
+      });
+
+      // ── TEST button — simulate a single prompt + DOM monitor ──
+      $id('sts-test-btn').addEventListener('click', function() {
+        if (S.typing.active) { console.log('[TEST] Already running'); return; }
+        var testPrompt = 'generate an image wide shot, a solitary figure standing in a vast empty white room, soft diffused lighting, cinematic mood 9:16';
+        console.log('[TEST] Starting test job with DOM monitor...');
+
+        // Inject into queue
+        var testKey = 'TEST|0';
+        S.projectId = 'TEST';
+        S.scenes[testKey] = { prompt: testPrompt, status: 'pending', imageUrl: null, projectId: 'TEST' };
+        S.typing.queue = [{
+          scene: '0', queueKey: testKey, projectId: 'TEST',
+          displayPrompt: testPrompt, aspectRatio: '',
+          fullPrompt: testPrompt,
+          selected: true, status: 'queued', error: null, retryCount: 0
+        }];
+        render();
+
+        // Run the flow manually with DOM monitor
+        waitForGeminiIdle(10000)
+          .then(function() { return enableImageTool(); })
+          .then(function() {
+            console.log('[TEST] Typing prompt...');
+            return typeIntoGemini(testPrompt);
+          })
+          .then(function() { return sleep(1000); })
+          .then(function() {
+            console.log('[TEST] Submitting...');
+            return submitPrompt();
+          })
+          .then(function() {
+            console.log('[TEST] Submitted! Starting DOM monitor on last model-response...');
+            captureContainerForScene('0');
+            // Wait a moment for container to appear, then start DOM monitor
+            return sleep(2000);
+          })
+          .then(function() {
+            var containers = document.querySelectorAll('div.conversation-container');
+            var xpath = '(//div[contains(@class,"conversation-container")])[' + containers.length + ']//model-response';
+            console.log('[TEST] Monitoring XPath: ' + xpath);
+            startDOMMonitor(xpath);
+            S.typing.queue[0].status = 'generating';
+            S.scenes[testKey].status = 'generating';
+            render();
+            return waitForImageGeneration(180000, 'TEST', '0');
+          })
+          .then(function(imageUrl) {
+            stopDOMMonitor();
+            if (imageUrl) {
+              console.log('[TEST] SUCCESS — Image found: ' + imageUrl.substring(0, 80));
+              S.typing.queue[0].status = 'completed';
+              S.typing.queue[0].imageUrl = imageUrl;
+              S.scenes[testKey].status = 'done';
+            } else {
+              console.error('[TEST] FAILED — No image generated (timed out)');
+              S.typing.queue[0].status = 'error';
+              S.typing.queue[0].error = 'No image generated';
+              S.scenes[testKey].status = 'error';
+            }
+            render();
+            console.log('[TEST] Done. Check DOM recorder panel for the full lifecycle report.');
+          })
+          .catch(function(e) {
+            stopDOMMonitor();
+            console.error('[TEST] Error:', e.message || e);
+            S.typing.queue[0].status = 'error';
+            S.typing.queue[0].error = e.message || String(e);
+            render();
+          });
       });
 
       // Per-scene retry buttons (delegated)
@@ -1209,7 +1434,7 @@
           var rowCls = 'sts-row' + (isCurrent ? ' highlight' : '') + (item.status === 'error' ? ' error-row' : '');
           var thumbHtml = item.imageUrl
             ? '<img class="sts-row-thumb" src="' + item.imageUrl + '" alt="">'
-            : '<div class="sts-row-thumb sts-row-thumb-empty">' + item.scene + '</div>';
+            : '';
           var errHtml = item.error ? '<div class="sts-row-error">' + escHtml(item.error) + '</div>' : '';
           var retryHtml = item.status === 'error'
             ? '<button class="sts-retry-scene-btn" data-scene="' + item.scene + '" style="background:#f39c12;color:#0d1117;border:none;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;cursor:pointer;margin-top:2px;">RETRY</button>'

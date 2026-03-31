@@ -730,4 +730,16 @@
     return true;
   });
 
+  // ── Public API (for cross-extension use) ───────────
+  // Other extensions on the same page can call:
+  //   window.__sarAPI.monitor(xpathOrCss)  — start monitoring
+  //   window.__sarAPI.stop()               — stop recording
+  //   window.__sarAPI.clear()              — clear data
+  window.__sarAPI = {
+    monitor: function(path) { return selectByPath(path); },
+    stop: function() { stopRecording(); return { ok: true }; },
+    clear: function() { clearData(); return { ok: true }; },
+    isRecording: function() { return state.recording; }
+  };
+
 })();
