@@ -407,6 +407,22 @@ async function runJobQueue() {
   jobQueueCurrent.value = null
   clearQueue()
   toast.success(`Job queue complete — ${jobIndex} jobs processed`)
+
+  // Navigate to final destination now that the full queue is done
+  if (lastCompletedProjectId.value) {
+    const stop = stopAfter.value
+    const pid = lastCompletedProjectId.value
+    const destinations = {
+      tts: '/tts', timing: '/alignment', segment: '/segmenter', scenes: '/scenes',
+      storyboard: '/storyboard', assets: '/assets', assemble: '/editor', export: '/export-library',
+    }
+    const dest = destinations[stop] || '/export-library'
+    const query = { project: pid }
+    if (dest === '/export-library' && lastCompletedExportFilename.value) {
+      query.export = lastCompletedExportFilename.value
+    }
+    setTimeout(() => { router.push({ path: dest, query }) }, 1500)
+  }
 }
 
 function stopJobQueue() {
@@ -813,8 +829,9 @@ watch(style, (val) => {
 })
 
 // Auto-navigate when pipeline completes — destination depends on stop_after
+// Skip navigation while a job queue is still processing (navigate only after all jobs finish)
 watch(globalStatus, (status) => {
-  if (status === 'done' && lastCompletedProjectId.value) {
+  if (status === 'done' && lastCompletedProjectId.value && !jobQueueRunning.value) {
     const stop = stopAfter.value
     const pid = lastCompletedProjectId.value
     // Map stop_after to the appropriate page
@@ -1519,6 +1536,13 @@ function logStepLabel(step) {
     <div v-if="pendingProviderUrl" class="provider-redirect-banner" @click="openPendingProvider()">
       <span class="provider-redirect-icon">&#x1F517;</span>
       <span>Click to open provider tab: <b>{{ pendingProviderUrl }}</b></span>
+    </div>
+
+    <!-- Job queue indicator -->
+    <div v-if="jobQueueRunning && jobQueueCurrent" class="job-queue-banner">
+      <span class="job-queue-badge">Job {{ jobQueueCurrent.index }}/{{ jobQueueCurrent.total }}</span>
+      <span class="job-queue-label">{{ jobQueueCurrent.label }}</span>
+      <span class="job-queue-remaining">{{ jobQueueCurrent.total - jobQueueCurrent.index }} remaining</span>
     </div>
 
     <!-- Progress -->
@@ -4692,6 +4716,42 @@ function logStepLabel(step) {
   50% {
     opacity: 0.5;
   }
+}
+
+/* ── Job queue banner ── */
+.job-queue-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 8px 0 4px;
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.12), rgba(167, 139, 250, 0.04));
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.job-queue-badge {
+  background: rgba(167, 139, 250, 0.2);
+  color: var(--accent-secondary, #a78bfa);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.job-queue-label {
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-queue-remaining {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .provider-redirect-banner {

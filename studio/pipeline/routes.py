@@ -1782,7 +1782,8 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
         from studio.music.selector import select_music
         bg_music = select_music(story_tone)
         if bg_music:
-            logger.info("Pipeline Export: auto-selected bgMusic for tone '{}'", story_tone)
+            logger.info("Pipeline Export: auto-selected bgMusic for tone '{}' → '{}'",
+                        story_tone, os.path.basename(bg_music["path"]))
 
     export_payload = {
         "project_id": project_id,
