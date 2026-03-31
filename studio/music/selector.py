@@ -14,6 +14,7 @@ _AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 TONE_MUSIC_MAP = {
     "suspenseful":   ["dark", "viral-slowed", "cinematic"],
     "dramatic":      ["cinematic", "dark", "viral-slowed", "viral-lofi"],
+    "religious":     ["religion", "dark", "ambient"],
     "educational":   ["ambient", "viral-lofi", "cinematic"],
     "inspirational": ["cinematic", "viral-lofi", "happy"],
     "comedic":       ["happy", "viral-hiphop", "viral-lofi"],

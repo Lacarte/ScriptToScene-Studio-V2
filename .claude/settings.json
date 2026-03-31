@@ -13,7 +13,9 @@
       "Bash(grep -r \"visual_style\\\\|style_prompt\\\\|image_prompt\" /d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/frontend/src --include=*.ts --include=*.tsx --include=*.js)",
       "Bash(grep -E \"\\\\.\\(json|js|py|md\\)$\")",
       "Bash(ls -d d:/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/*/)",
-      "Bash(find /d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/resources -type f \\\\\\(-name *.yml -o -name *.yaml -o -name *.json \\\\\\))"
+      "Bash(find /d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio/resources -type f \\\\\\(-name *.yml -o -name *.yaml -o -name *.json \\\\\\))",
+      "Bash(find /d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio -path *TRASH* -prune -o -name work@in@progress.json -type f -print)",
+      "Bash(find /d/@Workspace/@Development/@Scripts/@Python/ScriptToScene-Studio -path *TRASH* -prune -o -path *node_modules* -prune -o -name *.json -path */projects/* -type f -print)"
     ]
   },
   "enableAgentTeam": true,

@@ -56,13 +56,15 @@ def classify(t: dict) -> tuple[str, str]:
     # --- Strong name anchors ---
     if any(w in name for w in ["happy", "comedy", "kids-", "optimistic", "upbeat"]):
         return "happy", "name"
+    if any(w in name for w in ["religion", "religious", "biblical", "sacred"]):
+        return "religion", "name"
     if any(w in name for w in ["meditation", "sound bath", "calm", "healing", "drone", "angelic", "choir"]):
         return "ambient", "name"
     if any(w in name for w in ["kendrick", "carti", "peep", "xxx", "lil-"]):
         return "viral-hiphop", "name"
     if any(w in name for w in ["orchestral", "classical", "inspiring-flight", "ivory and iron", "rising current"]):
         return "cinematic", "name"
-    if any(w in name for w in ["suspense", "suspenseful"]):
+    if any(w in name for w in ["suspense", "suspenseful", "terror"]):
         return "dark", "name"
 
     has_slowed = any(w in name for w in ["slowed", "reverb", "muffled"])
