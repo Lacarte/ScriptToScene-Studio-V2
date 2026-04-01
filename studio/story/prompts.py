@@ -74,6 +74,9 @@ def build_story_system_prompt(
         "Blend authority (science, evolution, psychology) with emotional stakes.]\n\n"
         "CTA: [1 sentence — call to action, question, or cliffhanger that reminds the viewer what's at stake]\n\n"
         "WRITING RULES:\n"
+        "- Use simple, everyday language — even when explaining complex ideas. "
+        "Write like you're explaining to a smart friend, not a professor. "
+        "Short words beat long words. If a 10-year-old can't follow it, simplify.\n"
         "- Plain text only. No markdown, no formatting, no emojis, no asterisks.\n"
         "- Write as spoken narration — short punchy sentences, conversational rhythm, "
         "natural pauses through line breaks.\n"
@@ -83,6 +86,25 @@ def build_story_system_prompt(
         "- Do not include any meta-commentary, instructions, or stage directions in the output.\n"
         "- Reinforce key phrases and recurring motifs to build authority and memorability.\n"
     )
+
+
+_ANGLE_STARTERS = [
+    "Start with a little-known fact or paradox",
+    "Open with a personal anecdote or first-person scenario",
+    "Begin with a provocative question that challenges assumptions",
+    "Start with a vivid sensory scene the listener can picture",
+    "Open with a bold controversial claim",
+    "Begin with a historical event most people have never heard of",
+    "Start with a 'what if' thought experiment",
+    "Open with a common belief and immediately subvert it",
+    "Begin with a countdown, list, or pattern that builds tension",
+    "Start mid-action, dropping the listener into a dramatic moment",
+    "Open with a scientific discovery that sounds impossible",
+    "Begin with a quiet, intimate confession",
+    "Start with two contradictory truths side by side",
+    "Open with a warning or ominous prediction",
+    "Begin by describing something everyone does but nobody talks about",
+]
 
 
 def _unique_seed() -> str:
@@ -100,11 +122,14 @@ def build_story_user_prompt(
     """Build the user prompt for the story generation call."""
     word_target = compute_word_target(duration)
     seed = _unique_seed()
+    angle = random.choice(_ANGLE_STARTERS)
     base = (
         f"Write a viral {story_category} story for a {duration}-second voiceover video. "
         f"Target: {word_target} words. Language: {language}. Style: {preset_style}. "
-        "Natural spoken flow only — no titles, no meta-text, no formatting. "
-        f"Be original and creative — do not repeat previous stories. [seed:{seed}]"
+        "Natural spoken flow only — no titles, no meta-text, no formatting.\n\n"
+        f"CREATIVE DIRECTION: {angle}. "
+        "Choose a fresh, unexpected angle — avoid generic hooks about 'ancient wisdom' or 'what they don't tell you'. "
+        f"[uid:{seed}]"
     )
     if idea:
         base += f"\n\nBuild the story around this idea:\n{idea}"

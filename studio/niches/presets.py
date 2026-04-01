@@ -24,110 +24,122 @@ _DEFAULT_VOICE = "af_heart"
 _DEFAULT_SPEED = 1.0
 _DEFAULT_DURATION = 45
 _DEFAULT_INWORLD_VOICE = "Dennis"
+_BELLA_VOICE_ID = "default-ofw8mqnvn6z4uenfqu9epq__bella"  # Clone: firm female narrative
 
 # ── Inworld voice mapping — best voice per (category, tone) ────────────────────
 # Curated from 135 Inworld preset voices.
 INWORLD_VOICE_MAP = {
+    # ══════════════════════════════════════════════════════════════════════
+    # Curated from user's preferred voices only.
+    #
+    # MALE NARRATIVE:  Hades, Vinny, Elliot, Malcolm, Oliver, Brian,
+    #                  Callum, James, Blake, Craig, Ronald
+    # FIRM FEMALE:     Victoria, Bianca, Deborah, Jessica, Lauren,
+    #                  Miranda, Sarah
+    # SMOOTH FEMALE:   Celeste, Claire, Evelyn, Luna, Nadia, Selene,
+    #                  Serena, Wendy
+    # FRENCH:          Alain
+    # ══════════════════════════════════════════════════════════════════════
+
     # ── Psychology ──
-    ("psychology", "suspenseful"): "Damon",       # Calm, raspy — moody narration
-    ("psychology", "dramatic"): "Malcolm",        # Authoritative, manipulative — intense psychology
-    ("psychology", "educational"): "Simon",       # Articulate, insightful — psych explainers
-    ("psychology", "inspirational"): "Jake",      # Amiable, introspective — growth mindset
+    ("psychology", "suspenseful"): "Malcolm",     # Authoritative, manipulative — dark psych
+    ("psychology", "dramatic"): "Victoria",       # Silky, cunning — mind games
+    ("psychology", "educational"): _BELLA_VOICE_ID,  # Bella — firm female, clear explainer
+    ("psychology", "inspirational"): _BELLA_VOICE_ID,  # Bella — firm, motivational
 
     # ── Philosophy ──
-    ("philosophy", "educational"): "Simon",       # Articulate, insightful — presentations
-    ("philosophy", "dramatic"): "Graham",         # Profound, authoritative British
-    ("philosophy", "inspirational"): "Jake",      # Amiable, introspective — motivational
-    ("philosophy", "suspenseful"): "Tristan",     # Deliberate, controlled — deep questions
+    ("philosophy", "educational"): _BELLA_VOICE_ID,  # Bella — firm female, structured lectures
+    ("philosophy", "dramatic"): "Ronald",         # Deep, gravelly British — weighty ideas
+    ("philosophy", "inspirational"): _BELLA_VOICE_ID,  # Bella — firm, uplifting
+    ("philosophy", "suspenseful"): "Hades",       # Commanding, omniscient — existential dread
 
     # ── Motivation ──
-    ("motivation", "inspirational"): "Rupert",    # Resonant, commanding — motivational speeches
-    ("motivation", "dramatic"): "Carter",         # Energetic, mature — powerful delivery
-    ("motivation", "educational"): "Brian",       # Friendly, encouraging — tutorials
-    ("motivation", "wholesome"): "Jake",          # Amiable, warm — uplifting
+    ("motivation", "inspirational"): _BELLA_VOICE_ID,  # Bella — firm female, motivational
+    ("motivation", "dramatic"): "Ronald",         # Deep, confident British — powerful delivery
+    ("motivation", "educational"): _BELLA_VOICE_ID,  # Bella — firm, tutorials
+    ("motivation", "wholesome"): "Callum",        # Casual, friendly Australian — warm uplift
 
     # ── Crime ──
-    ("crime", "dramatic"): "Conrad",              # Gruff, weathered — detective archetypes
-    ("crime", "suspenseful"): "Vinny",            # Gritty, assertive — urban crime
-    ("crime", "educational"): "Cedric",           # Crisp, measured — true crime analysis
+    ("crime", "dramatic"): "Vinny",               # Gritty, assertive NY — crime drama
+    ("crime", "suspenseful"): "Miranda",          # Menacing, cold — chilling true crime
+    ("crime", "educational"): "Elliot",           # Calm, steady — true crime analysis
 
     # ── Horror ──
-    ("horror", "suspenseful"): "Victor",          # Ominous, sinister — dark suspense
-    ("horror", "dramatic"): "Lucian",             # Brooding, foreboding — gothic horror
-    ("horror", "comedic"): "Mortimer",            # Gravelly, aggressive — campy horror
+    ("horror", "suspenseful"): "Hades",           # Commanding, gruff — omniscient dread
+    ("horror", "dramatic"): "Miranda",            # Menacing, cold-hearted — gothic horror
+    ("horror", "comedic"): "James",               # Vibrant, expressive — campy horror
 
     # ── Mystery ──
-    ("mystery", "suspenseful"): "Levi",           # Measured, ominous — suspense narration
-    ("mystery", "dramatic"): "Victoria",          # Silky, cunning British — intricate plots
+    ("mystery", "suspenseful"): "Victoria",       # Silky, cunning British — intricate plots
+    ("mystery", "dramatic"): "Malcolm",           # Authoritative, manipulative — who done it
     ("mystery", "educational"): "Elliot",         # Calm, steady — mystery breakdowns
 
     # ── Religion ──
-    ("religion", "dramatic"): "Nikolai",          # Deep, resonant, theatrical
-    ("religion", "religious"): "Graham",          # Profound, authoritative — biblical
-    ("religion", "inspirational"): "Rupert",      # Commanding — spiritual motivation
-    ("religion", "educational"): "Duncan",        # Warm, articulate British — theology
+    ("religion", "dramatic"): "Craig",            # Refined, articulate British — gravitas
+    ("religion", "religious"): "Ronald",          # Deep, gravelly British — biblical authority
+    ("religion", "inspirational"): "James",       # Vibrant, expressive — spiritual fire
+    ("religion", "educational"): "Oliver",        # Neutral, clear — theology explainers
 
     # ── Romance ──
     ("romance", "dramatic"): "Blake",             # Rich, intimate — audiobooks, romantic
     ("romance", "suspenseful"): "Selene",         # Soft, flirtatious — romantic tension
-    ("romance", "wholesome"): "Naomi",            # Warm, grounded — heartfelt stories
-    ("romance", "comedic"): "Jessica",            # Encouraging, expressive — rom-com
+    ("romance", "wholesome"): "Claire",           # Warm, gentle — heartfelt stories
+    ("romance", "comedic"): "Jessica",            # Encouraging, articulate — rom-com
 
     # ── Science ──
-    ("science", "educational"): "Tyler",          # Authoritative — tech explainers
-    ("science", "dramatic"): "Tristan",           # Deliberate, controlled — documentaries
-    ("science", "suspenseful"): "Jason",          # Lucid, engrossing — science mysteries
-    ("science", "inspirational"): "Ethan",        # Assured, precise — innovation stories
+    ("science", "educational"): _BELLA_VOICE_ID,  # Bella — firm female, explainer
+    ("science", "dramatic"): "Elliot",            # Calm, steady — science documentaries
+    ("science", "suspenseful"): "Malcolm",        # Authoritative — science mysteries
+    ("science", "inspirational"): _BELLA_VOICE_ID,  # Bella — firm, innovation stories
 
     # ── Children ──
-    ("children", "wholesome"): "Hana",            # Bright, expressive young female
-    ("children", "educational"): "Riley",         # Playful, youthful — learning content
-    ("children", "comedic"): "Abby",              # Bright, eager child — fun stories
-    ("children", "dramatic"): "Mia",              # Youthful, expressive — adventure
+    ("children", "wholesome"): "Nadia",           # Personable, lively — friendly narrator
+    ("children", "educational"): "Brian",         # Friendly, encouraging — learning
+    ("children", "dramatic"): "James",            # Vibrant, expressive — adventure
 
     # ── History ──
-    ("history", "dramatic"): "Graham",            # Authoritative British — historical docs
-    ("history", "educational"): "Craig",          # Older British, refined — history lessons
-    ("history", "suspenseful"): "Sebastian",      # Steely, intimidating — war/conflict
-    ("history", "inspirational"): "Marcus",       # Authoritative, empathetic — civic
+    ("history", "dramatic"): "Craig",             # Refined British — historical documentaries
+    ("history", "educational"): "Ronald",         # Deep, gravelly British — history lessons
+    ("history", "suspenseful"): "Hades",          # Commanding — war, conflict, empires
+    ("history", "inspirational"): "Callum",       # Friendly Australian — human stories
 
     # ── Nature ──
     ("nature", "dramatic"): "Elliot",             # Calm, steady — nature documentaries
     ("nature", "educational"): "Serena",          # Soft, nurturing — nature-inspired
     ("nature", "wholesome"): "Luna",              # Calm, relaxing — peaceful nature
-    ("nature", "suspenseful"): "Gareth",          # Soothing, gentle — survival of the wild
+    ("nature", "suspenseful"): "Deborah",         # Warm, peaceful — eerie wilderness
 
     # ── Survival ──
-    ("survival", "suspenseful"): "Carter",        # Energetic, mature — storytelling
-    ("survival", "dramatic"): "Brandon",          # Bold, strident — high-stakes
-    ("survival", "educational"): "Derek",         # Steady, professional — survival tips
-    ("survival", "inspirational"): "Liam",        # Upbeat, motivating — overcoming odds
+    ("survival", "suspenseful"): "Vinny",         # Gritty, assertive — raw survival
+    ("survival", "dramatic"): "Hades",            # Commanding, gruff — high-stakes
+    ("survival", "educational"): "Elliot",        # Calm, steady — survival tips
+    ("survival", "inspirational"): "James",       # Vibrant — overcoming odds
 
     # ── Curiosity ──
-    ("curiosity", "suspenseful"): "Jason",        # Lucid, engrossing — creative content
-    ("curiosity", "educational"): "Tyler",        # Authoritative — explainers
+    ("curiosity", "suspenseful"): "Victoria",     # Cunning — what if, hidden truths
+    ("curiosity", "educational"): "Oliver",       # Neutral, clear — explainers
     ("curiosity", "dramatic"): "James",           # Vibrant, expressive — animated
-    ("curiosity", "inspirational"): "Ethan",      # Assured — wonder and discovery
+    ("curiosity", "inspirational"): "Callum",     # Friendly — wonder and discovery
 
     # ── Anecdote ──
-    ("anecdote", "dramatic"): "Naomi",            # Warm, grounded — narrative podcasting
-    ("anecdote", "comedic"): "Mark",              # Energetic, rapid-fire — funny stories
-    ("anecdote", "wholesome"): "Dennis",          # Smooth, calm, friendly — personal tales
+    ("anecdote", "dramatic"): "Wendy",            # Posh British — storytelling
+    ("anecdote", "comedic"): "Callum",            # Casual Australian — funny stories
+    ("anecdote", "wholesome"): "Deborah",         # Warm, peaceful — personal tales
     ("anecdote", "inspirational"): "Jessica",     # Encouraging — uplifting stories
 
     # ── Comedy ──
-    ("comedy", "comedic"): "Mark",                # Energetic, rapid-fire delivery
-    ("comedy", "dramatic"): "Avery",              # Youthful, performative — gameshow energy
-    ("comedy", "wholesome"): "Timothy",           # Lively, upbeat — feel-good comedy
+    ("comedy", "comedic"): "Callum",              # Casual, friendly Australian — laughs
+    ("comedy", "dramatic"): "James",              # Vibrant, expressive — over the top
+    ("comedy", "wholesome"): "Nadia",             # Personable, lively — feel-good
 
     # ── Space ──
-    ("space", "dramatic"): "Tristan",             # Deliberate, controlled — cosmic scale
-    ("space", "educational"): "Tyler",            # Authoritative — space explainers
-    ("space", "suspenseful"): "Victor",           # Ominous — cosmic horror / deep space
-    ("space", "inspirational"): "Rupert",         # Commanding — awe and wonder
+    ("space", "dramatic"): "Ronald",              # Deep, gravelly British — cosmic scale
+    ("space", "educational"): "Oliver",           # Neutral, clear — space explainers
+    ("space", "suspenseful"): "Hades",            # Commanding — cosmic horror / deep space
+    ("space", "inspirational"): "Craig",          # Refined British — awe and wonder
 
     # ── Politics ──
-    ("politics", "dramatic"): "Marcus",           # Authoritative, empathetic — civic
+    ("politics", "dramatic"): "Craig",            # Refined British — power and gravitas
     ("politics", "educational"): "Bianca",        # Deep, controlled — serious analysis
     ("politics", "suspenseful"): "Malcolm",       # Manipulative — power dynamics
     ("politics", "inspirational"): "Lauren",      # Confident, friendly — civic motivation

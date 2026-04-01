@@ -4395,6 +4395,7 @@ function logStepLabel(step) {
     linear-gradient(135deg, rgba(0, 200, 150, 0.15), rgba(0, 150, 200, 0.15));
   pointer-events: none;
   cursor: wait;
+  animation: run-btn-jump 1.8s ease-in-out infinite;
 }
 
 .run-btn--running::before {
@@ -4412,6 +4413,29 @@ function logStepLabel(step) {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@keyframes run-btn-jump {
+  0%, 100% {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 200, 150, 0.15);
+  }
+  15% {
+    transform: translateY(-6px);
+    box-shadow: 0 8px 20px rgba(0, 200, 150, 0.25);
+  }
+  30% {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 200, 150, 0.15);
+  }
+  40% {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 14px rgba(0, 200, 150, 0.2);
+  }
+  50% {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(0, 200, 150, 0.15);
+  }
 }
 
 /* ---- Stop Button ---- */
