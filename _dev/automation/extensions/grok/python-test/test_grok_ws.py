@@ -27,6 +27,8 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
+from screenshot import ScreenshotCapture
+
 FLASK_URL = "http://127.0.0.1:5050"
 WS_URL = "ws://127.0.0.1:5050/ws/animator-grok-video-grabber"
 PROJECT_ID = "pp_GROK01"
@@ -215,12 +217,30 @@ def main():
     print(f"  Assets uploaded:  {len(uploads)}")
     print(f"  Errors:           {len(errors)}")
 
+    # Screenshot for audit
+    def snap(label):
+        try:
+            sws = websocket.create_connection(WS_URL, timeout=5)
+            sws.send(json.dumps({"type": "EXTENSION_READY", "source": "screenshot"}))
+            sws.settimeout(1)
+            try:
+                while True: sws.recv()
+            except: pass
+            cap = ScreenshotCapture(sws, test_name="grok-ws")
+            cap.take(label, on_fail="warn")
+            sws.close()
+        except Exception:
+            pass
+
     if uploads:
         print(f"\n  [OK] Smoke test PASSED")
+        snap("passed")
     elif statuses or animate:
         print(f"\n  [~] Extension responded but no assets uploaded yet")
+        snap("partial")
     else:
         print(f"\n  [!] No response from extension — check if it's loaded in Chromium")
+        snap("no-response")
 
 
 if __name__ == "__main__":

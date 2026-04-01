@@ -187,6 +187,9 @@ def run_pipeline(data: PipelineRunRequest):
         "prompt_prefix": data.prompt_prefix,
         "aspect_ratio": data.aspect_ratio,
         "auto_type": data.auto_type,
+        # TTS provider (kokoro/inworld)
+        "tts_provider": data.tts_provider,
+        "tts_voice": data.tts_voice,
         # Asset grabber options (grok videos)
         "provider": data.provider,
         "grok_mode": data.grok_mode,
@@ -203,6 +206,9 @@ def run_pipeline(data: PipelineRunRequest):
     config["niche"] = resolved_niche["niche"]
     config["voice"] = resolved_niche["voice"]
     config["speed"] = resolved_niche["speed"]
+    # Auto-resolve Inworld voice from niche if not explicitly set
+    if config.get("tts_provider") == "inworld" and not config.get("tts_voice"):
+        config["tts_voice"] = resolved_niche.get("inworld_voice", "Dennis")
 
     # Compute which steps will run
     all_steps = ALL_PIPELINE_STEPS
@@ -1106,25 +1112,94 @@ def _run_pipeline(job_id):
 def _step_tts(config, project_id):
     """Generate TTS audio and return metadata dict (includes wav_path).
 
-    If a cached preview WAV exists for the same (text, voice, speed),
-    copies it instead of re-running inference — saves ~5-15s.
+    Supports two providers:
+      - kokoro (default): local Kokoro ONNX inference with caching
+      - inworld: cloud Inworld Voice API
     """
+    from studio.tts.routes import _tts_job_dir
+    from studio.tts.normalize import clean_for_tts
+    from studio.tts.audio import run_loudnorm
+
+    text = config["text"]
+    voice = config["voice"]
+    speed = config["speed"]
+    tts_provider = config.get("tts_provider", "kokoro")
+
+    # Inworld: use tts_voice (separate from Kokoro voice); always speed 1.0
+    if tts_provider == "inworld":
+        voice = config.get("tts_voice") or "Carter"
+        speed = 1.0
+
+    job_dir = _tts_job_dir(project_id)
+    os.makedirs(job_dir, exist_ok=True)
+    wav_path = os.path.join(job_dir, "voice.wav")
+
+    if tts_provider == "inworld":
+        return _step_tts_inworld(config, project_id, text, voice, speed, job_dir, wav_path)
+
+    return _step_tts_kokoro(config, project_id, text, voice, speed, job_dir, wav_path)
+
+
+def _step_tts_inworld(config, project_id, text, voice, speed, job_dir, wav_path):
+    """Pipeline TTS via Inworld cloud API."""
+    from studio.tts.inworld import synthesize_to_wav
+    from studio.tts.normalize import clean_for_tts
+    from studio.tts.audio import run_loudnorm
+
+    tts_prompt = clean_for_tts(text)
+
+    result = synthesize_to_wav(
+        text=tts_prompt,
+        wav_path=wav_path,
+        voice_id=voice,
+        speed=speed,
+    )
+    run_loudnorm(wav_path)
+
+    clean_prompt = re.sub(r'[\[\]]', '', text).strip()
+    metadata = {
+        "filename": "voice.wav",
+        "folder": project_id,
+        "prompt": clean_prompt,
+        "model": result["model_id"],
+        "model_id": "inworld",
+        "provider": "inworld",
+        "voice": voice,
+        "project_id": project_id,
+        "visual_style": config.get("visual_style"),
+        "story_tone": config.get("story_tone"),
+        "category": config.get("category"),
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "inference_time": result["inference_time"],
+        "rtf": round(result["inference_time"] / result["duration_seconds"], 4) if result["duration_seconds"] > 0 else 0,
+        "duration_seconds": result["duration_seconds"],
+        "sample_rate": result["sample_rate"],
+        "speed": speed,
+        "words": len(clean_prompt.split()),
+        "approx_tokens": int(len(clean_prompt.split()) * 1.3),
+        "wav_path": wav_path,
+        "cache_hit": False,
+        "characters_billed": result["characters"],
+    }
+
+    safe_json_write(
+        os.path.join(job_dir, "tts.json"),
+        {k: v for k, v in metadata.items() if k != "wav_path"},
+        indent=2,
+    )
+    return metadata
+
+
+def _step_tts_kokoro(config, project_id, text, voice, speed, job_dir, wav_path):
+    """Pipeline TTS via local Kokoro ONNX with caching."""
     from studio.tts.routes import (
         load_model, _voice_to_lang, _phonemize_with_misaki,
-        generation_inference_lock, _tts_job_dir,
+        generation_inference_lock,
         _cache_key, _cache_path,
     )
     from studio.tts.normalize import clean_for_tts
     from studio.tts.audio import pad_audio, run_loudnorm
     import shutil
-
-    text = config["text"]
-    voice = config["voice"]
-    speed = config["speed"]
-
-    job_dir = _tts_job_dir(project_id)
-    os.makedirs(job_dir, exist_ok=True)
-    wav_path = os.path.join(job_dir, "voice.wav")
 
     # ── Try preview cache first ──
     cache_hit = False
@@ -1134,7 +1209,7 @@ def _step_tts(config, project_id):
     if os.path.isfile(cached_wav):
         try:
             info = sf.info(cached_wav)
-            if info.duration >= 0.5:  # sanity: not a corrupt/empty file
+            if info.duration >= 0.5:
                 shutil.copy2(cached_wav, wav_path)
                 run_loudnorm(wav_path)
                 cache_hit = True
@@ -1164,7 +1239,6 @@ def _step_tts(config, project_id):
         sf.write(wav_path, audio, 24000)
         run_loudnorm(wav_path)
 
-        # Populate the cache for future runs
         try:
             shutil.copy2(wav_path, cached_wav)
             logger.debug("Cached pipeline TTS → {}", cache_key)
@@ -1185,8 +1259,12 @@ def _step_tts(config, project_id):
         "prompt": clean_prompt,
         "model": "kokoro-v1.0",
         "model_id": "kokoro",
+        "provider": "kokoro",
         "voice": voice,
         "project_id": project_id,
+        "visual_style": config.get("visual_style"),
+        "story_tone": config.get("story_tone"),
+        "category": config.get("category"),
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "inference_time": round(total_inference, 3),
         "rtf": round(rtf, 4),

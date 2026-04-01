@@ -9,6 +9,7 @@ import ProgressStepper from '../components/ProgressStepper.vue'
 import PipelineLog from '../components/PipelineLog.vue'
 import SceneNotifications from '../components/SceneNotifications.vue'
 import PipelineHistory from '../components/PipelineHistory.vue'
+import VoicePicker from '../components/VoicePicker.vue'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useAssets } from '@/features/assets/composables/useAssets.js'
 import { useStory } from '../composables/useStory.js'
@@ -16,6 +17,7 @@ import { useProjectSync } from '@/shared/composables/useProjectSync.js'
 import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
 import { formatElapsed } from '@/shared/utils/format.js'
 import { useToast } from '@/shared/composables/useToast.js'
+import { useDoneSound } from '@/shared/composables/useDoneSound.js'
 
 defineOptions({ name: 'PipelinePage' })
 
@@ -112,6 +114,29 @@ async function previewAudio() {
   _previewAbort = ctrl
 
   try {
+    const provider = ttsProvider.value || 'kokoro'
+
+    // ── Inworld: generate WAV and play it directly ──
+    if (provider === 'inworld') {
+      previewLabel.value = 'Generating (Inworld)...'
+      const res = await api.post('/api/tts/generate', {
+        body: { provider: 'inworld', voice: voice.value, speed: speed.value, prompt: t },
+      })
+      if (res.error) throw new Error(res.error)
+      previewLabel.value = 'Playing...'
+      const audio = new Audio(`/output/tts/${res.folder}/${res.filename}`)
+      _previewAudioEl = audio
+      await new Promise((resolve, reject) => {
+        audio.onended = resolve
+        audio.onpause = resolve
+        audio.onerror = () => reject(new Error('Audio playback failed'))
+        audio.play().catch(reject)
+      })
+      return
+    }
+
+    // ── Kokoro: check cache, then stream ──
+
     // 1. Check if cached WAV exists
     const cacheResp = await fetch('/api/tts/cache/check', {
       method: 'POST',
@@ -122,11 +147,9 @@ async function previewAudio() {
     const cacheData = await cacheResp.json()
 
     if (cacheData.cached) {
-      // Play cached WAV directly — instant playback
       previewLabel.value = 'Playing (cached)'
       const audio = new Audio(`/api/tts/cache/${cacheData.key}`)
       _previewAudioEl = audio
-      // Wait for playback to finish OR user stop (pause event)
       await new Promise((resolve, reject) => {
         audio.onended = resolve
         audio.onpause = resolve
@@ -136,8 +159,7 @@ async function previewAudio() {
       return
     }
 
-    // 2. Not cached — stream from TTS and let backend cache it
-    //    Retry on 429 (another stream in progress) with backoff
+    // 2. Not cached — stream from Kokoro and let backend cache it
     previewLabel.value = 'Generating...'
     let resp
     const MAX_RETRIES = 10
@@ -206,7 +228,6 @@ async function previewAudio() {
       }
     }
 
-    // Wait for playback to finish
     const remaining = nextPlayTime - audioCtx.currentTime
     if (remaining > 0) {
       await new Promise(r => setTimeout(r, remaining * 1000 + 300))
@@ -249,6 +270,11 @@ function _persistJobQueue() {
   localStorage.setItem(JOB_QUEUE_KEY, JSON.stringify(jobQueue.value))
 }
 
+function _defaultVoiceForQueue(preset) {
+  if (ttsProvider.value === 'inworld') return preset.inworld_voice || inworldVoice.value || 'Carter'
+  return preset.voice || 'af_heart'
+}
+
 function addToQueue(presetId) {
   const existing = jobQueue.value.find(q => q.presetId === presetId)
   if (existing) {
@@ -261,7 +287,7 @@ function addToQueue(presetId) {
       count: 1,
       label: preset.label || presetId,
       overrides: {
-        voice: preset.voice || 'af_heart',
+        voice: _defaultVoiceForQueue(preset),
         speed: preset.speed || 1.0,
       },
     })
@@ -278,7 +304,7 @@ function updateJobOverride(presetId, field, value) {
   if (!item) return
   if (!item.overrides) {
     const preset = nichePresets.value[presetId] || {}
-    item.overrides = { voice: preset.voice || 'af_heart', speed: preset.speed || 1.0 }
+    item.overrides = { voice: _defaultVoiceForQueue(preset), speed: preset.speed || 1.0 }
   }
   item.overrides[field] = value
   _persistJobQueue()
@@ -355,14 +381,17 @@ async function runJobQueue() {
   if (!jobQueue.value.length) { toast.error('Queue is empty'); return }
 
   jobQueueRunning.value = true
+  batchMode.value = true
   const queue = [...jobQueue.value] // snapshot
   let jobIndex = 0
 
   for (const item of queue) {
+    if (!jobQueueRunning.value) break
     const preset = nichePresets.value[item.presetId]
     if (!preset) continue
 
     for (let i = 0; i < item.count; i++) {
+      if (!jobQueueRunning.value) break
       jobIndex++
       jobQueueCurrent.value = { presetId: item.presetId, index: jobIndex, total: totalQueuedJobs.value, label: item.label }
 
@@ -370,16 +399,22 @@ async function runJobQueue() {
       const overrides = item.overrides || {}
       selectNiche({
         ...preset,
-        voice: overrides.voice || preset.voice,
+        voice: ttsProvider.value === 'inworld' ? preset.voice : (overrides.voice || preset.voice),
         speed: overrides.speed || preset.speed,
       })
+      // When Inworld is active, the queue voice override goes to inworldVoice
+      if (ttsProvider.value === 'inworld' && overrides.voice) {
+        inworldVoice.value = overrides.voice
+      }
       story.storyCategory.value = preset.category || story.storyCategory.value
       if (overrides.duration) story.storyDuration.value = overrides.duration
       else if (preset.duration) story.storyDuration.value = preset.duration
 
       // Generate a story for this preset
       try {
+        if (!jobQueueRunning.value) break
         const generated = await handleGenerateStory({ notifySuccess: false })
+        if (!jobQueueRunning.value) break
         if (!generated.ok) {
           toast.error(`Queue job ${jobIndex} failed to generate story`)
           continue
@@ -389,7 +424,7 @@ async function runJobQueue() {
         // Wait for pipeline to finish (watch globalStatus)
         await new Promise((resolve) => {
           const unwatch = watch(globalStatus, (status) => {
-            if (status === 'done' || status === 'error' || status === 'stopped') {
+            if (!jobQueueRunning.value || status === 'done' || status === 'error' || status === 'stopped') {
               unwatch()
               resolve()
             }
@@ -398,15 +433,23 @@ async function runJobQueue() {
           if (!running.value) { unwatch(); resolve() }
         })
       } catch (e) {
+        if (!jobQueueRunning.value) break
         toast.error(`Queue job ${jobIndex} error: ${e.message || 'unknown'}`)
       }
     }
   }
 
+  const aborted = !jobQueueRunning.value
   jobQueueRunning.value = false
   jobQueueCurrent.value = null
-  clearQueue()
-  toast.success(`Job queue complete — ${jobIndex} jobs processed`)
+  batchMode.value = false
+  if (!aborted) {
+    clearQueue()
+    useDoneSound().play()
+    toast.success(`Job queue complete — ${jobIndex} jobs processed`)
+  } else {
+    toast.warning(`Job queue aborted after ${jobIndex} jobs`)
+  }
 
   // Navigate to final destination now that the full queue is done
   if (lastCompletedProjectId.value) {
@@ -490,6 +533,7 @@ async function runAllSavedStories() {
   if (!savedStories.value.length) { toast.error('No saved stories'); return }
 
   savedQueueRunning.value = true
+  batchMode.value = true
   const stories = [...savedStories.value]
 
   for (let i = 0; i < stories.length; i++) {
@@ -528,7 +572,9 @@ async function runAllSavedStories() {
 
   savedQueueRunning.value = false
   savedQueueCurrent.value = null
-  if (savedQueueRunning.value !== false) toast.success(`All ${stories.length} saved stories processed`)
+  batchMode.value = false
+  useDoneSound().play()
+  toast.success(`All ${stories.length} saved stories processed`)
 }
 
 function stopSavedQueue() {
@@ -613,8 +659,9 @@ async function loadFromGenHistory(h) {
 const router = useRouter()
 const {
   ALL_STEPS, VOICES,
-  text, voice, speed, style, stopAfter, imageModel, imageModelsConfig, templates,
-  running, stopping, stepStatus, log, globalStatus,
+  text, voice, kokoroVoice, inworldVoice, speed, style, stopAfter, imageModel, imageModelsConfig, templates,
+  ttsProvider, favorites, toggleFavorite, isFavorite,
+  running, stopping, batchMode, stepStatus, log, globalStatus,
   jobs, lastCompletedProjectId, lastCompletedExportFilename,
   failedStep, failedProjectId, stoppedStep, stoppedProjectId,
   nichePreset, nichePresets, storyTone, storyTones, visualStyles, nicheCategories,
@@ -1471,9 +1518,14 @@ function logStepLabel(step) {
       <div v-show="settingsOpen" class="controls-strip">
         <div class="control-group">
           <label class="control-label">Voice</label>
-          <select v-model="voice" class="input-field control-select">
-            <option v-for="v in VOICES" :key="v.id" :value="v.id">{{ v.label }}</option>
-          </select>
+          <VoicePicker
+            :model-value="voice"
+            :voices="VOICES"
+            :favorites="favorites"
+            :provider="ttsProvider"
+            @update:model-value="voice = $event"
+            @toggle-favorite="toggleFavorite($event)"
+          />
         </div>
         <div class="control-group">
           <label class="control-label">Speed</label>
@@ -1732,13 +1784,14 @@ function logStepLabel(step) {
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
                       Voice
                     </label>
-                    <select
-                      class="q-settings-select"
-                      :value="item.overrides?.voice || nichePresets[item.presetId]?.voice || 'af_heart'"
-                      @change="updateJobOverride(item.presetId, 'voice', $event.target.value)"
-                    >
-                      <option v-for="v in VOICES" :key="v.id" :value="v.id">{{ v.label }}</option>
-                    </select>
+                    <VoicePicker
+                      :model-value="item.overrides?.voice || _defaultVoiceForQueue(nichePresets[item.presetId] || {})"
+                      :voices="VOICES"
+                      :favorites="favorites"
+                      :provider="ttsProvider"
+                      @update:model-value="updateJobOverride(item.presetId, 'voice', $event)"
+                      @toggle-favorite="toggleFavorite($event)"
+                    />
                   </div>
                   <div class="q-settings-row">
                     <label class="q-settings-label">
@@ -1819,7 +1872,7 @@ function logStepLabel(step) {
                     <div v-if="nichePresets[item.presetId]?.description" class="q-confirm-desc">{{ nichePresets[item.presetId].description }}</div>
                     <div class="q-confirm-meta">
                       <span class="q-confirm-pill q-confirm-pill--category">{{ nichePresets[item.presetId]?.category || '—' }}</span>
-                      <span class="q-confirm-pill q-confirm-pill--voice">{{ item.overrides?.voice || nichePresets[item.presetId]?.voice || 'af_heart' }}</span>
+                      <span class="q-confirm-pill q-confirm-pill--voice">{{ item.overrides?.voice || _defaultVoiceForQueue(nichePresets[item.presetId] || {}) }}</span>
                       <span class="q-confirm-pill q-confirm-pill--speed">{{ (item.overrides?.speed || nichePresets[item.presetId]?.speed || 1.0).toFixed(2) }}x</span>
                       <span class="q-confirm-pill q-confirm-pill--duration">{{ item.overrides?.duration || nichePresets[item.presetId]?.duration || story.storyDuration.value }}s</span>
                     </div>

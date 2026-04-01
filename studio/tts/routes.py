@@ -513,6 +513,25 @@ def models():
 # --- Voices ---
 @tts_bp.route("/api/tts/voices")
 def voices():
+    provider = request.args.get("provider", "kokoro")
+    if provider == "inworld":
+        from studio.tts.inworld import list_voices, is_available
+        if not is_available():
+            return jsonify({"error": "Inworld API key not configured"}), 503
+        try:
+            iw_voices = list_voices()
+            return jsonify([
+                {
+                    "id": v.get("voiceId", ""),
+                    "label": v.get("voiceId", ""),
+                    "description": v.get("description", ""),
+                    "tags": v.get("tags", []),
+                }
+                for v in iw_voices if v.get("voiceId")
+            ])
+        except Exception as e:
+            logger.error("Inworld voices fetch failed: {}", e)
+            return jsonify({"error": str(e)}), 502
     return jsonify(VOICES)
 
 
@@ -604,6 +623,13 @@ def download_model(model_id):
 @tts_bp.route("/api/tts/generate", methods=["POST"])
 @validate_json(TtsGenerateRequest)
 def generate(data: TtsGenerateRequest):
+    provider = data.provider or "kokoro"
+
+    # ── Inworld provider ──
+    if provider == "inworld":
+        return _generate_inworld(data)
+
+    # ── Kokoro provider (default) ──
     model_id = data.model
     voice = data.voice
     prompt = data.prompt
@@ -692,6 +718,7 @@ def generate(data: TtsGenerateRequest):
         "prompt": clean_prompt,
         "model": "kokoro-v1.0",
         "model_id": "kokoro",
+        "provider": "kokoro",
         "voice": voice_for_metadata,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "inference_time": round(inference_time, 3),
@@ -705,6 +732,66 @@ def generate(data: TtsGenerateRequest):
     }
     if blend_meta:
         metadata["blend"] = blend_meta
+    safe_json_write(os.path.join(job_dir, json_name), metadata, indent=2)
+
+    return jsonify(metadata)
+
+
+def _generate_inworld(data: TtsGenerateRequest):
+    """Generate TTS audio via Inworld cloud API."""
+    from studio.tts.inworld import synthesize_to_wav, is_available
+
+    if not is_available():
+        return jsonify({"error": "Inworld API key not configured. Set INWORLD_API_KEY in .env"}), 503
+
+    prompt = data.prompt
+    voice = data.voice
+    speed = data.speed
+
+    skip_clean = data.skip_clean
+    tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
+
+    basename = generate_filename(prompt)
+    job_dir = _tts_job_dir(basename)
+    os.makedirs(job_dir, exist_ok=True)
+    wav_name = f"{basename}.wav"
+    json_name = f"{basename}.json"
+    wav_path = os.path.join(job_dir, wav_name)
+
+    logger.info("Generate  \033[1mInworld\033[0m | {} | {} chars", voice, len(prompt))
+
+    try:
+        result = synthesize_to_wav(
+            text=tts_prompt,
+            wav_path=wav_path,
+            voice_id=voice,
+            speed=speed,
+        )
+    except Exception as e:
+        logger.exception("Inworld TTS failed")
+        return jsonify({"error": f"Inworld generation failed: {e}"}), 500
+
+    run_loudnorm(wav_path)
+
+    clean_prompt = re.sub(r'[\[\]]', '', prompt).strip()
+    metadata = {
+        "filename": wav_name,
+        "folder": basename,
+        "prompt": clean_prompt,
+        "model": result["model_id"],
+        "model_id": "inworld",
+        "provider": "inworld",
+        "voice": voice,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "inference_time": result["inference_time"],
+        "rtf": round(result["inference_time"] / result["duration_seconds"], 4) if result["duration_seconds"] > 0 else 0,
+        "duration_seconds": result["duration_seconds"],
+        "sample_rate": result["sample_rate"],
+        "speed": speed,
+        "words": len(clean_prompt.split()),
+        "approx_tokens": int(len(clean_prompt.split()) * 1.3),
+        "characters_billed": result["characters"],
+    }
     safe_json_write(os.path.join(job_dir, json_name), metadata, indent=2)
 
     return jsonify(metadata)
@@ -804,11 +891,17 @@ def cache_serve(key):
 
 
 # --- Stream audio (listen-only, no save) ---
+# NOTE: Streaming is Kokoro-only. Inworld uses /api/tts/generate instead.
 @tts_bp.route("/api/tts/stream", methods=["POST"])
 def stream_audio():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be JSON"}), 400
+
+    provider = data.get("provider", "kokoro")
+    if provider == "inworld":
+        return jsonify({"error": "Inworld does not support streaming. Use /api/tts/generate instead."}), 400
+
     model_id = data.get("model", "kokoro")
     voice = data.get("voice", "af_bella")
     prompt = data.get("prompt", "")

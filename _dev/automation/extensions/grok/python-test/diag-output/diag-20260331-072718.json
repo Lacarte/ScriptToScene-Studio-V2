@@ -1,0 +1,29 @@
+{
+  "type": "DIAGNOSE_REPORT",
+  "ts": "2026-03-31T12:27:18.221Z",
+  "bg": {
+    "wsConnected": true,
+    "wsReadyState": 1,
+    "portsActive": 1,
+    "reconnectAttempts": 0
+  },
+  "contentStates": [
+    {
+      "tabId": 854777007,
+      "state": {
+        "active": true,
+        "wsConnected": true,
+        "connected": true,
+        "projectId": "pp_MZRTY5",
+        "scenesCount": 13,
+        "queueLength": 13,
+        "typingActive": false,
+        "panelExists": true,
+        "connBarDisplay": "flex",
+        "connBarClass": "sts-conn-bar ok",
+        "connMsgText": "Connected",
+        "headDotClass": "sts-head-dot on"
+      }
+    }
+  ]
+}

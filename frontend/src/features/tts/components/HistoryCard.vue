@@ -5,6 +5,7 @@ import { timeAgo, formatElapsed } from '@/shared/utils/format.js'
 
 const props = defineProps({
   item: { type: Object, required: true },
+  active: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['play', 'delete', 'open-folder'])
@@ -24,7 +25,7 @@ const ago = computed(() => timeAgo(props.item.timestamp))
 </script>
 
 <template>
-  <div class="card history-card" @click="emit('play', item)">
+  <div class="card history-card" :class="{ 'history-card--active': active }" @click="emit('play', item)">
     <button class="play-btn" @click.stop="emit('play', item)" title="Play">
       <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
         <path d="M8 5v14l11-7z" />
@@ -34,6 +35,8 @@ const ago = computed(() => timeAgo(props.item.timestamp))
     <div class="card-info">
       <p class="card-text">{{ excerpt }}</p>
       <div class="card-meta">
+        <span v-if="item.project_id" class="project-id">{{ item.project_id }}</span>
+        <span v-if="item.project_id" class="sep">/</span>
         <span>{{ voiceName }}</span>
         <span class="sep">/</span>
         <span>{{ durationLabel }}</span>
@@ -43,6 +46,11 @@ const ago = computed(() => timeAgo(props.item.timestamp))
         </template>
         <span class="sep">/</span>
         <span>{{ ago }}</span>
+      </div>
+      <div v-if="item.visual_style || item.story_tone || item.category" class="card-tags">
+        <span v-if="item.visual_style" class="tag tag--style">{{ item.visual_style }}</span>
+        <span v-if="item.story_tone" class="tag tag--tone">{{ item.story_tone }}</span>
+        <span v-if="item.category" class="tag tag--category">{{ item.category }}</span>
       </div>
     </div>
 
@@ -80,6 +88,11 @@ const ago = computed(() => timeAgo(props.item.timestamp))
 .history-card:hover {
   border-color: var(--border-hover);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+}
+
+.history-card--active {
+  border-color: #f0c040;
+  box-shadow: 0 0 0 1px #f0c040, 0 2px 12px rgba(240, 192, 64, 0.15);
 }
 
 .play-btn {
@@ -126,6 +139,41 @@ const ago = computed(() => timeAgo(props.item.timestamp))
   font-size: 10px;
   color: var(--text-muted);
   font-family: var(--font-mono);
+}
+
+.project-id {
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+.card-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.tag--style {
+  background: rgba(78, 205, 196, 0.12);
+  color: #4ecdc4;
+}
+
+.tag--tone {
+  background: rgba(240, 192, 64, 0.12);
+  color: #f0c040;
+}
+
+.tag--category {
+  background: rgba(168, 130, 255, 0.12);
+  color: #a882ff;
 }
 
 .sep {

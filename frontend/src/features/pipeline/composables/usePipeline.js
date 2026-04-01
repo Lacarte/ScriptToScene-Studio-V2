@@ -5,6 +5,7 @@ import { useActivityFeed } from '@/shared/composables/useActivityFeed.js'
 import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
 import { timeAgo } from '@/shared/utils/format.js'
 import { useDoneSound } from '@/shared/composables/useDoneSound.js'
+import { useSettings } from '@/features/settings/composables/useSettings.js'
 
 import { ALL_STEPS } from '../constants/steps.js'
 import { usePipelineForm } from './usePipelineForm.js'
@@ -26,6 +27,7 @@ const failedProjectId = ref(null)
 const stoppedStep = ref(null)
 const stoppedProjectId = ref(null)
 const sceneNotifications = ref([])
+const batchMode = ref(false)  // true when job queue is running — suppresses per-job done sound
 
 let eventSource = null
 let initialized = false
@@ -71,7 +73,7 @@ function startSSE(id) {
       lastCompletedProjectId.value = summary.scenes?.project_id || event.project_id || null
       lastCompletedExportFilename.value = summary.export?.filename || null
       activity.push('Pipeline complete', 'success', { source: 'pipeline' })
-      useDoneSound().play()
+      if (!batchMode.value) useDoneSound().play()
       setTimeout(() => loadHistory(), 500)
       return
     }
@@ -182,8 +184,9 @@ async function start() {
   }
 
   // Preflight: check extension connectivity before starting
-  const storyboardProvider = localStorage.getItem('sts-storyboard-provider') || 'gemini'
-  const assetProvider = localStorage.getItem('sts-asset-provider') || 'grok'
+  const { settings: _s } = useSettings()
+  const storyboardProvider = _s.value['sts-storyboard-provider'] || 'gemini'
+  const assetProvider = _s.value['sts-asset-provider'] || 'grok'
   try {
     const preflight = await api.post('/api/pipeline/preflight', {
       body: {
@@ -209,10 +212,12 @@ async function start() {
   const webhookUrl = localStorage.getItem('sts-scenes-webhook-url') || ''
   const config = {
     text: t,
-    voice: form.voice.value,
+    voice: form.kokoroVoice.value,
     speed: form.speed.value,
     style: form.style.value,
     ...niches._buildNicheConfig(),
+    tts_provider: form.ttsProvider.value || 'kokoro',
+    tts_voice: form.inworldVoice.value,
     auto_scenes: true,
     auto_storyboard: true,
     stop_after: form.stopAfter.value || undefined,
@@ -264,18 +269,20 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
   const webhookUrl = localStorage.getItem('sts-scenes-webhook-url') || ''
   const config = {
     text: t,
-    voice: form.voice.value,
+    voice: form.kokoroVoice.value,
     speed: form.speed.value,
     style: form.style.value,
     ...niches._buildNicheConfig(),
+    tts_provider: form.ttsProvider.value || 'kokoro',
+    tts_voice: form.inworldVoice.value,
     auto_scenes: true,
     auto_storyboard: true,
     stop_after: form.stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     image_model: form.imageModel.value || undefined,
-    storyboard_provider: localStorage.getItem('sts-storyboard-provider') || 'gemini',
+    storyboard_provider: useSettings().settings.value['sts-storyboard-provider'] || 'gemini',
     prompt_prefix: localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ',
-    provider: localStorage.getItem('sts-asset-provider') || 'grok',
+    provider: useSettings().settings.value['sts-asset-provider'] || 'grok',
     auto_type: true,
     resume_from: resumeStep,
     resume_project_id: resumeProject,
@@ -364,7 +371,7 @@ function loadFromHistory(index) {
   if (!j) return
 
   if (j.text) form.text.value = j.text
-  if (j.voice) form.voice.value = j.voice
+  if (j.voice) form.kokoroVoice.value = j.voice
   if (j.speed) form.speed.value = j.speed
   if (j.niche_preset && niches.nichePresets.value[j.niche_preset]) {
     niches.selectNiche({ id: j.niche_preset, ...niches.nichePresets.value[j.niche_preset] })
@@ -446,8 +453,14 @@ export function usePipeline() {
     // Form state
     text: form.text,
     voice: form.voice,
+    kokoroVoice: form.kokoroVoice,
+    inworldVoice: form.inworldVoice,
     speed: form.speed,
     style: form.style,
+    ttsProvider: form.ttsProvider,
+    favorites: form.favorites,
+    toggleFavorite: form.toggleFavorite,
+    isFavorite: form.isFavorite,
     stopAfter: form.stopAfter,
     imageModel: form.imageModel,
     imageModelsConfig: readonly(form.imageModelsConfig),
@@ -455,6 +468,7 @@ export function usePipeline() {
 
     // Execution state
     running: readonly(running),
+    batchMode,
     stopping: readonly(stopping),
     jobId: readonly(jobId),
     stepStatus: readonly(stepStatus),

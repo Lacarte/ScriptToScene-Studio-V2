@@ -30,6 +30,8 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
+from screenshot import ScreenshotCapture
+
 
 # ── Config ──────────────────────────────────────────
 
@@ -41,10 +43,28 @@ PASS = "\033[92m PASS \033[0m"
 FAIL = "\033[91m FAIL \033[0m"
 INFO = "\033[94m INFO \033[0m"
 
+WS_URL = "ws://127.0.0.1:5050/ws/storyboard-gemini-image-grabber"
+
 
 def log(tag, msg):
     ts = time.strftime("%H:%M:%S")
     print(f"  [{ts}] [{tag}] {msg}")
+
+
+def snap(label):
+    """Take a quick screenshot for audit. Opens a short-lived WS."""
+    try:
+        ws = websocket.create_connection(WS_URL, timeout=5)
+        ws.send(json.dumps({"type": "EXTENSION_READY", "source": "screenshot"}))
+        ws.settimeout(1)
+        try:
+            while True: ws.recv()
+        except: pass
+        cap = ScreenshotCapture(ws, test_name="gemini-ws")
+        cap.take(label, on_fail="warn")
+        ws.close()
+    except Exception:
+        pass
 
 
 # -- Test 1: WebSocket Connect + Handshake --─────────
@@ -87,6 +107,7 @@ def test_connect(port):
 
     except Exception as e:
         log(FAIL, f"Connection failed: {e}")
+        snap("t1-connect-failed")
         return False
 
 
@@ -234,6 +255,7 @@ def test_job(port):
         return True
     else:
         log(FAIL, "Job was NOT received via WebSocket")
+        snap("t3-job-not-received")
         return False
 
 
@@ -361,8 +383,10 @@ def main():
         print()
         if all_passed:
             print("  All tests passed.")
+            snap("all-passed")
         else:
             print("  Some tests failed — check output above.")
+            snap("tests-failed")
             sys.exit(1)
 
 

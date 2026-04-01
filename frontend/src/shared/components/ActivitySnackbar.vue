@@ -10,14 +10,25 @@ const app = useAppStore()
 const expanded = ref(false)
 const listEl = ref(null)
 const showScrollTop = ref(false)
+const showScrollBottom = ref(false)
 
 function onLogScroll() {
-  if (listEl.value) showScrollTop.value = listEl.value.scrollTop > 80
+  if (listEl.value) {
+    const el = listEl.value
+    showScrollTop.value = el.scrollTop > 80
+    showScrollBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight > 80
+  }
 }
 
 function scrollToTop() {
   if (listEl.value) {
     listEl.value.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+function scrollToBottom() {
+  if (listEl.value) {
+    listEl.value.scrollTo({ top: listEl.value.scrollHeight, behavior: 'smooth' })
   }
 }
 
@@ -93,6 +104,9 @@ function handleClear() {
           </div>
           <Transition name="fade">
             <button v-if="showScrollTop" class="scroll-top-btn" @click="scrollToTop" title="Scroll to top">&#8593;</button>
+          </Transition>
+          <Transition name="fade">
+            <button v-if="showScrollBottom" class="scroll-bottom-btn" @click="scrollToBottom" title="Scroll to bottom">&#8595;</button>
           </Transition>
           </div>
         </div>
@@ -282,10 +296,32 @@ function handleClear() {
   transition: all 0.15s;
   z-index: 2;
 }
-.scroll-top-btn:hover {
+.scroll-top-btn:hover,
+.scroll-bottom-btn:hover {
   opacity: 1;
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.scroll-bottom-btn {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: all 0.15s;
+  z-index: 2;
 }
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s; }

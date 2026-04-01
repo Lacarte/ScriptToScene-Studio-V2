@@ -1,5 +1,6 @@
 import { ref, readonly } from 'vue'
 import { api } from '@/shared/api/client.js'
+import { useSettings } from '@/features/settings/composables/useSettings.js'
 import { ALL_STEPS } from '../constants/steps.js'
 
 const pendingProviderUrl = ref(null)
@@ -45,7 +46,8 @@ function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
     return reaches && startsBefore
   }
 
-  const storyboardProvider = localStorage.getItem('sts-storyboard-provider') || 'gemini'
+  const { settings: _s } = useSettings()
+  const storyboardProvider = _s.value['sts-storyboard-provider'] || 'gemini'
   if (storyboardProvider === 'gemini' && _reaches('storyboard')) {
     _activateProviderTab('gemini')
   } else if (_reaches('assets')) {

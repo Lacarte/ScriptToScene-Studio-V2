@@ -46,6 +46,8 @@ try:
 except ImportError:
     sys.exit("pip install requests")
 
+from screenshot import ScreenshotCapture
+
 # ── Config ──────────────────────────────────────────
 
 PROJECT_ID = "pp_BGTAB_TEST"
@@ -227,6 +229,9 @@ def run_test(port, num_scenes, auto_mode):
     }
     done = threading.Event()
 
+    # Screenshot capture for audit trail
+    cap = ScreenshotCapture(ws, test_name="bg-tab")
+
     # ─ Start listener
     listener_thread = threading.Thread(target=ws_listener, args=(ws, timeline, results, done), daemon=True)
     listener_thread.start()
@@ -254,6 +259,7 @@ def run_test(port, num_scenes, auto_mode):
 
     log(PHASE, f"Sending IMAGE_JOB with {len(scenes)} scene(s)...")
     timeline.add("job_sent", f"{len(scenes)} scenes")
+    cap.take("before-job-sent", on_fail="warn")
 
     try:
         r = requests.post(
@@ -286,6 +292,7 @@ def run_test(port, num_scenes, auto_mode):
     while not done.is_set():
         # Once we see the first status update, prompt the tab switch
         if not switch_prompted and results["status_updates"]:
+            cap.take("generation-started", on_fail="warn")
             print()
             if auto_mode:
                 log(PHASE, "Generation started — in auto mode, NOT prompting tab switch")
@@ -321,6 +328,10 @@ def run_test(port, num_scenes, auto_mode):
             break
 
         time.sleep(0.5)
+
+    # ─ Final screenshot before closing
+    success_pre = results["images_received"] >= num_scenes and results["job_complete"]
+    cap.take("completed" if success_pre else "failed", on_fail="warn")
 
     # ─ Results
     ws.close()

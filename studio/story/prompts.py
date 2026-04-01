@@ -1,5 +1,8 @@
 """Prompt templates for story generation."""
 
+import random
+import string
+
 from studio.build_scene_blueprints.templates import STORY_CATEGORIES, TEMPLATES_BY_ID  # noqa: F401 — re-exported
 
 # Approximate words per second for spoken narration at 1.0x speed
@@ -82,6 +85,11 @@ def build_story_system_prompt(
     )
 
 
+def _unique_seed() -> str:
+    """Generate a short random seed to break LLM/cache deduplication."""
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+
 def build_story_user_prompt(
     preset_style: str,
     story_category: str,
@@ -91,10 +99,12 @@ def build_story_user_prompt(
 ) -> str:
     """Build the user prompt for the story generation call."""
     word_target = compute_word_target(duration)
+    seed = _unique_seed()
     base = (
         f"Write a viral {story_category} story for a {duration}-second voiceover video. "
         f"Target: {word_target} words. Language: {language}. Style: {preset_style}. "
-        "Natural spoken flow only — no titles, no meta-text, no formatting."
+        "Natural spoken flow only — no titles, no meta-text, no formatting. "
+        f"Be original and creative — do not repeat previous stories. [seed:{seed}]"
     )
     if idea:
         base += f"\n\nBuild the story around this idea:\n{idea}"

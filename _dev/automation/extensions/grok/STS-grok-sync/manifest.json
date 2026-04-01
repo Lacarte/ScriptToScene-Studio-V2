@@ -3,7 +3,7 @@
   "name": "STS Grok Sync",
   "version": "1.0.0",
   "description": "ScriptToScene Studio — in-page Grok asset synchronizer",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "<all_urls>"],
   "host_permissions": ["*://grok.com/*", "http://localhost/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:*"

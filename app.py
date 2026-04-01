@@ -85,6 +85,8 @@ app.register_blueprint(storyboard_bp)
 app.register_blueprint(animator_bp)
 init_animator_ws(sock)
 init_gemini_ws(sock)
+from studio.orchestrator_ws import init_orchestrator_ws
+init_orchestrator_ws(sock)
 
 
 # ---------------------------------------------------------------------------
@@ -151,12 +153,14 @@ def health():
     from studio.timing.routes import _check_alignment_available
     from studio.tts.routes import _model_files_present
     from config import APP_VERSION
+    from studio.tts.inworld import is_available as _inworld_available
     return jsonify({
         "status": "ok",
         "version": APP_VERSION,
         "alignment": _check_alignment_available(),
         "ffmpeg": find_ffmpeg() is not None,
         "tts_model": _model_files_present(),
+        "inworld_tts": _inworld_available(),
     })
 
 

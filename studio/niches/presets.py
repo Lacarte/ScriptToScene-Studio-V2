@@ -23,6 +23,129 @@ _VALID_TAGS = ("tiktok", "youtube", "shorts", "trending")
 _DEFAULT_VOICE = "af_heart"
 _DEFAULT_SPEED = 1.0
 _DEFAULT_DURATION = 45
+_DEFAULT_INWORLD_VOICE = "Dennis"
+
+# ── Inworld voice mapping — best voice per (category, tone) ────────────────────
+# Curated from 135 Inworld preset voices.
+INWORLD_VOICE_MAP = {
+    # ── Psychology ──
+    ("psychology", "suspenseful"): "Damon",       # Calm, raspy — moody narration
+    ("psychology", "dramatic"): "Malcolm",        # Authoritative, manipulative — intense psychology
+    ("psychology", "educational"): "Simon",       # Articulate, insightful — psych explainers
+    ("psychology", "inspirational"): "Jake",      # Amiable, introspective — growth mindset
+
+    # ── Philosophy ──
+    ("philosophy", "educational"): "Simon",       # Articulate, insightful — presentations
+    ("philosophy", "dramatic"): "Graham",         # Profound, authoritative British
+    ("philosophy", "inspirational"): "Jake",      # Amiable, introspective — motivational
+    ("philosophy", "suspenseful"): "Tristan",     # Deliberate, controlled — deep questions
+
+    # ── Motivation ──
+    ("motivation", "inspirational"): "Rupert",    # Resonant, commanding — motivational speeches
+    ("motivation", "dramatic"): "Carter",         # Energetic, mature — powerful delivery
+    ("motivation", "educational"): "Brian",       # Friendly, encouraging — tutorials
+    ("motivation", "wholesome"): "Jake",          # Amiable, warm — uplifting
+
+    # ── Crime ──
+    ("crime", "dramatic"): "Conrad",              # Gruff, weathered — detective archetypes
+    ("crime", "suspenseful"): "Vinny",            # Gritty, assertive — urban crime
+    ("crime", "educational"): "Cedric",           # Crisp, measured — true crime analysis
+
+    # ── Horror ──
+    ("horror", "suspenseful"): "Victor",          # Ominous, sinister — dark suspense
+    ("horror", "dramatic"): "Lucian",             # Brooding, foreboding — gothic horror
+    ("horror", "comedic"): "Mortimer",            # Gravelly, aggressive — campy horror
+
+    # ── Mystery ──
+    ("mystery", "suspenseful"): "Levi",           # Measured, ominous — suspense narration
+    ("mystery", "dramatic"): "Victoria",          # Silky, cunning British — intricate plots
+    ("mystery", "educational"): "Elliot",         # Calm, steady — mystery breakdowns
+
+    # ── Religion ──
+    ("religion", "dramatic"): "Nikolai",          # Deep, resonant, theatrical
+    ("religion", "religious"): "Graham",          # Profound, authoritative — biblical
+    ("religion", "inspirational"): "Rupert",      # Commanding — spiritual motivation
+    ("religion", "educational"): "Duncan",        # Warm, articulate British — theology
+
+    # ── Romance ──
+    ("romance", "dramatic"): "Blake",             # Rich, intimate — audiobooks, romantic
+    ("romance", "suspenseful"): "Selene",         # Soft, flirtatious — romantic tension
+    ("romance", "wholesome"): "Naomi",            # Warm, grounded — heartfelt stories
+    ("romance", "comedic"): "Jessica",            # Encouraging, expressive — rom-com
+
+    # ── Science ──
+    ("science", "educational"): "Tyler",          # Authoritative — tech explainers
+    ("science", "dramatic"): "Tristan",           # Deliberate, controlled — documentaries
+    ("science", "suspenseful"): "Jason",          # Lucid, engrossing — science mysteries
+    ("science", "inspirational"): "Ethan",        # Assured, precise — innovation stories
+
+    # ── Children ──
+    ("children", "wholesome"): "Hana",            # Bright, expressive young female
+    ("children", "educational"): "Riley",         # Playful, youthful — learning content
+    ("children", "comedic"): "Abby",              # Bright, eager child — fun stories
+    ("children", "dramatic"): "Mia",              # Youthful, expressive — adventure
+
+    # ── History ──
+    ("history", "dramatic"): "Graham",            # Authoritative British — historical docs
+    ("history", "educational"): "Craig",          # Older British, refined — history lessons
+    ("history", "suspenseful"): "Sebastian",      # Steely, intimidating — war/conflict
+    ("history", "inspirational"): "Marcus",       # Authoritative, empathetic — civic
+
+    # ── Nature ──
+    ("nature", "dramatic"): "Elliot",             # Calm, steady — nature documentaries
+    ("nature", "educational"): "Serena",          # Soft, nurturing — nature-inspired
+    ("nature", "wholesome"): "Luna",              # Calm, relaxing — peaceful nature
+    ("nature", "suspenseful"): "Gareth",          # Soothing, gentle — survival of the wild
+
+    # ── Survival ──
+    ("survival", "suspenseful"): "Carter",        # Energetic, mature — storytelling
+    ("survival", "dramatic"): "Brandon",          # Bold, strident — high-stakes
+    ("survival", "educational"): "Derek",         # Steady, professional — survival tips
+    ("survival", "inspirational"): "Liam",        # Upbeat, motivating — overcoming odds
+
+    # ── Curiosity ──
+    ("curiosity", "suspenseful"): "Jason",        # Lucid, engrossing — creative content
+    ("curiosity", "educational"): "Tyler",        # Authoritative — explainers
+    ("curiosity", "dramatic"): "James",           # Vibrant, expressive — animated
+    ("curiosity", "inspirational"): "Ethan",      # Assured — wonder and discovery
+
+    # ── Anecdote ──
+    ("anecdote", "dramatic"): "Naomi",            # Warm, grounded — narrative podcasting
+    ("anecdote", "comedic"): "Mark",              # Energetic, rapid-fire — funny stories
+    ("anecdote", "wholesome"): "Dennis",          # Smooth, calm, friendly — personal tales
+    ("anecdote", "inspirational"): "Jessica",     # Encouraging — uplifting stories
+
+    # ── Comedy ──
+    ("comedy", "comedic"): "Mark",                # Energetic, rapid-fire delivery
+    ("comedy", "dramatic"): "Avery",              # Youthful, performative — gameshow energy
+    ("comedy", "wholesome"): "Timothy",           # Lively, upbeat — feel-good comedy
+
+    # ── Space ──
+    ("space", "dramatic"): "Tristan",             # Deliberate, controlled — cosmic scale
+    ("space", "educational"): "Tyler",            # Authoritative — space explainers
+    ("space", "suspenseful"): "Victor",           # Ominous — cosmic horror / deep space
+    ("space", "inspirational"): "Rupert",         # Commanding — awe and wonder
+
+    # ── Politics ──
+    ("politics", "dramatic"): "Marcus",           # Authoritative, empathetic — civic
+    ("politics", "educational"): "Bianca",        # Deep, controlled — serious analysis
+    ("politics", "suspenseful"): "Malcolm",       # Manipulative — power dynamics
+    ("politics", "inspirational"): "Lauren",      # Confident, friendly — civic motivation
+}
+
+
+def resolve_inworld_voice(category: str = None, story_tone: str = None) -> str:
+    """Pick the best Inworld voice for a category + tone combo."""
+    if category and story_tone:
+        v = INWORLD_VOICE_MAP.get((category, story_tone))
+        if v:
+            return v
+    # Fallback: try category-only matches
+    if category:
+        for (cat, _tone), voice in INWORLD_VOICE_MAP.items():
+            if cat == category:
+                return voice
+    return _DEFAULT_INWORLD_VOICE
 
 # ── Hardcoded defaults (always available as built-in presets) ─────────────────
 _DEFAULTS = {
@@ -95,7 +218,7 @@ _DEFAULTS = {
         "niche": "dark_psychology",
         "visual_style": "noir",
         "story_tone": "suspenseful",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 75,
         "tags": ["youtube"],
@@ -108,7 +231,7 @@ _DEFAULTS = {
         "niche": "true_crime",
         "visual_style": "cinematic",
         "story_tone": "dramatic",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 90,
         "tags": ["youtube"],
@@ -120,7 +243,7 @@ _DEFAULTS = {
         "niche": "true_crime",
         "visual_style": "noir",
         "story_tone": "dramatic",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.85,
         "duration": 90,
         "tags": ["youtube"],
@@ -170,7 +293,7 @@ _DEFAULTS = {
         "niche": "stoicism",
         "visual_style": "cinematic",
         "story_tone": "educational",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -182,7 +305,7 @@ _DEFAULTS = {
         "niche": "stoicism",
         "visual_style": "stickman_animation",
         "story_tone": "educational",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.95,
         "duration": 35,
         "tags": ["tiktok", "shorts"],
@@ -219,7 +342,7 @@ _DEFAULTS = {
         "niche": "motivation",
         "visual_style": "motivational",
         "story_tone": "inspirational",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.95,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -231,7 +354,7 @@ _DEFAULTS = {
         "niche": "wealth",
         "visual_style": "cinematic",
         "story_tone": "inspirational",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.95,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -244,7 +367,7 @@ _DEFAULTS = {
         "niche": "biblical",
         "visual_style": "cinematic",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.85,
         "duration": 90,
         "tags": ["youtube"],
@@ -256,7 +379,7 @@ _DEFAULTS = {
         "niche": "biblical",
         "visual_style": "gothic",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.85,
         "duration": 90,
         "tags": ["youtube"],
@@ -268,7 +391,7 @@ _DEFAULTS = {
         "niche": "biblical_apocalypse",
         "visual_style": "dark_horror",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.8,
         "duration": 90,
         "tags": ["youtube", "shorts"],
@@ -280,7 +403,7 @@ _DEFAULTS = {
         "niche": "bible_curiosity",
         "visual_style": "cinematic",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["trending", "shorts", "tiktok"],
@@ -292,7 +415,7 @@ _DEFAULTS = {
         "niche": "bible_hidden_history",
         "visual_style": "dark_academia",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.85,
         "duration": 90,
         "tags": ["youtube"],
@@ -304,7 +427,7 @@ _DEFAULTS = {
         "niche": "bible_logic",
         "visual_style": "minimal_illustration",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -316,7 +439,7 @@ _DEFAULTS = {
         "niche": "bible_contradictions",
         "visual_style": "noir",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.85,
         "duration": 75,
         "tags": ["trending", "youtube"],
@@ -328,7 +451,7 @@ _DEFAULTS = {
         "niche": "bible_myths_debunked",
         "visual_style": "surreal",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["trending", "tiktok", "shorts"],
@@ -340,7 +463,7 @@ _DEFAULTS = {
         "niche": "bible_unreal_events",
         "visual_style": "fantasy_epic",
         "story_tone": "religious",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.85,
         "duration": 75,
         "tags": ["trending", "youtube", "shorts"],
@@ -353,7 +476,7 @@ _DEFAULTS = {
         "niche": "conspiracy",
         "visual_style": "noir",
         "story_tone": "suspenseful",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 75,
         "tags": ["youtube"],
@@ -365,7 +488,7 @@ _DEFAULTS = {
         "niche": "conspiracy",
         "visual_style": "cinematic",
         "story_tone": "suspenseful",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -378,7 +501,7 @@ _DEFAULTS = {
         "niche": "romance",
         "visual_style": "anime",
         "story_tone": "dramatic",
-        "voice": "af_heart",
+        "voice": "af_bella",
         "speed": 1.0,
         "duration": 45,
         "tags": ["shorts"],
@@ -391,7 +514,7 @@ _DEFAULTS = {
         "niche": "children",
         "visual_style": "children_storybook",
         "story_tone": "wholesome",
-        "voice": "af_heart",
+        "voice": "af_bella",
         "speed": 0.9,
         "duration": 45,
         "tags": ["youtube"],
@@ -404,7 +527,7 @@ _DEFAULTS = {
         "niche": "sci_fi",
         "visual_style": "cyberpunk",
         "story_tone": "dramatic",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 1.0,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -442,7 +565,7 @@ _DEFAULTS = {
         "niche": "science_tech",
         "visual_style": "code_cosmos",
         "story_tone": "educational",
-        "voice": "am_adam",
+        "voice": "am_puck",
         "speed": 0.95,
         "duration": 60,
         "tags": ["science", "tech", "programming", "shorts"],
@@ -466,7 +589,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "code_cosmos",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 50,
         "tags": ["philosophy", "simulation", "existential", "shorts"],
@@ -490,7 +613,7 @@ _DEFAULTS = {
         "niche": "motivation",
         "visual_style": "solitary_path",
         "story_tone": "inspirational",
-        "voice": "am_adam",
+        "voice": "am_puck",
         "speed": 0.9,
         "duration": 45,
         "tags": ["motivation", "journey", "perseverance", "tiktok"],
@@ -514,7 +637,7 @@ _DEFAULTS = {
         "niche": "nature",
         "visual_style": "crimson_silhouette",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.9,
         "duration": 50,
         "tags": ["nature", "wildlife", "sunset", "epic"],
@@ -526,7 +649,7 @@ _DEFAULTS = {
         "niche": "survival_adventure",
         "visual_style": "crimson_silhouette",
         "story_tone": "suspenseful",
-        "voice": "am_adam",
+        "voice": "am_puck",
         "speed": 0.95,
         "duration": 55,
         "tags": ["survival", "wilderness", "primal", "tiktok"],
@@ -550,7 +673,7 @@ _DEFAULTS = {
         "niche": "mystery",
         "visual_style": "gothic_moonlit",
         "story_tone": "suspenseful",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.9,
         "duration": 55,
         "tags": ["mystery", "gothic", "conspiracy", "tiktok"],
@@ -562,7 +685,7 @@ _DEFAULTS = {
         "niche": "history",
         "visual_style": "gothic_moonlit",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.9,
         "duration": 60,
         "tags": ["history", "medieval", "europe", "dark_academia"],
@@ -587,7 +710,7 @@ _DEFAULTS = {
         "niche": "science_tech",
         "visual_style": "body_signal",
         "story_tone": "educational",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -599,7 +722,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "body_signal",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -624,7 +747,7 @@ _DEFAULTS = {
         "niche": "science_tech",
         "visual_style": "neural_glow",
         "story_tone": "educational",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -673,7 +796,7 @@ _DEFAULTS = {
         "niche": "true_crime",
         "visual_style": "tension_macro",
         "story_tone": "dramatic",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -698,7 +821,7 @@ _DEFAULTS = {
         "niche": "conspiracy",
         "visual_style": "neon_sigil",
         "story_tone": "suspenseful",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -710,7 +833,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "neon_sigil",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -723,7 +846,7 @@ _DEFAULTS = {
         "niche": "history",
         "visual_style": "transparent_skeleton",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.9,
         "duration": 55,
         "tags": ["trending", "tiktok", "shorts"],
@@ -784,7 +907,7 @@ _DEFAULTS = {
         "niche": "motivation",
         "visual_style": "ink_fury",
         "story_tone": "inspirational",
-        "voice": "am_adam",
+        "voice": "am_puck",
         "speed": 0.95,
         "duration": 45,
         "tags": ["trending", "tiktok", "shorts"],
@@ -809,7 +932,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "white_room",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -846,7 +969,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "white_gaze",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -858,7 +981,7 @@ _DEFAULTS = {
         "niche": "science_tech",
         "visual_style": "white_gaze",
         "story_tone": "educational",
-        "voice": "bm_daniel",
+        "voice": "am_michael",
         "speed": 0.9,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -920,7 +1043,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "stickman_glow",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -957,7 +1080,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "ethereal_connection",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -969,7 +1092,7 @@ _DEFAULTS = {
         "niche": "romance",
         "visual_style": "ethereal_connection",
         "story_tone": "dramatic",
-        "voice": "af_heart",
+        "voice": "af_bella",
         "speed": 0.85,
         "duration": 50,
         "tags": ["trending", "tiktok", "shorts"],
@@ -994,7 +1117,7 @@ _DEFAULTS = {
         "niche": "existential",
         "visual_style": "glowing_core",
         "story_tone": "dramatic",
-        "voice": "bm_george",
+        "voice": "am_fenrir",
         "speed": 0.85,
         "duration": 60,
         "tags": ["youtube", "shorts"],
@@ -1236,8 +1359,12 @@ def _save_presets(presets: dict) -> None:
 
 
 def get_presets() -> dict:
-    """Get all niche presets (always fresh from disk)."""
-    return _load_presets()
+    """Get all niche presets (always fresh from disk), enriched with inworld_voice."""
+    presets = _load_presets()
+    for _pid, p in presets.items():
+        if "inworld_voice" not in p:
+            p["inworld_voice"] = resolve_inworld_voice(p.get("category"), p.get("story_tone"))
+    return presets
 
 
 def save_preset(preset_id: str, data: dict) -> dict:
@@ -1313,11 +1440,16 @@ def resolve_niche(config: dict) -> dict:
     if not category and preset and is_valid_category(preset.get("category")):
         category = preset["category"]
 
+    resolved_voice = voice or (preset.get("voice", _DEFAULT_VOICE) if preset else _DEFAULT_VOICE)
+    resolved_category = category or None
+    resolved_tone = story_tone or None
+
     return {
         "visual_style": visual_style,
-        "story_tone": story_tone or None,
-        "category": category or None,
+        "story_tone": resolved_tone,
+        "category": resolved_category,
         "niche": preset.get("niche") if preset else None,
-        "voice": voice or (preset.get("voice", _DEFAULT_VOICE) if preset else _DEFAULT_VOICE),
+        "voice": resolved_voice,
         "speed": speed,
+        "inworld_voice": resolve_inworld_voice(resolved_category, resolved_tone),
     }

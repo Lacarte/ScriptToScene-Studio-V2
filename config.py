@@ -78,6 +78,15 @@ KIE_AI_BASE_URL = os.environ.get("KIE_AI_BASE_URL", "https://api.kie.ai/api/v1")
 KIE_AI_MODEL = os.environ.get("KIE_AI_MODEL", "google/nano-banana")
 
 # ---------------------------------------------------------------------------
+# Inworld TTS (cloud text-to-speech)
+# ---------------------------------------------------------------------------
+INWORLD_API_KEY = os.environ.get("INWORLD_API_KEY", "")
+INWORLD_TTS_MODEL = os.environ.get("INWORLD_TTS_MODEL", "inworld-tts-1.5-max")
+INWORLD_TTS_BASE_URL = os.environ.get(
+    "INWORLD_TTS_BASE_URL", "https://api.inworld.ai/tts/v1"
+)
+
+# ---------------------------------------------------------------------------
 # WaveSpeed AI (Storyboard image generation)
 # ---------------------------------------------------------------------------
 WAVESPEED_API_KEY = os.environ.get("WAVESPEED_API_KEY", "")

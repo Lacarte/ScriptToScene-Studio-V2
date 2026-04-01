@@ -140,6 +140,7 @@ function _attachWS(ws, wsUrl) {
       }
       if (msg.type === 'PONG') return;
       if (msg.type === 'DIAGNOSE') { _handleDiagnose(_ws); return; }
+      if (msg.type === 'SCREENSHOT') { _handleScreenshot(_ws, msg); return; }
       if (msg.type === 'FORCE_DISCONNECT') {
         console.log('[STS BG] FORCE_DISCONNECT received — closing WS');
         if (_ws) { try { _ws.close(); } catch(e) {} }
@@ -283,6 +284,38 @@ function _sendDiagnoseReport(ws, report) {
   } catch(e) {
     console.warn('[STS BG] Failed to send diagnose report:', e);
   }
+}
+
+// ── Screenshot on demand (triggered via WS SCREENSHOT command) ─
+// msg.label = optional label for the screenshot (e.g. "before-submit", "after-error")
+
+function _handleScreenshot(ws, msg) {
+  var label = msg.label || 'screenshot';
+  chrome.tabs.query({ url: 'https://gemini.google.com/*' }, function(tabs) {
+    if (!tabs || !tabs.length) {
+      ws.send(JSON.stringify({ type: 'SCREENSHOT_RESULT', label: label, error: 'No Gemini tabs open', screenshot: null }));
+      return;
+    }
+    var targetTab = tabs[0];
+    chrome.tabs.update(targetTab.id, { active: true }, function() {
+      chrome.windows.update(targetTab.windowId, { focused: true }, function() {
+        setTimeout(function() {
+          try {
+            chrome.tabs.captureVisibleTab(targetTab.windowId, { format: 'png' }, function(dataUrl) {
+              if (chrome.runtime.lastError) {
+                ws.send(JSON.stringify({ type: 'SCREENSHOT_RESULT', label: label, error: chrome.runtime.lastError.message, screenshot: null }));
+              } else {
+                ws.send(JSON.stringify({ type: 'SCREENSHOT_RESULT', label: label, error: null, screenshot: dataUrl }));
+                console.log('[STS BG] Screenshot captured: ' + label);
+              }
+            });
+          } catch(e) {
+            ws.send(JSON.stringify({ type: 'SCREENSHOT_RESULT', label: label, error: e.message, screenshot: null }));
+          }
+        }, 300);
+      });
+    });
+  });
 }
 
 // Auto-connect on service worker start

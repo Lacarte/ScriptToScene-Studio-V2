@@ -13,6 +13,8 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
+from screenshot import ScreenshotCapture
+
 WS_URL = "ws://127.0.0.1:5050/ws/storyboard-gemini-image-grabber"
 
 
@@ -72,6 +74,22 @@ def force_disconnect():
         return False
 
 
+def take_screenshot(label):
+    """Open a short-lived WS to capture a screenshot."""
+    try:
+        ws = websocket.create_connection(WS_URL, timeout=5)
+        ws.send(json.dumps({"type": "EXTENSION_READY", "source": "screenshot"}))
+        ws.settimeout(1)
+        try:
+            while True: ws.recv()
+        except: pass
+        cap = ScreenshotCapture(ws, test_name="disconnect")
+        cap.take(label, on_fail="warn")
+        ws.close()
+    except Exception as e:
+        print(f"  \033[93m WARN \033[0m Screenshot failed ({label}): {e}")
+
+
 def main():
     print("=" * 60)
     print("  Disconnect / Reconnect Test")
@@ -84,6 +102,7 @@ def main():
     if not r or not r.get("bg", {}).get("wsConnected"):
         print("   Extension not connected. Reload extension first.")
         sys.exit(1)
+    take_screenshot("1-connected")
 
     # 2. Force disconnect
     print("\n2. Sending FORCE_DISCONNECT...")
@@ -95,6 +114,7 @@ def main():
     print("\n3. Checking state (should be RED)...")
     r2 = diagnose()
     print(f"   {status_line(r2)}")
+    take_screenshot("2-disconnected")
 
     # 4. Wait for auto-reconnect
     print("\n4. Waiting for auto-reconnect...")
@@ -111,6 +131,8 @@ def main():
                 reconnected = True
                 break
         print(f"   Check {i+1}/10: still disconnected...")
+
+    take_screenshot("3-reconnected" if reconnected else "3-still-disconnected")
 
     # Summary
     print("\n" + "=" * 60)

@@ -2,13 +2,16 @@
 Grok Extension — Remote Diagnostics
 
 Sends DIAGNOSE via the animator WS. Reports background + content state.
+Captures screenshots for audit.
 """
-import json, sys, time
+import json, os, sys, time
 
 try:
     import websocket
 except ImportError:
     sys.exit("pip install websocket-client")
+
+from screenshot import ScreenshotCapture
 
 WS_URL = "ws://127.0.0.1:5050/ws/animator-grok-video-grabber"
 
@@ -39,9 +42,8 @@ def run():
     except Exception as e:
         print(f"  Timeout: {e}")
 
-    ws.close()
-
     if not report:
+        ws.close()
         print("\nNo report. Extension background not connected.")
         return
 
@@ -69,6 +71,22 @@ def run():
             print(f"    connMsg:       '{s.get('connMsgText')}'")
             print(f"    headDot:       {s.get('headDotClass')}")
 
+    # Screenshot for audit
+    try:
+        cap = ScreenshotCapture(ws, test_name="grok-diagnose")
+        has_errors = not bg.get("wsConnected") or not states
+        cap.take("error-state" if has_errors else "healthy-state", on_fail="warn")
+    except Exception:
+        pass
+
+    # Save JSON report
+    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "diag-output")
+    os.makedirs(save_dir, exist_ok=True)
+    json_path = os.path.join(save_dir, f"diag-{time.strftime('%Y%m%d-%H%M%S')}.json")
+    with open(json_path, "w") as f:
+        json.dump(report, f, indent=2)
+    print(f"\n  Report saved: {json_path}")
+
     print("\n" + "=" * 60)
     bg_ok = bg.get("wsConnected")
     states = report.get("contentStates", [])
@@ -81,6 +99,8 @@ def run():
     elif not bg_ok:
         print("  Background NOT connected - check service worker")
     print("=" * 60)
+
+    ws.close()
 
 
 if __name__ == "__main__":

@@ -21,6 +21,8 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
+from screenshot import ScreenshotCapture
+
 WS_URL = "ws://127.0.0.1:5050/ws/storyboard-gemini-image-grabber"
 
 
@@ -63,9 +65,8 @@ def run_diagnose(save_dir):
     except Exception as e:
         print(f"  Timeout waiting for report: {e}")
 
-    ws.close()
-
     if not report:
+        ws.close()
         print("\nNo DIAGNOSE_REPORT received.")
         print("Possible causes:")
         print("  - Extension not loaded in Chrome")
@@ -115,22 +116,32 @@ def run_diagnose(save_dir):
         for e in errors:
             print(f"    - {e}")
 
-    # Save screenshot
+    # Save screenshot via inline report data (legacy DIAGNOSE_REPORT)
     screenshot = report.get("screenshot")
     if screenshot:
-        # Strip data:image/png;base64, prefix
         if "," in screenshot:
             b64 = screenshot.split(",", 1)[1]
         else:
             b64 = screenshot
         ts = time.strftime("%Y%m%d-%H%M%S")
-        path = os.path.join(save_dir, f"diag-{ts}.png")
+        screenshots_dir = os.path.join(save_dir, "screenshots")
+        os.makedirs(screenshots_dir, exist_ok=True)
+        path = os.path.join(screenshots_dir, f"diagnose_report_{ts}.png")
         with open(path, "wb") as f:
             f.write(base64.b64decode(b64))
         size_kb = os.path.getsize(path) / 1024
         print(f"\n  Screenshot saved: {path} ({size_kb:.0f} KB)")
     else:
         print(f"\n  Screenshot: NOT CAPTURED")
+
+    # Also take a standalone screenshot via the SCREENSHOT command for audit
+    try:
+        cap = ScreenshotCapture(ws, save_dir=os.path.join(save_dir, "screenshots"), test_name="diagnose")
+        has_errors = bool(report.get("errors")) or not bg.get("wsConnected")
+        label = "error-state" if has_errors else "healthy-state"
+        cap.take(label, on_fail="warn")
+    except Exception:
+        pass  # WS may already be closed
 
     # Save full JSON report
     report_no_screenshot = {k: v for k, v in report.items() if k != "screenshot"}
@@ -161,6 +172,8 @@ def run_diagnose(save_dir):
         print("    Background NOT connected to WS")
         print("    -> check service worker console for errors")
     print("=" * 60)
+
+    ws.close()
 
 
 if __name__ == "__main__":

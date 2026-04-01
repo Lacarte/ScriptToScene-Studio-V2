@@ -9,6 +9,9 @@ const DEFAULTS = {
   'sts-sound-enabled': true,
   'sts-caption-default-preset': 'bold_popup',
   'sts-default-style': 'cinematic',
+  'sts-tts-provider': 'kokoro',
+  'sts-storyboard-provider': 'gemini',
+  'sts-asset-provider': 'grok',
   'sts-sync-folder': 'D:/@Sync/PHONE-S24-PC',
   'sts-auto-sync': true,
 }

@@ -45,28 +45,33 @@ function setNicheCategory(categoryId) {
 }
 
 function selectNiche(preset) {
-  const { voice, speed, style } = usePipelineForm()
+  const { kokoroVoice, inworldVoice, speed, style } = usePipelineForm()
   nichePreset.value = preset.id || ''
   visualStyle.value = preset.visual_style || ''
   storyTone.value = preset.story_tone || ''
   nicheCategory.value = preset.category || ''
-  voice.value = preset.voice || voice.value
+  // Each provider gets its own voice from the preset
+  kokoroVoice.value = preset.voice || kokoroVoice.value
+  if (preset.inworld_voice) inworldVoice.value = preset.inworld_voice
   speed.value = preset.speed || speed.value
   style.value = preset.visual_style || style.value
   persistNicheState()
 }
 
 function clearNiche() {
+  const { kokoroVoice, speed } = usePipelineForm()
   nichePreset.value = ''
   visualStyle.value = ''
   storyTone.value = ''
   nicheCategory.value = ''
+  kokoroVoice.value = 'af_heart'
+  speed.value = 1.0
   persistNicheState()
 }
 
 async function loadNiches() {
   if (nichesLoaded.value) return
-  const { style, templates } = usePipelineForm()
+  const { style, kokoroVoice, inworldVoice, speed, templates } = usePipelineForm()
   try {
     const data = await api.get('/api/niches')
     nichePresets.value = data.presets || {}
@@ -81,6 +86,9 @@ async function loadNiches() {
       if (!storyTone.value) storyTone.value = preset.story_tone || ''
       if (!nicheCategory.value) nicheCategory.value = preset.category || ''
       if (!style.value && preset.visual_style) style.value = preset.visual_style
+      if (preset.voice) kokoroVoice.value = preset.voice
+      if (preset.inworld_voice) inworldVoice.value = preset.inworld_voice
+      if (preset.speed) speed.value = preset.speed
     } else if (nichePreset.value) {
       clearNiche()
     }

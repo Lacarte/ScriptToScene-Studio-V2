@@ -35,6 +35,8 @@ class PipelineRunRequest(BaseModel):
     auto_scenes: bool = True
     auto_storyboard: bool = True
     stop_after: Optional[str] = None
+    tts_provider: str = "kokoro"  # "kokoro" or "inworld"
+    tts_voice: Optional[str] = None  # Inworld voice ID (uses voice field for Kokoro)
     resume_from: Optional[str] = None
     resume_project_id: Optional[str] = None
 

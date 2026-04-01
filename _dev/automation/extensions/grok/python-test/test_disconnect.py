@@ -8,6 +8,8 @@ try:
 except ImportError:
     sys.exit("pip install websocket-client")
 
+from screenshot import ScreenshotCapture
+
 WS_URL = "ws://127.0.0.1:5050/ws/animator-grok-video-grabber"
 
 
@@ -62,44 +64,69 @@ def force_disconnect():
         print(f"  Failed: {e}")
 
 
-print("=" * 60)
-print("  Grok — Disconnect / Reconnect Test")
-print("=" * 60)
+def snap(label):
+    """Take a quick screenshot for audit."""
+    try:
+        ws = websocket.create_connection(WS_URL, timeout=5)
+        ws.send(json.dumps({"type": "EXTENSION_READY", "source": "screenshot"}))
+        ws.settimeout(1)
+        try:
+            while True: ws.recv()
+        except: pass
+        cap = ScreenshotCapture(ws, test_name="grok-disconnect")
+        cap.take(label, on_fail="warn")
+        ws.close()
+    except Exception:
+        pass
 
-print("\n1. Current state...")
-r = diagnose()
-print(f"   {status_line(r)}")
-if not r or not r.get("bg", {}).get("wsConnected"):
-    print("   Extension not connected. Reload extension first.")
-    sys.exit(1)
 
-print("\n2. Sending FORCE_DISCONNECT...")
-force_disconnect()
-print("   Sent. Waiting 3s...")
-time.sleep(3)
+def main():
+    print("=" * 60)
+    print("  Grok — Disconnect / Reconnect Test")
+    print("=" * 60)
 
-print("\n3. Checking state (should be RED)...")
-r2 = diagnose()
-print(f"   {status_line(r2)}")
+    print("\n1. Current state...")
+    r = diagnose()
+    print(f"   {status_line(r)}")
+    if not r or not r.get("bg", {}).get("wsConnected"):
+        print("   Extension not connected. Reload extension first.")
+        sys.exit(1)
+    snap("1-connected")
 
-print("\n4. Waiting for auto-reconnect...")
-reconnected = False
-for i in range(10):
-    time.sleep(2)
-    r3 = diagnose()
-    if r3 and r3.get("bg", {}).get("wsConnected"):
-        states = r3.get("contentStates", [])
-        cs = states[0].get("state", {}) if states and not states[0].get("error") else {}
-        if cs.get("wsConnected"):
-            print(f"   Reconnected after ~{(i+1)*2}s!")
-            print(f"   {status_line(r3)}")
-            reconnected = True
-            break
-    print(f"   Check {i+1}/10: still disconnected...")
+    print("\n2. Sending FORCE_DISCONNECT...")
+    force_disconnect()
+    print("   Sent. Waiting 3s...")
+    time.sleep(3)
 
-print("\n" + "=" * 60)
-if reconnected:
-    print("  PASS — Connected -> Disconnect -> Auto-reconnect -> Connected")
-else:
-    print("  FAIL — Did not auto-reconnect within 20s")
-print("=" * 60)
+    print("\n3. Checking state (should be RED)...")
+    r2 = diagnose()
+    print(f"   {status_line(r2)}")
+    snap("2-disconnected")
+
+    print("\n4. Waiting for auto-reconnect...")
+    reconnected = False
+    for i in range(10):
+        time.sleep(2)
+        r3 = diagnose()
+        if r3 and r3.get("bg", {}).get("wsConnected"):
+            states = r3.get("contentStates", [])
+            cs = states[0].get("state", {}) if states and not states[0].get("error") else {}
+            if cs.get("wsConnected"):
+                print(f"   Reconnected after ~{(i+1)*2}s!")
+                print(f"   {status_line(r3)}")
+                reconnected = True
+                break
+        print(f"   Check {i+1}/10: still disconnected...")
+
+    snap("3-reconnected" if reconnected else "3-still-disconnected")
+
+    print("\n" + "=" * 60)
+    if reconnected:
+        print("  PASS — Connected -> Disconnect -> Auto-reconnect -> Connected")
+    else:
+        print("  FAIL — Did not auto-reconnect within 20s")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

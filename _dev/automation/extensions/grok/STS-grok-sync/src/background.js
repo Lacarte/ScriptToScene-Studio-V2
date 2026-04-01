@@ -122,6 +122,7 @@ function _attachWS(ws, wsUrl, port) {
       if (msg.type === "PING") { try { ws.send(JSON.stringify({ type: "PONG" })); } catch(e) {} return; }
       if (msg.type === "PONG") return;
       if (msg.type === "DIAGNOSE") { _handleDiagnose(_ws); return; }
+      if (msg.type === "SCREENSHOT") { _handleScreenshot(_ws, msg); return; }
       if (msg.type === "FORCE_DISCONNECT") {
         console.log("[STS BG] FORCE_DISCONNECT — closing WS");
         if (_ws) { try { _ws.close(); } catch(e) {} }
@@ -221,6 +222,37 @@ function _handleDiagnose(ws) {
         }
       });
     }
+  });
+}
+
+// ── Screenshot on demand (triggered via WS SCREENSHOT command) ─
+
+function _handleScreenshot(ws, msg) {
+  const label = msg.label || "screenshot";
+  chrome.tabs.query({ url: "*://grok.com/*" }, (tabs) => {
+    if (!tabs || !tabs.length) {
+      try { ws.send(JSON.stringify({ type: "SCREENSHOT_RESULT", label, error: "No Grok tabs open", screenshot: null })); } catch(e) {}
+      return;
+    }
+    const targetTab = tabs[0];
+    chrome.tabs.update(targetTab.id, { active: true }, () => {
+      chrome.windows.update(targetTab.windowId, { focused: true }, () => {
+        setTimeout(() => {
+          try {
+            chrome.tabs.captureVisibleTab(targetTab.windowId, { format: "png" }, (dataUrl) => {
+              if (chrome.runtime.lastError) {
+                try { ws.send(JSON.stringify({ type: "SCREENSHOT_RESULT", label, error: chrome.runtime.lastError.message, screenshot: null })); } catch(e) {}
+              } else {
+                try { ws.send(JSON.stringify({ type: "SCREENSHOT_RESULT", label, error: null, screenshot: dataUrl })); } catch(e) {}
+                console.log("[STS BG] Screenshot captured: " + label);
+              }
+            });
+          } catch(e) {
+            try { ws.send(JSON.stringify({ type: "SCREENSHOT_RESULT", label, error: e.message, screenshot: null })); } catch(e2) {}
+          }
+        }, 300);
+      });
+    });
   });
 }
 

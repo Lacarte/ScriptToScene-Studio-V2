@@ -19,6 +19,7 @@ class TtsGenerateRequest(BaseModel):
     voice: str = "af_bella"
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     model: str = "kokoro"
+    provider: str = "kokoro"  # "kokoro" or "inworld"
     max_silence_ms: int = Field(default=500, ge=200, le=1000)
     blend: Optional[BlendConfig] = None
     skip_clean: bool = False

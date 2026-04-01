@@ -4,12 +4,14 @@ import { useRoute } from 'vue-router'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
+import { useSettings } from '@/features/settings/composables/useSettings.js'
 import { timeAgo } from '@/shared/utils/format.js'
 
 defineOptions({ name: 'StoryboardPage' })
 
 const route = useRoute()
 const toast = useToast()
+const { settings: _settings, update: _updateSetting } = useSettings()
 
 const projectId = ref(null)
 useProjectSync(projectId)
@@ -22,11 +24,10 @@ const history = ref([])
 const scenePickerOpen = ref(false)
 const scenePickerData = ref([])
 
-// Provider state
-const storyboardProvider = ref(localStorage.getItem('sts-storyboard-provider') || 'gemini')
+// Provider state — sourced from settings
+const storyboardProvider = computed(() => _settings.value['sts-storyboard-provider'] || 'gemini')
 function setProvider(val) {
-  storyboardProvider.value = val
-  localStorage.setItem('sts-storyboard-provider', val)
+  _updateSetting('sts-storyboard-provider', val)
 }
 
 // Prompt prefix (prepended to each prompt when using Gemini)

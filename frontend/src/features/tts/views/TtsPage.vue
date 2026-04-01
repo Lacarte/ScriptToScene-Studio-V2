@@ -476,6 +476,7 @@ const genButtonLabel = computed(() => {
           v-for="(item, i) in tts.history.value"
           :key="item.filename || i"
           :item="item"
+          :active="tts.nowPlaying.value?.folder === item.folder && tts.nowPlaying.value?.filename === item.filename"
           @play="handlePlayHistory"
           @open-folder="handleOpenFolder"
           @delete="handleDeleteItem"

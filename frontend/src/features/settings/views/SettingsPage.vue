@@ -181,6 +181,47 @@ function featureLabel(val) {
             <option v-for="t in styleTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </div>
+        <div class="export-default-row">
+          <div class="export-copy">
+            <label class="export-label">TTS Provider</label>
+            <p class="export-help">Voice engine used for narration. Kokoro runs locally; Inworld uses the cloud API.</p>
+          </div>
+          <select
+            class="input-field export-select"
+            :value="settings['sts-tts-provider'] ?? 'kokoro'"
+            @change="onToggle('sts-tts-provider', $event.target.value)"
+          >
+            <option value="kokoro">Kokoro (local)</option>
+            <option value="inworld">Inworld (cloud)</option>
+          </select>
+        </div>
+        <div class="export-default-row">
+          <div class="export-copy">
+            <label class="export-label">Storyboard Provider</label>
+            <p class="export-help">Image generation for storyboard. Gemini uses the browser extension; Webhook uses WaveSpeed via n8n.</p>
+          </div>
+          <select
+            class="input-field export-select"
+            :value="settings['sts-storyboard-provider'] ?? 'gemini'"
+            @change="onToggle('sts-storyboard-provider', $event.target.value)"
+          >
+            <option value="gemini">Gemini (extension)</option>
+            <option value="webhook">Webhook / WaveSpeed</option>
+          </select>
+        </div>
+        <div class="export-default-row">
+          <div class="export-copy">
+            <label class="export-label">Animator Provider</label>
+            <p class="export-help">Video generation for scene assets. Uses Grok via browser extension.</p>
+          </div>
+          <select
+            class="input-field export-select"
+            :value="settings['sts-asset-provider'] ?? 'grok'"
+            @change="onToggle('sts-asset-provider', $event.target.value)"
+          >
+            <option value="grok">Grok (extension)</option>
+          </select>
+        </div>
       </div>
     </section>
 
@@ -308,9 +349,15 @@ function featureLabel(val) {
           </span>
         </div>
         <div class="status-row">
-          <span class="status-label">TTS Model</span>
+          <span class="status-label">TTS Model (Kokoro)</span>
           <span class="status-badge" :class="featureStatus(health.tts_model)">
             {{ featureLabel(health.tts_model) }}
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">TTS API (Inworld)</span>
+          <span class="status-badge" :class="featureStatus(health.inworld_tts)">
+            {{ health.inworld_tts ? 'API Key Set' : 'Not Configured' }}
           </span>
         </div>
       </div>
@@ -338,7 +385,7 @@ function featureLabel(val) {
         </div>
         <div class="about-row">
           <span class="about-label">TTS Engine</span>
-          <span class="about-value mono">kokoro-onnx</span>
+          <span class="about-value mono">{{ (settings['sts-tts-provider'] ?? 'kokoro') === 'inworld' ? 'Inworld Voice' : 'kokoro-onnx' }}</span>
         </div>
         <div class="about-row">
           <span class="about-label">Sample Rate</span>

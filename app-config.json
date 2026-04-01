@@ -61,6 +61,7 @@
     "sts-vol-sfx": 0.7,
     "sts-caption-default-preset": "single_line",
     "sts-sync-folder": "D:/@Sync/PHONE-S24-PC",
-    "sts-auto-sync": true
+    "sts-auto-sync": true,
+    "sts-tts-provider": "inworld"
   }
 }

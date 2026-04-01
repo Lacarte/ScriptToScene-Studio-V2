@@ -39,7 +39,7 @@
     "niche": "dark_psychology",
     "visual_style": "noir",
     "story_tone": "suspenseful",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.9,
     "duration": 75,
     "tags": [
@@ -54,7 +54,7 @@
     "niche": "true_crime",
     "visual_style": "cinematic",
     "story_tone": "dramatic",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.9,
     "duration": 90,
     "tags": [
@@ -69,7 +69,7 @@
     "niche": "true_crime",
     "visual_style": "noir",
     "story_tone": "dramatic",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.85,
     "duration": 90,
     "tags": [
@@ -131,7 +131,7 @@
     "niche": "stoicism",
     "visual_style": "cinematic",
     "story_tone": "educational",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.9,
     "duration": 60,
     "tags": [
@@ -147,7 +147,7 @@
     "niche": "stoicism",
     "visual_style": "stickman_animation",
     "story_tone": "educational",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.95,
     "duration": 35,
     "tags": [
@@ -179,7 +179,7 @@
     "niche": "motivation",
     "visual_style": "motivational",
     "story_tone": "inspirational",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.95,
     "duration": 60,
     "tags": [
@@ -195,7 +195,7 @@
     "niche": "biblical",
     "visual_style": "cinematic",
     "story_tone": "dramatic",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.85,
     "duration": 90,
     "tags": [
@@ -210,7 +210,7 @@
     "niche": "biblical",
     "visual_style": "gothic",
     "story_tone": "dramatic",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.85,
     "duration": 90,
     "tags": [
@@ -225,7 +225,7 @@
     "niche": "conspiracy",
     "visual_style": "noir",
     "story_tone": "suspenseful",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.9,
     "duration": 75,
     "tags": [
@@ -240,7 +240,7 @@
     "niche": "conspiracy",
     "visual_style": "cinematic",
     "story_tone": "suspenseful",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.9,
     "duration": 60,
     "tags": [
@@ -286,7 +286,7 @@
     "niche": "sci_fi",
     "visual_style": "cyberpunk",
     "story_tone": "dramatic",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 1.0,
     "duration": 60,
     "tags": [
@@ -302,7 +302,7 @@
     "niche": "wealth",
     "visual_style": "cinematic",
     "story_tone": "inspirational",
-    "voice": "bm_daniel",
+    "voice": "am_michael",
     "speed": 0.95,
     "duration": 60,
     "tags": [

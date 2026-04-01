@@ -3,7 +3,7 @@
   "name": "Section Activity Record Analyzer",
   "version": "1.0.1",
   "description": "Record and analyze DOM changes in any HTML section over time. Generates detailed mutation reports.",
-  "permissions": ["activeTab", "scripting"],
+  "permissions": ["activeTab", "scripting", "<all_urls>"],
   "action": {
     "default_popup": "popup.html"
   },
