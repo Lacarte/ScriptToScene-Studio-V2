@@ -90,8 +90,11 @@ def synthesize(
     """
     model_id = model_id or INWORLD_TTS_MODEL
 
-    # Inworld voices sound best at natural pace — always use 1.0
-    speaking_rate = 1.0
+    # Bella clone uses slightly higher temperature but natural speed;
+    # all other voices get temperature 1.1 and speed 1.15.
+    is_bella = "bella" in voice_id.lower()
+    temperature = 1.11 if is_bella else 1.1
+    speaking_rate = 1.0 if is_bella else 1.15
 
     payload = {
         "text": text,
@@ -100,7 +103,7 @@ def synthesize(
         "audioConfig": {
             "speakingRate": speaking_rate,
         },
-        "temperature": 1,
+        "temperature": temperature,
     }
 
     url = f"{INWORLD_TTS_BASE_URL}/voice"

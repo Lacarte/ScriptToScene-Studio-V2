@@ -2,14 +2,15 @@
 :: Launch Ungoogled Chromium as dedicated STS automation browser
 :: Auto-setup on first run: download, extract, prepare extensions
 ::
-:: This script handles 3 things:
-::   1. INSTALL - download/extract Chromium + Automa if missing
-::   2. LAUNCH  - open Chromium if not already running (always with --load-extension)
-::   3. VERIFY  - check extensions are loaded via CDP
+:: This script handles 4 things:
+::   1. INSTALL  - download/extract Chromium if missing
+::   2. SERVERS  - start ai-web-auto WebSocket server (background)
+::   3. LAUNCH   - open Chromium with all extensions loaded
+::   4. VERIFY   - check extensions are loaded via CDP
 
 setlocal enabledelayedexpansion
 
-:: ── Resolve absolute paths (no ..\..\) ─────────────────────────────────
+:: ── Resolve absolute paths ────────────────────────────────────────────
 set "SCRIPT_DIR=%~dp0"
 pushd "%~dp0..\..\.."
 set "PROJECT_DIR=%CD%"
@@ -17,9 +18,15 @@ popd
 set "CHROMIUM_DIR=%PROJECT_DIR%\bin\chromium"
 set "BROWSER=%CHROMIUM_DIR%\ungoogled-chromium\chrome.exe"
 set "PROFILE=%PROJECT_DIR%\data\chromium-profile"
+
+:: ── Extensions ────────────────────────────────────────────────────────
 set "GROK_EXT=%PROJECT_DIR%\_dev\automation\extensions\grok\STS-grok-sync"
 set "GEMINI_EXT=%PROJECT_DIR%\_dev\automation\extensions\gemini\STS-gemini-sync"
-:: ── Read browser tab URLs from .env ────────────────────────────────────
+set "DEVTOOLS_EXT=%PROJECT_DIR%\_dev\automation\extensions\sts-devtools\STS-devtools-extension"
+set "AWA_EXT=D:\@Workspace\@Development\@Projects\ai-web-auto\ai-web-auto-extension"
+set "AWA_ROOT=D:\@Workspace\@Development\@Projects\ai-web-auto"
+
+:: ── Read browser tab URLs from .env ───────────────────────────────────
 set "TAB_GROK="
 set "TAB_GEMINI="
 set "TAB_PIPELINE="
@@ -99,14 +106,39 @@ if not exist "%BROWSER%" (
 echo  [OK] Chromium installed
 
 :: -- Extensions check --
-if exist "%GROK_EXT%\manifest.json" (echo  [OK] Grok ready) else (echo  [!]  Grok missing)
-if exist "%GEMINI_EXT%\manifest.json" (echo  [OK] Gemini ready) else (echo  [!]  Gemini missing)
+if exist "%GROK_EXT%\manifest.json" (echo  [OK] Grok extension ready) else (echo  [!]  Grok extension missing)
+if exist "%GEMINI_EXT%\manifest.json" (echo  [OK] Gemini extension ready) else (echo  [!]  Gemini extension missing)
+if exist "%DEVTOOLS_EXT%\manifest.json" (echo  [OK] STS DevTools extension ready) else (echo  [!]  STS DevTools extension missing)
+if exist "%AWA_EXT%\manifest.json" (echo  [OK] AI Web-Auto extension ready) else (echo  [!]  AI Web-Auto extension missing)
 
 :: -- Profile --
 if not exist "%PROFILE%" mkdir "%PROFILE%"
 
 :: ================================================================
-:: STEP 2: LAUNCH (if not already running)
+:: STEP 2: START SERVERS (background)
+:: ================================================================
+
+:: -- ai-web-auto WebSocket server --
+:: Check if already running on port 8765
+curl -s -o nul http://127.0.0.1:8765 >nul 2>&1
+if not errorlevel 1 (
+  echo  [OK] ai-web-auto server already running on :8765
+  goto :awa_done
+)
+
+if exist "%AWA_ROOT%\venv\Scripts\python.exe" (
+  echo  [..] Starting ai-web-auto server...
+  start "AI-Web-Auto Server" /min cmd /c "cd /d "%AWA_ROOT%" && venv\Scripts\python -m ai_web_auto_backend.automation_controller"
+  echo  [OK] ai-web-auto server starting on ws://localhost:8765
+) else if exist "%AWA_ROOT%\requirements.txt" (
+  echo  [!]  ai-web-auto venv missing — run: cd "%AWA_ROOT%" ^&^& python -m venv venv ^&^& venv\Scripts\pip install -r requirements.txt
+) else (
+  echo  [!]  ai-web-auto project not found at %AWA_ROOT%
+)
+:awa_done
+
+:: ================================================================
+:: STEP 3: LAUNCH CHROMIUM (if not already running)
 :: ================================================================
 
 curl -s -o nul http://127.0.0.1:9222/json/version >nul 2>&1
@@ -115,11 +147,17 @@ if not errorlevel 1 (
   goto :verify
 )
 
-:: Build extension list
+:: Build extension list — all available extensions
 set "EXT_LIST="
 if exist "%GROK_EXT%\manifest.json" set "EXT_LIST=%GROK_EXT%"
 if exist "%GEMINI_EXT%\manifest.json" (
   if defined EXT_LIST (set "EXT_LIST=!EXT_LIST!,%GEMINI_EXT%") else (set "EXT_LIST=%GEMINI_EXT%")
+)
+if exist "%DEVTOOLS_EXT%\manifest.json" (
+  if defined EXT_LIST (set "EXT_LIST=!EXT_LIST!,%DEVTOOLS_EXT%") else (set "EXT_LIST=%DEVTOOLS_EXT%")
+)
+if exist "%AWA_EXT%\manifest.json" (
+  if defined EXT_LIST (set "EXT_LIST=!EXT_LIST!,%AWA_EXT%") else (set "EXT_LIST=%AWA_EXT%")
 )
 
 echo.
@@ -146,7 +184,7 @@ exit /b 1
 echo  [OK] Chromium started - port 9222
 
 :: ================================================================
-:: STEP 3: VERIFY extensions via CDP
+:: STEP 4: VERIFY extensions via CDP
 :: ================================================================
 :verify
 
@@ -161,6 +199,16 @@ if not errorlevel 1 (
   echo  [!]  No extensions detected - they may need a page reload to activate
 )
 
+echo.
+echo  ============================================
+echo   Extensions loaded:
+echo     - Grok Sync
+echo     - Gemini Sync
+echo     - STS DevTools
+echo     - AI Web-Auto (CDP automation)
+echo   Servers:
+echo     - ai-web-auto ws://localhost:8765
+echo  ============================================
 echo.
 endlocal
 exit /b 0

@@ -1,0 +1,1545 @@
+[
+  {
+    "id": "Abby",
+    "name": "Abby",
+    "gender": "Female",
+    "age": "Child",
+    "language": "en",
+    "description": "Bright, eager American female child voice, ideal for animated characters, upbeat educational content, and lively kids' commercials.",
+    "tags": [
+      "bright",
+      "upbeat",
+      "lively"
+    ]
+  },
+  {
+    "id": "Alain",
+    "name": "Alain",
+    "gender": "Male",
+    "age": "Middle Aged",
+    "language": "fr",
+    "description": "Deep, smooth middle-aged male French voice. Composed and calm",
+    "tags": [
+      "calm",
+      "deep",
+      "smooth"
+    ]
+  },
+  {
+    "id": "Alex",
+    "name": "Alex",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Energetic and expressive mid-range male voice, with a mildly nasal quality",
+    "tags": [
+      "energetic",
+      "expressive"
+    ]
+  },
+  {
+    "id": "Amina",
+    "name": "Amina",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Warm, inviting West African female voice, ideal for community outreach, cultural storytelling, and educational workshops.",
+    "tags": [
+      "warm"
+    ]
+  },
+  {
+    "id": "Anjali",
+    "name": "Anjali",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "A confident and articulate Indian female voice, ideal for professional training materials.",
+    "tags": [
+      "professional",
+      "confident",
+      "articulate"
+    ]
+  },
+  {
+    "id": "Arjun",
+    "name": "Arjun",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Clear, composed Indian male voice, well-suited for instructional webinars and technology explainers.",
+    "tags": []
+  },
+  {
+    "id": "Ashley",
+    "name": "Ashley",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "A warm, natural female voice",
+    "tags": [
+      "warm"
+    ]
+  },
+  {
+    "id": "Asuka",
+    "name": "Asuka",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "ja",
+    "description": "Friendly, young adult Japanese female voice",
+    "tags": [
+      "friendly"
+    ]
+  },
+  {
+    "id": "Avery",
+    "name": "Avery",
+    "gender": "Male",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Youthful, performative male voice, suited for gameshow-style hosting, energetic presenter reads, and expressive young character parts.",
+    "tags": [
+      "energetic",
+      "expressive",
+      "youthful"
+    ]
+  },
+  {
+    "id": "Bianca",
+    "name": "Bianca",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Deep, controlled female voice, ideal for serious corporate reads, composed documentary segments, and measured authority-led explainers.",
+    "tags": [
+      "deep",
+      "measured"
+    ]
+  },
+  {
+    "id": "Blake",
+    "name": "Blake",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Rich, intimate male voice, perfect for audiobooks, romantic content, and reassuring narration",
+    "tags": [
+      "intimate"
+    ]
+  },
+  {
+    "id": "Brandon",
+    "name": "Brandon",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Bold, strident male voice, ideal for structured announcements, news-style reads, and direct promotional messaging.",
+    "tags": [
+      "bold"
+    ]
+  },
+  {
+    "id": "Brian",
+    "name": "Brian",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Friendly, encouraging American male voice, ideal for educational tutorials, motivational content, and instructional videos.",
+    "tags": [
+      "friendly",
+      "encouraging"
+    ]
+  },
+  {
+    "id": "Callum",
+    "name": "Callum",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Casual and friendly Australian male voice, ideal for informal instructional content.",
+    "tags": [
+      "friendly",
+      "casual"
+    ]
+  },
+  {
+    "id": "Carter",
+    "name": "Carter",
+    "gender": "Male",
+    "age": "Middle Aged",
+    "language": "en",
+    "description": "Energetic, mature radio announcer-style male voice, great for storytelling, pep talks, and voiceovers.",
+    "tags": [
+      "energetic"
+    ]
+  },
+  {
+    "id": "Cedric",
+    "name": "Cedric",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Crisp, measured male voice, ideal for formal announcements, premium trailer narration, and command-forward presentation scripts.",
+    "tags": [
+      "crisp",
+      "measured"
+    ]
+  },
+  {
+    "id": "Celeste",
+    "name": "Celeste",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Soft, whispery female voice, ideal for ASMR videos, soothing lullabies, and gentle mindfulness sessions.",
+    "tags": [
+      "soft",
+      "gentle",
+      "soothing",
+      "whispery"
+    ]
+  },
+  {
+    "id": "Chloe",
+    "name": "Chloe",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Thoughtful, introspective youthful female voice, perfect for coming-of-age narratives, personal growth stories, and emotional teen dramas.",
+    "tags": [
+      "thoughtful",
+      "youthful"
+    ]
+  },
+  {
+    "id": "Claire",
+    "name": "Claire",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Warm, gentle Eastern European female voice, ideal for bedtime stories, relaxation podcasts",
+    "tags": [
+      "warm",
+      "gentle"
+    ]
+  },
+  {
+    "id": "Clive",
+    "name": "Clive",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "British-accented English-language male voice with a calm, cordial quality",
+    "tags": [
+      "calm"
+    ]
+  },
+  {
+    "id": "Conrad",
+    "name": "Conrad",
+    "gender": "Male",
+    "age": "Senior",
+    "language": "en",
+    "description": "Gruff, weathered male voice, perfect for detective archetypes, hard-edged audiobook roles, and serious investigative narration.",
+    "tags": [
+      "gruff"
+    ]
+  },
+  {
+    "id": "Craig",
+    "name": "Craig",
+    "gender": "Male",
+    "age": "Senior",
+    "language": "en",
+    "description": "Older British male with a refined and articulate voice",
+    "tags": [
+      "articulate"
+    ]
+  },
+  {
+    "id": "Damon",
+    "name": "Damon",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Calm, raspy male voice, suited for moody narration, atmospheric roleplay characters, and grounded meditative reads with subtle tension.",
+    "tags": [
+      "calm",
+      "raspy"
+    ]
+  },
+  {
+    "id": "Darlene",
+    "name": "Darlene",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Soothing, comforting Southern female voice, ideal for bedtime stories, family-centered commercials, and nostalgic narrations.",
+    "tags": [
+      "soothing"
+    ]
+  },
+  {
+    "id": "Deborah",
+    "name": "Deborah",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Warm, peaceful female voice with a calm tone",
+    "tags": [
+      "warm",
+      "calm"
+    ]
+  },
+  {
+    "id": "Dennis",
+    "name": "Dennis",
+    "gender": "Male",
+    "age": "Middle Aged",
+    "language": "en",
+    "description": "Middle-aged man with a smooth, calm and friendly voice",
+    "tags": [
+      "calm",
+      "smooth",
+      "friendly"
+    ]
+  },
+  {
+    "id": "Derek",
+    "name": "Derek",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Steady, professional, composed American male voice, ideal for banking support, account inquiries, and service escalation calls.",
+    "tags": [
+      "professional"
+    ]
+  },
+  {
+    "id": "Diego",
+    "name": "Diego",
+    "gender": "Male",
+    "age": "",
+    "language": "es",
+    "description": "Spanish-speaking male voice with a soothing, gentle quality",
+    "tags": [
+      "gentle",
+      "soothing"
+    ]
+  },
+  {
+    "id": "Dmitry",
+    "name": "Dmitry",
+    "gender": "Male",
+    "age": "",
+    "language": "ru",
+    "description": "Deep, gravelly male voice, delivered at a moderate pace with a commanding and narrative tone.",
+    "tags": [
+      "deep",
+      "commanding",
+      "gravelly"
+    ]
+  },
+  {
+    "id": "Dominus",
+    "name": "Dominus",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Robotic, deep male voice with a menacing quality. Perfect for villains",
+    "tags": [
+      "deep",
+      "menacing",
+      "robotic"
+    ]
+  },
+  {
+    "id": "Duncan",
+    "name": "Duncan",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Warm, articulate British male voice for customer support and education.",
+    "tags": [
+      "warm",
+      "articulate"
+    ]
+  },
+  {
+    "id": "Edward",
+    "name": "Edward",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "American male with a emphatic, confident and streetwise tone",
+    "tags": [
+      "confident"
+    ]
+  },
+  {
+    "id": "Eleanor",
+    "name": "Eleanor",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Polished, approachable British female voice for support and learning.",
+    "tags": []
+  },
+  {
+    "id": "Elena",
+    "name": "Elena",
+    "gender": "Female",
+    "age": "",
+    "language": "ru",
+    "description": "Clear, mid-range female voice, with a smooth texture and a neutral, informational tone.",
+    "tags": [
+      "smooth"
+    ]
+  },
+  {
+    "id": "Elizabeth",
+    "name": "Elizabeth",
+    "gender": "Female",
+    "age": "Middle Aged",
+    "language": "en",
+    "description": "Professional middle-aged woman, perfect for narrations and voiceovers",
+    "tags": [
+      "professional"
+    ]
+  },
+  {
+    "id": "Elliot",
+    "name": "Elliot",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "A calm, steady male voice, suitable for nature documentaries, general informational content, and relaxed narrations.",
+    "tags": [
+      "calm",
+      "relaxed"
+    ]
+  },
+  {
+    "id": "Erik",
+    "name": "Erik",
+    "gender": "Male",
+    "age": "Senior",
+    "language": "nl",
+    "description": "Older Dutch male voice with a weathered edge",
+    "tags": []
+  },
+  {
+    "id": "Ethan",
+    "name": "Ethan",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Assured, precise male voice, perfect for tech tutorials, detailed gadget overviews, and captivating product demonstrations.",
+    "tags": []
+  },
+  {
+    "id": "Evan",
+    "name": "Evan",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Friendly, approachable, easygoing male voice, ideal for onboarding calls, retail assistance, and customer check-ins.",
+    "tags": [
+      "friendly"
+    ]
+  },
+  {
+    "id": "Evelyn",
+    "name": "Evelyn",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "A gentle and intimate female voice, ideal for personal ASMR content, affirmations, and close, calming conversations.",
+    "tags": [
+      "calm",
+      "gentle",
+      "intimate"
+    ]
+  },
+  {
+    "id": "Felix",
+    "name": "Felix",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Calm, friendly British male voice, ideal for help and tutorials.",
+    "tags": [
+      "calm",
+      "friendly"
+    ]
+  },
+  {
+    "id": "Gareth",
+    "name": "Gareth",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Soothing, gentle male voice, ideal for guided meditations, mindfulness exercises, and relaxation-focused wellness content.",
+    "tags": [
+      "gentle",
+      "soothing"
+    ]
+  },
+  {
+    "id": "Gianni",
+    "name": "Gianni",
+    "gender": "Male",
+    "age": "",
+    "language": "it",
+    "description": "Deep, smooth Italian male voice that speaks rapidly",
+    "tags": [
+      "deep",
+      "smooth"
+    ]
+  },
+  {
+    "id": "Graham",
+    "name": "Graham",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Profound, authoritative British male voice, perfect for historical documentaries, luxury brand advertisements, and educational content.",
+    "tags": [
+      "authoritative"
+    ]
+  },
+  {
+    "id": "Grant",
+    "name": "Grant",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Calm, attentive, helpful male voice, ideal for insurance claims, troubleshooting walkthroughs, and helpdesk interactions.",
+    "tags": [
+      "calm"
+    ]
+  },
+  {
+    "id": "Hades",
+    "name": "Hades",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Commanding and gruff male voice, think an omniscient narrator or castle guard",
+    "tags": [
+      "gruff",
+      "commanding"
+    ]
+  },
+  {
+    "id": "Hamish",
+    "name": "Hamish",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Friendly and casual Australian male voice, ideal for character-driven roles and upbeat fitness.",
+    "tags": [
+      "friendly",
+      "upbeat",
+      "casual"
+    ]
+  },
+  {
+    "id": "Hana",
+    "name": "Hana",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Bright, expressive young female voice, perfect for storytelling, gaming, and playful content",
+    "tags": [
+      "bright",
+      "expressive",
+      "playful"
+    ]
+  },
+  {
+    "id": "Hank",
+    "name": "Hank",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Warm, laid-back Southern male voice, ideal for travel documentaries, heritage storytelling, and down-to-earth podcast ads.",
+    "tags": [
+      "warm"
+    ]
+  },
+  {
+    "id": "Heitor",
+    "name": "Heitor",
+    "gender": "Male",
+    "age": "",
+    "language": "pt",
+    "description": "Composed Portuguese-speaking male voice with a neutral tone",
+    "tags": []
+  },
+  {
+    "id": "Hyunwoo",
+    "name": "Hyunwoo",
+    "gender": "Male",
+    "age": "Young Adult",
+    "language": "ko",
+    "description": "Young adult Korean male voice",
+    "tags": []
+  },
+  {
+    "id": "H\u00e9l\u00e8ne",
+    "name": "H\u00e9l\u00e8ne",
+    "gender": "Female",
+    "age": "Middle Aged",
+    "language": "fr",
+    "description": "Middle-aged French woman, with a smooth, musical, and graceful voice",
+    "tags": [
+      "smooth"
+    ]
+  },
+  {
+    "id": "Jake",
+    "name": "Jake",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Amiable, introspective male voice, ideal for motivational talks, personal growth content, and charming interviews.",
+    "tags": []
+  },
+  {
+    "id": "James",
+    "name": "James",
+    "gender": "Male",
+    "age": "Child",
+    "language": "en",
+    "description": "Vibrant, expressive male voice, perfect for animated video content, lively event hosting, and captivating children's stories.",
+    "tags": [
+      "expressive",
+      "lively"
+    ]
+  },
+  {
+    "id": "Jason",
+    "name": "Jason",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Lucid, engrossing male voice, ideal for tech tips, creative productivity hacks, and supportive user interface tutorials.",
+    "tags": []
+  },
+  {
+    "id": "Jessica",
+    "name": "Jessica",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Encouraging, articulate American female voice, perfect for self-help audiobooks, warm customer service messages, and clear e-learning modules.",
+    "tags": [
+      "warm",
+      "articulate",
+      "encouraging"
+    ]
+  },
+  {
+    "id": "Jing",
+    "name": "Jing",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "zh",
+    "description": "An energetic, fast-paced young Chinese female",
+    "tags": [
+      "energetic"
+    ]
+  },
+  {
+    "id": "Johanna",
+    "name": "Johanna",
+    "gender": "Female",
+    "age": "Senior",
+    "language": "de",
+    "description": "A calm older German female with a low, smoky voice",
+    "tags": [
+      "calm"
+    ]
+  },
+  {
+    "id": "Jonah",
+    "name": "Jonah",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Soothing, calm male voice, great for tutorial guidance, reassuring support flows, and gentle instructional narration with steady pacing.",
+    "tags": [
+      "calm",
+      "gentle",
+      "soothing"
+    ]
+  },
+  {
+    "id": "Josef",
+    "name": "Josef",
+    "gender": "Male",
+    "age": "",
+    "language": "de",
+    "description": "An articulate German male voice with an announcer-like quality",
+    "tags": [
+      "articulate"
+    ]
+  },
+  {
+    "id": "Julia",
+    "name": "Julia",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Quirky, high-pitched female voice that delivers lines with playful energy",
+    "tags": [
+      "playful",
+      "quirky"
+    ]
+  },
+  {
+    "id": "Katrien",
+    "name": "Katrien",
+    "gender": "Female",
+    "age": "",
+    "language": "nl",
+    "description": "Dutch woman with an expressive voice",
+    "tags": [
+      "expressive"
+    ]
+  },
+  {
+    "id": "Kayla",
+    "name": "Kayla",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Enthusiastic, youthful female voice, ideal for reaction videos, trendy product reviews, and energetic lifestyle vlogs.",
+    "tags": [
+      "energetic",
+      "youthful"
+    ]
+  },
+  {
+    "id": "Kelsey",
+    "name": "Kelsey",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Warm, empathetic, reassuring female voice, ideal for phone support, appointment confirmations, and customer success calls.",
+    "tags": [
+      "warm"
+    ]
+  },
+  {
+    "id": "Lauren",
+    "name": "Lauren",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Confident, friendly American female voice, ideal for corporate presentations, upbeat commercials, and engaging podcasts.",
+    "tags": [
+      "friendly",
+      "confident",
+      "upbeat"
+    ]
+  },
+  {
+    "id": "Lennart",
+    "name": "Lennart",
+    "gender": "Male",
+    "age": "",
+    "language": "nl",
+    "description": "A confident Dutch male voice. Calm and relaxed",
+    "tags": [
+      "calm",
+      "confident",
+      "relaxed"
+    ]
+  },
+  {
+    "id": "Levi",
+    "name": "Levi",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Measured, ominous male voice, ideal for suspense narration, dark fantasy storytelling, and composed dramatic monologues.",
+    "tags": [
+      "ominous",
+      "measured",
+      "dramatic"
+    ]
+  },
+  {
+    "id": "Liam",
+    "name": "Liam",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Upbeat, motivating Australian male voice, perfect for energizing workout sessions, lively event promotions, and informal lifestyle content.",
+    "tags": [
+      "upbeat",
+      "lively"
+    ]
+  },
+  {
+    "id": "Lore",
+    "name": "Lore",
+    "gender": "Female",
+    "age": "",
+    "language": "nl",
+    "description": "Clear, calm Dutch female voice, great for narrations and professional use cases",
+    "tags": [
+      "calm",
+      "professional"
+    ]
+  },
+  {
+    "id": "Loretta",
+    "name": "Loretta",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Inviting, folksy Southern female voice, perfect for cooking shows, heartwarming family tales, and cozy radio ads.",
+    "tags": [
+      "warm"
+    ]
+  },
+  {
+    "id": "Lucian",
+    "name": "Lucian",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Brooding, foreboding male voice, suited for villainous character arcs, gothic drama scenes, and dark narrative worldbuilding.",
+    "tags": [
+      "brooding"
+    ]
+  },
+  {
+    "id": "Luna",
+    "name": "Luna",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Calm, relaxing female voice, perfect for meditations, sleep stories, and mindfulness exercises",
+    "tags": [
+      "calm"
+    ]
+  },
+  {
+    "id": "Lupita",
+    "name": "Lupita",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "es",
+    "description": "Vibrant, energetic young Spanish-speaking female voice",
+    "tags": [
+      "energetic"
+    ]
+  },
+  {
+    "id": "Mait\u00ea",
+    "name": "Mait\u00ea",
+    "gender": "Female",
+    "age": "Middle Aged",
+    "language": "pt",
+    "description": "Middle-aged Portuguese-speaking female voice",
+    "tags": []
+  },
+  {
+    "id": "Malcolm",
+    "name": "Malcolm",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Authoritative, manipulative male voice, perfect for cunning leaders, intense negotiation scenes, and persuasive villain speeches.",
+    "tags": [
+      "authoritative",
+      "cunning"
+    ]
+  },
+  {
+    "id": "Manoj",
+    "name": "Manoj",
+    "gender": "Male",
+    "age": "",
+    "language": "hi",
+    "description": "Clear, professional Hindi male voice. Great for narrations, news anchors, and customer service.",
+    "tags": [
+      "professional"
+    ]
+  },
+  {
+    "id": "Marcus",
+    "name": "Marcus",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Authoritative, empathetic male voice, great for civic campaigns, community outreach explainers, and trustworthy commercial reads with emotional credibility.",
+    "tags": [
+      "authoritative"
+    ]
+  },
+  {
+    "id": "Mark",
+    "name": "Mark",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Energetic, expressive man with a rapid-fire delivery",
+    "tags": [
+      "energetic",
+      "expressive"
+    ]
+  },
+  {
+    "id": "Marlene",
+    "name": "Marlene",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Friendly, relaxed Southern female voice, ideal for home-style cooking tutorials, community event promotions, and downhome commercials.",
+    "tags": [
+      "friendly",
+      "relaxed"
+    ]
+  },
+  {
+    "id": "Mathieu",
+    "name": "Mathieu",
+    "gender": "Male",
+    "age": "",
+    "language": "fr",
+    "description": "A French male voice carrying a nasal quality",
+    "tags": []
+  },
+  {
+    "id": "Mia",
+    "name": "Mia",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Youthful, expressive female voice, ideal for adolescent characters, school-age animation dialogue, and bright coming-of-age narrative scenes.",
+    "tags": [
+      "bright",
+      "expressive",
+      "youthful"
+    ]
+  },
+  {
+    "id": "Miguel",
+    "name": "Miguel",
+    "gender": "Male",
+    "age": "Adult",
+    "language": "es",
+    "description": "A calm adult Spanish-speaking male voice, perfect for storytelling",
+    "tags": [
+      "calm"
+    ]
+  },
+  {
+    "id": "Minji",
+    "name": "Minji",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "ko",
+    "description": "Energetic, friendly young Korean female voice",
+    "tags": [
+      "energetic",
+      "friendly"
+    ]
+  },
+  {
+    "id": "Miranda",
+    "name": "Miranda",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Menacing, cold-hearted female voice, perfect for strategic villains, mysterious narratives",
+    "tags": [
+      "menacing"
+    ]
+  },
+  {
+    "id": "Mortimer",
+    "name": "Mortimer",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Gravelly, aggressive male character voice, ideal for fantasy villains and high-intensity game dialogue.",
+    "tags": [
+      "gravelly"
+    ]
+  },
+  {
+    "id": "Nadia",
+    "name": "Nadia",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Personable, lively female voice, perfect for tutorial walkthroughs, friendly support messaging, and engaging narration for creator-led product content.",
+    "tags": [
+      "friendly",
+      "lively"
+    ]
+  },
+  {
+    "id": "Naomi",
+    "name": "Naomi",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Warm, grounded female voice, perfect for narrative podcasting, people-first customer guidance, and emotionally real brand storytelling.",
+    "tags": [
+      "warm"
+    ]
+  },
+  {
+    "id": "Nate",
+    "name": "Nate",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Conversational, sociable male voice, great for customer support and friendly guidance",
+    "tags": [
+      "friendly",
+      "conversational"
+    ]
+  },
+  {
+    "id": "Nikolai",
+    "name": "Nikolai",
+    "gender": "Male",
+    "age": "",
+    "language": "ru",
+    "description": "Deep, resonant male voice, delivered at a measured pace with a clear, theatrical, and narrative quality.",
+    "tags": [
+      "deep",
+      "resonant",
+      "measured"
+    ]
+  },
+  {
+    "id": "Nour",
+    "name": "Nour",
+    "gender": "Female",
+    "age": "",
+    "language": "ar",
+    "description": "Polished female Arabic voice with a friendly tone, great for voice over or support.",
+    "tags": [
+      "friendly"
+    ]
+  },
+  {
+    "id": "Oliver",
+    "name": "Oliver",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Neutral and clear male voice, ideal for public announcements and educational information.",
+    "tags": []
+  },
+  {
+    "id": "Olivia",
+    "name": "Olivia",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Young, British female with a friendly and helpful tone, conveying confidence and efficiency.",
+    "tags": [
+      "friendly"
+    ]
+  },
+  {
+    "id": "Omar",
+    "name": "Omar",
+    "gender": "Male",
+    "age": "",
+    "language": "ar",
+    "description": "Bright, confident Arabic male voice, great for announcements, broadcasts, and voice overs.",
+    "tags": [
+      "bright",
+      "confident"
+    ]
+  },
+  {
+    "id": "Oren",
+    "name": "Oren",
+    "gender": "Male",
+    "age": "",
+    "language": "he",
+    "description": "Steady male Hebrew voice, great for podcasts, voice overs, or announcers.",
+    "tags": []
+  },
+  {
+    "id": "Orietta",
+    "name": "Orietta",
+    "gender": "Female",
+    "age": "Adult",
+    "language": "it",
+    "description": "Calm adult female Italian voice, with a soothing cadence",
+    "tags": [
+      "calm",
+      "soothing"
+    ]
+  },
+  {
+    "id": "Pippa",
+    "name": "Pippa",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Friendly and casual Australian female voice, ideal for relaxed instructional content.",
+    "tags": [
+      "friendly",
+      "casual",
+      "relaxed"
+    ]
+  },
+  {
+    "id": "Pixie",
+    "name": "Pixie",
+    "gender": "Female",
+    "age": "Child",
+    "language": "en",
+    "description": "High-pitched, childlike female voice with a squeaky quality - great for a cartoon character",
+    "tags": []
+  },
+  {
+    "id": "Priya",
+    "name": "Priya",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Even-toned female voice with an Indian accent",
+    "tags": []
+  },
+  {
+    "id": "Rafael",
+    "name": "Rafael",
+    "gender": "Male",
+    "age": "Middle Aged",
+    "language": "es",
+    "description": "Middle-aged Spanish-speaking male with a deep, composed voice. Great for narrations",
+    "tags": [
+      "deep"
+    ]
+  },
+  {
+    "id": "Reed",
+    "name": "Reed",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Clear, professional American male voice, well-suited for support and training.",
+    "tags": [
+      "professional"
+    ]
+  },
+  {
+    "id": "Riley",
+    "name": "Riley",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Playful, youthful female voice, perfect for animated storytelling, upbeat game characters, and high-energy kid-focused digital content.",
+    "tags": [
+      "upbeat",
+      "playful",
+      "youthful"
+    ]
+  },
+  {
+    "id": "Riya",
+    "name": "Riya",
+    "gender": "Female",
+    "age": "",
+    "language": "hi",
+    "description": "Professional and clean female voice, with a clear and articulate tone, moderate pace, and a polished, approachable quality.",
+    "tags": [
+      "professional",
+      "articulate"
+    ]
+  },
+  {
+    "id": "Ronald",
+    "name": "Ronald",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Confident, British man with a deep, gravelly voice",
+    "tags": [
+      "deep",
+      "confident",
+      "gravelly"
+    ]
+  },
+  {
+    "id": "Rupert",
+    "name": "Rupert",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Resonant, commanding British male voice, ideal for motivational speeches, epic film trailers, and dynamic corporate presentations.",
+    "tags": [
+      "commanding",
+      "resonant"
+    ]
+  },
+  {
+    "id": "Saanvi",
+    "name": "Saanvi",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Crisp, articulate Indian female voice, ideal for dynamic e-learning modules, articulate documentary narrations, and vibrant travel vlogs.",
+    "tags": [
+      "articulate",
+      "crisp"
+    ]
+  },
+  {
+    "id": "Sarah",
+    "name": "Sarah",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "en",
+    "description": "Fast-talking young adult woman, with a questioning and curious tone",
+    "tags": []
+  },
+  {
+    "id": "Satoshi",
+    "name": "Satoshi",
+    "gender": "Male",
+    "age": "",
+    "language": "ja",
+    "description": "Dramatic, expressive male Japanese voice filled with energy",
+    "tags": [
+      "expressive",
+      "dramatic"
+    ]
+  },
+  {
+    "id": "Sebastian",
+    "name": "Sebastian",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Intimidating, steely male voice, perfect for ruthless antagonists, strategic power struggles, and chilling monologues.",
+    "tags": [
+      "intimidating"
+    ]
+  },
+  {
+    "id": "Selene",
+    "name": "Selene",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Soft, flirtatious female voice, ideal for companion-style interactions, charming game dialogue, and emotionally playful character-driven story scenes.",
+    "tags": [
+      "soft",
+      "playful",
+      "flirtatious"
+    ]
+  },
+  {
+    "id": "Seojun",
+    "name": "Seojun",
+    "gender": "Male",
+    "age": "Middle Aged",
+    "language": "ko",
+    "description": "Clear, deep mature Korean male voice",
+    "tags": [
+      "deep"
+    ]
+  },
+  {
+    "id": "Serena",
+    "name": "Serena",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Soft, nurturing female voice, perfect for mindfulness sessions, nature-inspired visualizations, and gentle wellness podcasts.",
+    "tags": [
+      "soft",
+      "gentle",
+      "nurturing"
+    ]
+  },
+  {
+    "id": "Shaun",
+    "name": "Shaun",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Friendly, dynamic male voice great for conversations",
+    "tags": [
+      "friendly"
+    ]
+  },
+  {
+    "id": "Simon",
+    "name": "Simon",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Articulate, insightful male voice, perfect for corporate presentations, technical tutorials, and steady news reporting.",
+    "tags": [
+      "articulate"
+    ]
+  },
+  {
+    "id": "Snik",
+    "name": "Snik",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Hoarse, cunning male voice, perfect for devious goblin roles, fantasy heist scenarios, and trickster-themed animations.",
+    "tags": [
+      "cunning",
+      "hoarse"
+    ]
+  },
+  {
+    "id": "Sophie",
+    "name": "Sophie",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Friendly British female voice, great for assistance and knowledge sharing.",
+    "tags": [
+      "friendly"
+    ]
+  },
+  {
+    "id": "Svetlana",
+    "name": "Svetlana",
+    "gender": "Female",
+    "age": "",
+    "language": "ru",
+    "description": "Soft, high-pitched female voice, with a moderate pace and slightly breathy quality.",
+    "tags": [
+      "soft"
+    ]
+  },
+  {
+    "id": "Szymon",
+    "name": "Szymon",
+    "gender": "Male",
+    "age": "Adult",
+    "language": "pl",
+    "description": "Polish adult male voice with a warm, friendly quality",
+    "tags": [
+      "warm",
+      "friendly"
+    ]
+  },
+  {
+    "id": "Tessa",
+    "name": "Tessa",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Upbeat, conversational Australian female voice, perfect for lifestyle vlogs, playful advertisements, and engaging social media content.",
+    "tags": [
+      "upbeat",
+      "playful",
+      "conversational"
+    ]
+  },
+  {
+    "id": "Theodore",
+    "name": "Theodore",
+    "gender": "Male",
+    "age": "Senior",
+    "language": "en",
+    "description": "Gravelly male voice, with a time-worn quality",
+    "tags": [
+      "gravelly"
+    ]
+  },
+  {
+    "id": "Timothy",
+    "name": "Timothy",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Lively, upbeat American male voice",
+    "tags": [
+      "upbeat",
+      "lively"
+    ]
+  },
+  {
+    "id": "Trevor",
+    "name": "Trevor",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Punchy, expressive male voice, perfect for energetic promos, announcer-driven reveals, and fast-moving scripted event intros.",
+    "tags": [
+      "energetic",
+      "expressive"
+    ]
+  },
+  {
+    "id": "Tristan",
+    "name": "Tristan",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Deliberate, controlled male voice, ideal for documentary narration, polished voiceover campaigns, and clear long-form infomercial storytelling.",
+    "tags": []
+  },
+  {
+    "id": "Tyler",
+    "name": "Tyler",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Authoritative, insightful male voice, ideal for tech explainer videos, in-depth software reviews, and dynamic coding guides.",
+    "tags": [
+      "soft",
+      "authoritative"
+    ]
+  },
+  {
+    "id": "Veronica",
+    "name": "Veronica",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Intimidating, commanding female voice, perfect for ruthless antagonists, high-stakes negotiations, and chilling monologues.",
+    "tags": [
+      "commanding",
+      "intimidating"
+    ]
+  },
+  {
+    "id": "Victor",
+    "name": "Victor",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Ominous, sinister male voice, ideal for dark conspiracies, eerie suspense scenes, and enigmatic villain roles.",
+    "tags": [
+      "ominous",
+      "sinister"
+    ]
+  },
+  {
+    "id": "Victoria",
+    "name": "Victoria",
+    "gender": "Female",
+    "age": "",
+    "language": "en",
+    "description": "Silky, cunning British female voice, ideal for narrating intricate plots",
+    "tags": [
+      "cunning"
+    ]
+  },
+  {
+    "id": "Vinny",
+    "name": "Vinny",
+    "gender": "Male",
+    "age": "",
+    "language": "en",
+    "description": "Gritty, assertive New York male voice, perfect for crime dramas, urban documentaries, and no-nonsense character roles.",
+    "tags": []
+  },
+  {
+    "id": "Wendy",
+    "name": "Wendy",
+    "gender": "Female",
+    "age": "Middle Aged",
+    "language": "en",
+    "description": "Posh, middle-aged British female voice",
+    "tags": []
+  },
+  {
+    "id": "Wojciech",
+    "name": "Wojciech",
+    "gender": "Male",
+    "age": "Middle Aged",
+    "language": "pl",
+    "description": "A middle-aged Polish male voice",
+    "tags": []
+  },
+  {
+    "id": "Xiaoyin",
+    "name": "Xiaoyin",
+    "gender": "Female",
+    "age": "Young Adult",
+    "language": "zh",
+    "description": "A youthful Chinese female voice with a gentle, sweet voice",
+    "tags": [
+      "gentle",
+      "youthful"
+    ]
+  },
+  {
+    "id": "Xinyi",
+    "name": "Xinyi",
+    "gender": "Female",
+    "age": "",
+    "language": "zh",
+    "description": "A Chinese woman with a neutral tone, perfect for narrations",
+    "tags": []
+  },
+  {
+    "id": "Yael",
+    "name": "Yael",
+    "gender": "Female",
+    "age": "",
+    "language": "he",
+    "description": "Mid-range female Hebrew voice, suitable for narrations, storytelling, and more.",
+    "tags": []
+  },
+  {
+    "id": "Yichen",
+    "name": "Yichen",
+    "gender": "Male",
+    "age": "Young Adult",
+    "language": "zh",
+    "description": "A calm, flat young adult male Chinese voice",
+    "tags": [
+      "calm"
+    ]
+  },
+  {
+    "id": "Yoona",
+    "name": "Yoona",
+    "gender": "Female",
+    "age": "",
+    "language": "ko",
+    "description": "Korean woman with a gentle, soothing voice",
+    "tags": [
+      "gentle",
+      "soothing"
+    ]
+  },
+  {
+    "id": "default-ofw8mqnvn6z4uenfqu9epq__bella",
+    "name": "Bella",
+    "gender": "",
+    "age": "",
+    "language": "en",
+    "description": "",
+    "tags": []
+  },
+  {
+    "id": "\u00c9tienne",
+    "name": "\u00c9tienne",
+    "gender": "Male",
+    "age": "Young Adult",
+    "language": "fr",
+    "description": "Calm young adult French male",
+    "tags": [
+      "calm"
+    ]
+  }
+]

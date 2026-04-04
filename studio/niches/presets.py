@@ -23,7 +23,7 @@ _VALID_TAGS = ("tiktok", "youtube", "shorts", "trending")
 _DEFAULT_VOICE = "af_heart"
 _DEFAULT_SPEED = 1.0
 _DEFAULT_DURATION = 45
-_DEFAULT_INWORLD_VOICE = "Dennis"
+_DEFAULT_INWORLD_VOICE = "Elliot"
 _BELLA_VOICE_ID = "default-ofw8mqnvn6z4uenfqu9epq__bella"  # Clone: firm female narrative
 
 # ── Inworld voice mapping — best voice per (category, tone) ────────────────────
@@ -33,8 +33,8 @@ INWORLD_VOICE_MAP = {
     # Curated from user's preferred voices only.
     #
     # MALE NARRATIVE:  Hades, Vinny, Elliot, Malcolm, Oliver, Brian,
-    #                  Callum, James, Blake, Craig, Ronald
-    # FIRM FEMALE:     Victoria, Bianca, Deborah, Jessica, Lauren,
+    #                  Callum, James, Blake
+    # FIRM FEMALE:     Bianca, Deborah, Jessica, Lauren,
     #                  Miranda, Sarah
     # SMOOTH FEMALE:   Celeste, Claire, Evelyn, Luna, Nadia, Selene,
     #                  Serena, Wendy
@@ -43,19 +43,19 @@ INWORLD_VOICE_MAP = {
 
     # ── Psychology ──
     ("psychology", "suspenseful"): "Malcolm",     # Authoritative, manipulative — dark psych
-    ("psychology", "dramatic"): "Victoria",       # Silky, cunning — mind games
+    ("psychology", "dramatic"): "Deborah",        # Firm, commanding — mind games
     ("psychology", "educational"): _BELLA_VOICE_ID,  # Bella — firm female, clear explainer
     ("psychology", "inspirational"): _BELLA_VOICE_ID,  # Bella — firm, motivational
 
     # ── Philosophy ──
     ("philosophy", "educational"): _BELLA_VOICE_ID,  # Bella — firm female, structured lectures
-    ("philosophy", "dramatic"): "Ronald",         # Deep, gravelly British — weighty ideas
+    ("philosophy", "dramatic"): "Hades",           # Commanding, deep — weighty ideas
     ("philosophy", "inspirational"): _BELLA_VOICE_ID,  # Bella — firm, uplifting
     ("philosophy", "suspenseful"): "Hades",       # Commanding, omniscient — existential dread
 
     # ── Motivation ──
     ("motivation", "inspirational"): _BELLA_VOICE_ID,  # Bella — firm female, motivational
-    ("motivation", "dramatic"): "Ronald",         # Deep, confident British — powerful delivery
+    ("motivation", "dramatic"): "Brian",           # Friendly, encouraging — powerful delivery
     ("motivation", "educational"): _BELLA_VOICE_ID,  # Bella — firm, tutorials
     ("motivation", "wholesome"): "Callum",        # Casual, friendly Australian — warm uplift
 
@@ -70,13 +70,13 @@ INWORLD_VOICE_MAP = {
     ("horror", "comedic"): "James",               # Vibrant, expressive — campy horror
 
     # ── Mystery ──
-    ("mystery", "suspenseful"): "Victoria",       # Silky, cunning British — intricate plots
+    ("mystery", "suspenseful"): "Miranda",        # Firm, sharp — intricate plots
     ("mystery", "dramatic"): "Malcolm",           # Authoritative, manipulative — who done it
     ("mystery", "educational"): "Elliot",         # Calm, steady — mystery breakdowns
 
     # ── Religion ──
-    ("religion", "dramatic"): "Craig",            # Refined, articulate British — gravitas
-    ("religion", "religious"): "Ronald",          # Deep, gravelly British — biblical authority
+    ("religion", "dramatic"): "Malcolm",          # Authoritative, intense — gravitas narration
+    ("religion", "religious"): "Hades",            # Commanding, deep — biblical authority
     ("religion", "inspirational"): "James",       # Vibrant, expressive — spiritual fire
     ("religion", "educational"): "Oliver",        # Neutral, clear — theology explainers
 
@@ -98,8 +98,8 @@ INWORLD_VOICE_MAP = {
     ("children", "dramatic"): "James",            # Vibrant, expressive — adventure
 
     # ── History ──
-    ("history", "dramatic"): "Craig",             # Refined British — historical documentaries
-    ("history", "educational"): "Ronald",         # Deep, gravelly British — history lessons
+    ("history", "dramatic"): "Oliver",            # Neutral, clear — historical documentaries
+    ("history", "educational"): "Callum",          # Steady, articulate — history lessons
     ("history", "suspenseful"): "Hades",          # Commanding — war, conflict, empires
     ("history", "inspirational"): "Callum",       # Friendly Australian — human stories
 
@@ -116,7 +116,7 @@ INWORLD_VOICE_MAP = {
     ("survival", "inspirational"): "James",       # Vibrant — overcoming odds
 
     # ── Curiosity ──
-    ("curiosity", "suspenseful"): "Victoria",     # Cunning — what if, hidden truths
+    ("curiosity", "suspenseful"): "Lauren",       # Firm — what if, hidden truths
     ("curiosity", "educational"): "Oliver",       # Neutral, clear — explainers
     ("curiosity", "dramatic"): "James",           # Vibrant, expressive — animated
     ("curiosity", "inspirational"): "Callum",     # Friendly — wonder and discovery
@@ -133,13 +133,13 @@ INWORLD_VOICE_MAP = {
     ("comedy", "wholesome"): "Nadia",             # Personable, lively — feel-good
 
     # ── Space ──
-    ("space", "dramatic"): "Ronald",              # Deep, gravelly British — cosmic scale
+    ("space", "dramatic"): "Hades",               # Commanding, deep — cosmic scale
     ("space", "educational"): "Oliver",           # Neutral, clear — space explainers
     ("space", "suspenseful"): "Hades",            # Commanding — cosmic horror / deep space
-    ("space", "inspirational"): "Craig",          # Refined British — awe and wonder
+    ("space", "inspirational"): "James",          # Vibrant, expressive — awe and wonder
 
     # ── Politics ──
-    ("politics", "dramatic"): "Craig",            # Refined British — power and gravitas
+    ("politics", "dramatic"): "Malcolm",          # Authoritative — power and gravitas
     ("politics", "educational"): "Bianca",        # Deep, controlled — serious analysis
     ("politics", "suspenseful"): "Malcolm",       # Manipulative — power dynamics
     ("politics", "inspirational"): "Lauren",      # Confident, friendly — civic motivation
