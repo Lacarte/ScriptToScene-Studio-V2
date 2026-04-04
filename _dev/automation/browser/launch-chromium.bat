@@ -19,8 +19,6 @@ set "BROWSER=%CHROMIUM_DIR%\ungoogled-chromium\chrome.exe"
 set "PROFILE=%PROJECT_DIR%\data\chromium-profile"
 set "GROK_EXT=%PROJECT_DIR%\_dev\automation\extensions\grok\STS-grok-sync"
 set "GEMINI_EXT=%PROJECT_DIR%\_dev\automation\extensions\gemini\STS-gemini-sync"
-set "RECORDER_EXT=%PROJECT_DIR%\_dev\automation\extensions\dom-activity-recorder"
-
 :: ── Read browser tab URLs from .env ────────────────────────────────────
 set "TAB_GROK="
 set "TAB_GEMINI="
@@ -103,7 +101,6 @@ echo  [OK] Chromium installed
 :: -- Extensions check --
 if exist "%GROK_EXT%\manifest.json" (echo  [OK] Grok ready) else (echo  [!]  Grok missing)
 if exist "%GEMINI_EXT%\manifest.json" (echo  [OK] Gemini ready) else (echo  [!]  Gemini missing)
-if exist "%RECORDER_EXT%\manifest.json" (echo  [OK] DOM Recorder ready) else (echo  [!]  DOM Recorder missing)
 
 :: -- Profile --
 if not exist "%PROFILE%" mkdir "%PROFILE%"
@@ -123,9 +120,6 @@ set "EXT_LIST="
 if exist "%GROK_EXT%\manifest.json" set "EXT_LIST=%GROK_EXT%"
 if exist "%GEMINI_EXT%\manifest.json" (
   if defined EXT_LIST (set "EXT_LIST=!EXT_LIST!,%GEMINI_EXT%") else (set "EXT_LIST=%GEMINI_EXT%")
-)
-if exist "%RECORDER_EXT%\manifest.json" (
-  if defined EXT_LIST (set "EXT_LIST=!EXT_LIST!,%RECORDER_EXT%") else (set "EXT_LIST=%RECORDER_EXT%")
 )
 
 echo.

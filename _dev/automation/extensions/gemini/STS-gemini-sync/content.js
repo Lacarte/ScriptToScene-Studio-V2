@@ -981,33 +981,11 @@
 
     function stopTyping() { S.typing.stopRequested = true; render(); }
 
-    // ── DOM Monitor Integration (dom-activity-recorder) ──
-    // Uses __sarAPI exposed by the DOM Activity Recorder extension
-    function startDOMMonitor(xpath) {
-      if (!window.__sarAPI) {
-        console.warn('[DOM-MON] DOM Activity Recorder not loaded — install the extension to enable monitoring');
-        return false;
-      }
-      if (window.__sarAPI.isRecording()) {
-        window.__sarAPI.stop();
-        window.__sarAPI.clear();
-      }
-      var result = window.__sarAPI.monitor(xpath);
-      if (result && result.ok) {
-        console.log('[DOM-MON] Started monitoring: ' + xpath + ' — ' + result.message);
-        return true;
-      } else {
-        console.warn('[DOM-MON] Failed to monitor: ' + (result ? result.error : 'unknown error'));
-        return false;
-      }
-    }
-
-    function stopDOMMonitor() {
-      if (window.__sarAPI && window.__sarAPI.isRecording()) {
-        window.__sarAPI.stop();
-        console.log('[DOM-MON] Stopped monitoring');
-      }
-    }
+    // ── DOM Monitor stubs ──
+    // DOM observation is now handled by ai-web-auto platform (observe_start/observe_diff).
+    // These stubs keep call sites working without the removed dom-activity-recorder.
+    function startDOMMonitor(xpath) { return false; }
+    function stopDOMMonitor() {}
 
     // ── UI ───────────────────────────────────────────
     function $id(id) { return document.getElementById(id); }
