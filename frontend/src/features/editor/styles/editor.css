@@ -3626,31 +3626,75 @@
 
 /* ---- Timeline minimap (overview bar) ---- */
 .timeline-minimap {
-    height: 20px;
-    background: var(--bg-darkest);
+    height: 24px;
+    background: var(--bg-darkest, #0a0a12);
     border-bottom: 1px solid var(--border);
     position: relative;
     overflow: hidden;
     flex-shrink: 0;
     cursor: pointer;
+    margin-left: 36px; /* align with track content (skip track-header width) */
 }
+.timeline-minimap:hover { background: rgba(10, 10, 18, 0.95); }
 
 .minimap-scene {
     position: absolute;
+    top: 2px;
+    height: 14px;
+    border-radius: 2px;
+    border-right: 1px solid rgba(0, 0, 0, 0.3);
+    transition: opacity 0.15s;
+}
+.minimap-scene:hover { opacity: 0.9; }
+.minimap-scene-selected {
+    box-shadow: inset 0 0 0 1px var(--accent, #2dd4bf);
+}
+
+.minimap-audio {
+    position: absolute;
+    height: 3px;
+    border-radius: 1px;
+    pointer-events: none;
+}
+.minimap-audio-voice {
+    bottom: 4px;
+    background: rgba(52, 211, 153, 0.5);
+}
+.minimap-audio-music {
+    bottom: 1px;
+    background: rgba(167, 139, 250, 0.4);
+}
+
+.minimap-playhead {
+    position: absolute;
     top: 0;
-    height: 100%;
-    border-right: 1px solid rgba(255, 255, 255, 0.04);
+    bottom: 0;
+    width: 1px;
+    background: var(--accent, #2dd4bf);
+    pointer-events: none;
+    z-index: 2;
+    box-shadow: 0 0 4px rgba(45, 212, 191, 0.5);
 }
 
 .minimap-viewport {
     position: absolute;
     top: 0;
     height: 100%;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 2px;
     pointer-events: none;
     box-sizing: border-box;
+    z-index: 1;
+}
+
+.minimap-end-marker {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    pointer-events: none;
 }
 
 /* ---- Time ruler (top, CapCut-style) ---- */
@@ -3744,15 +3788,19 @@
 }
 
 .track-label {
-    font-size: 8px;
+    font-size: 7px;
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     color: var(--text-muted, rgba(255, 255, 255, 0.35));
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0;
     text-align: center;
     width: 100%;
+    max-width: 36px;
     line-height: 1;
     pointer-events: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .track-toggle {

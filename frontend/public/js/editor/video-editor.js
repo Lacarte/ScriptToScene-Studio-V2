@@ -3109,9 +3109,9 @@ function buildFontOptions(selectEl, selectedFamily) {
 
 // ---- Load saved project from server ----
 
-async function loadProjectFromServer(projectId) {
-    // Skip if this project is already loaded and has scenes
-    if (EditorState.project?.id === projectId && EditorState.scenes.length > 0 && !EditorState.activeBootstrapId) {
+async function loadProjectFromServer(projectId, { force = false } = {}) {
+    // Skip if this project is already loaded and has scenes (unless forced, e.g. reset)
+    if (!force && EditorState.project?.id === projectId && EditorState.scenes.length > 0 && !EditorState.activeBootstrapId) {
         hideNoDataOverlay();
         showToast('Project already loaded', 'info');
         return;
@@ -6725,8 +6725,8 @@ function resetToInitialState() {
             clearProjectEdits();
             clearEditorBootCaches();
 
-            // Reload the project from initial state
-            await loadProjectFromServer(pid);
+            // Reload the project from initial state (force bypass "already loaded" guard)
+            await loadProjectFromServer(pid, { force: true });
             showToast('Project reset to initial state', 'success');
         } catch (e) {
             hideLoadingOverlay();
@@ -8497,24 +8497,52 @@ function renderMinimap() {
     const totalDur = getTotalDuration();
     if (!totalDur) { container.innerHTML = ''; return; }
 
+    // The minimap always represents the full project duration spread across 100% width.
+    // The viewport indicator shows which portion is visible in the scrollable timeline.
+    const contentPct = 100;
+
+    // Helper: convert time fraction to percentage within the content area
+    const pct = (timeFrac) => timeFrac * contentPct;
+
     let html = '';
     let t = 0;
-    const colors = ['rgba(45,212,191,0.3)', 'rgba(45,212,191,0.18)'];
+
+    // Scene blocks with color coding
     EditorState.scenes.forEach((s, i) => {
-        const left = (t / totalDur) * 100;
-        const width = ((s.duration || 0) / totalDur) * 100;
-        html += `<div class="minimap-scene" style="left:${left}%;width:${width}%;background:${colors[i % 2]}"></div>`;
+        const left = pct(t / totalDur);
+        const width = pct((s.duration || 0) / totalDur);
+        const isText = s.type === 'text';
+        const alpha = isText ? 0.15 : (i % 2 === 0 ? 0.35 : 0.22);
+        const hue = isText ? '167,139,250' : '45,212,191';
+        const selected = EditorState.selectedScene?.id === s.id ? ' minimap-scene-selected' : '';
+        html += `<div class="minimap-scene${selected}" data-scene-id="${s.id}" style="left:${left}%;width:${width}%;background:rgba(${hue},${alpha});"></div>`;
         t += s.duration || 0;
     });
 
+    // Audio track indicators
+    const voiceTrack = EditorState.audioTracks.find(t => t.type === 'voice' && !t.muted);
+    const musicTrack = EditorState.audioTracks.find(t => t.type === 'music' && !t.muted);
+    if (voiceTrack) {
+        const vStart = pct(getTrackTimelineOffset(voiceTrack) / totalDur);
+        const vEnd = pct((getTrackTimelineEnd(voiceTrack, totalDur) || totalDur) / totalDur);
+        html += `<div class="minimap-audio minimap-audio-voice" style="left:${vStart}%;width:${Math.min(vEnd - vStart, contentPct - vStart)}%;"></div>`;
+    }
+    if (musicTrack) {
+        const mWidth = musicTrack.loop ? contentPct : pct(Math.min(1, (musicTrack.duration || totalDur) / totalDur));
+        html += `<div class="minimap-audio minimap-audio-music" style="left:0%;width:${mWidth}%;"></div>`;
+    }
+
+    // Playhead
+    const playPct = pct(EditorState.playbackPosition / totalDur);
+    html += `<div class="minimap-playhead" style="left:${playPct}%"></div>`;
+
     // Viewport indicator
     if (elements.timelineTracks) {
-        const pps = EditorState.pixelsPerSecond * EditorState.zoomLevel;
         const scrollLeft = elements.timelineTracks.scrollLeft;
         const visibleWidth = elements.timelineTracks.clientWidth;
-        const viewLeft = (pixelsToTime(scrollLeft) / totalDur) * 100;
-        const viewWidth = (pixelsToTime(visibleWidth) / totalDur) * 100;
-        html += `<div class="minimap-viewport" style="left:${viewLeft}%;width:${Math.min(viewWidth, 100 - viewLeft)}%"></div>`;
+        const viewLeft = pct(pixelsToTime(scrollLeft) / totalDur);
+        const viewWidth = pct(pixelsToTime(visibleWidth) / totalDur);
+        html += `<div class="minimap-viewport" style="left:${viewLeft}%;width:${Math.min(viewWidth, contentPct - viewLeft)}%"></div>`;
     }
 
     container.innerHTML = html;
@@ -9717,6 +9745,15 @@ function updatePlayhead() {
             } else {
                 timeLabel.classList.remove('visible');
             }
+        }
+    }
+
+    // Update minimap playhead (lightweight — just move the existing element)
+    const mmPlayhead = elements.timelineMinimap?.querySelector('.minimap-playhead');
+    if (mmPlayhead) {
+        const totalDur = getTotalDuration();
+        if (totalDur) {
+            mmPlayhead.style.left = `${(EditorState.playbackPosition / totalDur) * 100}%`;
         }
     }
 

@@ -208,6 +208,14 @@ def _apply_segmenter_timing(result, segments, full_segments=None):
         visual_duration = round(timeline_end - timeline_start, 3)
         speech_duration = round(seg["end"] - seg["start"], 3)
 
+        # Cap trailing silence — don't let a scene extend more than 1.5s
+        # beyond its speech end (prevents TTS paragraph pauses from bloating scenes)
+        MAX_TRAILING_SILENCE = 1.5
+        trailing = timeline_end - seg["end"]
+        if trailing > MAX_TRAILING_SILENCE and speech_duration > 0:
+            timeline_end = round(seg["end"] + MAX_TRAILING_SILENCE, 3)
+            visual_duration = round(timeline_end - timeline_start, 3)
+
         # Enforce minimum scene duration (too-short scenes produce unusable video)
         MIN_SCENE_DURATION = 1.5
         if visual_duration < MIN_SCENE_DURATION:

@@ -927,6 +927,12 @@ def assemble_project_for_editor(project_id):
         scene_index = s.get("index", i)
         scene_type = s.get("type_of_scene", s.get("type", "image"))
         duration = s.get("duration", 3)
+
+        # Cap bloated scene durations — if the scene has way more time than its
+        # speech segment (e.g., TTS inserted a long paragraph pause), trim it
+        seg_dur = s.get("segment_duration")
+        if seg_dur and seg_dur > 0 and duration > seg_dur + 2.0:
+            duration = round(seg_dur + 1.5, 2)
         media_url, media_type = _pick_scene_asset(safe_id, i, scene_index,
                                                    used_urls=used_asset_urls)
         if scene_type != "text" and media_type:

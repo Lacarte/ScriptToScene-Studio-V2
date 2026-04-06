@@ -280,9 +280,15 @@ def merge_short(segments, config=None):
 
 
 def fill_gaps(segments, config=None):
-    """Post-process: insert silence fillers for gaps > gap_filler threshold."""
+    """Post-process: insert silence fillers for gaps > gap_filler threshold.
+
+    Long silence gaps (> MAX_SILENCE) are capped — the filler only covers
+    MAX_SILENCE seconds and the remaining dead time is discarded.  This
+    prevents a single long TTS paragraph pause from inflating one scene.
+    """
     cfg = {**DEFAULT_CONFIG, **(config or {})}
     gap_threshold = cfg["gap_filler"]
+    MAX_SILENCE = cfg.get("max_silence", 2.0)  # cap silence fillers
 
     if not segments:
         return segments
@@ -293,15 +299,17 @@ def fill_gaps(segments, config=None):
             prev_end = filled[-1]["end"]
             gap = seg["start"] - prev_end
             if gap >= gap_threshold:
+                # Cap long silences — only keep MAX_SILENCE worth of pause
+                filler_dur = min(gap, MAX_SILENCE)
                 filler = {
                     "index": 0,  # re-indexed later
                     "words": "",
                     "start": prev_end,
-                    "end": seg["start"],
-                    "duration": round(gap, 3),
+                    "end": round(prev_end + filler_dur, 3),
+                    "duration": round(filler_dur, 3),
                     "word_count": 0,
                     "is_filler": True,
-                    "break_reason": "silence",
+                    "break_reason": "silence" if gap <= MAX_SILENCE else "silence_capped",
                 }
                 filled.append(filler)
         filled.append(seg)

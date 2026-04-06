@@ -1408,7 +1408,7 @@ export const EDITOR_SHELL_HTML = `
                             <path d="M14 14h4" />
                             <path d="M6 18h12" />
                         </svg>
-                        <span class="track-label">Captions</span>
+                        <span class="track-label">Cap</span>
                     </div>
                     <div class="track-content" id="caption-track"></div>
                 </div>
