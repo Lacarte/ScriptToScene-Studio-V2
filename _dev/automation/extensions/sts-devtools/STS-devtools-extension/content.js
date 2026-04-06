@@ -60,10 +60,12 @@
       state.toasts = Array.from(toasts).map(t => t.textContent?.trim().slice(0, 100));
     }
 
-    // Error indicators
-    const errors = document.querySelectorAll('[class*="error"], [class*="danger"], [class*="alert-error"]');
+    // Error indicators — only match visible, non-history error elements
+    const errors = document.querySelectorAll('.gen-error, .state-error, .error-text, .preview-error-text, .snackbar-bar--urgent');
     if (errors.length) {
-      state.errors = Array.from(errors).map(e => e.textContent?.trim().slice(0, 200));
+      state.errors = Array.from(errors)
+        .filter(e => e.offsetParent !== null && e.textContent?.trim().length > 0)
+        .map(e => e.textContent?.trim().slice(0, 200));
     }
 
     // Running indicator
@@ -84,7 +86,7 @@
         #sts-dt-badge {
           position: fixed;
           bottom: 12px;
-          left: 12px;
+          right: 12px;
           z-index: 999999;
           display: flex;
           align-items: center;
@@ -97,11 +99,12 @@
           font-family: 'JetBrains Mono', monospace;
           font-size: 11px;
           color: #aaa;
-          cursor: pointer;
+          cursor: grab;
           user-select: none;
-          transition: opacity 0.2s;
+          transition: opacity 0.2s, box-shadow 0.2s;
         }
         #sts-dt-badge:hover { opacity: 1; border-color: rgba(100, 200, 255, 0.5); }
+        #sts-dt-badge.dragging { cursor: grabbing; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
         #sts-dt-badge .dot {
           width: 7px; height: 7px; border-radius: 50%;
           background: #555;
@@ -120,7 +123,41 @@
     `;
     document.body.appendChild(badge);
 
-    badge.addEventListener('click', () => {
+    // ── Drag support ──
+    let isDragging = false, dragOffset = { x: 0, y: 0 }, didDrag = false;
+
+    badge.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      didDrag = false;
+      const rect = badge.getBoundingClientRect();
+      dragOffset.x = e.clientX - rect.left;
+      dragOffset.y = e.clientY - rect.top;
+      badge.classList.add('dragging');
+      // Switch to left/top positioning for free movement
+      badge.style.right = 'auto';
+      badge.style.bottom = 'auto';
+      badge.style.left = rect.left + 'px';
+      badge.style.top = rect.top + 'px';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      didDrag = true;
+      const x = Math.max(0, Math.min(e.clientX - dragOffset.x, window.innerWidth - badge.offsetWidth));
+      const y = Math.max(0, Math.min(e.clientY - dragOffset.y, window.innerHeight - badge.offsetHeight));
+      badge.style.left = x + 'px';
+      badge.style.top = y + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isDragging) return;
+      isDragging = false;
+      badge.classList.remove('dragging');
+    });
+
+    badge.addEventListener('click', (e) => {
+      if (didDrag) return; // Don't trigger click after drag
       send('screenshot', { save: true });
     });
 

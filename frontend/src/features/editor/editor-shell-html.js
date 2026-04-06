@@ -1342,11 +1342,15 @@ export const EDITOR_SHELL_HTML = `
                 </div>
             </div>
 
+            <!-- Timeline Minimap (overview bar) -->
+            <div class="timeline-minimap" id="timeline-minimap"></div>
+
             <!-- Time Ruler (top, above tracks) -->
             <div class="time-ruler" id="time-ruler"></div>
 
             <!-- Playhead -->
             <div class="timeline-playhead" id="timeline-playhead">
+                <div class="playhead-time-label" id="playhead-time-label"></div>
                 <div class="playhead-marker"></div>
                 <div class="playhead-line"></div>
             </div>
@@ -1368,6 +1372,7 @@ export const EDITOR_SHELL_HTML = `
                             <path d="M17 12h5" />
                             <path d="M17 16.5h5" />
                         </svg>
+                        <span class="track-label">Video</span>
                         <button class="video-audio-toggle muted" id="video-audio-toggle" title="Video Audio (muted)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
@@ -1388,6 +1393,7 @@ export const EDITOR_SHELL_HTML = `
                             <path d="M12 4v16" />
                             <path d="M8 20h8" />
                         </svg>
+                        <span class="track-label">Text</span>
                     </div>
                     <div class="track-content" id="text-track"></div>
                 </div>
@@ -1402,6 +1408,7 @@ export const EDITOR_SHELL_HTML = `
                             <path d="M14 14h4" />
                             <path d="M6 18h12" />
                         </svg>
+                        <span class="track-label">Captions</span>
                     </div>
                     <div class="track-content" id="caption-track"></div>
                 </div>

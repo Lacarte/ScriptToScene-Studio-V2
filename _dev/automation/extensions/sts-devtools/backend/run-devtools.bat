@@ -1,4 +1,5 @@
 @echo off
+title STS - DevTools Backend
 :: Run STS DevTools from the ScriptToScene-Studio project
 cd /d "%~dp0..\..\..\..\.."
 if exist "venv\Scripts\python.exe" (

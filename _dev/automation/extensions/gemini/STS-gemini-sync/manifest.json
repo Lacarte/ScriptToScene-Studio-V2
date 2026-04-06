@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
+  "key": "BIuAcXv/d1ASo95GPUV71n92NUP6lj8yZ0fMgNdebnqZi4Bxe/93UBKj3kY9RXvWf3Y1Q/qWPzJnR8yA115uepk=",
   "name": "STS Gemini Sync",
   "version": "1.0",
   "description": "Automates Gemini image generation via WebSocket for ScriptToScene Studio",
-  "permissions": ["storage", "activeTab", "tabs", "<all_urls>"],
+  "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": ["https://gemini.google.com/*", "https://lh3.googleusercontent.com/*", "https://*.googleusercontent.com/*", "https://*.usercontent.google.com/*", "http://localhost/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:*"

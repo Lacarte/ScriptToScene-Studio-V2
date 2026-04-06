@@ -105,7 +105,7 @@ echo   %G%+%X% Chromium installed
 :start_flask
 echo   %D%~%X% Starting Flask server...
 set "STS_NO_BROWSER=1"
-start "STS Flask" /min /d "%CD%" cmd /c "venv\Scripts\activate.bat && python app.py"
+start "STS - Flask Server (:5050)" /min /d "%CD%" cmd /c "venv\Scripts\activate.bat && python app.py"
 
 set "RETRIES=0"
 :wait_flask
@@ -159,7 +159,7 @@ echo   %Y%!%X% Chromium CDP not available
 :: 4) START Vite
 :: ════════════════════════════════════════════════════════════════════════
 echo   %D%~%X% Starting Vite...
-start "STS Vite" /min /d "%CD%\frontend" cmd /c "npm run dev"
+start "STS - Vite Dev Server (:5174)" /min /d "%CD%\frontend" cmd /c "npm run dev"
 
 set "RETRIES=0"
 :wait_vite
@@ -179,7 +179,7 @@ echo.
 :: 5) OPEN Pipeline tab in Chromium (Vite is now serving)
 :: ════════════════════════════════════════════════════════════════════════
 echo   %D%~%X% Opening pipeline in Chromium...
-curl -s -o nul http://localhost:9222/json/version >nul 2>&1
+curl -s -o nul http://127.0.0.1:9222/json/version >nul 2>&1
 if not errorlevel 1 (
     curl -s http://localhost:9222/json/list | findstr /i "localhost:5174" >nul 2>&1
     if errorlevel 1 (

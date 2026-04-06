@@ -58,7 +58,7 @@ def select_music(story_tone):
                 "fade_out": 3.0,
                 "loop": True,
                 "ducking_enabled": True,
-                "ducking_level": 0.2,
+                "ducking_level": 0.45,
             }
 
     logger.warning("Auto-music: no tracks found for tone '{}' in folders {}", story_tone, folders)

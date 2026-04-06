@@ -3624,6 +3624,35 @@
     text-align: center;
 }
 
+/* ---- Timeline minimap (overview bar) ---- */
+.timeline-minimap {
+    height: 20px;
+    background: var(--bg-darkest);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.minimap-scene {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.minimap-viewport {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 2px;
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
 /* ---- Time ruler (top, CapCut-style) ---- */
 .time-ruler {
     height: 20px;
@@ -3712,6 +3741,18 @@
     left: 0;
     z-index: 4;
     background: var(--bg-surface, #141522);
+}
+
+.track-label {
+    font-size: 8px;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    color: var(--text-muted, rgba(255, 255, 255, 0.35));
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: center;
+    width: 100%;
+    line-height: 1;
+    pointer-events: none;
 }
 
 .track-toggle {
@@ -4602,6 +4643,65 @@
     cursor: grabbing;
 }
 
+/* ---- Fade in/out drag handles ---- */
+
+.audio-fade-handle {
+    position: absolute;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.audio-fade-handle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(78, 205, 196, 0.35);
+}
+
+.audio-fade-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-style: solid;
+}
+
+.audio-fade-handle.audio-fade-in::after {
+    left: -1px;
+    border-width: 5px 6px 5px 0;
+    border-color: transparent rgba(78, 205, 196, 0.85) transparent transparent;
+}
+
+.audio-fade-handle.audio-fade-out::after {
+    right: -1px;
+    border-width: 5px 0 5px 6px;
+    border-color: transparent transparent transparent rgba(78, 205, 196, 0.85);
+}
+
+.audio-clip-universal:hover .audio-fade-handle,
+.audio-fade-handle.active {
+    opacity: 1;
+}
+
+.audio-fade-handle:hover,
+.audio-fade-handle.active {
+    opacity: 1;
+}
+
+.audio-fade-handle:hover::before,
+.audio-fade-handle.active::before {
+    background: rgba(78, 205, 196, 0.55);
+}
+
 .audio-clip.audio-clip-error,
 .audio-clip-universal.audio-clip-universal-error {
     background: rgba(255, 107, 107, 0.06);
@@ -4803,6 +4903,38 @@
 .audio-track-speaker-btn:hover { opacity: 1; }
 .audio-track-speaker-btn.muted { color: var(--coral, #ff6b6b); opacity: 0.8; }
 
+.audio-track-solo-btn {
+    background: none;
+    border: 1px solid var(--border, #1f2536);
+    color: var(--text-muted);
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    font-size: 9px;
+    font-weight: bold;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 14px;
+    text-align: center;
+    border-radius: 3px;
+    opacity: 0.5;
+    transition: opacity 0.12s, color 0.12s, background 0.12s, border-color 0.12s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.audio-track-solo-btn:hover {
+    opacity: 1;
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+.audio-track-solo-btn.active {
+    opacity: 1;
+    color: #fff;
+    background: var(--accent, #4ECDC4);
+    border-color: var(--accent, #4ECDC4);
+}
+
 .audio-track-remove-btn {
     background: none;
     border: none;
@@ -4822,6 +4954,68 @@
 }
 .audio-track-remove-btn:active {
     transform: scale(0.9);
+}
+
+.audio-track-gear-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0.4;
+    padding: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: opacity 0.15s, color 0.15s, transform 0.15s;
+}
+.audio-track-gear-btn:hover {
+    opacity: 1;
+    color: var(--text-secondary);
+    transform: scale(1.15);
+}
+.audio-track-gear-btn:active {
+    transform: scale(0.9);
+}
+
+.track-gear-menu {
+    background: var(--bg-darkest, #0d0d14);
+    border: 1px solid var(--border, #1f2536);
+    border-radius: 8px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 120px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    animation: gearMenuIn 0.12s ease-out;
+}
+@keyframes gearMenuIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.track-gear-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: none;
+    border: none;
+    color: var(--text-secondary, #94a3b8);
+    font-size: 11px;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    cursor: pointer;
+    border-radius: 5px;
+    transition: background 0.1s, color 0.1s;
+    white-space: nowrap;
+}
+.track-gear-item:hover {
+    background: rgba(45, 212, 191, 0.1);
+    color: var(--accent, #2dd4bf);
+}
+.track-gear-item.danger:hover {
+    background: rgba(248, 113, 113, 0.1);
+    color: var(--coral, #f87171);
 }
 
 /* ---- Volume Popup ---- */
@@ -5051,6 +5245,29 @@
 
 .timeline-playhead.dragging {
     z-index: 20;
+}
+
+.playhead-time-label {
+    position: absolute;
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: var(--accent, #a78bfa);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 8px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 11;
+}
+
+.playhead-time-label.visible {
+    opacity: 1;
 }
 
 .playhead-marker {

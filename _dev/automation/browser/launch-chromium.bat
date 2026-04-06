@@ -1,4 +1,5 @@
 @echo off
+title STS - Automation Browser Launcher
 :: Launch Ungoogled Chromium as dedicated STS automation browser
 :: Auto-setup on first run: download, extract, prepare extensions
 ::
@@ -23,8 +24,8 @@ set "PROFILE=%PROJECT_DIR%\data\chromium-profile"
 set "GROK_EXT=%PROJECT_DIR%\_dev\automation\extensions\grok\STS-grok-sync"
 set "GEMINI_EXT=%PROJECT_DIR%\_dev\automation\extensions\gemini\STS-gemini-sync"
 set "DEVTOOLS_EXT=%PROJECT_DIR%\_dev\automation\extensions\sts-devtools\STS-devtools-extension"
-set "AWA_EXT=D:\@Workspace\@Development\@Projects\ai-web-auto\ai-web-auto-extension"
-set "AWA_ROOT=D:\@Workspace\@Development\@Projects\ai-web-auto"
+set "AWA_EXT=%PROJECT_DIR%\_dev\automation\extensions\ai-web-auto\ai-web-auto-extension"
+set "AWA_ROOT=%PROJECT_DIR%\_dev\automation\extensions\ai-web-auto"
 
 :: ── Read browser tab URLs from .env ───────────────────────────────────
 set "TAB_GROK="
@@ -114,13 +115,50 @@ if exist "%AWA_EXT%\manifest.json" (echo  [OK] AI Web-Auto extension ready) else
 :: -- Profile --
 if not exist "%PROFILE%" mkdir "%PROFILE%"
 
+:: -- Clear extension cache for fresh load --
+if exist "%PROFILE%\Extensions" (
+  echo  [..] Clearing extension cache...
+  rmdir /s /q "%PROFILE%\Extensions" >nul 2>&1
+)
+if exist "%PROFILE%\Local Extension Settings" (
+  rmdir /s /q "%PROFILE%\Local Extension Settings" >nul 2>&1
+)
+if exist "%PROFILE%\Extension State" (
+  rmdir /s /q "%PROFILE%\Extension State" >nul 2>&1
+)
+if exist "%PROFILE%\Extension Rules" (
+  rmdir /s /q "%PROFILE%\Extension Rules" >nul 2>&1
+)
+echo  [OK] Extension cache cleared — fresh load
+
+:: -- Pin extensions to toolbar --
+:: Stable IDs from "key" field in each manifest.json
+set "ID_GROK=jdookpoacnpjccbglagkajbodnhfabco"
+set "ID_GEMINI=madklpolldnjjdglmjjjoekceldfjgkl"
+set "ID_DEVTOOLS=ildalkidbljlnonbcbfeagfmhgdghaeg"
+set "ID_AWA=lcdcclkfepemmgooijjalcaadbdeicop"
+
+set "PREFS_FILE=%PROFILE%\Default\Preferences"
+if exist "%PREFS_FILE%" (
+  echo  [..] Pinning extensions to toolbar...
+  powershell -NoProfile -Command ^
+    "$prefs = Get-Content '%PREFS_FILE%' -Raw | ConvertFrom-Json;" ^
+    "if (-not $prefs.extensions) { $prefs | Add-Member -Name 'extensions' -Value @{} -MemberType NoteProperty -Force };" ^
+    "$ids = @('%ID_GROK%','%ID_GEMINI%','%ID_DEVTOOLS%','%ID_AWA%');" ^
+    "$prefs.extensions | Add-Member -Name 'pinned_extensions' -Value $ids -MemberType NoteProperty -Force;" ^
+    "$prefs | ConvertTo-Json -Depth 50 -Compress | Set-Content '%PREFS_FILE%' -Encoding UTF8;"
+  echo  [OK] Extensions pinned to toolbar
+) else (
+  echo  [!]  Preferences not found — extensions will pin after first run
+)
+
 :: ================================================================
 :: STEP 2: START SERVERS (background)
 :: ================================================================
 
 :: -- ai-web-auto WebSocket server --
-:: Check if already running on port 8765
-curl -s -o nul http://127.0.0.1:8765 >nul 2>&1
+:: Check if already running on port 8765 (use netstat, not curl — curl causes WS handshake errors)
+netstat -ano | findstr ":8765 " | findstr "LISTENING" >nul 2>&1
 if not errorlevel 1 (
   echo  [OK] ai-web-auto server already running on :8765
   goto :awa_done
@@ -128,7 +166,7 @@ if not errorlevel 1 (
 
 if exist "%AWA_ROOT%\venv\Scripts\python.exe" (
   echo  [..] Starting ai-web-auto server...
-  start "AI-Web-Auto Server" /min cmd /c "cd /d "%AWA_ROOT%" && venv\Scripts\python -m ai_web_auto_backend.automation_controller"
+  start "STS - AI Web-Auto Server (ws://8765)" /min cmd /c "cd /d "%AWA_ROOT%" && venv\Scripts\python -m ai_web_auto_backend.automation_controller"
   echo  [OK] ai-web-auto server starting on ws://localhost:8765
 ) else if exist "%AWA_ROOT%\requirements.txt" (
   echo  [!]  ai-web-auto venv missing — run: cd "%AWA_ROOT%" ^&^& python -m venv venv ^&^& venv\Scripts\pip install -r requirements.txt
@@ -164,7 +202,7 @@ echo.
 echo  Launching Chromium...
 
 if defined EXT_LIST (
-  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 --load-extension=%EXT_LIST% %TABS%
+  start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --auto-grant-permissions --window-position=100,100 --window-size=1400,900 --load-extension=%EXT_LIST% %TABS%
 ) else (
   start "" "%BROWSER%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --no-first-run --disable-default-apps --window-position=100,100 --window-size=1400,900 %TABS%
 )

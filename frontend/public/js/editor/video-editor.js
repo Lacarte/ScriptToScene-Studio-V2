@@ -329,7 +329,7 @@ const AUDIO_TRACK_COLORS = {
     music: 'rgba(167, 139, 250, 0.8)',
     fx: 'rgba(255, 183, 77, 0.8)',
 };
-const DEFAULT_MUSIC_DUCKING_LEVEL = 0.2;
+const DEFAULT_MUSIC_DUCKING_LEVEL = 0.45;
 const MIN_MUSIC_DUCKING_LEVEL = 0.12;
 const MIN_TEXT_OVERLAY_DURATION = 0.5;
 
@@ -1101,13 +1101,42 @@ function isTrackPlaybackSuppressed(track) {
     const disabledTracks = EditorState.disabledTracks || new Set();
     const trackKey = `audio-${track.id}`;
     const legacyMusicDisabled = track.type === 'music' && disabledTracks.has('bgmusic');
+    const soloSuppressed = EditorState.soloTrackId != null && track.id !== EditorState.soloTrackId;
     return !!(
         EditorState.isMuted
         || track.muted
+        || soloSuppressed
         || disabledTracks.has(trackKey)
         || disabledTracks.has('audio')
         || legacyMusicDisabled
     );
+}
+
+function toggleSolo(trackId) {
+    if (EditorState.soloTrackId === trackId) {
+        // Unsolo — restore all tracks to their pre-solo mute state
+        EditorState.soloTrackId = null;
+        EditorState.audioTracks.forEach(t => {
+            if (t._preSoloMuted !== undefined) {
+                t.muted = t._preSoloMuted;
+                t._preSoloMuted = undefined;
+            }
+            applyTrackVolumeLive(t, t.volume);
+        });
+    } else {
+        // Solo this track — save mute states, mute all others
+        EditorState.soloTrackId = trackId;
+        EditorState.audioTracks.forEach(t => {
+            t._preSoloMuted = t.muted;
+            if (t.id !== trackId) {
+                t.muted = true;
+            } else {
+                t.muted = false;
+            }
+            applyTrackVolumeLive(t, t.volume);
+        });
+    }
+    renderAllAudioTracks();
 }
 
 function ensureTrackGainNode(track) {
@@ -1146,6 +1175,8 @@ async function ensureAudioContextReady() {
 
 function applyTrackVolumeLive(track, requestedVol = track?.volume, options = {}) {
     if (!track?.element) return;
+    // Don't override gain while user is dragging the volume slider
+    if (track._volumeDragging) return;
 
     const nextVol = Number.isFinite(+requestedVol) ? Math.max(0, +requestedVol) : Number(track.volume ?? 1.0);
     track.volume = nextVol;
@@ -1156,9 +1187,11 @@ function applyTrackVolumeLive(track, requestedVol = track?.volume, options = {})
         track.element.muted = false;
         if (track._gainNode && EditorState._audioCtx) {
             try {
+                const gain = track._gainNode.gain;
                 const now = EditorState._audioCtx.currentTime;
-                track._gainNode.gain.cancelScheduledValues(now);
-                track._gainNode.gain.setValueAtTime(effectiveVol, now);
+                gain.cancelScheduledValues(now);
+                gain.setValueAtTime(gain.value, now);
+                gain.linearRampToValueAtTime(effectiveVol, now + 0.05);
             } catch (_) {
                 track._gainNode.gain.value = effectiveVol;
             }
@@ -1305,6 +1338,55 @@ function drawWaveformCanvas(canvas, track) {
         ctx.strokeStyle = color.replace(/[\d.]+\)$/, '0.8)');
         ctx.lineWidth = 1.5;
         ctx.stroke();
+    }
+
+    // Draw ducking envelope overlay for music tracks
+    if (track.type === 'music' && track.duckingEnabled) {
+        const voiceTrack = EditorState.audioTracks.find(t => t.type === 'voice' && !t.muted);
+        if (voiceTrack) {
+            const totalDur = getTotalDuration();
+            const voiceStart = getTrackTimelineOffset(voiceTrack);
+            const voiceEnd = getTrackTimelineEnd(voiceTrack, totalDur) || totalDur;
+            const musicStart = getTrackTimelineOffset(track);
+            const musicDur = trackDur;
+            const pxPerSec = w / musicDur;
+            const duckStartPx = Math.max(0, (voiceStart - musicStart) * pxPerSec);
+            const duckEndPx = Math.min(w, (voiceEnd - musicStart) * pxPerSec);
+
+            // Only draw if the ducked region is visible on this canvas
+            if (duckEndPx > 0 && duckStartPx < w) {
+                const duckLevel = Math.max(0, Math.min(1, track.duckingLevel || 0));
+                const duckHeight = h * (1 - duckLevel);
+                const rampPx = Math.min(1.5 * pxPerSec, (duckEndPx - duckStartPx) * 0.3);
+
+                // Semi-transparent ducking region overlay
+                ctx.save();
+                ctx.globalAlpha = 0.12;
+                ctx.fillStyle = '#f59e0b';
+                ctx.beginPath();
+                ctx.moveTo(Math.max(0, duckStartPx - rampPx), 0);
+                ctx.lineTo(duckStartPx, duckHeight);
+                ctx.lineTo(duckEndPx, duckHeight);
+                ctx.lineTo(Math.min(w, duckEndPx + rampPx), 0);
+                ctx.lineTo(Math.max(0, duckStartPx - rampPx), 0);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+
+                // Dashed line at the ducking level across the ducked region
+                ctx.save();
+                ctx.globalAlpha = 0.35;
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                ctx.moveTo(duckStartPx, duckHeight);
+                ctx.lineTo(duckEndPx, duckHeight);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+        }
     }
 }
 
@@ -1566,6 +1648,7 @@ const EditorState = {
     selectedExportProfile: 'yt_shorts',  // Export profile ID
     bgMusic: null,          // DEPRECATED — use audioTracks (type: 'music')
     bgMusicElement: null,   // DEPRECATED — use audioTracks[].element
+    soloTrackId: null,         // Currently soloed audio track ID (null = no solo)
     disabledTracks: new Set(), // Keep track of which tracks are disabled
     storageEnabled: STS.get('sts-editor-storage') !== 'false', // localStorage toggle (default ON)
     sessionStorageEnabled: STS.get('sts-editor-session-storage') !== 'false' // sessionStorage toggle (default ON)
@@ -2796,6 +2879,32 @@ function getSceneStartTime(sceneIndex) {
         startTime += EditorState.scenes[i].duration;
     }
     return startTime;
+}
+
+/**
+ * Get all scene boundary times (start/end of every scene)
+ */
+function getSceneBoundaryTimes() {
+    const boundaries = [0];
+    let t = 0;
+    for (const s of EditorState.scenes) {
+        t += s.duration || 0;
+        boundaries.push(t);
+    }
+    return boundaries;
+}
+
+/**
+ * Snap a time value to the nearest scene boundary if within threshold pixels.
+ * Returns the snapped time, or the original time if no boundary is close enough.
+ */
+function snapToSceneBoundary(time, thresholdPx) {
+    const threshold = pixelsToTime(thresholdPx || 8);
+    const boundaries = getSceneBoundaryTimes();
+    for (const b of boundaries) {
+        if (Math.abs(time - b) < threshold) return b;
+    }
+    return time;
 }
 
 /**
@@ -5529,6 +5638,19 @@ function renderAllAudioTracks() {
                 : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;opacity:0.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
 
             const selectedClass = EditorState.selectedAudioTrack?.id === track.id ? ' selected' : '';
+            // Fade handle positioning
+            const fadeInSec = track.fadeIn || 0;
+            const fadeOutSec = track.fadeOut || 0;
+            const fadeInPx = duration > 0 ? (fadeInSec / duration) * width : 0;
+            const fadeOutPx = duration > 0 ? (fadeOutSec / duration) * width : 0;
+            const showFadeIn = fadeInSec > 0 || track.type === 'music';
+            const showFadeOut = fadeOutSec > 0 || track.type === 'music';
+            const fadeInHandle = showFadeIn
+                ? `<div class="audio-fade-handle audio-fade-in" data-track-id="${track.id}" style="left:${fadeInPx}px;" title="Fade in: ${fadeInSec.toFixed(1)}s"></div>`
+                : '';
+            const fadeOutHandle = showFadeOut
+                ? `<div class="audio-fade-handle audio-fade-out" data-track-id="${track.id}" style="right:${fadeOutPx}px;" title="Fade out: ${fadeOutSec.toFixed(1)}s"></div>`
+                : '';
             clipHTML = `
                 <div class="audio-clip-wrap" data-track-id="${track.id}" style="width:${width}px; margin-left:${offsetPx}px;">
                     <span class="audio-clip-tag" style="background:${color}">${displayFile}</span>
@@ -5537,6 +5659,8 @@ function renderAllAudioTracks() {
                         <span class="audio-clip-duration">${statusText}</span>
                         <div class="audio-resize-handle-universal audio-resize-left" data-track-id="${track.id}"></div>
                         <div class="audio-resize-handle-universal audio-resize-right" data-track-id="${track.id}"></div>
+                        ${fadeInHandle}
+                        ${fadeOutHandle}
                     </div>
                 </div>`;
         } else {
@@ -5557,18 +5681,20 @@ function renderAllAudioTracks() {
             ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>`
             : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.08"/></svg>`;
 
-        // Remove button (only for non-voice tracks)
-        const removeBtn = !isVoice
-            ? `<button class="audio-track-remove-btn" data-track-id="${track.id}" title="Remove track"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>`
+        // Gear menu button (for non-voice tracks)
+        const gearBtn = !isVoice
+            ? `<button class="audio-track-gear-btn" data-track-id="${track.id}" data-track-type="${track.type}" title="Track options"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>`
             : '';
 
         return `
             <div class="track" data-track="audio-${track.id}" data-audio-track-id="${track.id}">
-                <div class="track-header" style="display:flex; align-items:center; gap:2px;">
+                <div class="track-header" style="display:flex; flex-direction:column; align-items:center; gap:2px;">
                     <button class="audio-track-speaker-btn${mutedClass}" data-track-id="${track.id}" title="${trackLabel} — Vol ${Math.round(track.volume * 100)}%">
                         ${speakerIcon}
                     </button>
-                    ${removeBtn}
+                    <button class="audio-track-solo-btn${track.id === EditorState.soloTrackId ? ' active' : ''}" data-track-id="${track.id}" title="Solo">S</button>
+                    <span class="track-label">${trackLabel}</span>
+                    ${gearBtn}
                 </div>
                 <div class="track-content" style="display:flex; align-items:center; min-height:28px;">
                     ${clipHTML}
@@ -5576,8 +5702,9 @@ function renderAllAudioTracks() {
             </div>`;
     }).join('');
 
-    // Wire up resize handles + edge hover indicators
+    // Wire up resize handles + edge hover indicators + fade handles
     setupAllAudioResizeHandlers();
+    setupAudioFadeHandlers();
     setupAudioResizeHoverIndicators(container);
     setupAudioTrackDragHandlers(container);
     if (typeof _wireFxTrackDropZones === 'function') _wireFxTrackDropZones();
@@ -5591,12 +5718,19 @@ function renderAllAudioTracks() {
         });
     });
 
-    // Wire up remove buttons
-    container.querySelectorAll('.audio-track-remove-btn').forEach(btn => {
+    // Wire up solo buttons
+    container.querySelectorAll('.audio-track-solo-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const trackId = btn.dataset.trackId;
-            removeAudioTrack(trackId);
+            toggleSolo(btn.dataset.trackId);
+        });
+    });
+
+    // Wire up gear menu buttons
+    container.querySelectorAll('.audio-track-gear-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _showTrackGearMenu(btn.dataset.trackId, btn.dataset.trackType, btn);
         });
     });
 
@@ -5668,6 +5802,86 @@ function setupAllAudioResizeHandlers() {
 }
 
 /**
+ * Setup drag handlers for fade in/out handles on audio clips.
+ */
+function setupAudioFadeHandlers() {
+    document.querySelectorAll('.audio-fade-handle').forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const trackId = handle.dataset.trackId;
+            const track = getAudioTrackById(trackId);
+            if (!track) return;
+            const isFadeIn = handle.classList.contains('audio-fade-in');
+            startAudioFadeDrag(e, track, isFadeIn, handle);
+        });
+    });
+}
+
+/**
+ * Drag handler for adjusting fade in/out duration on an audio clip.
+ */
+function startAudioFadeDrag(startEvent, track, isFadeIn, handle) {
+    const clip = document.querySelector(`.audio-clip-universal[data-track-id="${track.id}"]`);
+    const waveformCanvas = clip?.querySelector('.audio-waveform-canvas');
+    if (!clip) return;
+
+    const clipRect = clip.getBoundingClientRect();
+    const timelineDur = getTotalDuration() || 60;
+    const duration = getTrackVisibleDuration(track) || getTrackTimelineDuration(track, timelineDur) || track.duration || 1;
+    const maxFade = duration / 2;
+    const oldValue = isFadeIn ? (track.fadeIn || 0) : (track.fadeOut || 0);
+
+    handle.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+
+    const onMouseMove = (e) => {
+        const currentRect = clip.getBoundingClientRect();
+        let newFade;
+        if (isFadeIn) {
+            // Fade in: distance from left edge of clip
+            const px = e.clientX - currentRect.left;
+            newFade = Math.max(0, Math.min(maxFade, pixelsToTime(px)));
+        } else {
+            // Fade out: distance from right edge of clip
+            const px = currentRect.right - e.clientX;
+            newFade = Math.max(0, Math.min(maxFade, pixelsToTime(px)));
+        }
+        // Snap to 0.1s
+        newFade = Math.round(newFade * 10) / 10;
+
+        if (isFadeIn) {
+            track.fadeIn = newFade;
+            handle.style.left = `${timeToPixels(newFade)}px`;
+            handle.title = `Fade in: ${newFade.toFixed(1)}s`;
+        } else {
+            track.fadeOut = newFade;
+            handle.style.right = `${timeToPixels(newFade)}px`;
+            handle.title = `Fade out: ${newFade.toFixed(1)}s`;
+        }
+
+        if (waveformCanvas) drawWaveformCanvas(waveformCanvas, track);
+    };
+
+    const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        handle.classList.remove('active');
+        document.body.style.cursor = '';
+
+        const newValue = isFadeIn ? (track.fadeIn || 0) : (track.fadeOut || 0);
+        const field = isFadeIn ? 'fadeIn' : 'fadeOut';
+        if (newValue !== oldValue) {
+            recordEdit(`${isFadeIn ? 'Fade in' : 'Fade out'} ${track.label}`, track.id, field, oldValue, newValue);
+            showToast(`${track.label} ${isFadeIn ? 'fade in' : 'fade out'}: ${newValue.toFixed(1)}s`, 'info');
+        }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+}
+
+/**
  * Show the resize cue only on the clip edge nearest the pointer.
  */
 function setupAudioResizeHoverIndicators(root = document) {
@@ -5705,6 +5919,7 @@ function setupAudioTrackDragHandlers(root = document) {
         clip.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             if (e.target.closest('.audio-resize-handle-universal')) return;
+            if (e.target.closest('.audio-fade-handle')) return;
             if (clip.classList.contains('resize-hover-left') || clip.classList.contains('resize-hover-right')) return;
             startAudioTrackDrag(e, clip.dataset.trackId);
         });
@@ -5728,7 +5943,9 @@ function startAudioTrackDrag(startEvent, trackId) {
     const onMouseMove = (e) => {
         const deltaX = e.clientX - startX;
         let newOffset = Math.max(0, startOffset + pixelsToTime(deltaX));
-        newOffset = Math.round(newOffset * 2) / 2;
+        // Scene boundary snap takes priority, then fall back to 0.5s grid
+        const snapped = snapToSceneBoundary(newOffset, 8);
+        newOffset = snapped !== newOffset ? snapped : Math.round(newOffset * 2) / 2;
         moved = moved || Math.abs(deltaX) > 2;
 
         track.timelineOffset = newOffset;
@@ -5880,6 +6097,49 @@ function startUniversalAudioResize(startEvent, track, handleSide = 'right') {
 /**
  * Toggle volume popup for a given audio track
  */
+function _showTrackGearMenu(trackId, trackType, anchorBtn) {
+    // Close any existing gear menu
+    document.querySelector('.track-gear-menu')?.remove();
+
+    const menu = document.createElement('div');
+    menu.className = 'track-gear-menu';
+
+    const isMusic = trackType === 'music';
+    const items = [];
+
+    if (isMusic) {
+        items.push({ icon: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>`, label: 'Random', action: () => { menu.remove(); _replaceMusicTrackRandom(trackId); } });
+        items.push({ icon: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0115.4-6.4L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 01-15.4 6.4L3 16"/></svg>`, label: 'Replace', action: () => { menu.remove(); removeAudioTrack(trackId); if (typeof showMusicPicker === 'function') showMusicPicker(); } });
+    }
+    items.push({ icon: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>`, label: 'Remove', cls: 'danger', action: () => { menu.remove(); removeAudioTrack(trackId); } });
+
+    menu.innerHTML = items.map(it =>
+        `<button class="track-gear-item${it.cls ? ' ' + it.cls : ''}">${it.icon}<span>${it.label}</span></button>`
+    ).join('');
+
+    // Position
+    const rect = anchorBtn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.zIndex = '300';
+    document.body.appendChild(menu);
+
+    // Wire actions
+    menu.querySelectorAll('.track-gear-item').forEach((btn, i) => {
+        btn.addEventListener('click', (e) => { e.stopPropagation(); items[i].action(); });
+    });
+
+    // Close on click outside
+    const close = (e) => {
+        if (!menu.contains(e.target) && e.target !== anchorBtn) {
+            menu.remove();
+            document.removeEventListener('mousedown', close);
+        }
+    };
+    setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
 function toggleVolumePopup(trackId, anchorBtn) {
     const track = getAudioTrackById(trackId);
     if (!track) return;
@@ -5896,6 +6156,18 @@ function toggleVolumePopup(trackId, anchorBtn) {
     popup.className = 'volume-popup';
     popup.dataset.trackId = trackId;
     const volPct = Math.round(track.volume * 100);
+    const isDucked = track.type === 'music' && track.duckingEnabled;
+    const duckPct = isDucked ? Math.round((track.duckingLevel ?? DEFAULT_MUSIC_DUCKING_LEVEL) * 100) : 0;
+    const duckRow = isDucked
+        ? `<div style="display:flex; align-items:center; gap:10px; padding:4px 12px 8px;">
+            <button class="ducking-toggle-btn" title="Toggle ducking" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:4px;display:flex;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20l2.7-6.8a6 6 0 011.2-1.8L18 1l-2 6 6-2L12 17.1a6 6 0 01-1.8 1.2L4 21z"/></svg>
+            </button>
+            <input type="range" class="ducking-slider volume-slider" min="5" max="100" step="1" value="${duckPct}" style="width:120px;">
+            <span class="ducking-label" style="font-size:10px; font-family:var(--font-mono); color:var(--text-secondary); min-width:32px; text-align:right;">${duckPct}%</span>
+          </div>
+          <div class="ducking-note" style="font-size:9px; color:var(--text-muted); padding:0 12px 6px; font-family:var(--font-mono);">Ducking to ${duckPct}% when voice plays</div>`
+        : '';
     popup.innerHTML = `
         <div style="display:flex; align-items:center; gap:10px; padding:8px 12px;">
             <button class="volume-mute-toggle" title="${track.muted ? 'Unmute' : 'Mute'}" style="background:none;border:none;color:${track.muted ? 'var(--coral)' : 'var(--text-secondary)'};cursor:pointer;padding:4px;display:flex;">
@@ -5903,9 +6175,10 @@ function toggleVolumePopup(trackId, anchorBtn) {
                     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>'
                     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.08"/></svg>'}
             </button>
-            <input type="range" class="volume-slider" min="0" max="300" value="${volPct}" style="width:120px;">
+            <input type="range" class="volume-slider" min="0" max="300" step="1" value="${volPct}" style="width:120px;">
             <span class="volume-label" style="font-size:10px; font-family:var(--font-mono); color:var(--text-secondary); min-width:32px; text-align:right;">${volPct}%</span>
         </div>
+        ${duckRow}
     `;
 
     // Position popup near the speaker button
@@ -5920,23 +6193,113 @@ function toggleVolumePopup(trackId, anchorBtn) {
     const slider = popup.querySelector('.volume-slider');
     const label = popup.querySelector('.volume-label');
     const volBefore = track.volume;
-    const applyVolume = () => {
-        const vol = parseInt(slider.value) / 100;
-        _saveVolume(track.type, vol);
-        label.textContent = `${slider.value}%`;
-        anchorBtn.title = `${track.label} - Vol ${slider.value}%`;
-        applyTrackVolumeLive(track, vol, { resumeContext: true });
+
+    // One-time setup: ensure AudioContext + gain node are ready on first interaction
+    let _audioReady = false;
+    const _ensureAudio = async () => {
+        if (_audioReady) return;
+        if (!EditorState._audioCtx) {
+            EditorState._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (EditorState._audioCtx.state === 'suspended') {
+            await EditorState._audioCtx.resume();
+        }
+        if (track.element) {
+            ensureTrackGainNode(track);
+        }
+        _audioReady = true;
     };
-    slider.addEventListener('input', applyVolume);
-    slider.addEventListener('change', () => {
-        applyVolume();
+
+    // Set volume directly — synchronous, no awaits (fires 60+ fps during drag)
+    const _setVol = (vol) => {
+        track.volume = vol;
+        if (vol > 0) { track.muted = false; }
+        label.textContent = `${Math.round(vol * 100)}%`;
+        anchorBtn.title = `${track.label} - Vol ${Math.round(vol * 100)}%`;
+
+        if (track.element) { track.element.muted = false; }
+
+        if (track._gainNode && EditorState._audioCtx) {
+            // Use linearRampToValueAtTime to avoid pops/clicks from instant jumps
+            try {
+                const gain = track._gainNode.gain;
+                const now = EditorState._audioCtx.currentTime;
+                gain.cancelScheduledValues(now);
+                gain.setValueAtTime(gain.value, now);
+                gain.linearRampToValueAtTime(vol, now + 0.03); // 30ms ramp — smooth, no pop
+            } catch (_) {
+                track._gainNode.gain.value = vol;
+            }
+            if (track.element) track.element.volume = 1.0;
+        } else if (track.element) {
+            track.element.volume = Math.min(1.0, vol);
+        }
+    };
+
+    // While dragging, block playback loop from overriding the gain value
+    slider.addEventListener('pointerdown', () => {
+        _ensureAudio();
+        track._volumeDragging = true;
+    });
+    slider.addEventListener('input', () => {
+        const vol = parseInt(slider.value) / 100;
+        _setVol(vol);
+    });
+    const _finishDrag = () => {
+        track._volumeDragging = false;
+        const vol = parseInt(slider.value) / 100;
+        _setVol(vol);
+        _saveVolume(track.type, vol);
+        applyTrackVolumeLive(track, vol, { resumeContext: true });
+        renderAllAudioTracks();
         const volAfter = track.volume;
         if (volBefore !== volAfter) {
             recordEdit(`Change ${track.label} volume`, track.id, 'volume', volBefore, volAfter);
         } else {
             saveProjectEdits();
         }
-    });
+    };
+    slider.addEventListener('change', _finishDrag);
+    slider.addEventListener('pointerup', () => { track._volumeDragging = false; });
+    slider.addEventListener('pointercancel', () => { track._volumeDragging = false; });
+
+    // Wire ducking slider (music tracks only)
+    const duckSlider = popup.querySelector('.ducking-slider');
+    const duckLabelEl = popup.querySelector('.ducking-label');
+    const duckNoteEl = popup.querySelector('.ducking-note');
+    if (duckSlider) {
+        const duckBefore = track.duckingLevel;
+        duckSlider.addEventListener('input', () => {
+            const duck = parseInt(duckSlider.value) / 100;
+            track.duckingLevel = duck;
+            if (duckLabelEl) duckLabelEl.textContent = `${duckSlider.value}%`;
+            if (duckNoteEl) duckNoteEl.textContent = `Ducking to ${duckSlider.value}% when voice plays`;
+        });
+        duckSlider.addEventListener('change', () => {
+            const duck = parseInt(duckSlider.value) / 100;
+            track.duckingLevel = duck;
+            saveProjectEdits();
+            if (duckBefore !== duck) {
+                recordEdit(`Change ${track.label} ducking`, track.id, 'duckingLevel', duckBefore, duck);
+            }
+        });
+    }
+
+    // Wire ducking toggle button
+    const duckToggleBtn = popup.querySelector('.ducking-toggle-btn');
+    if (duckToggleBtn) {
+        duckToggleBtn.addEventListener('click', () => {
+            track.duckingEnabled = !track.duckingEnabled;
+            duckToggleBtn.style.color = track.duckingEnabled ? 'var(--text-secondary)' : 'var(--text-muted)';
+            duckToggleBtn.style.opacity = track.duckingEnabled ? '1' : '0.3';
+            if (duckSlider) duckSlider.disabled = !track.duckingEnabled;
+            if (duckNoteEl) duckNoteEl.textContent = track.duckingEnabled
+                ? `Ducking to ${Math.round(track.duckingLevel * 100)}% when voice plays`
+                : 'Ducking disabled';
+            applyTrackVolumeLive(track, track.volume, { resumeContext: true });
+            saveProjectEdits();
+        });
+    }
 
     // Wire mute toggle
     popup.querySelector('.volume-mute-toggle').addEventListener('click', () => {
@@ -6416,6 +6779,25 @@ function renderTimeline() {
         clip.addEventListener('click', (e) => {
             if (e.target.closest('.resize-handle')) return;
             selectScene(parseInt(clip.dataset.id));
+        });
+
+        // Double-click to jump playhead and start playback
+        clip.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            const sceneId = parseInt(clip.dataset.id);
+            const sceneIndex = EditorState.scenes.findIndex(s => s.id === sceneId);
+            if (sceneIndex < 0) return;
+            const startTime = getSceneStartTime(sceneIndex);
+            EditorState.playbackPosition = startTime;
+            if (EditorState.preview) {
+                EditorState.preview.seek(startTime);
+                EditorState.preview.play();
+            }
+            EditorState.audioTracks.forEach(t => {
+                if (t.element) t.element.currentTime = getTrackPlaybackTime(t, startTime);
+            });
+            updatePlayhead();
+            updateTimeScrubber();
         });
     });
 
@@ -7288,10 +7670,24 @@ function startTextOverlayDrag(sceneId, startEvent) {
 
     clip.classList.add('text-clip-dragging');
 
+    const sceneStart = getSceneStartTime(sceneIndex);
+
     const onMouseMove = (e) => {
         const deltaDuration = pixelsToTime(e.clientX - startX);
         let newOffset = Math.max(0, Math.min(maxOffset, startOffset + deltaDuration));
-        newOffset = Math.round(newOffset * 2) / 2;
+
+        // Scene boundary snap (in absolute time) takes priority, then 0.5s grid
+        const absStart = sceneStart + newOffset;
+        const absEnd = absStart + textDuration;
+        const snappedStart = snapToSceneBoundary(absStart, 8);
+        const snappedEnd = snapToSceneBoundary(absEnd, 8);
+        if (snappedStart !== absStart) {
+            newOffset = Math.max(0, Math.min(maxOffset, snappedStart - sceneStart));
+        } else if (snappedEnd !== absEnd) {
+            newOffset = Math.max(0, Math.min(maxOffset, snappedEnd - textDuration - sceneStart));
+        } else {
+            newOffset = Math.round(newOffset * 2) / 2;
+        }
         moved = moved || Math.abs(e.clientX - startX) > 2;
 
         scene.text_timeline_offset = newOffset;
@@ -8089,6 +8485,39 @@ function renderTimeRuler() {
     }
 
     elements.timeRuler.innerHTML = markers;
+    renderMinimap();
+}
+
+/**
+ * Render timeline minimap (overview bar above time ruler)
+ */
+function renderMinimap() {
+    const container = elements.timelineMinimap;
+    if (!container) return;
+    const totalDur = getTotalDuration();
+    if (!totalDur) { container.innerHTML = ''; return; }
+
+    let html = '';
+    let t = 0;
+    const colors = ['rgba(45,212,191,0.3)', 'rgba(45,212,191,0.18)'];
+    EditorState.scenes.forEach((s, i) => {
+        const left = (t / totalDur) * 100;
+        const width = ((s.duration || 0) / totalDur) * 100;
+        html += `<div class="minimap-scene" style="left:${left}%;width:${width}%;background:${colors[i % 2]}"></div>`;
+        t += s.duration || 0;
+    });
+
+    // Viewport indicator
+    if (elements.timelineTracks) {
+        const pps = EditorState.pixelsPerSecond * EditorState.zoomLevel;
+        const scrollLeft = elements.timelineTracks.scrollLeft;
+        const visibleWidth = elements.timelineTracks.clientWidth;
+        const viewLeft = (pixelsToTime(scrollLeft) / totalDur) * 100;
+        const viewWidth = (pixelsToTime(visibleWidth) / totalDur) * 100;
+        html += `<div class="minimap-viewport" style="left:${viewLeft}%;width:${Math.min(viewWidth, 100 - viewLeft)}%"></div>`;
+    }
+
+    container.innerHTML = html;
 }
 
 /**
@@ -8402,6 +8831,31 @@ function setupEventListeners() {
         elements.timelineTracks.addEventListener('scroll', () => {
             updatePlayhead();
             updateHeaderMarker();
+            renderMinimap();
+        });
+    }
+
+    // Minimap click/drag to scroll timeline
+    if (elements.timelineMinimap) {
+        let minimapDragging = false;
+        const scrollMinimapTo = (e) => {
+            const rect = elements.timelineMinimap.getBoundingClientRect();
+            const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            const time = frac * getTotalDuration();
+            if (elements.timelineTracks) {
+                const pps = EditorState.pixelsPerSecond * EditorState.zoomLevel;
+                elements.timelineTracks.scrollLeft = time * pps - elements.timelineTracks.clientWidth / 2;
+            }
+        };
+        elements.timelineMinimap.addEventListener('mousedown', (e) => {
+            minimapDragging = true;
+            scrollMinimapTo(e);
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (minimapDragging) scrollMinimapTo(e);
+        });
+        document.addEventListener('mouseup', () => {
+            minimapDragging = false;
         });
     }
 
@@ -9253,6 +9707,17 @@ function updatePlayhead() {
         const pixelPos = timeToPixels(EditorState.playbackPosition);
         const left = TRACK_BASE_OFFSET + pixelPos - scrollLeft;
         playhead.style.left = `${left}px`;
+
+        // Update floating time label
+        const timeLabel = document.getElementById('playhead-time-label');
+        if (timeLabel) {
+            if (EditorState.playbackPosition > 0) {
+                timeLabel.textContent = formatTimestamp(EditorState.playbackPosition);
+                timeLabel.classList.add('visible');
+            } else {
+                timeLabel.classList.remove('visible');
+            }
+        }
     }
 
     // Also update header marker indicator
@@ -10038,6 +10503,13 @@ function renderMusicList(files) {
 }
 
 window.selectBgMusic = function (filename, path, duration) {
+    // Remove any existing music track to prevent duplicates
+    const existingMusic = EditorState.audioTracks.filter(t => t.type === 'music');
+    for (const old of existingMusic) {
+        if (old.element) { old.element.pause(); old.element.src = ''; }
+        EditorState.audioTracks.splice(EditorState.audioTracks.indexOf(old), 1);
+    }
+
     // Create a new music track via the universal audio track system
     const musicTrack = createAudioTrack({
         label: 'Music',
@@ -10088,8 +10560,8 @@ window.selectBgMusic = function (filename, path, duration) {
 async function _autoSelectBgMusic() {
     const tone = EditorState.project?.storyTone;
     if (!tone) return;
-    // Skip if a music track already exists
-    if (EditorState.audioTracks.some(t => t.type === 'music' && t.loaded)) return;
+    // Skip if a music track already exists (loaded or still loading)
+    if (EditorState.audioTracks.some(t => t.type === 'music')) return;
 
     try {
         const res = await fetch(`/api/music/auto-select?tone=${encodeURIComponent(tone)}`);
@@ -10100,6 +10572,42 @@ async function _autoSelectBgMusic() {
         window.selectBgMusic(music.filename, music.path, music.duration || 0);
     } catch (e) {
         console.warn('[Editor] Auto-music selection failed:', e);
+    }
+}
+
+/**
+ * Replace the current music track with a random one (tone-based or fully random).
+ */
+async function _replaceMusicTrackRandom(trackId) {
+    const tone = EditorState.project?.storyTone || EditorState.project?.story_tone;
+    try {
+        const url = tone
+            ? `/api/music/auto-select?tone=${encodeURIComponent(tone)}`
+            : '/api/music/library';
+        const res = await fetch(url);
+        if (!res.ok) { showToast('Failed to fetch music', 'error'); return; }
+        const data = await res.json();
+
+        let file;
+        if (tone && data?.path) {
+            file = data;
+        } else if (Array.isArray(data)) {
+            // Full library — pick random
+            if (!data.length) { showToast('No music in library', 'error'); return; }
+            file = data[Math.floor(Math.random() * data.length)];
+        } else {
+            showToast('No music available', 'error'); return;
+        }
+
+        // Remove old music track
+        if (trackId) removeAudioTrack(trackId);
+
+        // Add new one
+        window.selectBgMusic(file.filename || file.file, file.path, file.duration || 0);
+        showToast(`Music: ${file.filename || file.file}`, 'success');
+    } catch (e) {
+        console.error('[Editor] Random music failed:', e);
+        showToast('Random music failed', 'error');
     }
 }
 
@@ -11153,8 +11661,33 @@ function handleKeyboard(e) {
         togglePlayback();
     }
 
-    // Left/Right - Seek
-    if (e.code === 'ArrowLeft') {
+    // Shift+Left/Right - Frame step (1/30s)
+    if (e.code === 'ArrowLeft' && e.shiftKey) {
+        e.preventDefault();
+        EditorState.playbackPosition = Math.max(0, EditorState.playbackPosition - 1 / 30);
+        if (EditorState.preview) {
+            EditorState.preview.seek(EditorState.playbackPosition);
+        }
+        seekAudio(EditorState.playbackPosition);
+        updateTimeScrubber();
+        updatePlayhead();
+    }
+    if (e.code === 'ArrowRight' && e.shiftKey) {
+        e.preventDefault();
+        EditorState.playbackPosition = Math.min(
+            EditorState.project.totalDuration,
+            EditorState.playbackPosition + 1 / 30
+        );
+        if (EditorState.preview) {
+            EditorState.preview.seek(EditorState.playbackPosition);
+        }
+        seekAudio(EditorState.playbackPosition);
+        updateTimeScrubber();
+        updatePlayhead();
+    }
+
+    // Left/Right - Seek (1s, without Shift)
+    if (e.code === 'ArrowLeft' && !e.shiftKey) {
         EditorState.playbackPosition = Math.max(0, EditorState.playbackPosition - 1);
         if (EditorState.preview) {
             EditorState.preview.seek(EditorState.playbackPosition);
@@ -11163,7 +11696,7 @@ function handleKeyboard(e) {
         updateTimeScrubber();
         updatePlayhead();
     }
-    if (e.code === 'ArrowRight') {
+    if (e.code === 'ArrowRight' && !e.shiftKey) {
         EditorState.playbackPosition = Math.min(
             EditorState.project.totalDuration,
             EditorState.playbackPosition + 1
@@ -11176,13 +11709,163 @@ function handleKeyboard(e) {
         updatePlayhead();
     }
 
-    // D - Delete selected audio track (SFX/music)
-    if (e.code === 'KeyD' && !e.target.matches('input, textarea, [contenteditable="true"]')) {
-        const track = EditorState.selectedAudioTrack;
-        if (track && track.type !== 'voice') {
+    // J - Step back 5s
+    if (e.code === 'KeyJ' && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        EditorState.playbackPosition = Math.max(0, EditorState.playbackPosition - 5);
+        if (EditorState.preview) {
+            EditorState.preview.seek(EditorState.playbackPosition);
+        }
+        seekAudio(EditorState.playbackPosition);
+        updateTimeScrubber();
+        updatePlayhead();
+    }
+
+    // K - Pause
+    if (e.code === 'KeyK' && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        if (EditorState.isPlaying) {
+            togglePlayback();
+        }
+    }
+
+    // L - Step forward 5s
+    if (e.code === 'KeyL' && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        EditorState.playbackPosition = Math.min(
+            EditorState.project.totalDuration,
+            EditorState.playbackPosition + 5
+        );
+        if (EditorState.preview) {
+            EditorState.preview.seek(EditorState.playbackPosition);
+        }
+        seekAudio(EditorState.playbackPosition);
+        updateTimeScrubber();
+        updatePlayhead();
+    }
+
+    // Home - Go to start
+    if (e.code === 'Home' && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        EditorState.playbackPosition = 0;
+        if (EditorState.preview) {
+            EditorState.preview.seek(EditorState.playbackPosition);
+        }
+        seekAudio(EditorState.playbackPosition);
+        updateTimeScrubber();
+        updatePlayhead();
+    }
+
+    // End - Go to end
+    if (e.code === 'End' && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        EditorState.playbackPosition = EditorState.project.totalDuration;
+        if (EditorState.preview) {
+            EditorState.preview.seek(EditorState.playbackPosition);
+        }
+        seekAudio(EditorState.playbackPosition);
+        updateTimeScrubber();
+        updatePlayhead();
+    }
+
+    // +/= - Zoom in
+    if ((e.key === '+' || e.key === '=') && !e.ctrlKey && !e.metaKey && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        EditorState.zoomLevel = Math.min(4, EditorState.zoomLevel * 1.5);
+        updateZoom();
+    }
+
+    // - (minus) - Zoom out
+    if (e.key === '-' && !e.ctrlKey && !e.metaKey && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        EditorState.zoomLevel = Math.max(0.25, EditorState.zoomLevel / 1.5);
+        updateZoom();
+    }
+
+    // S - Split scene at playhead
+    if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        const time = EditorState.playbackPosition;
+        // Find which scene the playhead is over
+        let cumulative = 0;
+        let splitIndex = -1;
+        let splitOffset = 0;
+        for (let i = 0; i < EditorState.scenes.length; i++) {
+            const dur = EditorState.scenes[i].duration || 0;
+            if (time > cumulative && time < cumulative + dur) {
+                splitIndex = i;
+                splitOffset = time - cumulative;
+                break;
+            }
+            cumulative += dur;
+        }
+        if (splitIndex < 0 || splitOffset <= 0.1) return; // nothing to split or too close to edge
+
+        e.preventDefault();
+        const original = EditorState.scenes[splitIndex];
+        const originalDur = original.duration;
+
+        // Create the second half as a clone
+        const clone = JSON.parse(JSON.stringify(original));
+        clone.id = Math.max(...EditorState.scenes.map(s => s.id)) + 1;
+        clone.duration = originalDur - splitOffset;
+
+        // Shorten the original
+        original.duration = splitOffset;
+
+        // Insert clone after original
+        EditorState.scenes.splice(splitIndex + 1, 0, clone);
+
+        recalculateDuration();
+        renderTimeline();
+        saveProjectEdits();
+        recordEdit('Split scene', original.id, 'split', originalDur, splitOffset);
+        showToast(`Split scene ${original.id} at ${formatTimestamp(time)}`, 'success');
+    }
+
+    // D or E - Delete selected element (audio track, scene, text overlay, SFX clip)
+    if ((e.code === 'KeyD' || e.code === 'KeyE') && !e.target.matches('input, textarea, [contenteditable="true"]')) {
+        // 1. Selected audio track (music, fx — not voice)
+        const selTrack = EditorState.selectedAudioTrack;
+        if (selTrack && selTrack.type !== 'voice') {
             e.preventDefault();
-            removeAudioTrack(track.id);
-            showToast(`Removed "${track.label || track.file || 'track'}"`, 'info');
+            removeAudioTrack(selTrack.id);
+            showToast(`Removed "${selTrack.label || selTrack.file || 'track'}"`, 'info');
+            return;
+        }
+
+        // 2. Selected text overlay
+        if (EditorState.selectedTextOverlaySceneId != null) {
+            const scene = EditorState.scenes.find(s => s.id === EditorState.selectedTextOverlaySceneId);
+            if (scene && scene.text_content) {
+                e.preventDefault();
+                const oldText = scene.text_content;
+                clearSceneTextOverlay(scene);
+                EditorState.selectedTextOverlaySceneId = null;
+                renderAllTextOverlays();
+                renderSceneProperties();
+                saveProjectEdits();
+                recordEdit('Remove text overlay', scene.id, 'text_content', oldText, null);
+                showToast('Text overlay removed', 'info');
+                return;
+            }
+        }
+
+        // 3. Selected scene (remove from timeline)
+        const selScene = EditorState.selectedScene;
+        if (selScene && EditorState.scenes.length > 1) {
+            e.preventDefault();
+            const idx = EditorState.scenes.findIndex(s => s.id === selScene.id);
+            if (idx !== -1) {
+                const removed = EditorState.scenes.splice(idx, 1)[0];
+                EditorState.selectedScene = null;
+                recalculateDuration();
+                renderTimeline();
+                renderSceneProperties();
+                saveProjectEdits();
+                recordEdit('Remove scene', removed.id, 'removeScene', removed, null);
+                showToast(`Removed scene ${removed.id}`, 'info');
+            }
+            return;
         }
     }
 
@@ -11287,6 +11970,7 @@ function refreshElements() {
     elements.previewJsonBtn = document.getElementById('preview-json');
     elements.exportShareBtn = document.getElementById('export-share-btn');
     elements.timeRuler = document.getElementById('time-ruler');
+    elements.timelineMinimap = document.getElementById('timeline-minimap');
     elements.timelineResizeHandle = document.getElementById('timeline-resize-handle');
     elements.timelineHeaderMarker = document.getElementById('timeline-header-marker');
     elements.headerMarkerIndicator = document.querySelector('.header-marker-indicator');

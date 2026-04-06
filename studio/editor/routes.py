@@ -445,7 +445,8 @@ def _get_story_tone(project_id: str) -> str | None:
     pipeline_path = os.path.join(PIPELINE_DIR, project_id, "pipeline.json")
     try:
         with open(pipeline_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("story_tone") or None
+            data = json.load(f)
+            return data.get("story_tone") or (data.get("config") or {}).get("story_tone") or None
     except FileNotFoundError:
         return None
     except (json.JSONDecodeError, OSError) as error:
@@ -1000,6 +1001,36 @@ def assemble_project_for_editor(project_id):
             "fadeIn": 0,
             "fadeOut": 0,
         })
+
+    # Auto-select background music based on story tone
+    story_tone = _get_story_tone(safe_id)
+    if story_tone:
+        try:
+            from studio.music.selector import select_music
+            bg_music = select_music(story_tone)
+            if bg_music:
+                audio_tracks.append({
+                    "id": "at_music_1",
+                    "label": "Music",
+                    "type": "music",
+                    "file": os.path.basename(bg_music["path"]),
+                    "path": f"/output/musics/{os.path.basename(bg_music['path'])}",
+                    "duration": 0,
+                    "timelineOffset": 0,
+                    "startOffset": 0,
+                    "trimmedDuration": None,
+                    "volume": bg_music.get("volume", 0.15),
+                    "loop": bg_music.get("loop", True),
+                    "muted": False,
+                    "duckingEnabled": bg_music.get("ducking_enabled", True),
+                    "duckingLevel": bg_music.get("ducking_level", 0.2),
+                    "fadeIn": bg_music.get("fade_in", 2.0),
+                    "fadeOut": bg_music.get("fade_out", 3.0),
+                })
+                logger.info("Auto-selected bgMusic for tone '{}' → '{}'",
+                            story_tone, os.path.basename(bg_music["path"]))
+        except Exception as e:
+            logger.debug("Could not auto-select bgMusic for {}: {}", safe_id, e)
 
     total_duration = sum(s["duration"] for s in editor_scenes)
     editor_data = {
