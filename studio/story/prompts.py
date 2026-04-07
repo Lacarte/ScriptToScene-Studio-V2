@@ -120,6 +120,8 @@ def build_story_user_prompt(
     idea: str = None,
 ) -> str:
     """Build the user prompt for the story generation call."""
+    from studio.story.history import format_history_for_prompt
+
     word_target = compute_word_target(duration)
     seed = _unique_seed()
     angle = random.choice(_ANGLE_STARTERS)
@@ -131,6 +133,12 @@ def build_story_user_prompt(
         "Choose a fresh, unexpected angle — avoid generic hooks about 'ancient wisdom' or 'what they don't tell you'. "
         f"[uid:{seed}]"
     )
+
+    # Inject per-preset history so Gemini actively dodges its own past stories.
+    history_block = format_history_for_prompt(preset_style, story_category, language)
+    if history_block:
+        base += f"\n\n{history_block}"
+
     if idea:
         base += f"\n\nBuild the story around this idea:\n{idea}"
     return base

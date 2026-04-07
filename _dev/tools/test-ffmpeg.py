@@ -1,8 +1,41 @@
-"""FFmpeg scene rendering test — prints result + writes err.log on failure."""
-import subprocess
+"""FFmpeg scene rendering test — prints result + writes err.log on failure.
 
-FFMPEG_BIN = r"D:\@Workspace\@Development\@Scripts\@Python\ScriptToScene-Studio\bin\ffmpeg.exe"
-media_path = r"D:\@Workspace\@Development\@Scripts\@Python\ScriptToScene-Studio\output\assets\pp_ER7T57\0\0.webp"
+Auto-discovers the first available media file under output/animator/<pid>/<scene>/
+instead of pointing at a hardcoded (and now-removed) output/assets/ path.
+"""
+import os
+import subprocess
+import sys
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+FFMPEG_BIN = os.path.join(ROOT, "bin", "ffmpeg.exe")
+
+
+def find_sample_media():
+    animator_dir = os.path.join(ROOT, "output", "animator")
+    exts = (".webp", ".png", ".jpg", ".jpeg")
+    if not os.path.isdir(animator_dir):
+        return None
+    for project in sorted(os.listdir(animator_dir)):
+        proj_path = os.path.join(animator_dir, project)
+        if not os.path.isdir(proj_path):
+            continue
+        for scene in sorted(os.listdir(proj_path)):
+            scene_path = os.path.join(proj_path, scene)
+            if not os.path.isdir(scene_path):
+                continue
+            for fname in sorted(os.listdir(scene_path)):
+                if fname.lower().endswith(exts):
+                    return os.path.join(scene_path, fname)
+    return None
+
+
+media_path = find_sample_media()
+if not media_path:
+    print("No animator media found under output/animator/ — generate a project first.")
+    sys.exit(1)
+print(f"Using media: {media_path}")
+
 output_path = "test_scene.mp4"
 duration = 2.4
 width, height = 1080, 1920

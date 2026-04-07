@@ -255,7 +255,7 @@ function stopPreview() {
 onUnmounted(stopPreview)
 
 // ── Jobs Pane ──
-const jobPaneTab = ref('queue') // 'queue' | 'saved'
+const jobPaneTab = ref('queue') // 'queue' | 'saved' | 'history'
 const showJobPane = ref(false)
 
 // ── Auto-generated Job Queue ──
@@ -268,6 +268,134 @@ const showLaunchConfirm = ref(false)
 
 function _persistJobQueue() {
   localStorage.setItem(JOB_QUEUE_KEY, JSON.stringify(jobQueue.value))
+}
+
+// ── Job History (finished queue runs) ──
+// Flat list of every job iteration the user fired through the auto queue,
+// most-recent first. Survives queue clears so users can review what ran.
+const JOB_HISTORY_KEY = 'sts-job-history'
+const JOB_HISTORY_MAX = 100
+const jobHistory = ref(JSON.parse(localStorage.getItem(JOB_HISTORY_KEY) || '[]'))
+
+function _persistJobHistory() {
+  localStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(jobHistory.value))
+}
+
+function pushJobHistory(entry) {
+  // entry: { presetId, label, status: 'success'|'skipped'|'error', projectId?, error? }
+  jobHistory.value.unshift({
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    finishedAt: Date.now(),
+    ...entry,
+  })
+  if (jobHistory.value.length > JOB_HISTORY_MAX) {
+    jobHistory.value.length = JOB_HISTORY_MAX
+  }
+  _persistJobHistory()
+}
+
+function clearJobHistory() {
+  jobHistory.value = []
+  _persistJobHistory()
+}
+
+function jobHistoryAge(entry) {
+  const ms = Date.now() - (entry.finishedAt || 0)
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return s + 's ago'
+  const m = Math.floor(s / 60)
+  if (m < 60) return m + 'm ago'
+  const h = Math.floor(m / 60)
+  if (h < 24) return h + 'h ago'
+  return Math.floor(h / 24) + 'd ago'
+}
+
+// ── Niche preview dialog (latest pipeline run for a niche) ──
+const nichePreviewOpen = ref(false)
+const nichePreviewLoading = ref(false)
+const nichePreviewData = ref(null) // { found, project_id, text, audio_url, images, video_url, ... }
+const nichePreviewLabel = ref('')
+const nichePreviewError = ref('')
+// Set of preset IDs that have at least one pipeline run (for chip badges)
+const nichesWithPreview = ref(new Set())
+
+async function refreshNichePreviewIndex() {
+  try {
+    const res = await api.get('/api/niches/preview-index')
+    nichesWithPreview.value = new Set(res?.preset_ids || [])
+  } catch (e) {
+    // non-critical — chip badges just won't show
+  }
+}
+onMounted(refreshNichePreviewIndex)
+
+async function openNichePreview(presetId, label) {
+  nichePreviewOpen.value = true
+  nichePreviewLoading.value = true
+  nichePreviewData.value = null
+  nichePreviewError.value = ''
+  nichePreviewLabel.value = label || presetId
+  try {
+    const res = await api.get(`/api/niches/${encodeURIComponent(presetId)}/preview`)
+    nichePreviewData.value = res
+  } catch (e) {
+    nichePreviewError.value = e?.message || 'Failed to load preview'
+  } finally {
+    nichePreviewLoading.value = false
+  }
+}
+
+function closeNichePreview() {
+  nichePreviewOpen.value = false
+  nichePreviewData.value = null
+  nichePreviewError.value = ''
+  if (bgMusicAudio.value) {
+    try { bgMusicAudio.value.pause() } catch {}
+  }
+  if (sfxAudio.value) {
+    try { sfxAudio.value.pause() } catch {}
+  }
+  bgMusicPlaying.value = false
+  sfxPlaying.value = false
+}
+
+const bgMusicAudio = ref(null)
+const bgMusicPlaying = ref(false)
+function toggleBgMusicPreview() {
+  const el = bgMusicAudio.value
+  if (!el) return
+  // Pause SFX if playing — only one preview at a time
+  if (sfxAudio.value && !sfxAudio.value.paused) {
+    sfxAudio.value.pause()
+    sfxPlaying.value = false
+  }
+  if (el.paused) {
+    el.volume = 0.5
+    el.play().then(() => { bgMusicPlaying.value = true }).catch(() => {})
+    el.onended = () => { bgMusicPlaying.value = false }
+  } else {
+    el.pause()
+    bgMusicPlaying.value = false
+  }
+}
+
+const sfxAudio = ref(null)
+const sfxPlaying = ref(false)
+function toggleSfxPreview() {
+  const el = sfxAudio.value
+  if (!el) return
+  if (bgMusicAudio.value && !bgMusicAudio.value.paused) {
+    bgMusicAudio.value.pause()
+    bgMusicPlaying.value = false
+  }
+  if (el.paused) {
+    el.volume = 0.5
+    el.play().then(() => { sfxPlaying.value = true }).catch(() => {})
+    el.onended = () => { sfxPlaying.value = false }
+  } else {
+    el.pause()
+    sfxPlaying.value = false
+  }
 }
 
 function _defaultVoiceForQueue(preset) {
@@ -411,30 +539,47 @@ async function runJobQueue() {
       else if (preset.duration) story.storyDuration.value = preset.duration
 
       // Generate a story for this preset
+      const pidBefore = lastCompletedProjectId.value
       try {
         if (!jobQueueRunning.value) break
         const generated = await handleGenerateStory({ notifySuccess: false })
         if (!jobQueueRunning.value) break
         if (!generated.ok) {
           toast.error(`Queue job ${jobIndex} failed to generate story`)
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', error: 'Story generation failed' })
           continue
         }
         // Run the pipeline
         await start()
         // Wait for pipeline to finish (watch globalStatus)
+        let endStatus = null
         await new Promise((resolve) => {
           const unwatch = watch(globalStatus, (status) => {
             if (!jobQueueRunning.value || status === 'done' || status === 'error' || status === 'stopped') {
+              endStatus = status
               unwatch()
               resolve()
             }
           })
-          // Safety: if not running after start, resolve immediately
+          // Safety: if not running after start, resolve immediately (preflight bailed)
           if (!running.value) { unwatch(); resolve() }
         })
+        const pidAfter = lastCompletedProjectId.value
+        const newProjectId = (pidAfter && pidAfter !== pidBefore) ? pidAfter : null
+        if (endStatus === 'done') {
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'success', projectId: newProjectId })
+        } else if (endStatus === 'error') {
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', projectId: newProjectId, error: 'Pipeline failed' })
+        } else if (endStatus === 'stopped') {
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', projectId: newProjectId, error: 'Stopped' })
+        } else {
+          // Preflight bail or never started
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'skipped', error: 'Preflight aborted' })
+        }
       } catch (e) {
         if (!jobQueueRunning.value) break
         toast.error(`Queue job ${jobIndex} error: ${e.message || 'unknown'}`)
+        pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', error: e.message || 'unknown' })
       }
     }
   }
@@ -924,6 +1069,11 @@ watch(running, (isRunning) => {
 watch(globalStatus, (status) => {
   if (status === 'done' || status === 'error' || status === 'stopped') {
     scrollToProgress()
+  }
+  // Refresh the niche-preview index when a run completes so newly-generated
+  // niches light up in the chip catalog
+  if (status === 'done') {
+    refreshNichePreviewIndex()
   }
 })
 
@@ -1670,6 +1820,11 @@ function logStepLabel(step) {
           Saved
           <span v-if="savedStories.length" class="jobs-tab-badge jobs-tab-badge--muted">{{ savedStories.length }}</span>
         </button>
+        <button class="jobs-tab" :class="{ active: jobPaneTab === 'history' }" @click="jobPaneTab = 'history'">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+          History
+          <span v-if="jobHistory.length" class="jobs-tab-badge jobs-tab-badge--muted">{{ jobHistory.length }}</span>
+        </button>
       </div>
 
       <!-- TAB 1: Auto Queue -->
@@ -1892,11 +2047,133 @@ function logStepLabel(step) {
           </Transition>
         </Teleport>
 
+        <!-- Niche preview dialog (latest pipeline run) -->
+        <Teleport to="body">
+          <Transition name="np-fade">
+            <div v-if="nichePreviewOpen" class="np-overlay" @click.self="closeNichePreview">
+              <div class="np-dialog">
+                <div class="np-header">
+                  <div class="np-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span>Preview · {{ nichePreviewLabel }}</span>
+                  </div>
+                  <button class="np-close" @click="closeNichePreview" title="Close">&times;</button>
+                </div>
+
+                <div v-if="nichePreviewLoading" class="np-loading">Loading…</div>
+
+                <div v-else-if="nichePreviewError" class="np-empty">
+                  <span>{{ nichePreviewError }}</span>
+                </div>
+
+                <div v-else-if="nichePreviewData && !nichePreviewData.found" class="np-empty">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span>No pipeline was generated yet for this niche.</span>
+                </div>
+
+                <div v-else-if="nichePreviewData" class="np-body">
+                  <div class="np-meta">
+                    <span class="np-meta-id">{{ nichePreviewData.project_id }}</span>
+                    <span v-if="nichePreviewData.created" class="np-meta-time">{{ new Date(nichePreviewData.created).toLocaleString() }}</span>
+                    <span v-if="nichePreviewData.voice" class="np-meta-voice" :title="`TTS voice (${nichePreviewData.tts_provider || 'kokoro'})`">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                      {{ nichePreviewData.voice }}
+                    </span>
+                    <span v-if="nichePreviewData.bg_music_name" class="np-meta-music" :title="nichePreviewData.bg_music_name">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                      {{ nichePreviewData.bg_music_name }}
+                      <audio v-if="nichePreviewData.bg_music_url" :src="nichePreviewData.bg_music_url" preload="none" ref="bgMusicAudio" style="display:none"></audio>
+                      <button
+                        v-if="nichePreviewData.bg_music_url"
+                        type="button"
+                        class="np-music-play"
+                        @click.stop="toggleBgMusicPreview"
+                        :title="bgMusicPlaying ? 'Pause' : 'Preview'"
+                      >
+                        <svg v-if="!bgMusicPlaying" width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        <svg v-else width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                      </button>
+                    </span>
+                    <span v-if="nichePreviewData.sfx_name" class="np-meta-sfx" :title="nichePreviewData.sfx_name">
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                      {{ nichePreviewData.sfx_name }}
+                      <audio v-if="nichePreviewData.sfx_url" :src="nichePreviewData.sfx_url" preload="none" ref="sfxAudio" style="display:none"></audio>
+                      <button
+                        v-if="nichePreviewData.sfx_url"
+                        type="button"
+                        class="np-music-play"
+                        @click.stop="toggleSfxPreview"
+                        :title="sfxPlaying ? 'Pause' : 'Preview'"
+                      >
+                        <svg v-if="!sfxPlaying" width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        <svg v-else width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                      </button>
+                    </span>
+                    <span v-if="nichePreviewData.status === 'error'" class="np-meta-error" :title="`This run failed at the ${nichePreviewData.error_step || 'unknown'} step`">
+                      failed @ {{ nichePreviewData.error_step || 'unknown' }}
+                    </span>
+                    <span v-else-if="nichePreviewData.stop_after" class="np-meta-stop" :title="`This run was stopped after the ${nichePreviewData.stop_after} step`">
+                      stopped @ {{ nichePreviewData.stop_after }}
+                    </span>
+                  </div>
+                  <div class="np-grid">
+                    <!-- TEXT -->
+                    <div class="np-tile np-tile--text">
+                      <div class="np-tile-label">Text</div>
+                      <div v-if="nichePreviewData.text" class="np-text">{{ nichePreviewData.text }}</div>
+                      <div v-else class="np-tile-empty">—</div>
+                    </div>
+
+                    <!-- VIDEO -->
+                    <div class="np-tile np-tile--video">
+                      <div class="np-tile-label">Video</div>
+                      <video
+                        v-if="nichePreviewData.video_url"
+                        :src="nichePreviewData.video_url"
+                        controls
+                        preload="metadata"
+                        class="np-video"
+                      ></video>
+                      <div v-else class="np-tile-empty">No exported video</div>
+                    </div>
+
+                    <!-- AUDIO -->
+                    <div class="np-tile np-tile--audio">
+                      <div class="np-tile-label">Audio</div>
+                      <audio
+                        v-if="nichePreviewData.audio_url"
+                        :src="nichePreviewData.audio_url"
+                        controls
+                        preload="metadata"
+                        class="np-audio"
+                      ></audio>
+                      <div v-else class="np-tile-empty">No audio</div>
+                    </div>
+
+                    <!-- IMAGES -->
+                    <div class="np-tile np-tile--images">
+                      <div class="np-tile-label">Images <span v-if="nichePreviewData.images?.length" class="np-img-count">{{ nichePreviewData.images.length }}</span></div>
+                      <div v-if="nichePreviewData.images?.length" class="np-img-strip">
+                        <img v-for="(src, i) in nichePreviewData.images" :key="i" :src="src" loading="lazy" />
+                      </div>
+                      <div v-else class="np-tile-empty">No storyboard images</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </Teleport>
+
         <!-- Preset catalog — grouped with search -->
         <div class="q-catalog">
           <div class="q-catalog-header">
             <span class="q-catalog-label">Presets</span>
             <span class="q-catalog-total">{{ Object.keys(nichePresets).length }}</span>
+            <span v-if="nichesWithPreview.size" class="q-catalog-preview-count" :title="`${nichesWithPreview.size} niche(s) with at least one previous run`">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              {{ nichesWithPreview.size }}
+            </span>
           </div>
           <div class="q-catalog-search">
             <svg class="q-search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -1919,18 +2196,34 @@ function logStepLabel(step) {
                 <span class="q-group-count">{{ group.presets.length }}</span>
               </div>
               <div class="q-catalog-grid">
-                <button
+                <div
                   v-for="p in group.presets"
                   :key="p.id"
-                  class="q-cat-chip"
-                  :class="{ 'q-cat-chip--queued': jobQueue.some(q => q.presetId === p.id) }"
-                  :style="{ '--chip-color': styleColor(p.visual_style) }"
-                  @click="addToQueue(p.id)"
+                  class="q-cat-row"
                 >
-                  <span class="q-cat-bar" :style="{ background: styleColor(p.visual_style) }"></span>
-                  <span class="q-cat-name">{{ p.label }}</span>
-                  <span v-if="jobQueue.find(q => q.presetId === p.id)" class="q-cat-count">{{ jobQueue.find(q => q.presetId === p.id).count }}</span>
-                </button>
+                  <button
+                    class="q-cat-chip"
+                    :class="{
+                      'q-cat-chip--queued': jobQueue.some(q => q.presetId === p.id),
+                      'q-cat-chip--has-preview': nichesWithPreview.has(p.id),
+                    }"
+                    :style="{ '--chip-color': styleColor(p.visual_style) }"
+                    @click="addToQueue(p.id)"
+                  >
+                    <span class="q-cat-bar" :style="{ background: styleColor(p.visual_style) }"></span>
+                    <span class="q-cat-name">{{ p.label }}</span>
+                    <span v-if="jobQueue.find(q => q.presetId === p.id)" class="q-cat-count">{{ jobQueue.find(q => q.presetId === p.id).count }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="q-cat-preview-btn"
+                    :class="{ 'q-cat-preview-btn--has': nichesWithPreview.has(p.id) }"
+                    :title="nichesWithPreview.has(p.id) ? 'Preview latest pipeline run for this niche' : 'No pipeline generated yet for this niche'"
+                    @click.stop="openNichePreview(p.id, p.label)"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2008,6 +2301,47 @@ function logStepLabel(step) {
               <button class="saved-story-delete" title="Delete" @click.stop="deleteSavedStory(entry.id)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: Job History -->
+      <div v-if="jobPaneTab === 'history'" class="jobs-tab-content">
+        <div class="saved-actions-bar">
+          <span class="job-hist-summary">
+            {{ jobHistory.length }} entr{{ jobHistory.length === 1 ? 'y' : 'ies' }}
+            <template v-if="jobHistory.length">
+              · {{ jobHistory.filter(j => j.status === 'success').length }} ok
+              · {{ jobHistory.filter(j => j.status === 'skipped').length }} skipped
+              · {{ jobHistory.filter(j => j.status === 'error').length }} failed
+            </template>
+          </span>
+          <button v-if="jobHistory.length" class="saved-story-delete job-hist-clear" title="Clear history" @click="clearJobHistory">
+            Clear
+          </button>
+        </div>
+        <div class="saved-sidebar-list">
+          <div v-if="!jobHistory.length" class="saved-empty">No finished jobs yet.</div>
+          <div
+            v-for="entry in jobHistory"
+            :key="entry.id"
+            class="saved-story-item job-hist-item"
+            :class="'job-hist-item--' + entry.status"
+            :style="{ '--q-color': styleColor(nichePresets[entry.presetId]?.visual_style) || 'var(--accent)' }"
+            @click="entry.projectId && openInScenes(entry.projectId)"
+          >
+            <div class="saved-story-main">
+              <span class="saved-story-title">
+                <span class="job-hist-dot"></span>
+                {{ entry.label || entry.presetId }}
+              </span>
+              <span class="saved-story-meta">
+                <span class="job-hist-status" :class="'job-hist-status--' + entry.status">{{ entry.status }}</span>
+                <span v-if="entry.projectId" class="saved-tag" :title="entry.projectId">{{ entry.projectId }}</span>
+                <span v-if="entry.error" class="saved-tag job-hist-err" :title="entry.error">{{ entry.error }}</span>
+                <span class="saved-story-age">{{ jobHistoryAge(entry) }}</span>
+              </span>
             </div>
           </div>
         </div>
@@ -3297,6 +3631,18 @@ function logStepLabel(step) {
   padding: 2px 5px;
   border-radius: 4px;
 }
+.q-catalog-preview-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font: 600 9px/1 var(--font-mono);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 2px 5px;
+  margin-left: auto;
+  border-radius: 4px;
+}
 
 .q-catalog-search {
   display: flex;
@@ -3437,6 +3783,23 @@ function logStepLabel(step) {
   background: color-mix(in srgb, var(--chip-color) 8%, transparent);
   color: var(--text);
 }
+/* Chip with at least one previous pipeline run — fully lit */
+.q-cat-chip--has-preview {
+  color: var(--text);
+  background: color-mix(in srgb, var(--chip-color) 12%, rgba(255,255,255,0.02));
+  border-color: color-mix(in srgb, var(--chip-color) 45%, var(--border));
+}
+.q-cat-chip--has-preview .q-cat-bar {
+  width: 4px;
+  box-shadow: 0 0 6px var(--chip-color);
+}
+/* Chips that have NO preview yet — visibly muted */
+.q-cat-chip:not(.q-cat-chip--has-preview) {
+  opacity: 0.55;
+}
+.q-cat-chip:not(.q-cat-chip--has-preview):hover {
+  opacity: 1;
+}
 
 .q-cat-bar {
   width: 3px;
@@ -3469,6 +3832,286 @@ function logStepLabel(step) {
   border-radius: 8px;
   margin-right: 6px;
   flex-shrink: 0;
+}
+
+/* Niche row = chip + preview eye button */
+.q-cat-row {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+}
+.q-cat-row .q-cat-chip {
+  flex: 1;
+  min-width: 0;
+}
+.q-cat-preview-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: all 0.15s;
+}
+.q-cat-preview-btn:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  opacity: 1;
+}
+/* Lit-up state when a pipeline run exists for this niche */
+.q-cat-preview-btn--has {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  opacity: 1;
+}
+.q-cat-preview-btn--has::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* ── Niche preview dialog ── */
+.np-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.np-dialog {
+  width: min(720px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface, #15171c);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.np-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.np-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 12px/1 var(--font-mono);
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.np-title svg { color: var(--accent); }
+.np-close {
+  width: 24px;
+  height: 24px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.np-close:hover { color: var(--text); border-color: var(--accent); }
+
+.np-loading,
+.np-empty {
+  padding: 48px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.np-body {
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+.np-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font: 500 10px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+.np-meta-id {
+  padding: 3px 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+}
+.np-meta-stop {
+  padding: 3px 6px;
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+  color: #f59e0b;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.np-meta-error {
+  padding: 3px 6px;
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+  border: 1px solid color-mix(in srgb, #ef4444 40%, transparent);
+  color: #ef4444;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.np-meta-voice,
+.np-meta-music,
+.np-meta-sfx {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  max-width: 240px;
+}
+.np-meta-voice svg,
+.np-meta-music svg,
+.np-meta-sfx svg { color: var(--accent); opacity: 0.7; flex-shrink: 0; }
+.np-meta-music,
+.np-meta-sfx {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.np-music-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.np-music-play:hover {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.np-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.np-tile {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+}
+.np-tile-label {
+  font: 600 9px/1 var(--font-mono);
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-img-count {
+  padding: 1px 5px;
+  font-size: 8px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 6px;
+}
+.np-tile-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  opacity: 0.6;
+}
+.np-text {
+  flex: 1;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+.np-video {
+  width: 100%;
+  max-height: 200px;
+  border-radius: 6px;
+  background: #000;
+}
+.np-audio {
+  width: 100%;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+.np-img-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 180px;
+}
+.np-img-strip img {
+  width: calc(25% - 3px);
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.np-fade-enter-active,
+.np-fade-leave-active {
+  transition: opacity 0.15s;
+}
+.np-fade-enter-from,
+.np-fade-leave-to {
+  opacity: 0;
 }
 
 /* ── Saved Stories (in Jobs pane) ── */
@@ -3619,6 +4262,59 @@ function logStepLabel(step) {
   color: var(--text-muted);
   opacity: 0.5;
 }
+
+/* ── Job History tab ── */
+.job-hist-summary {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.02em;
+}
+.job-hist-clear {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 1;
+}
+.job-hist-clear:hover { color: #ff6b6b; border-color: rgba(255,107,107,0.4); }
+.job-hist-item { position: relative; }
+.job-hist-item::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 2px;
+  background: var(--q-color, var(--accent));
+  border-radius: 2px;
+  opacity: 0.6;
+}
+.job-hist-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--q-color, var(--accent));
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.job-hist-status {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.job-hist-status--success { color: #4ecdc4; border-color: rgba(78,205,196,0.3); background: rgba(78,205,196,0.08); }
+.job-hist-status--skipped { color: #f7b955; border-color: rgba(247,185,85,0.3); background: rgba(247,185,85,0.08); }
+.job-hist-status--error   { color: #ff6b6b; border-color: rgba(255,107,107,0.3); background: rgba(255,107,107,0.08); }
+.job-hist-err { color: #ff6b6b; border-color: rgba(255,107,107,0.25); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-hist-item--success { cursor: pointer; }
+.job-hist-item--skipped, .job-hist-item--error { cursor: default; }
 
 .saved-story-actions {
   display: flex;

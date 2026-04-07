@@ -329,7 +329,22 @@ const AUDIO_TRACK_COLORS = {
     music: 'rgba(167, 139, 250, 0.8)',
     fx: 'rgba(255, 183, 77, 0.8)',
 };
-const DEFAULT_MUSIC_DUCKING_LEVEL = 0.45;
+const DEFAULT_MUSIC_DUCKING_LEVEL = 0.20;
+
+/**
+ * Read user-configured ducking default from settings (saved by SettingsPage),
+ * fall back to DEFAULT_MUSIC_DUCKING_LEVEL.
+ */
+function getUserDuckingDefault() {
+    try {
+        const v = localStorage.getItem('sts-music-ducking');
+        if (v != null) {
+            const n = parseFloat(v);
+            if (!isNaN(n) && n > 0 && n <= 1) return n;
+        }
+    } catch (_) {}
+    return DEFAULT_MUSIC_DUCKING_LEVEL;
+}
 const MIN_MUSIC_DUCKING_LEVEL = 0.12;
 const MIN_TEXT_OVERLAY_DURATION = 0.5;
 
@@ -10510,7 +10525,7 @@ function renderMusicList(files) {
         return div.innerHTML;
     };
     if (!files.length) {
-        list.innerHTML = '<div style="text-align:center;padding:32px 16px;color:var(--text-muted);font-size:12px"><p>No music files yet</p><p style="font-size:11px;opacity:0.6;margin-top:8px">Place .mp3/.wav/.ogg files in output/musics/</p></div>';
+        list.innerHTML = '<div style="text-align:center;padding:32px 16px;color:var(--text-muted);font-size:12px"><p>No music files yet</p><p style="font-size:11px;opacity:0.6;margin-top:8px">Built-in music: resources/sounds/music/&lt;folder&gt;/<br>Or upload your own to output/musics/</p></div>';
         return;
     }
     list.innerHTML = files.map((f, index) => `
@@ -10557,7 +10572,7 @@ window.selectBgMusic = function (filename, path, duration) {
         volume: _getSavedVolume('music') ?? 0.08,
         loop: true,
         duckingEnabled: true,
-        duckingLevel: DEFAULT_MUSIC_DUCKING_LEVEL,
+        duckingLevel: getUserDuckingDefault(),
         fadeIn: 2.0,
         fadeOut: 3.0,
         color: AUDIO_TRACK_COLORS.music,
@@ -10596,12 +10611,15 @@ window.selectBgMusic = function (filename, path, duration) {
  */
 async function _autoSelectBgMusic() {
     const tone = EditorState.project?.storyTone;
+    const projectId = EditorState.project?.id || '';
     if (!tone) return;
     // Skip if a music track already exists (loaded or still loading)
     if (EditorState.audioTracks.some(t => t.type === 'music')) return;
 
     try {
-        const res = await fetch(`/api/music/auto-select?tone=${encodeURIComponent(tone)}`);
+        const params = new URLSearchParams({ tone });
+        if (projectId) params.set('project_id', projectId);
+        const res = await fetch(`/api/music/auto-select?${params.toString()}`);
         if (!res.ok) return;
         const music = await res.json();
         if (!music?.path) return;
@@ -10613,33 +10631,31 @@ async function _autoSelectBgMusic() {
 }
 
 /**
- * Replace the current music track with a random one (tone-based or fully random).
+ * Replace the current music track with a random one from the built-in library.
+ *
+ * Always pulls from resources/sounds/music/ via /api/music/auto-select — never
+ * from user uploads (output/musics/). With story_tone, the picker uses the
+ * tone→folder mapping; without tone, it picks fully random across all
+ * built-in folders.
  */
 async function _replaceMusicTrackRandom(trackId) {
     const tone = EditorState.project?.storyTone || EditorState.project?.story_tone;
+    const projectId = EditorState.project?.id || '';
+    const params = new URLSearchParams();
+    if (tone) params.set('tone', tone);
+    if (projectId) params.set('project_id', projectId);
+    const url = params.toString()
+        ? `/api/music/auto-select?${params.toString()}`
+        : '/api/music/auto-select';
     try {
-        const url = tone
-            ? `/api/music/auto-select?tone=${encodeURIComponent(tone)}`
-            : '/api/music/library';
         const res = await fetch(url);
         if (!res.ok) { showToast('Failed to fetch music', 'error'); return; }
-        const data = await res.json();
+        const file = await res.json();
+        if (!file?.path) { showToast('No music available', 'error'); return; }
 
-        let file;
-        if (tone && data?.path) {
-            file = data;
-        } else if (Array.isArray(data)) {
-            // Full library — pick random
-            if (!data.length) { showToast('No music in library', 'error'); return; }
-            file = data[Math.floor(Math.random() * data.length)];
-        } else {
-            showToast('No music available', 'error'); return;
-        }
-
-        // Remove old music track
+        // Remove old music track first so selectBgMusic can install the new one
         if (trackId) removeAudioTrack(trackId);
 
-        // Add new one
         window.selectBgMusic(file.filename || file.file, file.path, file.duration || 0);
         showToast(`Music: ${file.filename || file.file}`, 'success');
     } catch (e) {

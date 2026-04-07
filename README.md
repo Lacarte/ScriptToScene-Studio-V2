@@ -53,7 +53,7 @@ Imagine you have a 200-word script about a psychological phenomenon. Here's what
  │  (Grok, Midjourney, Meta AI, or Kie AI).                   │
  │  The grabber polls until all assets are ready.              │
  │  Output: one video or image file per scene in               │
- │  output/assets/{project_id}/{scene_index}/                  │
+ │  output/animator/{project_id}/{scene_index}/                │
  └────────────────────────┬────────────────────────────────────┘
                           ▼
  ┌─────────────────────────────────────────────────────────────┐
@@ -262,7 +262,7 @@ The timeline editor saves the full project state including scene order, music, c
       "index": 0,
       "title": "The Hidden Pattern",
       "duration": 3.14,
-      "asset_path": "output/assets/pp_8T1UU3/0/video.mp4",
+      "asset_path": "output/animator/pp_8T1UU3/0/video.mp4",
       "text_overlay": null,
       "visible": true
     }
@@ -652,7 +652,6 @@ Example: `pp_8T1UU3`, `pm_SLLGTM`. IDs are 6-character alphanumeric with collisi
 | `POST` | `/api/editor/save` | Save editor state |
 | `POST` | `/api/export` | Start video export |
 | `GET` | `/api/export/library` | List all exported videos |
-| `POST` | `/api/captions/generate` | Generate word-level captions |
 | `GET` | `/api/captions/presets` | List caption style presets |
 | `GET` | `/api/music/library` | List available background tracks |
 
@@ -763,7 +762,7 @@ The Grok Assets Synchronizer is an [Automa](https://www.automa.site/) browser ex
 
 ### How it fits in the pipeline
 
-During **Step 5 (Asset Grabbing)**, when the provider is set to `grok`, the pipeline writes pending scene prompts to the grabber queue. The Automa workflow running in the browser picks up those prompts, types them into Grok, waits for generation, and syncs the resulting media files back to `output/assets/{project_id}/`.
+During **Step 5 (Asset Grabbing)**, when the provider is set to `grok`, the pipeline writes pending scene prompts to the grabber queue. The Automa workflow running in the browser picks up those prompts, types them into Grok, waits for generation, and syncs the resulting media files back to `output/animator/{project_id}/`.
 
 ---
 

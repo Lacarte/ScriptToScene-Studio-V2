@@ -1,117 +1,231 @@
-"""Auto-select background music based on story_tone."""
+"""Auto-select background music and SFX based on story tone."""
+
 import json
 import os
 import random
-from collections import deque
 
 from loguru import logger
 
-from config import APP_ASSETS_DIR, OUTPUT_DIR
+from config import APP_ASSETS_DIR, PROJECTS_DIR
+from studio.io_utils import safe_json_read, safe_json_write
 
 _MUSIC_ROOT = os.path.join(APP_ASSETS_DIR, "sounds", "music")
-_HISTORY_FILE = os.path.join(OUTPUT_DIR, "music_history.json")
-_HISTORY_LIMIT = 10  # remember last 10 picks across all projects
+_SFX_ROOT = os.path.join(APP_ASSETS_DIR, "sounds", "sfx")
+_INITIAL_FILENAME = "initial.json"
+_HISTORY_LIMIT = 10
 
 _AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 
-# story_tone → ordered list of music sub-folders (primary first, fallbacks after)
-#
-# Available folders:
-#   ambient   — universal, fits any story (chill background presence)
-#   chill     — smooth ambient-like with hip-hop kick, modern relaxed
-#   dark      — terror, sad, scary, dread, suspense
-#   romantic  — chill lofi for love/wholesome/feel-good
-#   historic  — period/historical narration
-#   religion  — sacred, reverent
+# story_tone -> ordered list of music sub-folders (primary first, fallbacks after)
 TONE_MUSIC_MAP = {
-    "suspenseful":   ["dark", "ambient", "chill"],
-    "dramatic":      ["dark", "ambient", "chill", "historic"],
-    "religious":     ["religion", "ambient", "dark"],
-    "educational":   ["ambient", "chill", "historic"],
+    "suspenseful": ["dark", "ambient", "chill"],
+    "dramatic": ["dark", "ambient", "chill", "historic"],
+    "religious": ["religion", "ambient", "dark"],
+    "educational": ["ambient", "chill", "historic"],
     "inspirational": ["chill", "ambient", "romantic"],
-    "comedic":       ["chill", "ambient", "romantic"],
-    "wholesome":     ["romantic", "chill", "ambient"],
+    "comedic": ["chill", "ambient", "romantic"],
+    "wholesome": ["romantic", "chill", "ambient"],
+}
+
+# story_tone -> ordered list of SFX sub-folders to draw a single ambience-style
+# sound from. The pick is layered onto the timeline as a low-volume looping
+# accent (rain for suspense, ambient pad for educational, etc.).
+TONE_SFX_MAP = {
+    "suspenseful": ["heartbeat", "clock", "ambient", "viscous"],
+    "dramatic": ["bass-drops", "cinematic", "ambient"],
+    "religious": ["ambient", "magic"],
+    "educational": ["ambient", "thinking", "clicks"],
+    "inspirational": ["ambient", "whoosh", "magic"],
+    "comedic": ["cartoon", "notification", "clicks"],
+    "wholesome": ["ambient", "magic", "notification"],
 }
 
 
 def _list_tracks(folder):
-    """Return list of audio file paths in a folder."""
+    """Return audio file paths in a folder."""
     if not os.path.isdir(folder):
         return []
     return [
-        os.path.join(folder, f)
-        for f in os.listdir(folder)
-        if os.path.splitext(f)[1].lower() in _AUDIO_EXTS
-        and os.path.isfile(os.path.join(folder, f))
+        os.path.join(folder, name)
+        for name in os.listdir(folder)
+        if os.path.splitext(name)[1].lower() in _AUDIO_EXTS
+        and os.path.isfile(os.path.join(folder, name))
     ]
 
 
-def _load_history():
-    """Load recently-used music tracks from disk."""
-    try:
-        with open(_HISTORY_FILE, "r", encoding="utf-8") as f:
-            return list(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
+def _normalize_history(history):
+    """Normalize history payloads to the expected bounded list."""
+    if not isinstance(history, list):
         return []
+    return list(history)[-_HISTORY_LIMIT:]
 
 
-def _save_history(history):
-    """Persist recently-used music tracks."""
+def _project_initial_path(project_id):
+    """Return output/projects/{project_id}/initial.json for a safe id."""
+    safe_id = "".join(c for c in str(project_id or "") if c.isalnum() or c in ("_", "-"))
+    if not safe_id:
+        return ""
+    return os.path.join(PROJECTS_DIR, safe_id, _INITIAL_FILENAME)
+
+
+def load_project_audio_history(project_id):
+    """Load persisted music/SFX history arrays from a project's initial.json."""
+    path = _project_initial_path(project_id)
+    if not path or not os.path.isfile(path):
+        return {"music_history": [], "sfx_history": []}
     try:
-        os.makedirs(os.path.dirname(_HISTORY_FILE), exist_ok=True)
-        with open(_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history[-_HISTORY_LIMIT:], f)
-    except OSError as e:
-        logger.debug("Could not save music history: {}", e)
+        data = safe_json_read(path)
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        logger.debug("Could not read audio history from {}: {}", path, exc)
+        return {"music_history": [], "sfx_history": []}
+    if not isinstance(data, dict):
+        return {"music_history": [], "sfx_history": []}
+    return {
+        "music_history": _normalize_history(data.get("music_history")),
+        "sfx_history": _normalize_history(data.get("sfx_history")),
+    }
+
+
+def persist_project_audio_history(project_id, *, music_history=None, sfx_history=None):
+    """Persist history arrays into an existing project's initial.json."""
+    path = _project_initial_path(project_id)
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        data = safe_json_read(path)
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        logger.debug("Could not load {} before persisting history: {}", path, exc)
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    if music_history is not None:
+        data["music_history"] = _normalize_history(music_history)
+    if sfx_history is not None:
+        data["sfx_history"] = _normalize_history(sfx_history)
+    try:
+        safe_json_write(path, data, indent=2)
+        return True
+    except OSError as exc:
+        logger.debug("Could not persist audio history into {}: {}", path, exc)
+        return False
 
 
 def _pick_with_history(tracks, history):
-    """Pick a random track preferring those NOT in recent history.
-
-    Falls back to fully random if all tracks are in history (small library).
-    """
+    """Pick a random track preferring those not in recent history."""
     if not tracks:
         return None
-    fresh = [t for t in tracks if t not in history]
+    fresh = [track for track in tracks if track not in history]
     if fresh:
         return random.choice(fresh)
     return random.choice(tracks)
 
 
-def select_music(story_tone):
-    """Pick a random music track matching the story_tone.
-
-    Uses a no-repeat history so the same track isn't picked twice in a row
-    across recent projects.  Returns a bgMusic dict ready for the export
-    payload, or None if no tracks are available.
-    """
+def select_music(story_tone, history=None):
+    """Pick a random music track matching the story tone."""
     folders = TONE_MUSIC_MAP.get(story_tone)
     if not folders:
         logger.debug("No music mapping for story_tone '{}', skipping auto-music", story_tone)
         return None
 
-    history = _load_history()
+    history = _normalize_history(history)
 
     for folder_name in folders:
         tracks = _list_tracks(os.path.join(_MUSIC_ROOT, folder_name))
-        if tracks:
-            chosen = _pick_with_history(tracks, history)
-            if not chosen:
-                continue
-            # Update history
-            history.append(chosen)
-            _save_history(history)
-            logger.info("Auto-music: tone='{}' → folder='{}' → '{}'",
-                        story_tone, folder_name, os.path.basename(chosen))
-            return {
-                "path": chosen,
-                "volume": 0.15,
-                "fade_in": 2.0,
-                "fade_out": 3.0,
-                "loop": True,
-                "ducking_enabled": True,
-                "ducking_level": 0.45,
-            }
+        if not tracks:
+            continue
+        chosen = _pick_with_history(tracks, history)
+        if not chosen:
+            continue
+        next_history = _normalize_history(history + [chosen])
+        logger.info(
+            "Auto-music: tone='{}' -> folder='{}' -> '{}'",
+            story_tone,
+            folder_name,
+            os.path.basename(chosen),
+        )
+        return {
+            "path": chosen,
+            "history": next_history,
+            "volume": 0.15,
+            "fade_in": 2.0,
+            "fade_out": 3.0,
+            "loop": True,
+            "ducking_enabled": True,
+            "ducking_level": 0.20,
+        }
 
     logger.warning("Auto-music: no tracks found for tone '{}' in folders {}", story_tone, folders)
+    return None
+
+
+def select_random_music(history=None):
+    """Pick a random track from any folder under the built-in music library."""
+    if not os.path.isdir(_MUSIC_ROOT):
+        return None
+
+    all_tracks = []
+    for entry in os.listdir(_MUSIC_ROOT):
+        folder = os.path.join(_MUSIC_ROOT, entry)
+        if not os.path.isdir(folder):
+            continue
+        all_tracks.extend(_list_tracks(folder))
+
+    if not all_tracks:
+        logger.warning("Auto-music: no tracks found in {}", _MUSIC_ROOT)
+        return None
+
+    history = _normalize_history(history)
+    chosen = _pick_with_history(all_tracks, history)
+    if not chosen:
+        return None
+    next_history = _normalize_history(history + [chosen])
+    logger.info("Auto-music: random pick -> '{}'", os.path.basename(chosen))
+    return {
+        "path": chosen,
+        "history": next_history,
+        "volume": 0.15,
+        "fade_in": 2.0,
+        "fade_out": 3.0,
+        "loop": True,
+        "ducking_enabled": True,
+        "ducking_level": 0.20,
+    }
+
+
+def select_sfx(story_tone, history=None):
+    """Pick a random SFX track matching the story tone."""
+    folders = TONE_SFX_MAP.get(story_tone)
+    if not folders:
+        logger.debug("No SFX mapping for story_tone '{}', skipping auto-sfx", story_tone)
+        return None
+
+    history = _normalize_history(history)
+
+    for folder_name in folders:
+        tracks = _list_tracks(os.path.join(_SFX_ROOT, folder_name))
+        if not tracks:
+            continue
+        chosen = _pick_with_history(tracks, history)
+        if not chosen:
+            continue
+        next_history = _normalize_history(history + [chosen])
+        logger.info(
+            "Auto-sfx: tone='{}' -> folder='{}' -> '{}'",
+            story_tone,
+            folder_name,
+            os.path.basename(chosen),
+        )
+        return {
+            "path": chosen,
+            "history": next_history,
+            "folder": folder_name,
+            "volume": 0.10,
+            "fade_in": 1.5,
+            "fade_out": 2.0,
+            "loop": True,
+            "ducking_enabled": True,
+            "ducking_level": 0.20,
+        }
+
+    logger.warning("Auto-sfx: no tracks found for tone '{}' in folders {}", story_tone, folders)
     return None

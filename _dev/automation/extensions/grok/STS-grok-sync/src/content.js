@@ -60,8 +60,9 @@ function initSync() {
     studioUrl: localStorage.getItem("sts-url") || "http://localhost:5050",
     connected: false,
     autoType: localStorage.getItem("sts-auto-type") === "true",
-    collapsed: true,
+    collapsed: false,
     showSettings: false,
+    showTestButton: localStorage.getItem("sts-grok-show-test") === "true",
     activeTab: "typing",
     lastPoll: 0,
     projectId: null,
@@ -71,6 +72,11 @@ function initSync() {
     grokQuality: "480p",
     grokDuration: "6s",
     scenes: {},
+    history: {
+      items: [],
+      activeId: null,
+      expanded: {},
+    },
     sentScenes: {},
     pollInterval: 5000,
     jobComplete: false,
@@ -99,6 +105,8 @@ function initSync() {
   // Survives tab discards, page reloads, and browser restarts.
   // Only cleared by the manual CLEAR button.
   const STORAGE_KEY = "sts-grok-state-v1";
+  const HISTORY_KEY = "sts-grok-history-v1";
+  const HISTORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   let _saveTimer = null;
   function saveState() {
     if (_saveTimer) return; // debounce
@@ -108,6 +116,7 @@ function initSync() {
         const snapshot = {
           projectId: S.projectId,
           scenes: S.scenes,
+          historyActiveId: S.history.activeId,
           sentScenes: S.sentScenes,
           jobComplete: S.jobComplete,
           aspectRatio: S.aspectRatio,
@@ -136,6 +145,7 @@ function initSync() {
           const snap = result[STORAGE_KEY];
           if (snap.projectId) S.projectId = snap.projectId;
           if (snap.scenes) S.scenes = snap.scenes;
+          if (snap.historyActiveId) S.history.activeId = snap.historyActiveId;
           if (snap.sentScenes) S.sentScenes = snap.sentScenes;
           if (snap.jobComplete) S.jobComplete = snap.jobComplete;
           if (snap.aspectRatio) S.aspectRatio = snap.aspectRatio;
@@ -156,6 +166,266 @@ function initSync() {
   function clearStoredState() {
     try { chrome.storage.local.remove(STORAGE_KEY); } catch (e) {}
   }
+
+  function sortHistoryEntries(entries) {
+    return (entries || []).sort((a, b) =>
+      (b.updatedAt || b.endedAt || b.startedAt || b.createdAt || 0) -
+      (a.updatedAt || a.endedAt || a.startedAt || a.createdAt || 0)
+    );
+  }
+
+  function pruneHistoryEntries(entries) {
+    const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+    return sortHistoryEntries((entries || []).filter((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      const stamp = entry.updatedAt || entry.endedAt || entry.startedAt || entry.createdAt || 0;
+      return stamp >= cutoff;
+    }));
+  }
+
+  function loadHistoryEntries() {
+    let entries = [];
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      entries = raw ? JSON.parse(raw) : [];
+    } catch {
+      entries = [];
+    }
+    if (!Array.isArray(entries)) entries = [];
+    entries = pruneHistoryEntries(entries);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(entries)); } catch {}
+    return entries;
+  }
+
+  function persistHistoryEntries() {
+    S.history.items = pruneHistoryEntries(S.history.items);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(S.history.items)); } catch {}
+    return S.history.items;
+  }
+
+  function isFinalHistoryStatus(status) {
+    return status === "completed" ||
+      status === "completed_with_errors" ||
+      status === "failed" ||
+      status === "stopped" ||
+      status === "cleared";
+  }
+
+  function getUniqueProjectIds(items) {
+    const seen = new Set();
+    const ids = [];
+    for (const item of (items || [])) {
+      const pid = item && item.projectId ? item.projectId : null;
+      if (!pid || seen.has(pid)) continue;
+      seen.add(pid);
+      ids.push(pid);
+    }
+    return ids;
+  }
+
+  function getProjectQueueItems(projectId) {
+    return (S.typing.queue || []).filter((item) => (item.projectId || S.projectId || "") === projectId);
+  }
+
+  function buildProjectHistoryPrompts(projectId) {
+    const prompts = getProjectQueueItems(projectId).map((item) => {
+      const sc = S.scenes[item.scene] || {};
+      return {
+        scene: String(item.scene || ""),
+        prompt: item.displayPrompt || item.prompt || item.fullPrompt || sc.prompt || "",
+        status: item.status || sc.status || "queued",
+        syncStatus: sc.status || "",
+        error: item.error || "",
+        imageUrl: item.imageUrl || sc.imageUrl || "",
+        videoUrl: item.videoUrl || sc.previewUrl || "",
+      };
+    });
+
+    if (!prompts.length && projectId === S.projectId) {
+      Object.keys(S.scenes || {}).forEach((sceneNum) => {
+        const sc = S.scenes[sceneNum];
+        prompts.push({
+          scene: String(sceneNum),
+          prompt: sc.prompt || "",
+          status: sc.status || "pending",
+          syncStatus: sc.status || "",
+          error: sc.error || "",
+          imageUrl: sc.imageUrl || "",
+          videoUrl: sc.previewUrl || "",
+        });
+      });
+    }
+
+    prompts.sort((a, b) => {
+      const na = parseInt(a.scene, 10);
+      const nb = parseInt(b.scene, 10);
+      if (Number.isNaN(na) || Number.isNaN(nb)) return String(a.scene).localeCompare(String(b.scene));
+      return na - nb;
+    });
+    return prompts;
+  }
+
+  function summarizeProjectHistory(projectId) {
+    const prompts = buildProjectHistoryPrompts(projectId);
+    let completedCount = 0;
+    let failedCount = 0;
+    let runningCount = 0;
+    let queuedCount = 0;
+
+    for (const prompt of prompts) {
+      const status = prompt.status || prompt.syncStatus || "queued";
+      if (status === "typed" || status === "ready" || status === "sent" || status === "downloaded") completedCount++;
+      else if (status === "error" || status === "failed") failedCount++;
+      else if (status === "typing" || status === "generating" || status === "processing" || status === "uploading") runningCount++;
+      else queuedCount++;
+    }
+
+    return {
+      prompts,
+      sceneCount: prompts.length,
+      completedCount,
+      failedCount,
+      runningCount,
+      queuedCount,
+    };
+  }
+
+  function ensureHistoryEntry(projectId, options = {}) {
+    let entry = null;
+    const now = Date.now();
+
+    if (options.id) entry = S.history.items.find((item) => item.id === options.id) || null;
+    if (!entry && !options.forceNew && S.history.activeId) {
+      entry = S.history.items.find((item) => item.id === S.history.activeId && item.projectId === projectId) || null;
+    }
+    if (!entry && !options.forceNew) {
+      entry = S.history.items.find((item) => item.projectId === projectId && !isFinalHistoryStatus(item.status)) || null;
+    }
+
+    if (!entry) {
+      entry = {
+        id: `${projectId || "PROJECT"}|${now}`,
+        projectId: projectId || "Unknown",
+        source: options.source || "job",
+        createdAt: now,
+        startedAt: null,
+        endedAt: null,
+        updatedAt: now,
+        status: "queued",
+        aspectRatio: "",
+        mode: "",
+        duration: "",
+        prompts: [],
+        sceneCount: 0,
+        completedCount: 0,
+        failedCount: 0,
+        runningCount: 0,
+        queuedCount: 0,
+        durationMs: 0,
+      };
+      S.history.items.unshift(entry);
+    }
+
+    if (options.activate !== false) S.history.activeId = entry.id;
+    return entry;
+  }
+
+  function deriveHistoryStatus(entry, summary) {
+    if (summary.runningCount > 0) return "running";
+    if (summary.sceneCount > 0 && summary.completedCount + summary.failedCount >= summary.sceneCount) {
+      if (summary.failedCount > 0 && summary.completedCount > 0) return "completed_with_errors";
+      if (summary.failedCount > 0) return "failed";
+      return "completed";
+    }
+    if (summary.failedCount > 0) return "error";
+    if (isFinalHistoryStatus(entry.status)) return entry.status;
+    return "queued";
+  }
+
+  function updateHistoryEntry(projectId, options = {}) {
+    if (!projectId) return null;
+    const now = Date.now();
+    const entry = ensureHistoryEntry(projectId, options);
+    const summary = summarizeProjectHistory(projectId);
+
+    entry.projectId = projectId;
+    entry.source = options.source || entry.source || "job";
+    entry.aspectRatio = options.aspectRatio !== undefined ? options.aspectRatio : (entry.aspectRatio || S.aspectRatio || "");
+    entry.mode = options.mode !== undefined ? options.mode : (entry.mode || S.grokMode || "");
+    entry.duration = options.duration !== undefined ? options.duration : (entry.duration || S.grokDuration || "");
+    entry.prompts = summary.prompts.length ? summary.prompts : (entry.prompts || []);
+    entry.sceneCount = summary.sceneCount || entry.sceneCount || entry.prompts.length || 0;
+    entry.completedCount = summary.completedCount;
+    entry.failedCount = summary.failedCount;
+    entry.runningCount = summary.runningCount;
+    entry.queuedCount = summary.queuedCount;
+
+    if (options.startedAt && !entry.startedAt) entry.startedAt = options.startedAt;
+    if (!entry.startedAt && options.status === "running") entry.startedAt = now;
+    if (!entry.startedAt && summary.runningCount > 0) entry.startedAt = now;
+    if (options.endedAt !== undefined) entry.endedAt = options.endedAt;
+
+    entry.status = options.status || deriveHistoryStatus(entry, summary);
+    entry.updatedAt = now;
+    entry.durationMs = Math.max(0, (entry.endedAt || now) - (entry.startedAt || entry.createdAt || now));
+
+    persistHistoryEntries();
+    if (isFinalHistoryStatus(entry.status) && S.history.activeId === entry.id) S.history.activeId = null;
+    return entry;
+  }
+
+  function updateHistoryForProjects(projectIds, options = {}) {
+    for (const projectId of (projectIds || [])) updateHistoryEntry(projectId, options);
+  }
+
+  function formatHistoryDuration(ms) {
+    ms = Math.max(0, ms || 0);
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  }
+
+  function formatHistoryTimestamp(ts) {
+    if (!ts) return "-";
+    return new Date(ts).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  function formatHistoryAge(ts) {
+    if (!ts) return "";
+    const diff = Math.max(0, Date.now() - ts);
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
+
+  function getHistoryBadge(entry) {
+    if (!entry) return { cls: "sts-badge-pending", text: "queued" };
+    if (entry.status === "running") return { cls: "sts-badge-processing", text: "running" };
+    if (entry.status === "completed") return { cls: "sts-badge-downloaded", text: "completed" };
+    if (entry.status === "completed_with_errors") return { cls: "sts-badge-mixed", text: "done with errors" };
+    if (entry.status === "failed") return { cls: "sts-badge-error", text: "failed" };
+    if (entry.status === "stopped") return { cls: "sts-badge-stopped", text: "stopped" };
+    if (entry.status === "cleared") return { cls: "sts-badge-stopped", text: "cleared" };
+    return { cls: "sts-badge-pending", text: entry.status || "queued" };
+  }
+
+  function isHistoryExpanded(entryId) {
+    return !!(entryId && S.history.expanded && S.history.expanded[entryId]);
+  }
+
+  S.history.items = loadHistoryEntries();
 
   // ── Helpers ────────────────────────────────────────────
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -301,6 +571,13 @@ function initSync() {
             aspectRatio: msg.aspectRatio || S.aspectRatio,
           });
         }
+        updateHistoryEntry(msg.projectId, {
+          source: "job",
+          status: "queued",
+          aspectRatio: msg.aspectRatio || S.aspectRatio,
+          mode: msg.mode || S.grokMode,
+          duration: msg.duration || S.grokDuration,
+        });
         render();
         chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
         console.log(`[STS WS] Job received: ${msg.projectId} scene ${msg.sceneIndex}`);
@@ -321,9 +598,10 @@ function initSync() {
           const k = String(sc.scene);
           const imgData = sc.image || (sc.image_url ? S.studioUrl + sc.image_url : null);
           if (!S.scenes[k]) {
-            S.scenes[k] = { prompt: sc.prompt, status: "pending", urls: [], fileCount: 0, imageUrl: imgData };
+            S.scenes[k] = { prompt: sc.prompt, status: "pending", urls: [], fileCount: 0, imageUrl: imgData, projectId: msg.projectId };
           } else if (imgData && !S.scenes[k].imageUrl) {
             S.scenes[k].imageUrl = imgData;
+            if (!S.scenes[k].projectId) S.scenes[k].projectId = msg.projectId;
           }
           const existing = S.typing.queue.find(q => q.scene === k && q.projectId === msg.projectId);
           if (!existing) {
@@ -341,6 +619,13 @@ function initSync() {
           }
         }
 
+        updateHistoryEntry(msg.projectId, {
+          source: "job",
+          status: "queued",
+          aspectRatio: S.aspectRatio,
+          mode: S.grokMode,
+          duration: S.grokDuration,
+        });
         render();
         sendWS({ type: "JOB_RECEIVED", projectId: msg.projectId, scenes: scenes.length });
         chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
@@ -1209,6 +1494,13 @@ function initSync() {
     S.typing.starting = false;
     S.typing.typedCount = 0;
     S.typing.batchCount = 0;
+    updateHistoryForProjects(getUniqueProjectIds(runItems), {
+      status: "running",
+      startedAt: Date.now(),
+      aspectRatio: S.aspectRatio,
+      mode: S.grokMode,
+      duration: S.grokDuration,
+    });
     render();
     console.log("=== TYPING", runItems.length, "prompts ===");
 
@@ -1229,6 +1521,7 @@ function initSync() {
 
       S.typing.currentIndex = i;
       item.status = "typing";
+      updateHistoryEntry(item.projectId || S.projectId, { status: "running" });
       sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "typing" });
       render();
 
@@ -1263,6 +1556,7 @@ function initSync() {
             item.status = "error";
             item.errorCount = (item.errorCount || 0) + 1;
             item.error = "Rate limit persists after cooldown";
+            updateHistoryEntry(item.projectId || S.projectId);
             render();
             continue;
           }
@@ -1270,6 +1564,7 @@ function initSync() {
 
         item.status = "generating";
         sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "generating" });
+        updateHistoryEntry(item.projectId || S.projectId, { status: "running" });
         render();
 
         const genResult = await waitForGeneration(item.scene, seenVideoUrls, undefined, runId);
@@ -1292,6 +1587,7 @@ function initSync() {
             sc.fileCount = item.allVideoUrls.length;
             sc.status = "ready";
           }
+          updateHistoryEntry(item.projectId || S.projectId);
           render();
 
           if (!shouldStopTyping(runId)) {
@@ -1302,6 +1598,7 @@ function initSync() {
         } else {
           item.errorCount = (item.errorCount || 0) + 1;
           item.status = "error";
+          updateHistoryEntry(item.projectId || S.projectId);
         }
         render();
 
@@ -1314,6 +1611,7 @@ function initSync() {
       } catch (e) {
         item.errorCount = (item.errorCount || 0) + 1;
         item.status = "error";
+        updateHistoryEntry(item.projectId || S.projectId);
         console.error("Failed scene", item.scene, ":", e.message);
         render();
         await doCountdown(5, "retry", runId);
@@ -1322,6 +1620,7 @@ function initSync() {
 
     if (shouldStopTyping(runId)) {
       S.typing.currentIndex = -1;
+      updateHistoryForProjects(getUniqueProjectIds(tq), { status: "stopped", endedAt: Date.now() });
       render();
       return;
     }
@@ -1338,6 +1637,7 @@ function initSync() {
         item.status = "typing";
         sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "typing" });
         S.typing.currentIndex = tq.indexOf(item);
+        updateHistoryEntry(item.projectId || S.projectId, { status: "running" });
         render();
 
         try {
@@ -1348,6 +1648,7 @@ function initSync() {
           captureContainerForScene(item.scene);
           item.status = "generating";
           sendWS({ type: "STATUS_UPDATE", projectId: S.projectId, scene: parseInt(item.scene), status: "generating" });
+          updateHistoryEntry(item.projectId || S.projectId, { status: "running" });
           render();
 
           const genResult = await waitForGeneration(item.scene, seenVideoUrls, undefined, runId);
@@ -1361,16 +1662,19 @@ function initSync() {
             S.typing.typedCount++;
             const sc = S.scenes[item.scene];
             if (sc) { sc.urls = item.allVideoUrls; sc.fileCount = item.allVideoUrls.length; sc.status = "ready"; }
+            updateHistoryEntry(item.projectId || S.projectId);
             render();
             if (!shouldStopTyping(runId)) { try { await sendResults(item.scene, item.allVideoUrls); } catch {} }
           } else {
             item.errorCount = (item.errorCount || 0) + 1;
             item.status = item.errorCount >= 3 ? "failed" : "error";
+            updateHistoryEntry(item.projectId || S.projectId);
           }
           render();
         } catch (e) {
           item.errorCount = (item.errorCount || 0) + 1;
           item.status = item.errorCount >= 3 ? "failed" : "error";
+          updateHistoryEntry(item.projectId || S.projectId);
           render();
           await doCountdown(5, "retry", runId);
         }
@@ -1423,6 +1727,7 @@ function initSync() {
     const finalScope = getSelectedTypingItems();
     const finalTyped = finalScope.filter(q => q.status === "typed").length;
     const finalFailed = finalScope.filter(q => q.status === "error" || q.status === "failed").length;
+    updateHistoryForProjects(getUniqueProjectIds(finalScope), { endedAt: Date.now() });
     console.log("=== BATCH COMPLETE:", finalTyped, "/", finalScope.length, "succeeded,", finalFailed, "failed ===");
     sendWS({ type: "JOB_COMPLETE", projectId: S.projectId, typed: finalTyped, total: finalScope.length, failed: finalFailed });
 
@@ -1470,8 +1775,143 @@ function initSync() {
       if (q.status === "typing" || q.status === "generating") q.status = "queued";
     }
     S.typing.currentIndex = -1;
+    updateHistoryForProjects(getUniqueProjectIds(S.typing.queue), {
+      status: "stopped",
+      endedAt: Date.now(),
+      activate: false,
+    });
     console.log("Typing stopped");
     render();
+  }
+
+  async function runTestPrompt() {
+    if (S.typing.active || S.typing.starting) {
+      console.log("[TEST] Already running");
+      return;
+    }
+
+    const testProjectId = "TEST";
+    const testScene = "0";
+    const testPrompt = "generate a cinematic 6 second video, medium shot, a solitary stick figure standing in a vast empty white room, soft diffused lighting, subtle camera push-in, clean minimal scene";
+    const runId = S.typing.runId + 1;
+    S.typing.runId = runId;
+    S.typing.active = true;
+    S.typing.starting = false;
+    S.typing.stopRequested = false;
+    S.typing.autoPaused = true;
+    S.typing.currentIndex = 0;
+    S.typing.typedCount = 0;
+    S.typing.batchCount = 0;
+    S.projectId = testProjectId;
+    S.sentScenes = {};
+    S.scenes = {
+      [testScene]: {
+        prompt: testPrompt,
+        status: "pending",
+        urls: [],
+        fileCount: 0,
+        imageUrl: null,
+        projectId: testProjectId,
+      },
+    };
+    S.typing.queue = [{
+      scene: testScene,
+      displayPrompt: testPrompt,
+      fullPrompt: testPrompt,
+      prompt: testPrompt,
+      selected: true,
+      status: "queued",
+      projectId: testProjectId,
+      imageUrl: null,
+      mode: S.grokMode,
+      duration: S.grokDuration,
+      aspectRatio: S.aspectRatio,
+      error: null,
+      errorCount: 0,
+    }];
+
+    updateHistoryEntry(testProjectId, {
+      forceNew: true,
+      source: "test",
+      status: "running",
+      startedAt: Date.now(),
+      aspectRatio: S.aspectRatio,
+      mode: S.grokMode,
+      duration: S.grokDuration,
+    });
+    render();
+
+    const item = S.typing.queue[0];
+    const seenVideoUrls = new Set();
+    document.querySelectorAll('video[src*="assets.grok.com"]').forEach((v) => addSeen(seenVideoUrls, v.src || ""));
+    document.querySelectorAll('img[src*="assets.grok.com"][src*="/generated/"]').forEach((img) => addSeen(seenVideoUrls, img.src || ""));
+    const sdv = document.getElementById("sd-video");
+    if (sdv?.src) addSeen(seenVideoUrls, sdv.src);
+
+    try {
+      await resetGrokInput();
+      await sleep(500);
+      try { await setupGrokMode(); } catch (e) { console.warn("[TEST] Mode setup failed:", e.message); }
+
+      item.status = "typing";
+      updateHistoryEntry(testProjectId, { source: "test", status: "running" });
+      render();
+      await typeIntoGrok(testPrompt);
+      if (shouldStopTyping(runId)) throw new Error("Test stopped");
+
+      await sleep(500);
+      captureContainerForScene(testScene);
+
+      item.status = "generating";
+      updateHistoryEntry(testProjectId, { source: "test", status: "running" });
+      render();
+
+      const genResult = await waitForGeneration(testScene, seenVideoUrls, undefined, runId);
+      if (shouldStopTyping(runId)) throw new Error("Test stopped");
+
+      if (genResult) {
+        addSeen(seenVideoUrls, genResult.primary);
+        (genResult.allUrls || []).forEach((url) => addSeen(seenVideoUrls, url));
+        item.status = "typed";
+        item.videoUrl = genResult.primary;
+        item.allVideoUrls = genResult.allUrls || [genResult.primary];
+        S.typing.typedCount = 1;
+        S.typing.batchCount = 1;
+        if (S.scenes[testScene]) {
+          S.scenes[testScene].urls = item.allVideoUrls;
+          S.scenes[testScene].previewUrl = genResult.primary.replace(/generated_video\.mp4(\?.*)?$/, "preview_image.jpg");
+          S.scenes[testScene].fileCount = item.allVideoUrls.length;
+          S.scenes[testScene].status = "ready";
+        }
+        updateHistoryEntry(testProjectId, { source: "test", endedAt: Date.now() });
+      } else {
+        item.status = "error";
+        item.error = "No video generated";
+        if (S.scenes[testScene]) S.scenes[testScene].status = "error";
+        updateHistoryEntry(testProjectId, { source: "test", status: "failed", endedAt: Date.now() });
+      }
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (!shouldStopTyping(runId)) {
+        item.status = "error";
+        item.error = msg;
+        if (S.scenes[testScene]) S.scenes[testScene].status = "error";
+      }
+      updateHistoryEntry(testProjectId, {
+        source: "test",
+        status: shouldStopTyping(runId) ? "stopped" : "failed",
+        endedAt: Date.now(),
+      });
+      console.error("[TEST] Failed:", msg);
+    } finally {
+      S.typing.active = false;
+      S.typing.starting = false;
+      S.typing.stopRequested = false;
+      S.typing.currentIndex = -1;
+      S.typing.countdown = 0;
+      S.typing.countdownType = "";
+      render();
+    }
   }
 
   // ── API ────────────────────────────────────────────────
@@ -1503,7 +1943,9 @@ function initSync() {
         const k = String(sc.scene);
         const imgData = sc.image || null;
         if (!S.scenes[k]) {
-          S.scenes[k] = { prompt: sc.prompt, status: "pending", urls: [], fileCount: 0, imageUrl: imgData };
+          S.scenes[k] = { prompt: sc.prompt, status: "pending", urls: [], fileCount: 0, imageUrl: imgData, projectId: d.projectId };
+        } else if (!S.scenes[k].projectId) {
+          S.scenes[k].projectId = d.projectId;
         }
         const existing = S.typing.queue.find(q => q.scene === k);
         if (!existing) {
@@ -1511,10 +1953,19 @@ function initSync() {
           S.typing.queue.push({
             scene: k, displayPrompt: sc.prompt,
             fullPrompt: sc.prompt + args,
-            selected: true, status: "queued", imageUrl: imgData,
+            selected: true, status: "queued", imageUrl: imgData, projectId: d.projectId,
           });
+        } else if (!existing.projectId) {
+          existing.projectId = d.projectId;
         }
       }
+      updateHistoryEntry(d.projectId, {
+        source: "job",
+        status: "queued",
+        aspectRatio: S.aspectRatio,
+        mode: S.grokMode,
+        duration: S.grokDuration,
+      });
     } catch { S.connected = false; S._fetchErrors++; }
   }
 
@@ -1592,8 +2043,36 @@ function initSync() {
 
   function escHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
+  function hideImagePreview() {
+    const overlay = document.getElementById("sts-img-overlay");
+    if (overlay) overlay.remove();
+  }
+
+  function showImagePreview(src) {
+    if (!src) return;
+    let overlay = document.getElementById("sts-img-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "sts-img-overlay";
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = '<img src="' + src + '" alt="Scene preview">';
+  }
+
+  function syncCollapsedUi() {
+    const pill = $id("sts-pill");
+    const panel = $id("sts-panel");
+    if (pill) pill.style.display = S.collapsed ? "" : "none";
+    if (panel) panel.style.display = S.collapsed ? "none" : "";
+  }
+
   function render() {
     saveState(); // persist on every state change (debounced)
+    hideImagePreview();
+    syncCollapsedUi();
+    const historyItems = pruneHistoryEntries(S.history.items);
+    S.history.items = historyItems;
+    const historyCount = historyItems.length;
     const tq = S.typing.queue;
     const selectedTq = getSelectedTypingItems();
     const selectedTotal = selectedTq.length;
@@ -1650,6 +2129,8 @@ function initSync() {
     const nr = $id("sts-n-rdy"); if (nr) nr.textContent = rdy;
     const totalScenes = Object.keys(S.scenes).length;
     const ns = $id("sts-n-sent"); if (ns) ns.textContent = sent + "/" + totalScenes;
+    const historyTabCount = $id("sts-history-tab-count");
+    if (historyTabCount) historyTabCount.textContent = String(historyCount);
 
     // Header aspect ratio indicator
     const headRatio = $id("sts-head-ratio");
@@ -1684,6 +2165,12 @@ function initSync() {
         label.textContent = tq.length > 0 ? "No prompts selected" : "No prompts queued";
         if (cd) cd.textContent = "";
       }
+    } else if (S.activeTab === "history") {
+      const fill = $id("sts-prog-fill"); if (fill) fill.style.width = "0%";
+      const label = $id("sts-prog-label");
+      const cd = $id("sts-prog-cd");
+      if (label) label.textContent = S.history.items.length ? S.history.items.length + " runs in last 7 days" : "No history yet";
+      if (cd) { cd.textContent = ""; cd.className = "sts-cd"; }
     }
 
     // Action button
@@ -1703,6 +2190,8 @@ function initSync() {
     const retryBtn = $id("sts-retry-btn");
     const hasErrors = tq.some(q => isTypingSelected(q) && (q.status === "error" || q.status === "failed"));
     if (retryBtn) retryBtn.style.display = (hasErrors && !S.typing.active) ? "" : "none";
+    const testBtn = $id("sts-test-btn");
+    if (testBtn) testBtn.style.display = S.showTestButton ? "" : "none";
 
     // List
     const list = $id("sts-list");
@@ -1738,7 +2227,7 @@ function initSync() {
         html += '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + escHtml(pr) + '</div><div class="sts-row-meta">' + meta + "</div></div><div class=\"sts-row-status\">" + sHTML + "</div></div>";
       });
       list.innerHTML = html;
-    } else {
+    } else if (S.activeTab === "sync") {
       const keys = Object.keys(S.scenes).sort((a, b) => parseInt(a) - parseInt(b));
       if (!keys.length) {
         list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F4E1;</div>Waiting for generations...</div>';
@@ -1755,6 +2244,49 @@ function initSync() {
         };
         const [bCls, bText] = badgeMap[sc.status] || ["pending", sc.status];
         return '<div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">' + num + '</div><div class="sts-card-prompt">' + escHtml(pr) + '</div><span class="sts-card-badge sts-badge-' + bCls + '">' + bText + "</span></div></div>";
+      }).join("");
+    } else {
+      const history = historyItems;
+      if (!history.length) {
+        list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F4DA;</div>No history yet.<br>Completed and stopped runs stay here for 7 days.</div>';
+        return;
+      }
+      list.innerHTML = history.map((entry) => {
+        const badge = getHistoryBadge(entry);
+        const startedAt = entry.startedAt || entry.createdAt;
+        let durationMs = entry.durationMs;
+        const expanded = isHistoryExpanded(entry.id);
+        if (!entry.endedAt && startedAt) durationMs = Date.now() - startedAt;
+        const promptHtml = (entry.prompts || []).map((prompt) => {
+          let meta = prompt.status || prompt.syncStatus || "queued";
+          if (prompt.error) meta += " - " + prompt.error;
+          return '<div class="sts-history-prompt">' +
+            '<div class="sts-history-prompt-num">' + escHtml(String(prompt.scene || "?")) + '</div>' +
+            '<div class="sts-history-prompt-body">' +
+              '<div class="sts-history-prompt-text">' + escHtml(prompt.prompt || "") + '</div>' +
+              '<div class="sts-history-prompt-meta">' + escHtml(meta) + '</div>' +
+            '</div>' +
+          '</div>';
+          }).join("");
+        return '<div class="sts-history-card' + (expanded ? ' open' : ' collapsed') + '">' +
+          '<div class="sts-history-head">' +
+            '<div class="sts-history-title">' + escHtml(entry.projectId || "Unknown project") + '</div>' +
+            (entry.source === "test" ? '<span class="sts-card-badge sts-badge-test">test</span>' : "") +
+            '<span class="sts-card-badge ' + badge.cls + '">' + escHtml(badge.text) + '</span>' +
+            '<button class="sts-history-toggle" type="button" data-entry-id="' + escHtml(entry.id || "") + '" aria-expanded="' + (expanded ? "true" : "false") + '" title="' + (expanded ? "Collapse prompts" : "Expand prompts") + '">' + (expanded ? '&#x25BE;' : '&#x25B8;') + '</button>' +
+          '</div>' +
+          '<div class="sts-history-sub">' + escHtml(formatHistoryTimestamp(startedAt)) + ' - ' + escHtml(formatHistoryAge(entry.updatedAt || startedAt)) + '</div>' +
+          '<div class="sts-history-meta">' +
+            '<span class="sts-history-chip sts-history-chip-time">duration ' + escHtml(formatHistoryDuration(durationMs)) + '</span>' +
+            '<span class="sts-history-chip sts-history-chip-count">' + escHtml(String(entry.sceneCount || 0)) + ' prompts</span>' +
+            '<span class="sts-history-chip sts-history-chip-done">' + escHtml(String(entry.completedCount || 0)) + ' done</span>' +
+            '<span class="sts-history-chip sts-history-chip-failed">' + escHtml(String(entry.failedCount || 0)) + ' failed</span>' +
+            (entry.aspectRatio ? '<span class="sts-history-chip sts-history-chip-setting">' + escHtml(entry.aspectRatio) + '</span>' : '') +
+            (entry.mode ? '<span class="sts-history-chip sts-history-chip-mode">' + escHtml(entry.mode) + '</span>' : '') +
+            (entry.duration ? '<span class="sts-history-chip sts-history-chip-setting">' + escHtml(entry.duration) + '</span>' : '') +
+          '</div>' +
+          (expanded ? '<div class="sts-history-prompts">' + promptHtml + '</div>' : '') +
+        '</div>';
       }).join("");
     }
   }
@@ -1805,6 +2337,10 @@ function initSync() {
     <label>URL</label>
     <input type="text" class="sts-url-input" id="sts-url-input" />
     <button class="sts-url-save" id="sts-url-save">Save</button>
+    <label class="sts-settings-toggle" title="Show or hide the TEST button">
+      <input type="checkbox" id="sts-show-test-toggle" />
+      <span>Show TEST button</span>
+    </label>
   </div>
 
   <!-- Stats -->
@@ -1819,6 +2355,7 @@ function initSync() {
   <div class="sts-tabs">
     <button class="sts-tab active" data-tab="typing">Typing</button>
     <button class="sts-tab" data-tab="sync">Sync</button>
+    <button class="sts-tab" data-tab="history">History <span class="sts-tab-count" id="sts-history-tab-count">0</span></button>
   </div>
 
   <!-- Progress -->
@@ -1838,10 +2375,12 @@ function initSync() {
     <button class="sts-btn sts-btn-primary" id="sts-action-btn">Start Typing</button>
     <button class="sts-btn sts-btn-warn" id="sts-retry-btn" style="display:none;">Retry Failed</button>
     <button class="sts-btn sts-btn-ghost sts-btn-sm" id="sts-clear-btn">Clear</button>
+    <button class="sts-btn" id="sts-test-btn" style="background:#6366f1;color:#fff;font-size:11px;padding:6px 12px;" title="Test one prompt locally without uploading results">TEST</button>
   </div>
-</div>`;
+    </div>`;
 
     document.body.appendChild(root);
+    syncCollapsedUi();
 
     // Event handlers — draggable pill
     (() => {
@@ -1864,8 +2403,7 @@ function initSync() {
       document.addEventListener("mouseup", () => {
         if (dragging && !hasMoved) {
           S.collapsed = false;
-          $id("sts-pill").style.display = "none";
-          $id("sts-panel").style.display = "";
+          syncCollapsedUi();
           render();
         }
         dragging = false;
@@ -1874,8 +2412,7 @@ function initSync() {
 
     $id("sts-collapse-btn").addEventListener("click", () => {
       S.collapsed = true;
-      $id("sts-panel").style.display = "none";
-      $id("sts-pill").style.display = "";
+      syncCollapsedUi();
       render();
     });
 
@@ -1883,6 +2420,7 @@ function initSync() {
       S.showSettings = !S.showSettings;
       $id("sts-settings").classList.toggle("open", S.showSettings);
       $id("sts-settings-btn").classList.toggle("active", S.showSettings);
+      if (S.showSettings) $id("sts-show-test-toggle").checked = !!S.showTestButton;
     });
 
     $id("sts-url-input").value = S.studioUrl;
@@ -1898,6 +2436,12 @@ function initSync() {
       }
       S.wsConnected = false;
       connectWS();
+      render();
+    });
+    $id("sts-show-test-toggle").checked = !!S.showTestButton;
+    $id("sts-show-test-toggle").addEventListener("change", () => {
+      S.showTestButton = !!$id("sts-show-test-toggle").checked;
+      localStorage.setItem("sts-grok-show-test", S.showTestButton ? "true" : "false");
       render();
     });
 
@@ -1935,6 +2479,13 @@ function initSync() {
     });
 
     $id("sts-clear-btn").addEventListener("click", () => {
+      let clearedProjects = getUniqueProjectIds(S.typing.queue);
+      if (!clearedProjects.length && S.projectId) clearedProjects = [S.projectId];
+      updateHistoryForProjects(clearedProjects, {
+        status: S.typing.active ? "stopped" : "cleared",
+        endedAt: Date.now(),
+        activate: false,
+      });
       if (S.typing.active) {
         S.typing.stopRequested = true;
         S.typing.active = false;
@@ -1954,6 +2505,10 @@ function initSync() {
       render();
     });
 
+    $id("sts-test-btn").addEventListener("click", () => {
+      runTestPrompt();
+    });
+
     // Checkbox delegation
     $id("sts-list").addEventListener("change", (e) => {
       const cb = e.target.closest('[data-role="typing-checkbox"]');
@@ -1963,6 +2518,27 @@ function initSync() {
         S.typing.queue[idx].selected = cb.checked;
         render();
       }
+    });
+    $id("sts-list").addEventListener("click", (e) => {
+      const toggle = e.target.closest(".sts-history-toggle");
+      if (!toggle) return;
+      const entryId = toggle.getAttribute("data-entry-id");
+      if (!entryId) return;
+      S.history.expanded[entryId] = !isHistoryExpanded(entryId);
+      render();
+    });
+
+    $id("sts-list").addEventListener("pointerover", (e) => {
+      const thumb = e.target.closest(".sts-row-thumb");
+      if (!thumb || thumb.tagName !== "IMG" || !thumb.src) return;
+      showImagePreview(thumb.src);
+    });
+    $id("sts-list").addEventListener("pointerout", (e) => {
+      const thumb = e.target.closest(".sts-row-thumb");
+      if (!thumb || thumb.tagName !== "IMG") return;
+      const next = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".sts-row-thumb") : null;
+      if (next === thumb) return;
+      hideImagePreview();
     });
   }
 

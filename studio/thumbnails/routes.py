@@ -19,11 +19,9 @@ import subprocess
 from flask import Blueprint, jsonify, request, send_file
 from loguru import logger
 
-from config import THUMBNAILS_DIR, ANIMATOR_DIR, EXPORT_DIR, PROJECTS_DIR, SCENES_DIR
+from config import THUMBNAILS_DIR, ANIMATOR_DIR, EXPORT_DIR, PROJECTS_DIR
 from studio.ffmpeg_utils import find_ffmpeg
 from studio.io_utils import safe_json_read
-from studio.security import sanitize_project_id
-
 thumbnails_bp = Blueprint("thumbnails", __name__)
 
 THUMB_SIZE = "480:-1"  # width 480, auto height
@@ -306,63 +304,3 @@ def serve_thumbnail(project_id, module, filename):
 
     return send_file(thumb_path, mimetype="image/jpeg")
 
-
-@thumbnails_bp.route("/api/thumbnails/generate-all", methods=["POST"])
-def generate_all_thumbnails():
-    """Generate thumbnails for all discovered projects.
-
-    Query params:
-      ?modules=assets,exports,editor
-      ?force=1
-    """
-    ffmpeg = find_ffmpeg()
-    if not ffmpeg:
-        return jsonify({"error": "ffmpeg not found"}), 500
-
-    force = request.args.get("force", "0") == "1"
-    modules_param = request.args.get("modules", "assets,exports,editor")
-    modules = [m.strip() for m in modules_param.split(",") if m.strip()]
-
-    generators = {
-        "assets": _generate_assets_thumbs,
-        "exports": _generate_exports_thumbs,
-        "editor": _generate_editor_thumb,
-    }
-
-    # Discover projects from scenes dir
-    project_ids = []
-    if os.path.isdir(SCENES_DIR):
-        project_ids = [
-            d for d in os.listdir(SCENES_DIR)
-            if os.path.isdir(os.path.join(SCENES_DIR, d))
-        ]
-
-    results = {}
-    for pid in sorted(project_ids):
-        report = {}
-        for mod in modules:
-            gen = generators.get(mod)
-            if gen:
-                report[mod] = gen(pid, ffmpeg, force=force)
-        results[pid] = report
-
-    total_gen = sum(
-        r.get("generated", 0)
-        for proj in results.values()
-        for r in proj.values()
-    )
-    total_skip = sum(
-        r.get("skipped", 0)
-        for proj in results.values()
-        for r in proj.values()
-    )
-
-    logger.info("Thumbnails generate-all: {} projects, {} generated, {} skipped",
-                len(results), total_gen, total_skip)
-
-    return jsonify({
-        "projects": results,
-        "project_count": len(results),
-        "total_generated": total_gen,
-        "total_skipped": total_skip,
-    })

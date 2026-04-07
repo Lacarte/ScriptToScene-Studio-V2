@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useSettings } from '../composables/useSettings.js'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useToast } from '@/shared/composables/useToast.js'
@@ -93,6 +93,30 @@ async function onToggle(key, value) {
   } catch {
     toast.error(`Failed to update setting.`)
   }
+}
+
+const DEFAULT_DUCKING = 20
+const duckingValue = computed(() => {
+  const v = settings.value['sts-music-ducking']
+  return v == null ? DEFAULT_DUCKING : Math.round(Number(v) * 100)
+})
+
+function _persistDucking(fraction) {
+  // Mirror to localStorage so the legacy editor (vanilla JS) can read it
+  try { localStorage.setItem('sts-music-ducking', String(fraction)) } catch (_) {}
+}
+
+function onDuckingInput(e) {
+  const pct = parseInt(e.target.value, 10)
+  const fraction = pct / 100
+  _persistDucking(fraction)
+  onToggle('sts-music-ducking', fraction)
+}
+
+function resetDucking() {
+  const fraction = DEFAULT_DUCKING / 100
+  _persistDucking(fraction)
+  onToggle('sts-music-ducking', fraction)
 }
 
 function replayWelcome() {
@@ -274,6 +298,34 @@ function featureLabel(val) {
           description="Apply grain overlay texture to exports"
           @update:model-value="onToggle('sts-export-grain', $event)"
         />
+      </div>
+    </section>
+
+    <!-- Audio / Music -->
+    <section class="card p-5 mb-4">
+      <label class="section-label">Audio &amp; Music</label>
+      <div class="export-defaults">
+        <div class="export-default-row" style="flex-direction: column; align-items: stretch; gap: 10px;">
+          <div class="export-copy">
+            <label class="export-label">Default Music Ducking</label>
+            <p class="export-help">When voice is playing, background music drops to this percentage of its set volume. Default: 30%.</p>
+          </div>
+          <div class="ducking-row">
+            <input
+              type="range"
+              min="5"
+              max="100"
+              step="1"
+              class="ducking-slider"
+              :value="duckingValue"
+              @input="onDuckingInput($event)"
+            />
+            <span class="ducking-value">{{ duckingValue }}%</span>
+            <button class="ducking-reset" @click="resetDucking" title="Reset to default (20%)">
+              Reset to 20%
+            </button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -481,6 +533,68 @@ function featureLabel(val) {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.ducking-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.ducking-slider {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-surface);
+  border-radius: 2px;
+  outline: none;
+}
+.ducking-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-deep);
+}
+.ducking-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-deep);
+}
+.ducking-value {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 42px;
+  text-align: right;
+}
+.ducking-reset {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ducking-reset:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(45, 212, 191, 0.08);
 }
 
 .sync-input {

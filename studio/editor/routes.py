@@ -597,6 +597,73 @@ def _resolve_project_captions(data: dict, project_id: str):
             logger.debug("Failed to build captions from alignment: {}", e)
 
 
+_AUDIO_HISTORY_LIMIT = 10
+
+
+def _normalize_audio_history(history) -> list[str]:
+    """Keep a bounded list of valid persisted audio history paths."""
+    if not isinstance(history, list):
+        return []
+    return [path for path in history if isinstance(path, str) and path.strip()][-_AUDIO_HISTORY_LIMIT:]
+
+
+def _append_audio_history(history: list[str], path: str | None) -> list[str]:
+    """Append a path to bounded recent history, de-duping earlier occurrences."""
+    if not isinstance(path, str) or not path.strip():
+        return _normalize_audio_history(history)
+    normalized = [item for item in _normalize_audio_history(history) if item != path]
+    normalized.append(path)
+    return normalized[-_AUDIO_HISTORY_LIMIT:]
+
+
+def _builtin_audio_url_to_abs(track_type: str, path: str | None) -> str | None:
+    """Convert a built-in /assets/sounds/{music|sfx}/... URL back to an absolute path."""
+    if not isinstance(path, str) or not path.strip():
+        return None
+    bucket = "music" if track_type == "music" else "sfx" if track_type == "sfx" else ""
+    if not bucket:
+        return None
+    prefix = f"/assets/sounds/{bucket}/"
+    if not path.startswith(prefix):
+        return None
+    rel = path[len("/assets/"):].replace("/", os.sep)
+    return os.path.join(APP_ASSETS_DIR, rel)
+
+
+def _merge_project_audio_history(save_data: dict, project_id: str):
+    """Keep initial/WIP payloads in sync with current music/SFX history."""
+    initial = _initial_path(project_id)
+    existing_initial = {}
+    if os.path.isfile(initial):
+        try:
+            existing_initial = safe_json_read(initial)
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
+            logger.debug("Could not read existing initial.json for {}: {}", project_id, e)
+            existing_initial = {}
+    if not isinstance(existing_initial, dict):
+        existing_initial = {}
+
+    music_history = _normalize_audio_history(
+        save_data.get("music_history") if "music_history" in save_data else existing_initial.get("music_history")
+    )
+    sfx_history = _normalize_audio_history(
+        save_data.get("sfx_history") if "sfx_history" in save_data else existing_initial.get("sfx_history")
+    )
+
+    for track in save_data.get("audio_tracks", []):
+        if not isinstance(track, dict):
+            continue
+        track_type = str(track.get("type") or "").lower()
+        abs_path = _builtin_audio_url_to_abs(track_type, track.get("path"))
+        if track_type == "music":
+            music_history = _append_audio_history(music_history, abs_path)
+        elif track_type == "sfx":
+            sfx_history = _append_audio_history(sfx_history, abs_path)
+
+    save_data["music_history"] = music_history
+    save_data["sfx_history"] = sfx_history
+
+
 # ---------------------------------------------------------------------------
 # Editor project save / load
 # ---------------------------------------------------------------------------
@@ -604,7 +671,7 @@ def _resolve_project_captions(data: dict, project_id: str):
 @editor_bp.route("/api/editor/save", methods=["POST"])
 @validate_json(EditorSaveRequest)
 def editor_save_project(data: EditorSaveRequest):
-    """Save editor project edits to the work-in-progress file."""
+    """Save editor project edits to both the work-in-progress and initial files."""
     safe_id = data.project_id  # already validated: alphanumeric + _ and -
 
     from datetime import datetime, timezone
@@ -617,29 +684,24 @@ def editor_save_project(data: EditorSaveRequest):
             captions["source_folder"] = source_folder
     _resolve_project_audio(save_data, safe_id)
     _resolve_project_captions(save_data, safe_id)
+    _merge_project_audio_history(save_data, safe_id)
     save_data["saved_at"] = datetime.now(timezone.utc).isoformat()
 
     os.makedirs(_project_dir(safe_id), exist_ok=True)
 
     # Always write to the WIP file — initial state stays untouched
+    # Mirror the latest saved editor state into both project files.
+    initial = _initial_path(safe_id)
     wip = _wip_path(safe_id)
     try:
+        safe_json_write(initial, save_data)
         safe_json_write(wip, save_data)
     except OSError as e:
-        logger.error("Failed to save WIP for {}: {}", safe_id, e)
+        logger.error("Failed to save editor state for {}: {}", safe_id, e)
         return jsonify({"error": f"Failed to save: {e}"}), 500
 
-    # Ensure the initial file exists (first-time project creation)
-    initial = _initial_path(safe_id)
-    if not os.path.isfile(initial):
-        try:
-            safe_json_write(initial, save_data)
-            logger.info("Initial state saved for new project: {}", safe_id)
-        except OSError:
-            pass  # WIP is already written, this is non-critical
-
-    logger.info("Editor WIP saved: {} ({} scenes)", safe_id, save_data.get("scene_count", "?"))
-    return jsonify({"ok": True, "saved_at": save_data["saved_at"], "wip": True})
+    logger.info("Editor state saved to initial + WIP: {} ({} scenes)", safe_id, save_data.get("scene_count", "?"))
+    return jsonify({"ok": True, "saved_at": save_data["saved_at"], "wip": True, "initial": True})
 
 
 @editor_bp.route("/api/editor/load/<project_id>", methods=["GET"])
@@ -647,7 +709,7 @@ def editor_load_project(project_id):
     """Load a saved editor project.
 
     Prefers the work-in-progress file if it exists, otherwise falls back to
-    the initial (pristine) project file.  The response includes a ``source``
+    the initial project file.  The response includes a ``source``
     field (``"wip"`` or ``"initial"``) so the frontend knows which was loaded.
     """
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
@@ -1008,19 +1070,42 @@ def assemble_project_for_editor(project_id):
             "fadeOut": 0,
         })
 
-    # Auto-select background music based on story tone
+    music_history = []
+    sfx_history = []
+    initial_path = _initial_path(safe_id)
+    if os.path.isfile(initial_path):
+        try:
+            existing_initial = safe_json_read(initial_path)
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
+            logger.debug("Could not read existing initial.json for {}: {}", safe_id, e)
+            existing_initial = {}
+        if isinstance(existing_initial, dict):
+            music_history = list(existing_initial.get("music_history") or [])
+            sfx_history = list(existing_initial.get("sfx_history") or [])
+
+    # Auto-select background music + ambient SFX based on story tone.
+    # Track order is preserved by insertion order: voice → music → sfx.
     story_tone = _get_story_tone(safe_id)
     if story_tone:
         try:
-            from studio.music.selector import select_music
-            bg_music = select_music(story_tone)
+            from studio.music.selector import select_music, select_sfx
+            bg_music = select_music(story_tone, history=music_history)
             if bg_music:
+                music_history = list(bg_music.get("history") or music_history)
+                # Music files live under APP_ASSETS_DIR/sounds/music/<folder>/<file>.
+                # Build a Flask-servable /assets/... URL the same way
+                # /api/music/auto-select does so the editor + renderer both
+                # resolve it. The folder is the immediate parent of the file.
+                music_abs = bg_music["path"]
+                music_file = os.path.basename(music_abs)
+                music_folder = os.path.basename(os.path.dirname(music_abs))
+                music_url = f"/assets/sounds/music/{music_folder}/{music_file}" if music_folder else f"/assets/sounds/music/{music_file}"
                 audio_tracks.append({
                     "id": "at_music_1",
                     "label": "Music",
                     "type": "music",
-                    "file": os.path.basename(bg_music["path"]),
-                    "path": f"/output/musics/{os.path.basename(bg_music['path'])}",
+                    "file": music_file,
+                    "path": music_url,
                     "duration": 0,
                     "timelineOffset": 0,
                     "startOffset": 0,
@@ -1034,9 +1119,39 @@ def assemble_project_for_editor(project_id):
                     "fadeOut": bg_music.get("fade_out", 3.0),
                 })
                 logger.info("Auto-selected bgMusic for tone '{}' → '{}'",
-                            story_tone, os.path.basename(bg_music["path"]))
+                            story_tone, music_file)
+
+            sfx = select_sfx(story_tone, history=sfx_history)
+            if sfx:
+                sfx_history = list(sfx.get("history") or sfx_history)
+                # Build a /assets/sounds/sfx/<folder>/<file> URL — keep the
+                # folder so the editor can resolve it the same way the SFX
+                # library endpoint does.
+                sfx_file = os.path.basename(sfx["path"])
+                sfx_folder = sfx.get("folder") or os.path.basename(os.path.dirname(sfx["path"]))
+                sfx_url = f"/assets/sounds/sfx/{sfx_folder}/{sfx_file}" if sfx_folder else f"/assets/sounds/sfx/{sfx_file}"
+                audio_tracks.append({
+                    "id": "at_sfx_1",
+                    "label": "SFX",
+                    "type": "sfx",
+                    "file": sfx_file,
+                    "path": sfx_url,
+                    "duration": 0,
+                    "timelineOffset": 0,
+                    "startOffset": 0,
+                    "trimmedDuration": None,
+                    "volume": sfx.get("volume", 0.10),
+                    "loop": sfx.get("loop", True),
+                    "muted": False,
+                    "duckingEnabled": sfx.get("ducking_enabled", True),
+                    "duckingLevel": sfx.get("ducking_level", 0.20),
+                    "fadeIn": sfx.get("fade_in", 1.5),
+                    "fadeOut": sfx.get("fade_out", 2.0),
+                })
+                logger.info("Auto-selected SFX for tone '{}' → '{}'",
+                            story_tone, sfx_file)
         except Exception as e:
-            logger.debug("Could not auto-select bgMusic for {}: {}", safe_id, e)
+            logger.debug("Could not auto-select bgMusic/SFX for {}: {}", safe_id, e)
 
     total_duration = sum(s["duration"] for s in editor_scenes)
     editor_data = {
@@ -1048,6 +1163,8 @@ def assemble_project_for_editor(project_id):
         "scene_count": len(editor_scenes),
         "scenes": editor_scenes,
         "audio_tracks": audio_tracks,
+        "music_history": music_history,
+        "sfx_history": sfx_history,
         "grain_overlay": {
             "enabled": False,
             "opacity": 0.16,
@@ -1124,7 +1241,7 @@ def assemble_project_for_editor(project_id):
 
 @editor_bp.route("/api/editor/reset/<project_id>", methods=["POST"])
 def editor_reset_to_initial(project_id):
-    """Delete the WIP file and revert the project to its initial state."""
+    """Delete the WIP file and fall back to the mirrored initial project file."""
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
 
 

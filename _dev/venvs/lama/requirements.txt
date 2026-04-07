@@ -1,0 +1,11 @@
+# Isolated venv for LaMa inpainting worker.
+#
+# Setup:
+#   python -m venv _dev/venvs/lama
+#   _dev/venvs/lama/Scripts/pip install -r _dev/venvs/lama/requirements.txt
+#
+# Why isolated: LaMa requires numpy<2 and torch 2.11 which conflict with the
+# main project's numpy 2.x / torch 2.10. The worker runs as a subprocess
+# bridged from the main env via studio/storyboard/lama_client.py.
+
+simple-lama-inpainting

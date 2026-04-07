@@ -75,10 +75,16 @@
       connected: false,
       collapsed: localStorage.getItem('sts-gemini-collapsed') === 'true',
       showSettings: false,
+      showTestButton: localStorage.getItem('sts-gemini-show-test') === 'true',
       activeTab: 'typing',
       projectId: null,
       aspectRatio: '',
       scenes: {},
+      history: {
+        items: [],
+        activeId: null,
+        expanded: {},
+      },
       wsConnected: false,
       typing: {
         active: false, starting: false, queue: [], runId: 0,
@@ -94,6 +100,8 @@
     // Survives tab discards, page reloads, and browser restarts.
     // Only cleared by the manual CLEAR button.
     var STORAGE_KEY = 'sts-gemini-state-v1';
+    var HISTORY_KEY = 'sts-gemini-history-v1';
+    var HISTORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
     var _saveTimer = null;
     function saveState() {
       if (_saveTimer) return; // debounce
@@ -104,6 +112,7 @@
             projectId: S.projectId,
             aspectRatio: S.aspectRatio,
             scenes: S.scenes,
+            historyActiveId: S.history.activeId,
             typing: {
               queue: S.typing.queue.map(function(q) {
                 var copy = {};
@@ -130,6 +139,7 @@
             if (snap.projectId) S.projectId = snap.projectId;
             if (snap.aspectRatio) S.aspectRatio = snap.aspectRatio;
             if (snap.scenes) S.scenes = snap.scenes;
+            if (snap.historyActiveId) S.history.activeId = snap.historyActiveId;
             if (snap.typing) {
               if (Array.isArray(snap.typing.queue)) S.typing.queue = snap.typing.queue;
               if (typeof snap.typing.typedCount === 'number') S.typing.typedCount = snap.typing.typedCount;
@@ -143,6 +153,289 @@
     function clearStoredState() {
       try { chrome.storage.local.remove(STORAGE_KEY); } catch (e) {}
     }
+
+    function sortHistoryEntries(entries) {
+      return (entries || []).sort(function(a, b) {
+        return (b.updatedAt || b.endedAt || b.startedAt || b.createdAt || 0) -
+          (a.updatedAt || a.endedAt || a.startedAt || a.createdAt || 0);
+      });
+    }
+
+    function pruneHistoryEntries(entries) {
+      var cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+      return sortHistoryEntries((entries || []).filter(function(entry) {
+        if (!entry || typeof entry !== 'object') return false;
+        var stamp = entry.updatedAt || entry.endedAt || entry.startedAt || entry.createdAt || 0;
+        return stamp >= cutoff;
+      }));
+    }
+
+    function loadHistoryEntries() {
+      var entries = [];
+      try {
+        var raw = localStorage.getItem(HISTORY_KEY);
+        entries = raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        entries = [];
+      }
+      if (!Array.isArray(entries)) entries = [];
+      entries = pruneHistoryEntries(entries);
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(entries)); } catch (_e) {}
+      return entries;
+    }
+
+    function persistHistoryEntries() {
+      S.history.items = pruneHistoryEntries(S.history.items);
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(S.history.items)); } catch (e) {}
+      return S.history.items;
+    }
+
+    function isFinalHistoryStatus(status) {
+      return status === 'completed' ||
+        status === 'completed_with_errors' ||
+        status === 'failed' ||
+        status === 'stopped' ||
+        status === 'cleared';
+    }
+
+    function getUniqueProjectIds(items) {
+      var seen = {};
+      var projectIds = [];
+      (items || []).forEach(function(item) {
+        var pid = item && item.projectId ? item.projectId : null;
+        if (!pid || seen[pid]) return;
+        seen[pid] = true;
+        projectIds.push(pid);
+      });
+      return projectIds;
+    }
+
+    function getProjectQueueItems(projectId) {
+      return (S.typing.queue || []).filter(function(item) {
+        return (item.projectId || S.projectId || '') === projectId;
+      });
+    }
+
+    function buildProjectHistoryPrompts(projectId) {
+      var prompts = [];
+      getProjectQueueItems(projectId).forEach(function(item) {
+        var sceneState = S.scenes[item.queueKey] || {};
+        prompts.push({
+          scene: String(item.scene || ''),
+          prompt: item.displayPrompt || item.fullPrompt || sceneState.prompt || '',
+          status: item.status || sceneState.status || 'queued',
+          syncStatus: sceneState.status || '',
+          error: item.error || '',
+          imageUrl: item.imageUrl || sceneState.imageUrl || '',
+        });
+      });
+
+      if (!prompts.length) {
+        Object.keys(S.scenes || {}).forEach(function(key) {
+          var sc = S.scenes[key];
+          var pid = sc && sc.projectId ? sc.projectId : (key.indexOf('|') > -1 ? key.split('|')[0] : '');
+          if (pid !== projectId) return;
+          prompts.push({
+            scene: String(key.indexOf('|') > -1 ? key.split('|')[1] : key),
+            prompt: sc.prompt || '',
+            status: sc.status || 'pending',
+            syncStatus: sc.status || '',
+            error: sc.error || '',
+            imageUrl: sc.imageUrl || '',
+          });
+        });
+      }
+
+      prompts.sort(function(a, b) {
+        var na = parseInt(a.scene, 10);
+        var nb = parseInt(b.scene, 10);
+        if (isNaN(na) || isNaN(nb)) return String(a.scene).localeCompare(String(b.scene));
+        return na - nb;
+      });
+      return prompts;
+    }
+
+    function summarizeProjectHistory(projectId) {
+      var prompts = buildProjectHistoryPrompts(projectId);
+      var completedCount = 0;
+      var failedCount = 0;
+      var runningCount = 0;
+      var queuedCount = 0;
+
+      prompts.forEach(function(prompt) {
+        var status = prompt.status || prompt.syncStatus || 'queued';
+        if (status === 'completed' || status === 'done' || status === 'saved' || status === 'downloaded') completedCount++;
+        else if (status === 'error' || status === 'failed') failedCount++;
+        else if (status === 'typing' || status === 'generating' || status === 'uploading') runningCount++;
+        else queuedCount++;
+      });
+
+      return {
+        prompts: prompts,
+        sceneCount: prompts.length,
+        completedCount: completedCount,
+        failedCount: failedCount,
+        runningCount: runningCount,
+        queuedCount: queuedCount,
+      };
+    }
+
+    function ensureHistoryEntry(projectId, options) {
+      options = options || {};
+      var entry = null;
+      var now = Date.now();
+      var i;
+
+      if (options.id) {
+        for (i = 0; i < S.history.items.length; i++) {
+          if (S.history.items[i].id === options.id) {
+            entry = S.history.items[i];
+            break;
+          }
+        }
+      }
+
+      if (!entry && !options.forceNew && S.history.activeId) {
+        for (i = 0; i < S.history.items.length; i++) {
+          if (S.history.items[i].id === S.history.activeId && S.history.items[i].projectId === projectId) {
+            entry = S.history.items[i];
+            break;
+          }
+        }
+      }
+
+      if (!entry && !options.forceNew) {
+        for (i = 0; i < S.history.items.length; i++) {
+          if (S.history.items[i].projectId === projectId && !isFinalHistoryStatus(S.history.items[i].status)) {
+            entry = S.history.items[i];
+            break;
+          }
+        }
+      }
+
+      if (!entry) {
+        entry = {
+          id: (projectId || 'PROJECT') + '|' + now,
+          projectId: projectId || 'Unknown',
+          source: options.source || 'job',
+          createdAt: now,
+          startedAt: null,
+          endedAt: null,
+          updatedAt: now,
+          status: 'queued',
+          aspectRatio: '',
+          prompts: [],
+          sceneCount: 0,
+          completedCount: 0,
+          failedCount: 0,
+          runningCount: 0,
+          queuedCount: 0,
+          durationMs: 0,
+        };
+        S.history.items.unshift(entry);
+      }
+
+      if (options.activate !== false) S.history.activeId = entry.id;
+      return entry;
+    }
+
+    function deriveHistoryStatus(entry, summary) {
+      if (summary.runningCount > 0) return 'running';
+      if (summary.sceneCount > 0 && summary.completedCount + summary.failedCount >= summary.sceneCount) {
+        if (summary.failedCount > 0 && summary.completedCount > 0) return 'completed_with_errors';
+        if (summary.failedCount > 0) return 'failed';
+        return 'completed';
+      }
+      if (summary.failedCount > 0) return 'error';
+      if (isFinalHistoryStatus(entry.status)) return entry.status;
+      return 'queued';
+    }
+
+    function updateHistoryEntry(projectId, options) {
+      if (!projectId) return null;
+      options = options || {};
+      var now = Date.now();
+      var entry = ensureHistoryEntry(projectId, options);
+      var summary = summarizeProjectHistory(projectId);
+
+      entry.projectId = projectId;
+      entry.source = options.source || entry.source || 'job';
+      entry.aspectRatio = options.aspectRatio !== undefined ? options.aspectRatio : (entry.aspectRatio || S.aspectRatio || '');
+      entry.prompts = summary.prompts.length ? summary.prompts : (entry.prompts || []);
+      entry.sceneCount = summary.sceneCount || entry.sceneCount || entry.prompts.length || 0;
+      entry.completedCount = summary.completedCount;
+      entry.failedCount = summary.failedCount;
+      entry.runningCount = summary.runningCount;
+      entry.queuedCount = summary.queuedCount;
+
+      if (options.startedAt && !entry.startedAt) entry.startedAt = options.startedAt;
+      if (!entry.startedAt && options.status === 'running') entry.startedAt = now;
+      if (!entry.startedAt && summary.runningCount > 0) entry.startedAt = now;
+      if (options.endedAt !== undefined) entry.endedAt = options.endedAt;
+
+      entry.status = options.status || deriveHistoryStatus(entry, summary);
+      entry.updatedAt = now;
+      entry.durationMs = Math.max(0, (entry.endedAt || now) - (entry.startedAt || entry.createdAt || now));
+
+      persistHistoryEntries();
+      if (isFinalHistoryStatus(entry.status) && S.history.activeId === entry.id) S.history.activeId = null;
+      return entry;
+    }
+
+    function updateHistoryForProjects(projectIds, options) {
+      (projectIds || []).forEach(function(projectId) {
+        updateHistoryEntry(projectId, options);
+      });
+    }
+
+    function formatHistoryDuration(ms) {
+      ms = Math.max(0, ms || 0);
+      var totalSeconds = Math.floor(ms / 1000);
+      var hours = Math.floor(totalSeconds / 3600);
+      var minutes = Math.floor((totalSeconds % 3600) / 60);
+      var seconds = totalSeconds % 60;
+      if (hours > 0) return hours + 'h ' + minutes + 'm';
+      if (minutes > 0) return minutes + 'm ' + seconds + 's';
+      return seconds + 's';
+    }
+
+    function formatHistoryTimestamp(ts) {
+      if (!ts) return '-';
+      return new Date(ts).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    }
+
+    function formatHistoryAge(ts) {
+      if (!ts) return '';
+      var diff = Math.max(0, Date.now() - ts);
+      var minutes = Math.floor(diff / 60000);
+      if (minutes < 1) return 'just now';
+      if (minutes < 60) return minutes + 'm ago';
+      var hours = Math.floor(minutes / 60);
+      if (hours < 24) return hours + 'h ago';
+      return Math.floor(hours / 24) + 'd ago';
+    }
+
+    function getHistoryBadge(entry) {
+      if (!entry) return { cls: 'sts-badge-pending', text: 'queued' };
+      if (entry.status === 'running') return { cls: 'sts-badge-generating', text: 'running' };
+      if (entry.status === 'completed') return { cls: 'sts-badge-done', text: 'completed' };
+      if (entry.status === 'completed_with_errors') return { cls: 'sts-badge-mixed', text: 'done with errors' };
+      if (entry.status === 'failed') return { cls: 'sts-badge-error', text: 'failed' };
+      if (entry.status === 'stopped') return { cls: 'sts-badge-stopped', text: 'stopped' };
+      if (entry.status === 'cleared') return { cls: 'sts-badge-stopped', text: 'cleared' };
+      return { cls: 'sts-badge-pending', text: entry.status || 'queued' };
+    }
+
+    function isHistoryExpanded(entryId) {
+      return !!(entryId && S.history.expanded && S.history.expanded[entryId]);
+    }
+
+    S.history.items = loadHistoryEntries();
 
     function doCountdown(seconds, type) {
       return new Promise(function(resolve) {
@@ -274,6 +567,7 @@
                 });
               }
             }
+            updateHistoryEntry(pid, { source: 'job', status: 'queued', aspectRatio: S.aspectRatio });
             render();
             sendWS({ type: 'JOB_RECEIVED', projectId: pid, scenes: scenes.length });
             chrome.runtime.sendMessage({ type: 'ACTIVATE_TAB' });
@@ -942,6 +1236,7 @@
       }
       if (!runItems.length) { S.typing.starting = false; render(); return; }
       S.typing.runId++; S.typing.active = true; S.typing.starting = false; S.typing.typedCount = 0;
+      updateHistoryForProjects(getUniqueProjectIds(runItems), { status: 'running', startedAt: Date.now() });
       render();
       console.log('=== Starting: ' + runItems.length + ' prompts ===');
 
@@ -956,6 +1251,10 @@
           S.typing.active = false; S.typing.currentIndex = -1; render();
           var completed = 0, failed = 0;
           tq.forEach(function(q) { if (q.status === 'completed') completed++; if (q.status === 'error') failed++; });
+          updateHistoryForProjects(getUniqueProjectIds(tq), {
+            status: S.typing.stopRequested ? 'stopped' : null,
+            endedAt: Date.now()
+          });
           console.log('=== Done: ' + completed + ' ok, ' + failed + ' failed ===');
           // Notify server when all scenes are resolved (either completed or exhausted retries)
           if (completed + failed === tq.length) {
@@ -970,6 +1269,7 @@
         if (!item.retryCount) item.retryCount = 0;
 
         S.typing.currentIndex = idx; item.status = 'typing'; render();
+        updateHistoryEntry(item.projectId || S.projectId, { status: 'running' });
         sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'typing' });
 
         document.querySelectorAll('generated-image img.image.loaded').forEach(function(img) {
@@ -998,6 +1298,7 @@
             // Clear stale container mapping so retry gets a fresh mapping
             delete sceneContainerMap[item.scene];
             render();
+            updateHistoryEntry(item.projectId || S.projectId, { status: 'running' });
             doCountdown(retrySec, 'retry').then(processNext); // Same idx — retry same scene
           } else {
             console.error('[RETRY] Scene ' + item.scene + ' failed after ' + item.retryCount + ' attempts: ' + reason);
@@ -1005,6 +1306,7 @@
             item.error = reason + (item.retryCount > 1 ? ' (after ' + item.retryCount + ' attempts)' : '');
             if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
             render();
+            updateHistoryEntry(item.projectId || S.projectId);
             idx++;
             doCountdown(3, 'next').then(processNext);
           }
@@ -1044,6 +1346,7 @@
             item.status = 'generating';
             if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'generating';
             render();
+            updateHistoryEntry(item.projectId || S.projectId, { status: 'running' });
             sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'generating' });
             // Start DOM monitor on the last model-response container
             var containers = document.querySelectorAll('div.conversation-container');
@@ -1069,6 +1372,7 @@
               S.typing.currentIndex = -1;
               sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'error', error: 'Refused: ' + rsn });
               render();
+              updateHistoryForProjects(getUniqueProjectIds(tq), { status: 'stopped', endedAt: Date.now() });
               return Promise.reject('REFUSED_PAUSE');
             }
             if (imageUrl) {
@@ -1083,6 +1387,7 @@
                   item.status = 'completed'; item.imageUrl = imageUrl; S.typing.typedCount++;
                   item.retryCount = 0; // Reset on success
                   if (S.scenes[item.queueKey]) { S.scenes[item.queueKey].status = 'done'; S.scenes[item.queueKey].imageUrl = imageUrl; }
+                  updateHistoryEntry(item.projectId || S.projectId);
                   console.log('Scene ' + item.scene + ' completed');
                 } else {
                   return Promise.reject({ autoRetry: true, reason: 'Fetch failed' });
@@ -1121,7 +1426,15 @@
       processNext();
     }
 
-    function stopTyping() { S.typing.stopRequested = true; render(); }
+    function stopTyping() {
+      S.typing.stopRequested = true;
+      updateHistoryForProjects(getUniqueProjectIds(S.typing.queue), {
+        status: 'stopped',
+        endedAt: Date.now(),
+        activate: false
+      });
+      render();
+    }
 
     // ── DOM Monitor stubs ──
     // DOM observation is now handled by ai-web-auto platform (observe_start/observe_diff).
@@ -1132,6 +1445,22 @@
     // ── UI ───────────────────────────────────────────
     function $id(id) { return document.getElementById(id); }
     function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function hideImagePreview() {
+      var overlay = document.getElementById('sts-img-overlay');
+      if (overlay) overlay.remove();
+    }
+
+    function showImagePreview(src) {
+      if (!src) return;
+      var overlay = document.getElementById('sts-img-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'sts-img-overlay';
+        document.body.appendChild(overlay);
+      }
+      overlay.innerHTML = '<img src="' + src + '" alt="Scene preview">';
+    }
 
     function injectUI() {
       if (document.getElementById('sts-sync')) return;
@@ -1182,6 +1511,10 @@
             '<label>WS URL</label>' +
             '<input type="text" class="sts-url-input" id="sts-url-input" />' +
             '<button class="sts-url-save" id="sts-url-save">Save</button>' +
+            '<label class="sts-settings-toggle" title="Show or hide the TEST button">' +
+              '<input type="checkbox" id="sts-show-test-toggle">' +
+              '<span>Show TEST button</span>' +
+            '</label>' +
           '</div>' +
           '<!-- Stats -->' +
           '<div class="sts-stats">' +
@@ -1194,6 +1527,7 @@
           '<div class="sts-tabs">' +
             '<button class="sts-tab active" data-tab="typing">Typing</button>' +
             '<button class="sts-tab" data-tab="sync">Sync</button>' +
+            '<button class="sts-tab" data-tab="history">History <span class="sts-tab-count" id="sts-history-tab-count">0</span></button>' +
           '</div>' +
           '<!-- Progress -->' +
           '<div class="sts-progress">' +
@@ -1255,7 +1589,10 @@
         S.showSettings = !S.showSettings;
         $id('sts-settings').classList.toggle('open', S.showSettings);
         $id('sts-settings-btn').classList.toggle('active', S.showSettings);
-        if (S.showSettings) $id('sts-url-input').value = S.wsUrl;
+        if (S.showSettings) {
+          $id('sts-url-input').value = S.wsUrl;
+          $id('sts-show-test-toggle').checked = !!S.showTestButton;
+        }
       });
       $id('sts-url-save').addEventListener('click', function() {
         var val = $id('sts-url-input').value.trim();
@@ -1269,6 +1606,12 @@
         }
         S.wsConnected = false;
         chrome.runtime.sendMessage({ action: 'STS_WS_RECONNECT', manualUrl: val || null });
+        render();
+      });
+      $id('sts-show-test-toggle').checked = !!S.showTestButton;
+      $id('sts-show-test-toggle').addEventListener('change', function() {
+        S.showTestButton = !!this.checked;
+        localStorage.setItem('sts-gemini-show-test', S.showTestButton ? 'true' : 'false');
         render();
       });
       // Tabs
@@ -1286,6 +1629,13 @@
         if (S.typing.active) { stopTyping(); } else { startTyping(); }
       });
       $id('sts-clear-btn').addEventListener('click', function() {
+        var clearedProjects = getUniqueProjectIds(S.typing.queue);
+        if (!clearedProjects.length && S.projectId) clearedProjects = [S.projectId];
+        updateHistoryForProjects(clearedProjects, {
+          status: S.typing.active ? 'stopped' : 'cleared',
+          endedAt: Date.now(),
+          activate: false
+        });
         if (S.typing.active) { stopTyping(); }
         S.typing.queue = [];
         S.scenes = {};
@@ -1332,6 +1682,13 @@
           fullPrompt: testPrompt,
           selected: true, status: 'queued', error: null, retryCount: 0
         }];
+        updateHistoryEntry('TEST', {
+          forceNew: true,
+          source: 'test',
+          status: 'running',
+          startedAt: Date.now(),
+          aspectRatio: '9:16'
+        });
         render();
 
         // Run the flow manually with DOM monitor
@@ -1369,11 +1726,13 @@
               S.typing.queue[0].status = 'completed';
               S.typing.queue[0].imageUrl = imageUrl;
               S.scenes[testKey].status = 'done';
+              updateHistoryEntry('TEST', { source: 'test', endedAt: Date.now() });
             } else {
               console.error('[TEST] FAILED — No image generated (timed out)');
               S.typing.queue[0].status = 'error';
               S.typing.queue[0].error = 'No image generated';
               S.scenes[testKey].status = 'error';
+              updateHistoryEntry('TEST', { source: 'test', status: 'failed', endedAt: Date.now() });
             }
             render();
             console.log('[TEST] Done. Check DOM recorder panel for the full lifecycle report.');
@@ -1383,12 +1742,23 @@
             console.error('[TEST] Error:', e.message || e);
             S.typing.queue[0].status = 'error';
             S.typing.queue[0].error = e.message || String(e);
+            if (S.scenes[testKey]) S.scenes[testKey].status = 'error';
+            updateHistoryEntry('TEST', { source: 'test', status: 'failed', endedAt: Date.now() });
             render();
           });
       });
 
       // Per-scene retry buttons (delegated)
       $id('sts-panel').addEventListener('click', function(e) {
+        var historyToggle = e.target.closest('.sts-history-toggle');
+        if (historyToggle) {
+          var entryId = historyToggle.getAttribute('data-entry-id');
+          if (entryId) {
+            S.history.expanded[entryId] = !isHistoryExpanded(entryId);
+            render();
+          }
+          return;
+        }
         var btn = e.target.closest('.sts-retry-scene-btn');
         if (!btn) return;
         var sceneKey = btn.getAttribute('data-scene');
@@ -1402,18 +1772,18 @@
           if (!S.typing.active) startTyping();
         }
       });
-      // Delegate thumbnail clicks for image overlay
-      $id('sts-list').addEventListener('click', function(e) {
+      // Delegate thumbnail hover for full-size image preview
+      $id('sts-list').addEventListener('pointerover', function(e) {
         var thumb = e.target.closest('.sts-row-thumb');
-        if (!thumb || !thumb.src) return;
-        e.stopPropagation();
-        var overlay = document.getElementById('sts-img-overlay');
-        if (overlay) overlay.remove();
-        overlay = document.createElement('div');
-        overlay.id = 'sts-img-overlay';
-        overlay.innerHTML = '<img src="' + thumb.src + '" alt="Scene preview">';
-        overlay.onclick = function() { overlay.remove(); };
-        document.body.appendChild(overlay);
+        if (!thumb || thumb.tagName !== 'IMG' || !thumb.src) return;
+        showImagePreview(thumb.src);
+      });
+      $id('sts-list').addEventListener('pointerout', function(e) {
+        var thumb = e.target.closest('.sts-row-thumb');
+        if (!thumb || thumb.tagName !== 'IMG') return;
+        var next = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest('.sts-row-thumb') : null;
+        if (next === thumb) return;
+        hideImagePreview();
       });
 
       // Initial state
@@ -1426,6 +1796,10 @@
     function render() {
       if (!document.getElementById('sts-sync')) injectUI();
       saveState(); // persist on every state change (debounced)
+      hideImagePreview();
+      var historyItems = pruneHistoryEntries(S.history.items);
+      S.history.items = historyItems;
+      var historyCount = historyItems.length;
       var tq = S.typing.queue;
       var total = tq.length, completed = 0, failed = 0;
       tq.forEach(function(q) { if (q.status === 'completed') completed++; if (q.status === 'error') failed++; });
@@ -1498,12 +1872,15 @@
       var nTyped = $id('sts-n-typed'); if (nTyped) nTyped.textContent = typed;
       var nDone = $id('sts-n-done'); if (nDone) nDone.textContent = completed;
       var nSent = $id('sts-n-sent'); if (nSent) nSent.textContent = synced + '/' + totalScenes;
+      var historyTabCount = $id('sts-history-tab-count'); if (historyTabCount) historyTabCount.textContent = String(historyCount);
 
       // Progress
       var fill = $id('sts-prog-fill'); if (fill) fill.style.width = pct + '%';
       var label = $id('sts-prog-label');
       if (label) {
-        if (S.typing.active) {
+        if (S.activeTab === 'history') {
+          label.textContent = S.history.items.length ? S.history.items.length + ' runs in last 7 days' : 'No history yet';
+        } else if (S.typing.active) {
           var ci = S.typing.currentIndex;
           label.textContent = ci >= 0 ? 'Typing ' + (ci + 1) + '/' + total : 'Typing...';
         } else if (total > 0) {
@@ -1516,7 +1893,11 @@
       // Countdown timer
       var cd = $id('sts-prog-cd');
       if (cd) {
-        if (S.typing.countdown > 0) {
+        if (S.activeTab === 'history') {
+          cd.textContent = '';
+          cd.className = 'sts-cd';
+          if (fill) fill.style.width = '0%';
+        } else if (S.typing.countdown > 0) {
           var cdLabels = { next: 'next in', retry: 'retry in' };
           cd.textContent = (cdLabels[S.typing.countdownType] || S.typing.countdownType) + ' ' + S.typing.countdown + 's';
           cd.className = 'sts-cd' + (S.typing.countdownType === 'next' || S.typing.countdownType === 'retry' ? ' cool' : '');
@@ -1543,6 +1924,8 @@
         var hasErrors = tq.some(function(q) { return q.status === 'error'; });
         retryBtn.style.display = (hasErrors && !S.typing.active) ? '' : 'none';
       }
+      var testBtn = $id('sts-test-btn');
+      if (testBtn) testBtn.style.display = S.showTestButton ? '' : 'none';
 
       // List
       var list = $id('sts-list');
@@ -1591,7 +1974,7 @@
           '</div>';
         });
         list.innerHTML = html;
-      } else {
+      } else if (S.activeTab === 'sync') {
         // ── Sync tab — shows image upload/save status per scene ──
         var sceneKeys = Object.keys(S.scenes).sort(function(a, b) {
           var na = parseInt(a.split('|').pop()); var nb = parseInt(b.split('|').pop());
@@ -1636,6 +2019,47 @@
           '</div>';
         });
         list.innerHTML = syncHtml;
+      } else {
+        var history = historyItems;
+        if (!history.length) {
+          list.innerHTML = '<div class="sts-empty"><div class="sts-empty-icon">&#x1F4DA;</div>No history yet.<br>Completed and stopped runs stay here for 7 days.</div>';
+          return;
+        }
+        list.innerHTML = history.map(function(entry) {
+          var badge = getHistoryBadge(entry);
+          var startedAt = entry.startedAt || entry.createdAt;
+          var durationMs = entry.durationMs;
+          var expanded = isHistoryExpanded(entry.id);
+          if (!entry.endedAt && startedAt) durationMs = Date.now() - startedAt;
+          var promptHtml = (entry.prompts || []).map(function(prompt) {
+            var meta = prompt.status || prompt.syncStatus || 'queued';
+            if (prompt.error) meta += ' - ' + prompt.error;
+            return '<div class="sts-history-prompt">' +
+              '<div class="sts-history-prompt-num">' + escHtml(String(prompt.scene || '?')) + '</div>' +
+              '<div class="sts-history-prompt-body">' +
+                '<div class="sts-history-prompt-text">' + escHtml(prompt.prompt || '') + '</div>' +
+                '<div class="sts-history-prompt-meta">' + escHtml(meta) + '</div>' +
+              '</div>' +
+            '</div>';
+          }).join('');
+          return '<div class="sts-history-card' + (expanded ? ' open' : ' collapsed') + '">' +
+            '<div class="sts-history-head">' +
+              '<div class="sts-history-title">' + escHtml(entry.projectId || 'Unknown project') + '</div>' +
+              (entry.source === 'test' ? '<span class="sts-card-badge sts-badge-test">test</span>' : '') +
+              '<span class="sts-card-badge ' + badge.cls + '">' + escHtml(badge.text) + '</span>' +
+              '<button class="sts-history-toggle" type="button" data-entry-id="' + escHtml(entry.id || '') + '" aria-expanded="' + (expanded ? 'true' : 'false') + '" title="' + (expanded ? 'Collapse prompts' : 'Expand prompts') + '">' + (expanded ? '&#x25BE;' : '&#x25B8;') + '</button>' +
+            '</div>' +
+            '<div class="sts-history-sub">' + escHtml(formatHistoryTimestamp(startedAt)) + ' - ' + escHtml(formatHistoryAge(entry.updatedAt || startedAt)) + '</div>' +
+            '<div class="sts-history-meta">' +
+              '<span class="sts-history-chip sts-history-chip-time">duration ' + escHtml(formatHistoryDuration(durationMs)) + '</span>' +
+              '<span class="sts-history-chip sts-history-chip-count">' + escHtml(String(entry.sceneCount || 0)) + ' prompts</span>' +
+              '<span class="sts-history-chip sts-history-chip-done">' + escHtml(String(entry.completedCount || 0)) + ' done</span>' +
+              '<span class="sts-history-chip sts-history-chip-failed">' + escHtml(String(entry.failedCount || 0)) + ' failed</span>' +
+              (entry.aspectRatio ? '<span class="sts-history-chip sts-history-chip-setting">' + escHtml(entry.aspectRatio) + '</span>' : '') +
+            '</div>' +
+            (expanded ? '<div class="sts-history-prompts">' + promptHtml + '</div>' : '') +
+          '</div>';
+        }).join('');
       }
     }
 

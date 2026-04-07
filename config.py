@@ -31,7 +31,6 @@ ANIMATOR_DIR = os.path.join(OUTPUT_DIR, "animator")
 STORYBOARD_DIR = os.path.join(OUTPUT_DIR, "storyboard")
 SEGMENTER_DIR = os.path.join(OUTPUT_DIR, "segmenters")
 CAPTIONS_DIR = os.path.join(OUTPUT_DIR, "captions")
-MUSIC_DIR = os.path.join(OUTPUT_DIR, "musics")
 TTS_DIR = os.path.join(OUTPUT_DIR, "tts")
 MODELS_DIR = os.path.join(ROOT_DIR, "models")
 BIN_DIR = os.path.join(ROOT_DIR, "bin")
@@ -43,12 +42,21 @@ TMP_DIR = os.path.join(ROOT_DIR, "tmp")
 TTS_CACHE_DIR = os.path.join(TMP_DIR, "tts")
 APP_ASSETS_DIR = os.path.join(ROOT_DIR, "resources")
 APP_CONFIG_PATH = os.path.join(ROOT_DIR, "app-config.json")
+
+# Music sources:
+#   • Built-in library  → resources/sounds/music/<folder>/<file>  (read-only,
+#     used by select_music for tone-based auto-pick) → /assets/sounds/music/...
+#   • User uploads      → output/musics/<file>                    (writable)
+#                                                                 → /output/musics/...
+MUSIC_LIBRARY_DIR = os.path.join(APP_ASSETS_DIR, "sounds", "music")
+MUSIC_DIR = os.path.join(OUTPUT_DIR, "musics")
+
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
 for _d in (LOG_DIR, TRASH_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR,
-           STORYBOARD_DIR, SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, MODELS_DIR,
-           EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR, TTS_CACHE_DIR):
+           STORYBOARD_DIR, SEGMENTER_DIR, CAPTIONS_DIR, TTS_DIR, MODELS_DIR,
+           EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR, TTS_CACHE_DIR, MUSIC_DIR):
     os.makedirs(_d, exist_ok=True)
 
 # ---------------------------------------------------------------------------

@@ -278,7 +278,6 @@ def _fix_zero_duration_words(alignment):
 # ---------------------------------------------------------------------------
 
 @timing_bp.route("/api/alignment/history")
-@timing_bp.route("/api/timing/history")
 def list_force_alignments():
     items = []
     if not os.path.exists(ALIGN_DIR):
@@ -388,7 +387,6 @@ def force_align():
 
 
 @timing_bp.route("/api/alignment/align-and-segment", methods=["POST"])
-@timing_bp.route("/api/timing/align-and-segment", methods=["POST"])
 def align_and_segment():
     """Combined alignment + segmentation in one request.
 

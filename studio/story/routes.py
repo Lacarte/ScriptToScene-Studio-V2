@@ -31,6 +31,7 @@ from studio.story.prompts import (
     WORDS_PER_SECOND,
 )
 from studio.story.engine import parse_story_sections
+from studio.story.history import append_history
 from studio.build_scene_blueprints.templates import SCENE_STYLE_TEMPLATES
 from studio.niches.presets import CATEGORIES as NICHE_CATEGORIES
 
@@ -218,6 +219,21 @@ def generate_story(data: StoryGenerateRequest):
             story_data,
             indent=2,
         )
+
+        # Record in per-preset history so the next call dodges this story's hook/opening.
+        try:
+            hook_text = parsed["sections"].get("hook", "") or ""
+            opening_text = (parsed["sections"].get("build", "") or "").split(".")[0]
+            append_history(
+                preset_style=data.preset_style,
+                category=data.story_category,
+                language=data.language,
+                hook=hook_text,
+                opening=opening_text,
+                timestamp=response["timestamp"],
+            )
+        except Exception as e:
+            logger.debug("Could not append story history: {}", e)
 
         logger.success("Generated story -> {} ({} words, {:.1f}s)", project_id, parsed["word_count"], generation_time)
         return jsonify(response)

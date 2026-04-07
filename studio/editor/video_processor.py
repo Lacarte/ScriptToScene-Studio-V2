@@ -1636,12 +1636,14 @@ class VideoProcessor:
             self._concat_subprocess(concat_list_path, output_path, audio_config)
 
     def _concat_ffmpeg(self, concat_list_path, output_path, audio_config):
-        """Concatenate using ffmpeg-python (delegates to subprocess for bgMusic mixing)."""
+        """Concatenate using ffmpeg-python (delegates to subprocess for bgMusic/SFX mixing)."""
         bg_music = self.export_data.get('bgMusic')
+        sfx = self.export_data.get('sfx')
         bgmusic_path = self._resolve_music_path(bg_music) if bg_music else None
+        sfx_path = self._resolve_sfx_path(sfx) if sfx else None
 
-        if bgmusic_path:
-            logger.info("BgMusic present, using subprocess path for filter_complex")
+        if bgmusic_path or sfx_path:
+            logger.info("BgMusic/SFX present, using subprocess path for filter_complex")
             self._concat_subprocess(concat_list_path, output_path, audio_config)
             return
 
@@ -1709,19 +1711,34 @@ class VideoProcessor:
         )
 
     def _resolve_music_path(self, bg_music):
-        """Resolve background music file path."""
+        """Resolve background music file path.
+
+        Two valid sources:
+          1. /assets/sounds/music/<folder>/<file> — built-in library under
+             APP_ASSETS_DIR (auto-pick by tone, manual replace from picker)
+          2. /output/musics/<file>                — user-uploaded music in
+             MUSIC_DIR
+        """
         music_path = bg_music.get('path', '')
         if not music_path:
             logger.debug("BgMusic: no path specified")
             return None
+        if music_path.startswith('/assets/'):
+            from config import APP_ASSETS_DIR
+            rel = music_path.replace('/assets/', '', 1)
+            full = os.path.join(APP_ASSETS_DIR, rel)
+            if os.path.isfile(full):
+                logger.debug("BgMusic resolved via assets: {} -> {}", music_path, full)
+                return full
+            logger.warning("BgMusic (assets) not found at {}", full)
         if music_path.startswith('/output/musics/'):
             from config import MUSIC_DIR
             fname = music_path.replace('/output/musics/', '', 1)
             full = os.path.join(MUSIC_DIR, fname)
             if os.path.isfile(full):
-                logger.debug("BgMusic resolved: {} -> {}", music_path, full)
+                logger.debug("BgMusic resolved (uploads): {} -> {}", music_path, full)
                 return full
-            logger.warning("BgMusic file not found: {}", full)
+            logger.warning("BgMusic (uploads) not found at {}", full)
         try:
             resolved = self._get_media_path(music_path)
             logger.debug("BgMusic resolved via media path: {}", resolved)
@@ -1730,18 +1747,48 @@ class VideoProcessor:
             logger.warning("BgMusic not found anywhere: {}", music_path)
             return None
 
-    def _build_audio_filter(self, audio_config, bg_music, total_duration):
-        """Build FFmpeg audio filter complex for narration + bgMusic mixing."""
+    def _resolve_sfx_path(self, sfx):
+        """Resolve SFX file path. SFX URLs typically look like
+        `/assets/sounds/sfx/<folder>/<file>` which Flask serves from
+        APP_ASSETS_DIR — map it back to the filesystem here so ffmpeg can
+        read it directly.
+        """
+        if not isinstance(sfx, dict):
+            return None
+        sfx_path = sfx.get('path', '')
+        if not sfx_path:
+            logger.debug("SFX: no path specified")
+            return None
+        if sfx_path.startswith('/assets/'):
+            from config import APP_ASSETS_DIR
+            rel = sfx_path.replace('/assets/', '', 1)
+            full = os.path.join(APP_ASSETS_DIR, rel)
+            if os.path.isfile(full):
+                logger.debug("SFX resolved: {} -> {}", sfx_path, full)
+                return full
+            logger.warning("SFX file not found at {}", full)
+        try:
+            resolved = self._get_media_path(sfx_path)
+            logger.debug("SFX resolved via media path: {}", resolved)
+            return resolved
+        except FileNotFoundError:
+            logger.warning("SFX not found anywhere: {}", sfx_path)
+            return None
+
+    def _build_audio_filter(self, audio_config, bg_music, total_duration, sfx=None):
+        """Build FFmpeg audio filter complex for narration + bgMusic + SFX mixing."""
         has_narration = audio_config and audio_config.get('path')
         has_bgmusic = bg_music is not None and self._resolve_music_path(bg_music) is not None
+        has_sfx = sfx is not None and self._resolve_sfx_path(sfx) is not None
 
-        if not has_narration and not has_bgmusic:
+        if not has_narration and not has_bgmusic and not has_sfx:
             logger.debug("Audio filter: no audio sources")
             return None, None
 
         filters = []
         narration_label = None
         bgmusic_label = None
+        sfx_label = None
 
         if has_narration:
             vol = audio_config.get('volume', 1.0)
@@ -1770,8 +1817,15 @@ class VideoProcessor:
             narration_label = '[narration]'
             logger.debug("Audio filter: narration vol={} fade_out={}s", vol, fade_out)
 
+        # Track the next free [N:a] input index. The video concat is [0],
+        # narration is [1] (when present), bgmusic is the next slot, then sfx.
+        next_input_idx = 1
+        if has_narration:
+            next_input_idx = 2
+
         if has_bgmusic:
-            bgm_input_idx = 2 if has_narration else 1
+            bgm_input_idx = next_input_idx
+            next_input_idx += 1
             vol = bg_music.get('volume', 0.15)
             fade_in = bg_music.get('fade_in', 2.0)
             fade_out = bg_music.get('fade_out', 3.0)
@@ -1793,22 +1847,51 @@ class VideoProcessor:
             logger.debug("Audio filter: bgmusic vol={} (effective={}) fade_in={} fade_out={} ducking={}",
                           vol, effective_vol, fade_in, fade_out, ducking)
 
-        if narration_label and bgmusic_label:
-            filters.append(f"{narration_label}{bgmusic_label}amix=inputs=2:duration=longest:normalize=0[audio_out]")
+        if has_sfx:
+            sfx_input_idx = next_input_idx
+            next_input_idx += 1
+            vol = sfx.get('volume', 0.10)
+            fade_in = sfx.get('fade_in', 1.5)
+            fade_out = sfx.get('fade_out', 2.0)
+            ducking = sfx.get('ducking_enabled', True)
+            duck_level = max(0.08, float(sfx.get('ducking_level', 0.20)))
+
+            effective_vol = duck_level if (ducking and has_narration) else vol
+
+            fade_out_start = max(0, total_duration - fade_out)
+            parts = [
+                f"[{sfx_input_idx}:a]volume={effective_vol}",
+                f"afade=t=in:st=0:d={fade_in}",
+                f"afade=t=out:st={fade_out_start}:d={fade_out}",
+                f"atrim=0:{total_duration}",
+                f"asetpts=PTS-STARTPTS"
+            ]
+            filters.append(','.join(parts) + '[sfx]')
+            sfx_label = '[sfx]'
+            logger.debug("Audio filter: sfx vol={} (effective={}) fade_in={} fade_out={} ducking={}",
+                          vol, effective_vol, fade_in, fade_out, ducking)
+
+        # Mix whatever combination of layers we have
+        active_labels = [lbl for lbl in (narration_label, bgmusic_label, sfx_label) if lbl]
+        if len(active_labels) > 1:
+            filters.append(
+                f"{''.join(active_labels)}amix=inputs={len(active_labels)}:duration=longest:normalize=0[audio_out]"
+            )
             out_label = '[audio_out]'
-            logger.debug("Audio filter: mixing narration + bgmusic")
-        elif narration_label:
-            out_label = narration_label
+            logger.debug("Audio filter: mixing {} layers", len(active_labels))
+        elif active_labels:
+            out_label = active_labels[0]
         else:
-            out_label = bgmusic_label
+            out_label = None
 
         filter_str = ';'.join(filters)
         logger.debug("Audio filter_complex: {}", filter_str)
         return filter_str, out_label
 
     def _concat_subprocess(self, concat_list_path, output_path, audio_config):
-        """Concatenate using subprocess with optional bgMusic mixing."""
+        """Concatenate using subprocess with optional bgMusic + SFX mixing."""
         bg_music = self.export_data.get('bgMusic')
+        sfx = self.export_data.get('sfx')
         total_duration = self._get_total_duration()
 
         narration_path = None
@@ -1821,8 +1904,9 @@ class VideoProcessor:
                 narration_path = None
 
         bgmusic_path = self._resolve_music_path(bg_music) if bg_music else None
+        sfx_path = self._resolve_sfx_path(sfx) if sfx else None
 
-        if not narration_path and not bgmusic_path:
+        if not narration_path and not bgmusic_path and not sfx_path:
             logger.info("Concat: no audio, video-only")
             cmd = [
                 FFMPEG_BIN, '-y',
@@ -1847,12 +1931,19 @@ class VideoProcessor:
                 cmd += ['-stream_loop', '-1']
             cmd += ['-i', bgmusic_path]
             logger.info("BgMusic input: {} (loop={})", bgmusic_path, loop_flag)
+        if sfx_path:
+            sfx_loop = sfx.get('loop', True)
+            if sfx_loop:
+                cmd += ['-stream_loop', '-1']
+            cmd += ['-i', sfx_path]
+            logger.info("SFX input: {} (loop={})", sfx_path, sfx_loop)
 
         # Build filter complex
         filter_str, out_label = self._build_audio_filter(
             audio_config if narration_path else None,
             bg_music if bgmusic_path else None,
-            total_duration
+            total_duration,
+            sfx=sfx if sfx_path else None,
         )
 
         if filter_str:
@@ -1862,8 +1953,9 @@ class VideoProcessor:
 
         cmd += ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', str(total_duration), output_path]
 
-        logger.info("Concat with audio: {} inputs, filter_complex={}",
-                     2 + (1 if bgmusic_path else 0), bool(filter_str))
+        n_audio_inputs = (1 if narration_path else 0) + (1 if bgmusic_path else 0) + (1 if sfx_path else 0)
+        logger.info("Concat with audio: {} inputs (video+{} audio), filter_complex={}",
+                     1 + n_audio_inputs, n_audio_inputs, bool(filter_str))
         logger.debug("Full concat cmd: {}", ' '.join(cmd))
         result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
         if result.returncode != 0:

@@ -247,7 +247,7 @@ _CLEAR_MODULES = [
     {"page": "Storyboard", "module": "Storyboard Images", "dir": STORYBOARD_DIR},
     {"page": "Captions", "module": "Captions", "dir": CAPTIONS_DIR},
     {"page": "Editor", "module": "Timeline Editor", "dir": PROJECTS_DIR},
-    {"page": "Music", "module": "Music Library", "dir": MUSIC_DIR},
+    {"page": "Music", "module": "User-uploaded Music", "dir": MUSIC_DIR},
     {"page": "Exports", "module": "Export Library", "dir": EXPORT_DIR},
     {"page": "Stories", "module": "Story Generator", "dir": STORIES_DIR},
     {"page": "Pipeline", "module": "Pipeline Data", "dir": PIPELINE_DIR},

@@ -28,7 +28,7 @@ function onUpload(el) {
       <div id="music-picker-list" style="flex:1;overflow-y:auto;padding:8px 12px;max-height:340px">
         <div style="text-align:center;padding:32px 16px;color:var(--text-muted);font-size:12px">
           <p style="margin-bottom:12px">No music files yet</p>
-          <p style="font-size:11px;opacity:0.6">Place .mp3/.wav/.ogg files in output/musics/</p>
+          <p style="font-size:11px;opacity:0.6">Built-in: resources/sounds/music/&lt;folder&gt;/<br>Uploads: output/musics/</p>
         </div>
       </div>
       <div style="padding:12px 16px;border-top:1px solid var(--border, #2a2a3e);display:flex;gap:8px">

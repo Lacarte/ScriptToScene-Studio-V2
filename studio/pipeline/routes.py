@@ -1781,6 +1781,40 @@ def _normalize_export_audio(assembled):
     return None
 
 
+def _extract_sfx_track(assembled):
+    """Pull the first non-muted/non-disabled SFX track out of audio_tracks.
+
+    Returns a dict shaped like a bgMusic entry (path/volume/loop/fades/ducking)
+    so the renderer can mix it as a second auxiliary audio layer. Returns
+    None when no usable SFX track exists.
+    """
+    if not isinstance(assembled, dict):
+        return None
+    disabled_tracks = set(assembled.get("disabled_tracks") or [])
+    for track in assembled.get("audio_tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        if (track.get("type") or "").lower() != "sfx":
+            continue
+        if track.get("muted"):
+            continue
+        if track.get("id") and track.get("id") in disabled_tracks:
+            continue
+        track_path = track.get("path") or track.get("url") or ""
+        if not track_path:
+            continue
+        return {
+            "path": track_path,
+            "volume": track.get("volume", 0.10),
+            "fade_in": track.get("fadeIn", track.get("fade_in", 1.5)),
+            "fade_out": track.get("fadeOut", track.get("fade_out", 2.0)),
+            "loop": track.get("loop", True),
+            "ducking_enabled": track.get("duckingEnabled", track.get("ducking_enabled", True)),
+            "ducking_level": track.get("duckingLevel", track.get("ducking_level", 0.20)),
+        }
+    return None
+
+
 def _normalize_export_captions(assembled):
     """Normalize editor caption payload into export caption payload."""
     captions = assembled.get("captions")
@@ -1854,14 +1888,53 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
     total_duration = assembled.get("total_duration") or assemble_result.get("total_duration") or sum(
         float(s.get("duration", 0) or 0) for s in raw_scenes
     )
-    # Auto-select background music if none was manually chosen
+    # Auto-select background music if none was manually chosen.
+    # Note: the assemble step already persists this to initial.json
+    # audio_tracks; this is just a fallback for runs that bypass assemble
+    # (e.g. legacy or partial pipelines).
+    music_history = list(assembled.get("music_history") or [])
+    sfx_history = list(assembled.get("sfx_history") or [])
+    if (not music_history or not sfx_history) and project_id:
+        from studio.music.selector import load_project_audio_history
+        persisted_audio_history = load_project_audio_history(project_id)
+        if not music_history:
+            music_history = list(persisted_audio_history.get("music_history") or [])
+        if not sfx_history:
+            sfx_history = list(persisted_audio_history.get("sfx_history") or [])
+
     bg_music = assembled.get("bgMusic")
     if not bg_music and story_tone:
-        from studio.music.selector import select_music
-        bg_music = select_music(story_tone)
+        from studio.music.selector import persist_project_audio_history, select_music
+        bg_music = select_music(story_tone, history=music_history)
         if bg_music:
+            music_history = list(bg_music.get("history") or music_history)
+            persist_project_audio_history(project_id, music_history=music_history)
+            bg_music.pop("history", None)
             logger.info("Pipeline Export: auto-selected bgMusic for tone '{}' → '{}'",
                         story_tone, os.path.basename(bg_music["path"]))
+
+    # Extract auto-SFX from the assembled timeline. Same fallback chain as
+    # bgMusic: prefer the track persisted in audio_tracks (set by assemble),
+    # otherwise pick a fresh one from the SFX library. SFX is optional —
+    # if neither path produces a track, it's silently skipped.
+    sfx = _extract_sfx_track(assembled)
+    if not sfx and story_tone:
+        from studio.music.selector import persist_project_audio_history, select_sfx
+        picked = select_sfx(story_tone, history=sfx_history)
+        if picked:
+            sfx_history = list(picked.get("history") or sfx_history)
+            persist_project_audio_history(project_id, sfx_history=sfx_history)
+            sfx = {
+                "path": picked["path"],
+                "volume": picked.get("volume", 0.10),
+                "fade_in": picked.get("fade_in", 1.5),
+                "fade_out": picked.get("fade_out", 2.0),
+                "loop": picked.get("loop", True),
+                "ducking_enabled": picked.get("ducking_enabled", True),
+                "ducking_level": picked.get("ducking_level", 0.20),
+            }
+            logger.info("Pipeline Export: auto-selected SFX for tone '{}' → '{}'",
+                        story_tone, os.path.basename(picked["path"]))
 
     export_payload = {
         "project_id": project_id,
@@ -1875,6 +1948,7 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
         "captions": _normalize_export_captions(assembled) if captions_enabled else None,
         "audio": _normalize_export_audio(assembled),
         "bgMusic": bg_music,
+        "sfx": sfx,
         "grain_overlay": assembled.get("grain_overlay") if grain_enabled else None,
     }
 

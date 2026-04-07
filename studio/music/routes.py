@@ -1,4 +1,14 @@
-"""Music Module — Browse and manage background music tracks."""
+"""Music Module — Browse and manage background music tracks.
+
+Two music sources, two URL formats:
+  • Built-in library  → resources/sounds/music/<folder>/<file>
+                      → /assets/sounds/music/<folder>/<file>
+  • User uploads      → output/musics/<file>
+                      → /output/musics/<file>
+
+Both are returned in one unified list by /api/music/library so the editor's
+music picker shows them together.
+"""
 import json
 import os
 import subprocess
@@ -7,7 +17,7 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from loguru import logger
 from werkzeug.utils import secure_filename
 
-from config import MUSIC_DIR
+from config import MUSIC_DIR, MUSIC_LIBRARY_DIR
 from studio.ffmpeg_utils import find_ffprobe
 
 music_bp = Blueprint("music", __name__)
@@ -36,32 +46,64 @@ def _get_duration(filepath):
 
 @music_bp.route("/api/music/library")
 def list_music():
-    """List all music files in the library."""
-    files = []
-    if not os.path.isdir(MUSIC_DIR):
-        return jsonify(files)
+    """List all music files — built-in library + user uploads.
 
-    for fname in sorted(os.listdir(MUSIC_DIR)):
-        ext = os.path.splitext(fname)[1].lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            continue
-        fpath = os.path.join(MUSIC_DIR, fname)
-        if not os.path.isfile(fpath):
-            continue
-        size_mb = round(os.path.getsize(fpath) / (1024 * 1024), 1)
-        duration = _get_duration(fpath)
-        files.append({
-            "filename": fname,
-            "path": f"/output/musics/{fname}",
-            "size_mb": size_mb,
-            "duration": duration,
-        })
+    Each entry carries the URL format that matches its physical location:
+      • Built-in (resources/sounds/music/<folder>/<file>)
+        →  /assets/sounds/music/<folder>/<file>
+      • User uploads (output/musics/<file>)
+        →  /output/musics/<file>
+    """
+    files = []
+
+    # ── Built-in music (one level deep, grouped by folder/category) ──
+    if os.path.isdir(MUSIC_LIBRARY_DIR):
+        for entry in sorted(os.listdir(MUSIC_LIBRARY_DIR)):
+            folder = os.path.join(MUSIC_LIBRARY_DIR, entry)
+            if not os.path.isdir(folder):
+                continue
+            for fname in sorted(os.listdir(folder)):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in ALLOWED_EXTENSIONS:
+                    continue
+                fpath = os.path.join(folder, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                size_mb = round(os.path.getsize(fpath) / (1024 * 1024), 1)
+                files.append({
+                    "filename": fname,
+                    "path": f"/assets/sounds/music/{entry}/{fname}",
+                    "category": entry,
+                    "source": "builtin",
+                    "size_mb": size_mb,
+                    "duration": _get_duration(fpath),
+                })
+
+    # ── User uploads (flat directory) ──
+    if os.path.isdir(MUSIC_DIR):
+        for fname in sorted(os.listdir(MUSIC_DIR)):
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in ALLOWED_EXTENSIONS:
+                continue
+            fpath = os.path.join(MUSIC_DIR, fname)
+            if not os.path.isfile(fpath):
+                continue
+            size_mb = round(os.path.getsize(fpath) / (1024 * 1024), 1)
+            files.append({
+                "filename": fname,
+                "path": f"/output/musics/{fname}",
+                "category": "uploads",
+                "source": "user",
+                "size_mb": size_mb,
+                "duration": _get_duration(fpath),
+            })
+
     return jsonify(files)
 
 
 @music_bp.route("/api/music/upload", methods=["POST"])
 def upload_music():
-    """Upload a music file to the library."""
+    """Upload a music file to output/musics/ (the user-upload bucket)."""
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
@@ -74,15 +116,18 @@ def upload_music():
         return jsonify({"error": f"Unsupported format: {ext}"}), 400
 
     fname = secure_filename(f.filename)
+    os.makedirs(MUSIC_DIR, exist_ok=True)
     dest = os.path.join(MUSIC_DIR, fname)
     f.save(dest)
-    logger.info(f"Music uploaded: {fname}")
+    logger.info("Music uploaded: {}", fname)
 
     size_mb = round(os.path.getsize(dest) / (1024 * 1024), 1)
     duration = _get_duration(dest)
     return jsonify({
         "filename": fname,
         "path": f"/output/musics/{fname}",
+        "category": "uploads",
+        "source": "user",
         "size_mb": size_mb,
         "duration": duration,
     })
@@ -90,27 +135,53 @@ def upload_music():
 
 @music_bp.route("/api/music/auto-select")
 def auto_select_music():
-    """Pick a random music track based on story_tone query param."""
+    """Pick a random music track from the BUILT-IN library only.
+
+    With a `tone` query param: tone-aware folder selection (e.g. suspenseful
+    → dark/ambient/chill). Without a tone: fully random across every built-in
+    folder. In both cases the pick comes from resources/sounds/music/ — never
+    from user uploads in output/musics/.
+    """
     story_tone = request.args.get("tone", "").strip()
-    if not story_tone:
-        return jsonify({"error": "Missing 'tone' query parameter"}), 400
+    project_id = request.args.get("project_id", "").strip()
 
-    from studio.music.selector import select_music
-    result = select_music(story_tone)
+    from studio.music.selector import (
+        load_project_audio_history,
+        persist_project_audio_history,
+        select_music,
+        select_random_music,
+    )
+    project_audio_history = load_project_audio_history(project_id) if project_id else {
+        "music_history": [],
+    }
+    music_history = list(project_audio_history.get("music_history") or [])
+    if story_tone:
+        result = select_music(story_tone, history=music_history)
+        if not result:
+            # Tone had no matching folders — fall back to fully random
+            # rather than failing the call.
+            result = select_random_music(history=music_history)
+    else:
+        result = select_random_music(history=music_history)
+
     if not result:
-        return jsonify({"error": f"No music for tone '{story_tone}'"}), 404
+        return jsonify({"error": "No built-in music available"}), 404
 
-    # Convert absolute path to a servable URL
+    if project_id:
+        persist_project_audio_history(project_id, music_history=result.get("history"))
+
+    # Convert absolute path to a servable /assets/... URL
     abs_path = result["path"]
     from config import APP_ASSETS_DIR
     if abs_path.startswith(APP_ASSETS_DIR):
         rel = abs_path[len(APP_ASSETS_DIR):].replace("\\", "/").lstrip("/")
         result["path"] = f"/assets/{rel}"
+    result.pop("history", None)
     result["filename"] = os.path.basename(abs_path)
     return jsonify(result)
 
 
 @music_bp.route("/output/musics/<path:filename>")
 def serve_music(filename):
-    """Serve music files for playback."""
+    """Serve user-uploaded music files for playback."""
     return send_from_directory(MUSIC_DIR, filename)
