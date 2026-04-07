@@ -3,6 +3,15 @@ setlocal EnableDelayedExpansion
 title ScriptToScene Studio [DEV]
 cd /d "%~dp0"
 
+:: ── Job Object bootstrap ────────────────────────────────────────────────
+:: On first launch, re-invoke through PowerShell which puts every child
+:: (Flask, Vite, Chromium, ...) inside a Windows Job Object with
+:: KILL_ON_JOB_CLOSE. Closing this window will atomically terminate them.
+if not defined STS_IN_JOB (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0.start-dev\_sts-background-job.ps1"
+    exit /b %errorlevel%
+)
+
 :: ── ANSI escape ─────────────────────────────────────────────────────────
 for /f %%a in ('echo prompt $E ^| cmd') do set "E=%%a"
 
