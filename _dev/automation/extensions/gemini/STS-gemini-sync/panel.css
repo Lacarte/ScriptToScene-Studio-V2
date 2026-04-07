@@ -120,10 +120,15 @@
   max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   border: 1px solid rgba(78,205,196,0.12);
 }
-.sts-head-ar {
+.sts-head-port {
   font-size: 10px; font-family: var(--mono); font-weight: 500; color: var(--text-muted);
   padding: 3px 6px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.04);
   border: 1px solid var(--border);
+}
+.sts-head-ar {
+  font-size: 10px; font-family: var(--mono); font-weight: 600; color: var(--accent);
+  padding: 3px 8px; border-radius: var(--radius-sm); background: var(--accent-bg);
+  border: 1px solid rgba(78,205,196,0.2);
 }
 .sts-head-btns { display: flex; gap: 4px; flex-shrink: 0; }
 .sts-hb {
@@ -207,6 +212,8 @@
 }
 @keyframes sts-shim { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .sts-prog-label { font-size: 10px; color: var(--text-dim); font-family: var(--mono); white-space: nowrap; }
+.sts-cd { font-size: 10px; font-family: var(--mono); color: var(--text-dim); white-space: nowrap; }
+.sts-cd.cool { color: var(--amber, #f59e0b); }
 
 /* ── List ─── */
 .sts-list {

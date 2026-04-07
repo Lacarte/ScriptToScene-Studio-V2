@@ -5,6 +5,12 @@ loguru
 numpy
 Pillow
 py-gemini-watermark-remover
+# NOTE: simple-lama-inpainting is NOT installed in this main env — it has
+# incompatible deps (numpy<2, torch 2.11). It runs in an isolated venv at
+# _dev/venvs/lama/ via studio/storyboard/lama_worker.py. Set up with:
+#   python -m venv _dev/venvs/lama
+#   _dev/venvs/lama/Scripts/pip install simple-lama-inpainting
+# (See _dev/venvs/lama/requirements.txt for the worker's pinned deps.)
 pydantic
 requests
 soundfile

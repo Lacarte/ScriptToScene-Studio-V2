@@ -123,6 +123,11 @@
   padding: 3px 6px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.04);
   border: 1px solid var(--border);
 }
+.sts-head-ratio {
+  font-size: 10px; font-family: var(--mono); font-weight: 600; color: var(--accent);
+  padding: 3px 8px; border-radius: var(--radius-sm); background: var(--accent-bg);
+  border: 1px solid rgba(78,205,196,0.2);
+}
 .sts-head-autotype {
   font-size: 9px; font-family: var(--mono); font-weight: 600;
   padding: 3px 8px; border-radius: var(--radius-sm);

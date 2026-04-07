@@ -83,11 +83,88 @@
       typing: {
         active: false, starting: false, queue: [], runId: 0,
         currentIndex: -1, typedCount: 0, stopRequested: false, toolsEnabled: false,
+        countdown: 0, countdownType: '',
       },
     };
     window.__stsGeminiState = S;
 
     function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+    // ── State persistence (chrome.storage.local) ───────────
+    // Survives tab discards, page reloads, and browser restarts.
+    // Only cleared by the manual CLEAR button.
+    var STORAGE_KEY = 'sts-gemini-state-v1';
+    var _saveTimer = null;
+    function saveState() {
+      if (_saveTimer) return; // debounce
+      _saveTimer = setTimeout(function() {
+        _saveTimer = null;
+        try {
+          var snapshot = {
+            projectId: S.projectId,
+            aspectRatio: S.aspectRatio,
+            scenes: S.scenes,
+            typing: {
+              queue: S.typing.queue.map(function(q) {
+                var copy = {};
+                for (var k in q) copy[k] = q[k];
+                // Reset transient statuses so they can resume after reload
+                if (copy.status === 'typing' || copy.status === 'starting' || copy.status === 'generating') {
+                  copy.status = 'queued';
+                }
+                return copy;
+              }),
+              typedCount: S.typing.typedCount,
+            },
+          };
+          chrome.storage.local.set({ 'sts-gemini-state-v1': snapshot });
+        } catch (e) { console.warn('[STS] saveState failed:', e); }
+      }, 500);
+    }
+    function loadState() {
+      return new Promise(function(resolve) {
+        try {
+          chrome.storage.local.get(STORAGE_KEY, function(result) {
+            if (chrome.runtime.lastError || !result || !result[STORAGE_KEY]) { resolve(); return; }
+            var snap = result[STORAGE_KEY];
+            if (snap.projectId) S.projectId = snap.projectId;
+            if (snap.aspectRatio) S.aspectRatio = snap.aspectRatio;
+            if (snap.scenes) S.scenes = snap.scenes;
+            if (snap.typing) {
+              if (Array.isArray(snap.typing.queue)) S.typing.queue = snap.typing.queue;
+              if (typeof snap.typing.typedCount === 'number') S.typing.typedCount = snap.typing.typedCount;
+            }
+            console.log('[STS] State restored from storage:', S.typing.queue.length, 'queue items,', Object.keys(S.scenes).length, 'scenes');
+            resolve();
+          });
+        } catch (e) { console.warn('[STS] loadState failed:', e); resolve(); }
+      });
+    }
+    function clearStoredState() {
+      try { chrome.storage.local.remove(STORAGE_KEY); } catch (e) {}
+    }
+
+    function doCountdown(seconds, type) {
+      return new Promise(function(resolve) {
+        S.typing.countdown = seconds;
+        S.typing.countdownType = type;
+        render();
+        var remaining = seconds;
+        var iv = setInterval(function() {
+          remaining--;
+          if (remaining <= 0 || S.typing.stopRequested) {
+            clearInterval(iv);
+            S.typing.countdown = 0;
+            S.typing.countdownType = '';
+            render();
+            resolve();
+            return;
+          }
+          S.typing.countdown = remaining;
+          render();
+        }, 1000);
+      });
+    }
 
     function smartClick(el) {
       if (!el) return;
@@ -531,25 +608,33 @@
 
     // ── Generation detection (from Gemini Automator) ─
     function isGeminiGenerating() {
-      // Based on DOM activity analysis — these are reliable generating indicators:
-      // 1. processing-state without hidden attr = actively processing
-      var processingStates = document.querySelectorAll('processing-state:not([hidden])');
-      var hasActiveProcessing = false;
-      for (var p = 0; p < processingStates.length; p++) {
-        if (!processingStates[p].hasAttribute('hidden')) { hasActiveProcessing = true; break; }
-      }
-      // 2. response-element with "pending" or "animating" class
-      var pendingResponse = document.querySelector('response-element.pending, response-element.animating');
-      // 3. Attachment container still pending
-      var pendingAttachment = document.querySelector('.attachment-container.generated-images.pending');
-      // 4. Classic indicators
+      // The MOST reliable indicators that Gemini is actively generating RIGHT NOW:
+      //
+      // 1. Stop button visible — Gemini swaps the Send button to a Stop button
+      //    while generating. This is the strongest signal.
       var stopBtn = document.querySelector('button[aria-label="Stop response"]');
-      var processingContainer = document.querySelector('.processing-state_container--processing');
-      // 5. Image loader skeleton — .loader inside generated-image means image still rendering
-      //    (animation circle may disappear but skeleton persists until image is ready)
-      var imageLoader = document.querySelector('generated-image .loader');
+      if (stopBtn) return true;
+      var stopIcon = document.querySelector('button.send-button mat-icon[fonticon="stop"]');
+      if (stopIcon) return true;
 
-      return !!(hasActiveProcessing || pendingResponse || pendingAttachment || stopBtn || processingContainer || imageLoader);
+      // 2. Active processing state — but only if it's the LAST one in the DOM
+      //    (prior conversation containers may still have processing-state elements
+      //    that never got cleaned up — those are false positives)
+      var processingStates = document.querySelectorAll('processing-state:not([hidden])');
+      if (processingStates.length > 0) {
+        var lastPS = processingStates[processingStates.length - 1];
+        // Only count if it's also marked as actively processing
+        var container = lastPS.querySelector('.processing-state_container--processing');
+        if (container) return true;
+      }
+
+      // NOTE: We deliberately do NOT check for:
+      //   - response-element.pending/.animating (persists from prior scenes)
+      //   - .attachment-container.generated-images.pending (stale)
+      //   - generated-image .loader (image skeleton lingers after completion)
+      // These cause false positives and stall the typing pipeline for 60s.
+
+      return false;
     }
 
     function isValidImageSrc(src) {
@@ -651,6 +736,26 @@
       userQuery.appendChild(badge);
     }
 
+    // Known Gemini refusal phrases — text-only responses that won't produce an image.
+    // Match must be confident (specific phrasing) to avoid false positives on captions/explanations.
+    var REFUSAL_PATTERNS = [
+      /i can[''']?t (?:create|generate|make|produce|depict|show|help)/i,
+      /i (?:can ?not|cannot) (?:create|generate|make|produce|depict|show|help)/i,
+      /i[''']?m (?:not able|unable) to (?:create|generate|make|produce|depict|show|help)/i,
+      /i am (?:not able|unable) to (?:create|generate|make|produce|depict|show|help)/i,
+      /i (?:won[''']?t|will not) (?:be able to )?(?:create|generate|depict)/i,
+      /can[''']?t (?:create|generate) (?:images|an image|that image)/i,
+      /but i (?:can[''']?t|cannot) depict (?:them|that|him|her|it) like that/i,
+      /(?:against|violates?) (?:my|our|the) (?:guidelines|policies|policy)/i,
+      /unable to (?:fulfill|complete) (?:this|that|your) request/i
+    ];
+    function isRefusalText(text) {
+      for (var i = 0; i < REFUSAL_PATTERNS.length; i++) {
+        if (REFUSAL_PATTERNS[i].test(text)) return true;
+      }
+      return false;
+    }
+
     function waitForImageGeneration(timeoutMs, projectId, sceneNum) {
       timeoutMs = timeoutMs || 180000;
       return new Promise(function(resolve) {
@@ -696,6 +801,22 @@
               console.log('[IMAGE] Found for scene ' + label + ':', img.substring(0, 80) + '...');
               resolve(img);
               return;
+            }
+
+            // ── Fast refusal detection ──
+            // Gemini sometimes responds text-only with a refusal (e.g. content-policy hit on minors).
+            // If we see refusal phrasing in structured-content-container and there's no generated-image
+            // element, fail immediately and pause the queue (retrying won't change a refusal).
+            var hasGenImgYet = container.querySelector('generated-image');
+            if (!hasGenImgYet) {
+              var scc = modelResponse.querySelector('structured-content-container .markdown, structured-content-container message-content');
+              var refusalText = scc ? (scc.innerText || scc.textContent || '').trim() : '';
+              if (refusalText && refusalText.length > 10 && isRefusalText(refusalText)) {
+                clearInterval(checkInterval);
+                console.error('[IMAGE] Refusal detected for scene ' + label + ': ' + refusalText.slice(0, 200));
+                resolve({ refused: true, reason: refusalText.slice(0, 300) });
+                return;
+              }
             }
 
             // ── Loader skeleton still visible — image rendering, keep waiting ──
@@ -869,15 +990,15 @@
         function handleSceneFailure(reason) {
           item.retryCount++;
           if (item.retryCount < 4 && !S.typing.stopRequested) {
-            var retryDelay = 3000 + (item.retryCount * 2000); // 5s, 7s, 9s
-            console.log('[RETRY] Scene ' + item.scene + ' failed (' + reason + '), attempt ' + item.retryCount + '/4 — retrying in ' + (retryDelay / 1000) + 's...');
+            var retrySec = Math.ceil((3000 + (item.retryCount * 2000)) / 1000); // 5s, 7s, 9s
+            console.log('[RETRY] Scene ' + item.scene + ' failed (' + reason + '), attempt ' + item.retryCount + '/4 — retrying in ' + retrySec + 's...');
             item.status = 'queued';
             item.error = reason + ' (retry ' + item.retryCount + '/4)';
             if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'pending';
             // Clear stale container mapping so retry gets a fresh mapping
             delete sceneContainerMap[item.scene];
             render();
-            setTimeout(processNext, retryDelay); // Same idx — retry same scene
+            doCountdown(retrySec, 'retry').then(processNext); // Same idx — retry same scene
           } else {
             console.error('[RETRY] Scene ' + item.scene + ' failed after ' + item.retryCount + ' attempts: ' + reason);
             item.status = 'error';
@@ -885,15 +1006,15 @@
             if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
             render();
             idx++;
-            setTimeout(processNext, 3000);
+            doCountdown(3, 'next').then(processNext);
           }
         }
 
         waitForGeminiIdle(60000)
           .then(function() { return enableImageTool(); })
           .then(function() { console.log('[FLOW] Step 1: Typing prompt...'); return typeIntoGemini(item.fullPrompt); })
-          .then(function() { console.log('[FLOW] Step 2: Waiting 1s before submit...'); return sleep(1000); })
-          .then(function() { console.log('[FLOW] Step 3: Submitting...'); return submitPrompt(); })
+          .then(function() { return sleep(300); })
+          .then(function() { console.log('[FLOW] Step 2: Submitting...'); return submitPrompt(); })
           .then(function() {
             // Start polling for the new conversation container (async, non-blocking)
             captureContainerForScene(item.scene);
@@ -935,6 +1056,21 @@
           .then(function(imageUrl) {
             stopDOMMonitor();
             if (S.typing.stopRequested) { item.status = 'queued'; return null; }
+            // ── Refusal signal: pause queue, mark as non-retryable error ──
+            if (imageUrl && typeof imageUrl === 'object' && imageUrl.refused) {
+              var rsn = imageUrl.reason || 'Gemini refused';
+              console.error('[FLOW] Scene ' + item.scene + ' refused — pausing typing. Reason: ' + rsn);
+              item.status = 'error';
+              item.error = 'Refused: ' + rsn;
+              item.retryCount = 99; // prevent any retry
+              if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'error';
+              S.typing.stopRequested = true;
+              S.typing.active = false;
+              S.typing.currentIndex = -1;
+              sendWS({ type: 'STATUS_UPDATE', scene: parseInt(item.scene), status: 'error', error: 'Refused: ' + rsn });
+              render();
+              return Promise.reject('REFUSED_PAUSE');
+            }
             if (imageUrl) {
               seenImageUrls[imageUrl] = true;
               if (S.scenes[item.queueKey]) S.scenes[item.queueKey].status = 'uploading';
@@ -960,13 +1096,19 @@
             render(); idx++;
             var hasMore = tq.slice(idx).some(function(q) { return q.selected && q.status !== 'completed'; });
             if (hasMore && !S.typing.stopRequested) {
-              var delay = 2000 + Math.floor(Math.random() * 4000); // 2-6 seconds
-              console.log('Next in ' + (delay/1000).toFixed(1) + 's...'); setTimeout(processNext, delay);
+              var delaySec = Math.ceil((2000 + Math.floor(Math.random() * 4000)) / 1000); // 2-6 seconds
+              console.log('Next in ' + delaySec + 's...');
+              doCountdown(delaySec, 'next').then(processNext);
             } else { processNext(); }
           })
           .catch(function(e) {
             stopDOMMonitor();
             if (e === 'RATE_LIMITED_SKIP') return; // Already handled
+            if (e === 'REFUSED_PAUSE') {
+              // Refusal already recorded above; halt the queue and notify.
+              try { chrome.runtime.sendMessage({ type: 'FOCUS_STUDIO_TAB' }); } catch(_e) {}
+              return;
+            }
             // Auto-retry for recoverable failures
             if (e && e.autoRetry) {
               handleSceneFailure(e.reason);
@@ -1046,7 +1188,7 @@
             '<div class="sts-stat"><span class="sts-sv sts-c-pend" id="sts-n-queue">0</span><span class="sts-sl">Queue</span></div>' +
             '<div class="sts-stat"><span class="sts-sv sts-c-done" id="sts-n-typed">0</span><span class="sts-sl">Typed</span></div>' +
             '<div class="sts-stat"><span class="sts-sv sts-c-rdy" id="sts-n-done">0</span><span class="sts-sl">Done</span></div>' +
-            '<div class="sts-stat"><span class="sts-sv sts-c-sent" id="sts-n-sent">0</span><span class="sts-sl">Sent</span></div>' +
+            '<div class="sts-stat"><span class="sts-sv sts-c-sent" id="sts-n-sent">0</span><span class="sts-sl">Synced</span></div>' +
           '</div>' +
           '<!-- Tabs -->' +
           '<div class="sts-tabs">' +
@@ -1057,6 +1199,7 @@
           '<div class="sts-progress">' +
             '<div class="sts-prog-track"><div class="sts-prog-fill" id="sts-prog-fill"></div></div>' +
             '<span class="sts-prog-label" id="sts-prog-label">No scenes loaded</span>' +
+            '<span class="sts-cd" id="sts-prog-cd"></span>' +
           '</div>' +
           '<!-- List -->' +
           '<div class="sts-list" id="sts-list">' +
@@ -1153,6 +1296,7 @@
         sceneContainerMap = {};
         // Remove all badges from DOM
         document.querySelectorAll('.sts-scene-badge').forEach(function(b) { b.remove(); });
+        clearStoredState(); // wipe persistence too
         console.log('[STS] Cleared all jobs');
         render();
       });
@@ -1281,6 +1425,7 @@
 
     function render() {
       if (!document.getElementById('sts-sync')) injectUI();
+      saveState(); // persist on every state change (debounced)
       var tq = S.typing.queue;
       var total = tq.length, completed = 0, failed = 0;
       tq.forEach(function(q) { if (q.status === 'completed') completed++; if (q.status === 'error') failed++; });
@@ -1343,11 +1488,16 @@
       // Stats
       var queued = tq.filter(function(q) { return q.status === 'queued'; }).length;
       var typed = tq.filter(function(q) { return q.status === 'completed' || q.status === 'generating'; }).length;
-      var sent = tq.filter(function(q) { return q.status === 'sent'; }).length;
+      // Count scenes that have been saved (status 'done' or 'saved')
+      var sceneList = Object.values(S.scenes || {});
+      var synced = sceneList.filter(function(s) {
+          return s.status === 'done' || s.status === 'saved' || s.status === 'downloaded';
+      }).length;
+      var totalScenes = sceneList.length || tq.length;
       var nQueue = $id('sts-n-queue'); if (nQueue) nQueue.textContent = queued;
       var nTyped = $id('sts-n-typed'); if (nTyped) nTyped.textContent = typed;
       var nDone = $id('sts-n-done'); if (nDone) nDone.textContent = completed;
-      var nSent = $id('sts-n-sent'); if (nSent) nSent.textContent = sent;
+      var nSent = $id('sts-n-sent'); if (nSent) nSent.textContent = synced + '/' + totalScenes;
 
       // Progress
       var fill = $id('sts-prog-fill'); if (fill) fill.style.width = pct + '%';
@@ -1360,6 +1510,18 @@
           label.textContent = completed === total ? 'All done' : completed + '/' + total + ' completed';
         } else {
           label.textContent = 'No scenes loaded';
+        }
+      }
+
+      // Countdown timer
+      var cd = $id('sts-prog-cd');
+      if (cd) {
+        if (S.typing.countdown > 0) {
+          var cdLabels = { next: 'next in', retry: 'retry in' };
+          cd.textContent = (cdLabels[S.typing.countdownType] || S.typing.countdownType) + ' ' + S.typing.countdown + 's';
+          cd.className = 'sts-cd' + (S.typing.countdownType === 'next' || S.typing.countdownType === 'retry' ? ' cool' : '');
+        } else {
+          cd.textContent = '';
         }
       }
 
@@ -1479,7 +1641,9 @@
 
     // ── Boot ─────────────────────────────────────────
     injectUI();
-    render();
-    console.log('STS Gemini Synchronizer initialized');
+    loadState().then(function() {
+      render();
+      console.log('STS Gemini Synchronizer initialized');
+    });
   }
 })();

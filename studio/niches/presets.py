@@ -32,7 +32,7 @@ INWORLD_VOICE_MAP = {
     # ══════════════════════════════════════════════════════════════════════
     # Curated from user's preferred voices only.
     #
-    # MALE NARRATIVE:  Hades, Vinny, Elliot, Malcolm, Oliver, Brian,
+    # MALE NARRATIVE:  Hades, Vinny, Elliot, Malcolm, Brian,
     #                  Callum, James, Blake
     # FIRM FEMALE:     Bianca, Deborah, Jessica, Lauren,
     #                  Miranda, Sarah
@@ -78,7 +78,7 @@ INWORLD_VOICE_MAP = {
     ("religion", "dramatic"): "Malcolm",          # Authoritative, intense — gravitas narration
     ("religion", "religious"): "Hades",            # Commanding, deep — biblical authority
     ("religion", "inspirational"): "James",       # Vibrant, expressive — spiritual fire
-    ("religion", "educational"): "Oliver",        # Neutral, clear — theology explainers
+    ("religion", "educational"): "Elliot",        # Calm, steady — theology explainers
 
     # ── Romance ──
     ("romance", "dramatic"): "Blake",             # Rich, intimate — audiobooks, romantic
@@ -98,7 +98,7 @@ INWORLD_VOICE_MAP = {
     ("children", "dramatic"): "James",            # Vibrant, expressive — adventure
 
     # ── History ──
-    ("history", "dramatic"): "Oliver",            # Neutral, clear — historical documentaries
+    ("history", "dramatic"): "Elliot",            # Calm, steady — historical documentaries
     ("history", "educational"): "Callum",          # Steady, articulate — history lessons
     ("history", "suspenseful"): "Hades",          # Commanding — war, conflict, empires
     ("history", "inspirational"): "Callum",       # Friendly Australian — human stories
@@ -117,7 +117,7 @@ INWORLD_VOICE_MAP = {
 
     # ── Curiosity ──
     ("curiosity", "suspenseful"): "Lauren",       # Firm — what if, hidden truths
-    ("curiosity", "educational"): "Oliver",       # Neutral, clear — explainers
+    ("curiosity", "educational"): "Elliot",       # Calm, steady — explainers
     ("curiosity", "dramatic"): "James",           # Vibrant, expressive — animated
     ("curiosity", "inspirational"): "Callum",     # Friendly — wonder and discovery
 
@@ -134,7 +134,7 @@ INWORLD_VOICE_MAP = {
 
     # ── Space ──
     ("space", "dramatic"): "Hades",               # Commanding, deep — cosmic scale
-    ("space", "educational"): "Oliver",           # Neutral, clear — space explainers
+    ("space", "educational"): "Elliot",           # Calm, steady — space explainers
     ("space", "suspenseful"): "Hades",            # Commanding — cosmic horror / deep space
     ("space", "inspirational"): "James",          # Vibrant, expressive — awe and wonder
 

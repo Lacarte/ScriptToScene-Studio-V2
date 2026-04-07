@@ -21,3 +21,9 @@ data/chromium-profile/
 _dev/self_improver/comparison-report.html
 _dev/self_improver/model-compare/model-6scene-compare.html
 _dev/automation/extensions/ai-web-auto/
+# Isolated venv for LaMa worker — installed packages and model cache
+_dev/venvs/lama/Lib/
+_dev/venvs/lama/Scripts/
+_dev/venvs/lama/Include/
+_dev/venvs/lama/pyvenv.cfg
+_dev/venvs/lama/share/

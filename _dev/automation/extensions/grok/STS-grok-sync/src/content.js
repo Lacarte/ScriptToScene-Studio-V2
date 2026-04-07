@@ -95,6 +95,68 @@ function initSync() {
     wsConnected: false,
   };
 
+  // ── State persistence (chrome.storage.local) ───────────
+  // Survives tab discards, page reloads, and browser restarts.
+  // Only cleared by the manual CLEAR button.
+  const STORAGE_KEY = "sts-grok-state-v1";
+  let _saveTimer = null;
+  function saveState() {
+    if (_saveTimer) return; // debounce
+    _saveTimer = setTimeout(() => {
+      _saveTimer = null;
+      try {
+        const snapshot = {
+          projectId: S.projectId,
+          scenes: S.scenes,
+          sentScenes: S.sentScenes,
+          jobComplete: S.jobComplete,
+          aspectRatio: S.aspectRatio,
+          grokMode: S.grokMode,
+          grokQuality: S.grokQuality,
+          grokDuration: S.grokDuration,
+          typing: {
+            queue: S.typing.queue.map(q => ({
+              ...q,
+              // Reset transient statuses so they can be retried after reload
+              status: (q.status === "typing" || q.status === "starting") ? "queued" : q.status,
+            })),
+            typedCount: S.typing.typedCount,
+            batchCount: S.typing.batchCount,
+          },
+        };
+        chrome.storage.local.set({ [STORAGE_KEY]: snapshot });
+      } catch (e) { console.warn("[STS] saveState failed:", e); }
+    }, 500);
+  }
+  function loadState() {
+    return new Promise(resolve => {
+      try {
+        chrome.storage.local.get(STORAGE_KEY, (result) => {
+          if (chrome.runtime.lastError || !result || !result[STORAGE_KEY]) { resolve(); return; }
+          const snap = result[STORAGE_KEY];
+          if (snap.projectId) S.projectId = snap.projectId;
+          if (snap.scenes) S.scenes = snap.scenes;
+          if (snap.sentScenes) S.sentScenes = snap.sentScenes;
+          if (snap.jobComplete) S.jobComplete = snap.jobComplete;
+          if (snap.aspectRatio) S.aspectRatio = snap.aspectRatio;
+          if (snap.grokMode) S.grokMode = snap.grokMode;
+          if (snap.grokQuality) S.grokQuality = snap.grokQuality;
+          if (snap.grokDuration) S.grokDuration = snap.grokDuration;
+          if (snap.typing) {
+            if (Array.isArray(snap.typing.queue)) S.typing.queue = snap.typing.queue;
+            if (typeof snap.typing.typedCount === "number") S.typing.typedCount = snap.typing.typedCount;
+            if (typeof snap.typing.batchCount === "number") S.typing.batchCount = snap.typing.batchCount;
+          }
+          console.log("[STS] State restored from storage:", S.typing.queue.length, "queue items,", Object.keys(S.scenes).length, "scenes");
+          resolve();
+        });
+      } catch (e) { console.warn("[STS] loadState failed:", e); resolve(); }
+    });
+  }
+  function clearStoredState() {
+    try { chrome.storage.local.remove(STORAGE_KEY); } catch (e) {}
+  }
+
   // ── Helpers ────────────────────────────────────────────
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
   function $id(id) { return document.getElementById(id); }
@@ -1531,6 +1593,7 @@ function initSync() {
   function escHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
   function render() {
+    saveState(); // persist on every state change (debounced)
     const tq = S.typing.queue;
     const selectedTq = getSelectedTypingItems();
     const selectedTotal = selectedTq.length;
@@ -1585,7 +1648,19 @@ function initSync() {
     const nq = $id("sts-n-q"); if (nq) nq.textContent = queued;
     const nt = $id("sts-n-typed"); if (nt) nt.textContent = typed;
     const nr = $id("sts-n-rdy"); if (nr) nr.textContent = rdy;
-    const ns = $id("sts-n-sent"); if (ns) ns.textContent = sent;
+    const totalScenes = Object.keys(S.scenes).length;
+    const ns = $id("sts-n-sent"); if (ns) ns.textContent = sent + "/" + totalScenes;
+
+    // Header aspect ratio indicator
+    const headRatio = $id("sts-head-ratio");
+    if (headRatio) {
+        if (S.aspectRatio) {
+            headRatio.textContent = S.aspectRatio;
+            headRatio.style.display = "";
+        } else {
+            headRatio.style.display = "none";
+        }
+    }
 
     // Progress
     if (S.activeTab === "typing") {
@@ -1710,6 +1785,7 @@ function initSync() {
       <div class="sts-head-dot" id="sts-head-dot"></div>
       <h3>STS Grok Sync</h3>
       <span class="sts-head-port" id="sts-head-port"></span>
+      <span class="sts-head-ratio" id="sts-head-ratio" style="display:none;"></span>
       <span class="sts-head-autotype" id="sts-head-autotype" style="display:none;"></span>
     </div>
     <div class="sts-head-btns">
@@ -1736,7 +1812,7 @@ function initSync() {
     <div class="sts-stat"><span class="sts-sv sts-c-pend" id="sts-n-q">0</span><span class="sts-sl">Queue</span></div>
     <div class="sts-stat"><span class="sts-sv sts-c-proc" id="sts-n-typed">0</span><span class="sts-sl">Typed</span></div>
     <div class="sts-stat"><span class="sts-sv sts-c-rdy" id="sts-n-rdy">0</span><span class="sts-sl">Done</span></div>
-    <div class="sts-stat"><span class="sts-sv sts-c-sent" id="sts-n-sent">0</span><span class="sts-sl">Sent</span></div>
+    <div class="sts-stat"><span class="sts-sv sts-c-sent" id="sts-n-sent">0</span><span class="sts-sl">Synced</span></div>
   </div>
 
   <!-- Tabs -->
@@ -1873,6 +1949,7 @@ function initSync() {
       S.jobComplete = false;
       // Remove all badges from DOM
       document.querySelectorAll(".sts-scene-badge").forEach(b => b.remove());
+      clearStoredState(); // wipe persistence too
       console.log("[STS] Cleared all jobs");
       render();
     });
@@ -1895,8 +1972,10 @@ function initSync() {
   renderAutoType();
   window.__stsGrokState = S;
 
-  // Start polling
+  // Restore persisted state, then start polling
   (async () => {
+    await loadState();
+    render(); // re-render with restored state
     await poll();
     async function adaptivePoll() {
       await poll();
