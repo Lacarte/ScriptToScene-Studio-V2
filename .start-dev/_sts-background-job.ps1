@@ -84,14 +84,15 @@ try {
 }
 
 # 3. Spawn start-dev.bat as a child cmd, assign to the job
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$bat       = Join-Path $scriptDir 'start-dev.bat'
-$guard     = Join-Path $scriptDir '.start-dev\_sts-background-guard.ps1'
+$helperDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent $helperDir
+$bat         = Join-Path $projectRoot 'start-dev.bat'
+$guard       = Join-Path $helperDir '_sts-background-guard.ps1'
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName         = $env:ComSpec
 $psi.Arguments        = "/c `"$bat`""
-$psi.WorkingDirectory = $scriptDir
+$psi.WorkingDirectory = $projectRoot
 $psi.UseShellExecute  = $false
 # Mark the child so the bat skips the bootstrap and runs the real logic
 $psi.EnvironmentVariables["STS_IN_JOB"] = "1"
@@ -108,15 +109,15 @@ try {
             '-ExecutionPolicy', 'Bypass',
             '-File', $guard,
             '-ParentPid', $PID,
-            '-ScriptDir', $scriptDir
+            '-ScriptDir', $projectRoot
         ) `
-        -WorkingDirectory $scriptDir `
+        -WorkingDirectory $projectRoot `
         -WindowStyle Hidden | Out-Null
 } catch {}
 
 # Path used to identify *our* Chromium so we don't kill the user's other Chrome
-$chromiumExe = Join-Path $scriptDir 'bin\chromium\ungoogled-chromium\chrome.exe'
-$chromiumProfile = Join-Path $scriptDir 'data\chromium-profile'
+$chromiumExe = Join-Path $projectRoot 'bin\chromium\ungoogled-chromium\chrome.exe'
+$chromiumProfile = Join-Path $projectRoot 'data\chromium-profile'
 
 function Stop-StsWindowTree {
     param(

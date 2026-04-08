@@ -18,8 +18,16 @@ import requests as http_requests
 from flask import Blueprint, jsonify, request
 from loguru import logger
 
-from config import STORIES_DIR, N8N_STORY_WEBHOOK_URL, N8N_CLASSIFY_WEBHOOK_URL, generate_project_id
-from studio.io_utils import safe_json_write
+from config import (
+    STORIES_DIR,
+    PIPELINE_DIR,
+    PROJECTS_DIR,
+    SCENES_DIR,
+    N8N_STORY_WEBHOOK_URL,
+    N8N_CLASSIFY_WEBHOOK_URL,
+    generate_project_id,
+)
+from studio.io_utils import safe_json_read, safe_json_write
 from studio.security import is_safe_webhook_url, sanitize_project_id
 from studio.validation import validate_json
 from studio.story.schemas import StoryGenerateRequest
@@ -85,6 +93,88 @@ def _resolve_classify_webhook_url(override_url=""):
         return derived_from_story
 
     return (N8N_CLASSIFY_WEBHOOK_URL or "").strip()
+
+
+def _extract_story_text_from_payload(payload):
+    """Best-effort recovery of story text from pipeline/editor/scenes payloads."""
+    if not isinstance(payload, dict):
+        return ""
+
+    direct = str(payload.get("story_text") or payload.get("text") or "").strip()
+    if direct:
+        return direct
+
+    scenes = payload.get("scenes") or []
+    parts = []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        text = (
+            scene.get("script")
+            or scene.get("segment_words")
+            or scene.get("text")
+            or scene.get("text_content")
+            or ""
+        )
+        text = str(text).strip()
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
+def _recover_story_from_project(project_id):
+    """Rebuild a story response from project artifacts when story.json is missing."""
+    safe_id = sanitize_project_id(project_id)
+    if not safe_id:
+        return None
+
+    candidates = [
+        ("pipeline", os.path.join(PIPELINE_DIR, safe_id, "pipeline.json")),
+        ("project_wip", os.path.join(PROJECTS_DIR, safe_id, "work@in@progress.json")),
+        ("project_initial", os.path.join(PROJECTS_DIR, safe_id, "initial.json")),
+        ("scenes", os.path.join(SCENES_DIR, safe_id, "scenes.json")),
+    ]
+
+    recovered_from = ""
+    raw = {}
+    story_text = ""
+
+    for source_name, path in candidates:
+        if not os.path.isfile(path):
+            continue
+        try:
+            raw = safe_json_read(path) or {}
+        except (json.JSONDecodeError, OSError, FileNotFoundError) as error:
+            logger.debug("Could not read fallback story source {}: {}", path, error)
+            continue
+
+        payload = raw.get("config") if source_name == "pipeline" and isinstance(raw.get("config"), dict) else raw
+        story_text = _extract_story_text_from_payload(payload)
+        if story_text:
+            recovered_from = source_name
+            break
+
+    if not story_text:
+        return None
+
+    parsed = parse_story_sections(story_text)
+    meta_source = raw.get("config") if isinstance(raw.get("config"), dict) else raw
+    metadata = {
+        "preset_style": meta_source.get("visual_style") or meta_source.get("style") or "",
+        "story_category": meta_source.get("category") or meta_source.get("story_category") or "",
+        "story_tone": meta_source.get("story_tone") or "",
+        "duration": meta_source.get("duration") or raw.get("total_duration") or 0,
+        "timestamp": raw.get("timestamp") or "",
+        "recovered_from": recovered_from,
+        "recovered": True,
+    }
+
+    return {
+        "project_id": safe_id,
+        "story_text": parsed["story_text"],
+        "sections": parsed["sections"],
+        "metadata": metadata,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -280,15 +370,23 @@ def list_stories():
 @story_bp.route("/api/story/<project_id>")
 def get_story(project_id):
     """Get full story data for a project."""
-    project_id = os.path.basename(project_id)
+    project_id = sanitize_project_id(project_id)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
     json_path = os.path.join(STORIES_DIR, project_id, "story.json")
-    if not os.path.isfile(json_path):
-        return jsonify({"error": "Not found"}), 404
-    try:
-        with open(json_path, encoding="utf-8") as f:
-            return jsonify(json.load(f))
-    except (json.JSONDecodeError, OSError) as e:
-        return jsonify({"error": f"Failed to read story data: {e}"}), 500
+    if os.path.isfile(json_path):
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                return jsonify(json.load(f))
+        except (json.JSONDecodeError, OSError) as e:
+            return jsonify({"error": f"Failed to read story data: {e}"}), 500
+
+    recovered = _recover_story_from_project(project_id)
+    if recovered:
+        logger.info("Recovered story for {} from {}", project_id, recovered.get("metadata", {}).get("recovered_from", "project files"))
+        return jsonify(recovered)
+
+    return jsonify({"error": "Not found"}), 404
 
 
 @story_bp.route("/api/story/classify-style", methods=["POST"])

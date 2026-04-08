@@ -281,12 +281,22 @@ function _persistJobHistory() {
   localStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(jobHistory.value))
 }
 
+function normalizeJobHistoryStory(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 600)
+}
+
 function pushJobHistory(entry) {
-  // entry: { presetId, label, status: 'success'|'skipped'|'error', projectId?, error? }
+  // entry: { presetId, label, status: 'success'|'skipped'|'error', projectId?, error?, storyText? }
+  const { storyText, ...rest } = entry || {}
+  const normalizedStoryText = normalizeJobHistoryStory(storyText)
   jobHistory.value.unshift({
     id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
     finishedAt: Date.now(),
-    ...entry,
+    ...rest,
+    ...(normalizedStoryText ? { storyText: normalizedStoryText } : {}),
   })
   if (jobHistory.value.length > JOB_HISTORY_MAX) {
     jobHistory.value.length = JOB_HISTORY_MAX
@@ -520,6 +530,7 @@ async function runJobQueue() {
 
     for (let i = 0; i < item.count; i++) {
       if (!jobQueueRunning.value) break
+      let jobStoryText = ''
       jobIndex++
       jobQueueCurrent.value = { presetId: item.presetId, index: jobIndex, total: totalQueuedJobs.value, label: item.label }
 
@@ -549,6 +560,7 @@ async function runJobQueue() {
           pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', error: 'Story generation failed' })
           continue
         }
+        jobStoryText = generated.text || text.value || ''
         // Run the pipeline
         await start()
         // Wait for pipeline to finish (watch globalStatus)
@@ -567,19 +579,19 @@ async function runJobQueue() {
         const pidAfter = lastCompletedProjectId.value
         const newProjectId = (pidAfter && pidAfter !== pidBefore) ? pidAfter : null
         if (endStatus === 'done') {
-          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'success', projectId: newProjectId })
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'success', projectId: newProjectId, storyText: jobStoryText })
         } else if (endStatus === 'error') {
-          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', projectId: newProjectId, error: 'Pipeline failed' })
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', projectId: newProjectId, error: 'Pipeline failed', storyText: jobStoryText })
         } else if (endStatus === 'stopped') {
-          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', projectId: newProjectId, error: 'Stopped' })
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', projectId: newProjectId, error: 'Stopped', storyText: jobStoryText })
         } else {
           // Preflight bail or never started
-          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'skipped', error: 'Preflight aborted' })
+          pushJobHistory({ presetId: item.presetId, label: item.label, status: 'skipped', error: 'Preflight aborted', storyText: jobStoryText })
         }
       } catch (e) {
         if (!jobQueueRunning.value) break
         toast.error(`Queue job ${jobIndex} error: ${e.message || 'unknown'}`)
-        pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', error: e.message || 'unknown' })
+        pushJobHistory({ presetId: item.presetId, label: item.label, status: 'error', error: e.message || 'unknown', storyText: jobStoryText })
       }
     }
   }
@@ -642,6 +654,7 @@ function saveCurrentStory() {
     category: nicheCategory.value || '',
     voice: voice.value || '',
     speed: speed.value || 1.0,
+    duration: story.storyDuration.value || 45,
     savedAt: new Date().toISOString(),
   }
   savedStories.value.unshift(entry)
@@ -654,6 +667,7 @@ function loadSavedStory(entry) {
   text.value = entry.text
   if (entry.voice) voice.value = entry.voice
   if (entry.speed) speed.value = entry.speed
+  if (entry.duration) story.storyDuration.value = entry.duration
   if (entry.style) style.value = entry.style
   if (entry.visualStyle) setVisualStyleOverride(entry.visualStyle)
   if (entry.storyTone) setStoryTone(entry.storyTone)
@@ -691,6 +705,7 @@ async function runAllSavedStories() {
     text.value = entry.text
     if (entry.voice) voice.value = entry.voice
     if (entry.speed) speed.value = entry.speed
+    if (entry.duration) story.storyDuration.value = entry.duration
     if (entry.style) style.value = entry.style
     if (entry.visualStyle) setVisualStyleOverride(entry.visualStyle)
     if (entry.storyTone) setStoryTone(entry.storyTone)
@@ -742,6 +757,98 @@ function savedStoryAge(entry) {
   if (hrs < 24) return `${hrs}h ago`
   const days = Math.floor(hrs / 24)
   return `${days}d ago`
+}
+
+function jobHistoryPreset(entry) {
+  return nichePresets.value?.[entry?.presetId] || null
+}
+
+function jobHistorySavedTitle(entry, storyText) {
+  const label = String(entry?.label || '').trim()
+  if (label) return label
+  const preview = String(firstSentence(storyText) || storyText || entry?.presetId || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return preview.slice(0, 60) + (preview.length > 60 ? '...' : '')
+}
+
+async function ensureJobHistoryStory(entry) {
+  const existing = normalizeJobHistoryStory(entry?.storyText)
+  if (existing) {
+    if (existing !== entry.storyText) {
+      entry.storyText = existing
+      _persistJobHistory()
+    }
+    return existing
+  }
+  if (!entry?.projectId) return ''
+
+  try {
+    const data = await story.loadStory(entry.projectId)
+    const loaded = normalizeJobHistoryStory(data?.story_text)
+    if (loaded) {
+      entry.storyText = loaded
+      _persistJobHistory()
+    }
+    return loaded
+  } catch (e) {
+    toast.error(e.message || 'Failed to load story')
+    return ''
+  }
+}
+
+function createSavedStoryFromJobHistory(entry, storyText) {
+  const preset = jobHistoryPreset(entry) || {}
+  return {
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    text: storyText,
+    title: jobHistorySavedTitle(entry, storyText),
+    style: preset.visual_style || '',
+    visualStyle: preset.visual_style || '',
+    storyTone: preset.story_tone || '',
+    category: preset.category || '',
+    voice: _defaultVoiceForQueue(preset),
+    speed: preset.speed || 1.0,
+    duration: preset.duration || story.storyDuration.value || 45,
+    savedAt: new Date().toISOString(),
+  }
+}
+
+async function addJobHistoryStoryToSaved(entry) {
+  const storyText = await ensureJobHistoryStory(entry)
+  if (!storyText) {
+    toast.error('No story text available for this job')
+    return
+  }
+  savedStories.value.unshift(createSavedStoryFromJobHistory(entry, storyText))
+  if (savedStories.value.length > 50) savedStories.value = savedStories.value.slice(0, 50)
+  _persistSavedStories()
+  jobPaneTab.value = 'saved'
+  toast.success('Story added to saved jobs')
+}
+
+async function runJobHistoryStory(entry) {
+  if (running.value || jobQueueRunning.value || savedQueueRunning.value) {
+    toast.error('Pipeline is already running')
+    return
+  }
+
+  const storyText = await ensureJobHistoryStory(entry)
+  if (!storyText) {
+    toast.error('No story text available for this job')
+    return
+  }
+
+  const preset = jobHistoryPreset(entry)
+  text.value = storyText
+  if (preset) {
+    selectNiche(preset)
+    if (preset.duration) story.storyDuration.value = preset.duration
+  }
+
+  showJobPane.value = false
+  await nextTick()
+  await start()
 }
 
 async function handleGenerateStory({ notifySuccess = true } = {}) {
@@ -2336,12 +2443,25 @@ function logStepLabel(step) {
                 <span class="job-hist-dot"></span>
                 {{ entry.label || entry.presetId }}
               </span>
+              <span v-if="entry.storyText" class="job-hist-story" :title="entry.storyText">
+                {{ entry.storyText }}
+              </span>
               <span class="saved-story-meta">
                 <span class="job-hist-status" :class="'job-hist-status--' + entry.status">{{ entry.status }}</span>
                 <span v-if="entry.projectId" class="saved-tag" :title="entry.projectId">{{ entry.projectId }}</span>
                 <span v-if="entry.error" class="saved-tag job-hist-err" :title="entry.error">{{ entry.error }}</span>
                 <span class="saved-story-age">{{ jobHistoryAge(entry) }}</span>
               </span>
+            </div>
+            <div class="saved-story-actions">
+              <button class="saved-story-add" title="Add to saved jobs" @click.stop="addJobHistoryStoryToSaved(entry)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14"/><path d="M5 12h14"/>
+                </svg>
+              </button>
+              <button class="saved-story-run" title="Process again" :disabled="running || jobQueueRunning || savedQueueRunning" @click.stop="runJobHistoryStory(entry)">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </button>
             </div>
           </div>
         </div>
@@ -4300,6 +4420,17 @@ function logStepLabel(step) {
   margin-right: 6px;
   vertical-align: middle;
 }
+.job-hist-story {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.72);
+  white-space: normal;
+  word-break: break-word;
+}
 .job-hist-status {
   font-size: 9px;
   font-weight: 600;
@@ -4338,6 +4469,18 @@ function logStepLabel(step) {
 }
 .saved-story-run:hover:not(:disabled) { opacity: 1; background: rgba(78, 205, 196, 0.1); }
 .saved-story-run:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.saved-story-add {
+  background: none;
+  border: none;
+  color: #8ab4ff;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0.75;
+  transition: all 0.12s;
+}
+.saved-story-add:hover { opacity: 1; background: rgba(138, 180, 255, 0.12); }
 
 .saved-story-delete {
   flex-shrink: 0;
