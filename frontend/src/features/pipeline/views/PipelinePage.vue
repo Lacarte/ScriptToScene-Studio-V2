@@ -881,7 +881,10 @@ async function runJobHistoryStory(entry) {
 async function handleGenerateStory({ notifySuccess = true } = {}) {
   const previousText = text.value
   try {
-    const data = await story.generateStory(style.value, { storyTone: storyTone.value || undefined })
+    const data = await story.generateStory(style.value, {
+      storyTone: storyTone.value || undefined,
+      nichePreset: nichePreset.value || undefined,
+    })
     // Strip section labels for clean pipeline text
     const plain = data.story_text
       .replace(/^(Hook|Build|Climax|CTA):\s*/gim, '')
@@ -905,6 +908,7 @@ async function handleGenerateFromIdea() {
     const data = await story.generateStory(style.value, {
       storyTone: storyTone.value || undefined,
       idea,
+      nichePreset: nichePreset.value || undefined,
     })
     const plain = data.story_text
       .replace(/^(Hook|Build|Climax|CTA):\s*/gim, '')

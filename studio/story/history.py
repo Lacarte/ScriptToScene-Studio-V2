@@ -58,6 +58,7 @@ def append_history(
     hook: str,
     opening: str,
     timestamp: str,
+    concept_family: str = "",
 ) -> None:
     """Append one story summary to the preset's history file (trims to last N).
 
@@ -80,6 +81,7 @@ def append_history(
         "hook": new_hook[:300],
         "opening": (opening or "").strip()[:300],
         "timestamp": timestamp,
+        "concept_family": (concept_family or "").strip()[:160],
     })
     history = history[-_HISTORY_LIMIT:]
     try:
@@ -104,10 +106,13 @@ def format_history_for_prompt(preset_style: str, category: str, language: str) -
         "Pick a genuinely different angle, subject, and metaphor. The viewer has already seen these:",
     ]
     for i, entry in enumerate(history, 1):
+        concept_family = entry.get("concept_family", "").strip()
         hook = entry.get("hook", "").strip()
         opening = entry.get("opening", "").strip()
+        if concept_family:
+            lines.append(f"{i}. Concept: {concept_family}")
         if hook:
-            lines.append(f"{i}. Hook: {hook}")
+            lines.append(f"   Hook: {hook}" if concept_family else f"{i}. Hook: {hook}")
         if opening and opening != hook:
             lines.append(f"   Opening: {opening}")
     lines.append(

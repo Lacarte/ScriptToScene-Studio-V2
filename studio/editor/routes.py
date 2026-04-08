@@ -822,6 +822,101 @@ def _builtin_audio_url_to_abs(track_type: str, path: str | None) -> str | None:
     return os.path.join(APP_ASSETS_DIR, rel)
 
 
+def _builtin_audio_abs_to_url(track_type: str, abs_path: str | None) -> str | None:
+    """Convert a built-in music/SFX absolute path to the matching /assets/... URL."""
+    if not isinstance(abs_path, str) or not abs_path.strip():
+        return None
+    normalized = os.path.abspath(abs_path)
+    try:
+        if os.path.commonpath([os.path.abspath(APP_ASSETS_DIR), normalized]) != os.path.abspath(APP_ASSETS_DIR):
+            return None
+    except ValueError:
+        return None
+    bucket = "music" if track_type == "music" else "sfx" if track_type == "sfx" else ""
+    if not bucket:
+        return None
+    expected_root = os.path.join(APP_ASSETS_DIR, "sounds", bucket)
+    try:
+        if os.path.commonpath([os.path.abspath(expected_root), normalized]) != os.path.abspath(expected_root):
+            return None
+    except ValueError:
+        return None
+    rel = os.path.relpath(normalized, APP_ASSETS_DIR).replace("\\", "/")
+    return f"/assets/{rel}"
+
+
+def _materialize_history_audio_tracks(data: dict) -> None:
+    """Backfill missing music/SFX tracks from persisted history for older projects."""
+    if not isinstance(data, dict):
+        return
+
+    tracks = data.get("audio_tracks")
+    if not isinstance(tracks, list):
+        tracks = []
+        data["audio_tracks"] = tracks
+
+    existing_types = {
+        str(track.get("type") or "").lower()
+        for track in tracks
+        if isinstance(track, dict)
+    }
+    music_history = _normalize_audio_history(data.get("music_history"))
+    sfx_history = _normalize_audio_history(data.get("sfx_history"))
+
+    from studio.music.selector import recall_last_music, recall_last_sfx
+
+    if "music" not in existing_types:
+        restored_music = recall_last_music(music_history)
+        if restored_music:
+            music_url = _builtin_audio_abs_to_url("music", restored_music.get("path"))
+            music_path = restored_music.get("path") or ""
+            if music_url and music_path:
+                tracks.append({
+                    "id": "at_music_history",
+                    "label": "Music",
+                    "type": "music",
+                    "file": os.path.basename(music_path),
+                    "path": music_url,
+                    "duration": 0,
+                    "timelineOffset": 0,
+                    "startOffset": 0,
+                    "trimmedDuration": None,
+                    "volume": restored_music.get("volume", 0.15),
+                    "loop": restored_music.get("loop", True),
+                    "muted": False,
+                    "duckingEnabled": restored_music.get("ducking_enabled", True),
+                    "duckingLevel": restored_music.get("ducking_level", 0.20),
+                    "fadeIn": restored_music.get("fade_in", 2.0),
+                    "fadeOut": restored_music.get("fade_out", 3.0),
+                })
+                existing_types.add("music")
+
+    if "sfx" not in existing_types:
+        restored_sfx = recall_last_sfx(sfx_history)
+        if restored_sfx:
+            sfx_url = _builtin_audio_abs_to_url("sfx", restored_sfx.get("path"))
+            sfx_path = restored_sfx.get("path") or ""
+            if sfx_url and sfx_path:
+                tracks.append({
+                    "id": "at_sfx_history",
+                    "label": "SFX",
+                    "type": "sfx",
+                    "file": os.path.basename(sfx_path),
+                    "path": sfx_url,
+                    "duration": 0,
+                    "timelineOffset": 0,
+                    "startOffset": 0,
+                    "trimmedDuration": None,
+                    "volume": restored_sfx.get("volume", 0.10),
+                    "loop": restored_sfx.get("loop", True),
+                    "muted": False,
+                    "duckingEnabled": restored_sfx.get("ducking_enabled", True),
+                    "duckingLevel": restored_sfx.get("ducking_level", 0.20),
+                    "fadeIn": restored_sfx.get("fade_in", 1.5),
+                    "fadeOut": restored_sfx.get("fade_out", 2.0),
+                })
+
+
 def _merge_project_audio_history(save_data: dict, project_id: str):
     """Keep initial/WIP payloads in sync with current music/SFX history."""
     initial = _initial_path(project_id)
@@ -940,6 +1035,7 @@ def editor_load_project(project_id):
     # Resolve correct audio from scenes.json source_folder to prevent
     # cross-project audio bleed (saved voice track may belong to another project).
     _resolve_project_audio(data, safe_id)
+    _materialize_history_audio_tracks(data)
 
     # Resolve correct captions from the alignment folder
     _resolve_project_captions(data, safe_id)

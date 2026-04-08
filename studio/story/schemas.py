@@ -8,6 +8,7 @@ from studio.niches.presets import (
     CATEGORIES as NICHE_CATEGORIES,
     is_known_template,
     is_valid_story_tone,
+    normalize_preset_id,
     normalize_story_tone,
 )
 from studio.story.prompts import STORY_CATEGORIES
@@ -19,6 +20,7 @@ VALID_STORY_CATEGORIES = tuple(dict.fromkeys([*STORY_CATEGORIES, *NICHE_CATEGORI
 
 class StoryGenerateRequest(BaseModel):
     project_name_id: Optional[str] = None
+    niche_preset: Optional[str] = None
     preset_style: str = "cinematic"
     story_category: str = "motivation"
     duration: int = Field(default=45, ge=15, le=180)
@@ -31,6 +33,7 @@ class StoryGenerateRequest(BaseModel):
     @model_validator(mode="after")
     def _normalize_fields(self):
         self.project_name_id = (self.project_name_id or "").strip() or None
+        self.niche_preset = normalize_preset_id(self.niche_preset) or None
         self.preset_style = (self.preset_style or "").strip()
         self.story_category = (self.story_category or "").strip().lower()
         self.story_tone = normalize_story_tone(self.story_tone) or None

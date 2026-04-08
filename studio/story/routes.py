@@ -34,6 +34,7 @@ from studio.story.schemas import StoryGenerateRequest
 from studio.story.prompts import (
     build_story_system_prompt,
     build_story_user_prompt,
+    choose_story_concept_family,
     compute_word_target,
     STORY_CATEGORIES,
     WORDS_PER_SECOND,
@@ -216,9 +217,17 @@ def generate_story(data: StoryGenerateRequest):
         story_tone=data.story_tone,
         language_level=data.language_level,
     )
+    concept_family = choose_story_concept_family(
+        data.preset_style,
+        data.story_category,
+        data.language,
+        niche_preset=data.niche_preset,
+    )
     user_prompt = build_story_user_prompt(
         data.preset_style, data.story_category, data.duration, data.language,
         idea=data.idea,
+        niche_preset=data.niche_preset,
+        concept_family=concept_family,
     )
     word_target = compute_word_target(data.duration)
 
@@ -279,6 +288,7 @@ def generate_story(data: StoryGenerateRequest):
             "word_count": parsed["word_count"],
             "generation_time": generation_time,
             "timestamp": datetime.now().isoformat(),
+            "concept_family": concept_family,
         }
 
         # Save to disk
@@ -297,6 +307,7 @@ def generate_story(data: StoryGenerateRequest):
                 "provider": "gemini",
                 "generation_time": generation_time,
                 "timestamp": response["timestamp"],
+                "concept_family": concept_family,
             },
             "pipeline_ref": {
                 "tts_project_id": None,
@@ -321,6 +332,7 @@ def generate_story(data: StoryGenerateRequest):
                 hook=hook_text,
                 opening=opening_text,
                 timestamp=response["timestamp"],
+                concept_family=concept_family,
             )
         except Exception as e:
             logger.debug("Could not append story history: {}", e)

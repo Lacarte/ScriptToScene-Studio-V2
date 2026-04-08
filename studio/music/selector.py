@@ -120,6 +120,26 @@ def _pick_with_history(tracks, history):
     return random.choice(tracks)
 
 
+def _last_valid_history_track(history, root):
+    """Return the newest valid history path that still exists under the given root."""
+    root_abs = os.path.abspath(root)
+    for candidate in reversed(_normalize_history(history)):
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        candidate_abs = os.path.abspath(candidate)
+        try:
+            if os.path.commonpath([root_abs, candidate_abs]) != root_abs:
+                continue
+        except ValueError:
+            continue
+        if not os.path.isfile(candidate_abs):
+            continue
+        if os.path.splitext(candidate_abs)[1].lower() not in _AUDIO_EXTS:
+            continue
+        return candidate_abs
+    return None
+
+
 def select_music(story_tone, history=None):
     """Pick a random music track matching the story tone."""
     folders = TONE_MUSIC_MAP.get(story_tone)
@@ -156,6 +176,23 @@ def select_music(story_tone, history=None):
 
     logger.warning("Auto-music: no tracks found for tone '{}' in folders {}", story_tone, folders)
     return None
+
+
+def recall_last_music(history=None):
+    """Reuse the most recent valid built-in music file from history, if available."""
+    chosen = _last_valid_history_track(history, _MUSIC_ROOT)
+    if not chosen:
+        return None
+    logger.info("Auto-music: reusing history pick '{}'", os.path.basename(chosen))
+    return {
+        "path": chosen,
+        "volume": 0.15,
+        "fade_in": 2.0,
+        "fade_out": 3.0,
+        "loop": True,
+        "ducking_enabled": True,
+        "ducking_level": 0.20,
+    }
 
 
 def select_random_music(history=None):
@@ -229,3 +266,22 @@ def select_sfx(story_tone, history=None):
 
     logger.warning("Auto-sfx: no tracks found for tone '{}' in folders {}", story_tone, folders)
     return None
+
+
+def recall_last_sfx(history=None):
+    """Reuse the most recent valid built-in SFX file from history, if available."""
+    chosen = _last_valid_history_track(history, _SFX_ROOT)
+    if not chosen:
+        return None
+    folder_name = os.path.basename(os.path.dirname(chosen))
+    logger.info("Auto-sfx: reusing history pick '{}'", os.path.basename(chosen))
+    return {
+        "path": chosen,
+        "folder": folder_name,
+        "volume": 0.10,
+        "fade_in": 1.5,
+        "fade_out": 2.0,
+        "loop": True,
+        "ducking_enabled": True,
+        "ducking_level": 0.20,
+    }
