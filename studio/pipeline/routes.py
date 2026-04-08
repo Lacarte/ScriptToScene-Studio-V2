@@ -41,6 +41,72 @@ _jobs_lock = threading.Lock()
 ALL_PIPELINE_STEPS = ["tts", "timing", "segment", "scenes", "storyboard", "assets", "assemble", "export"]
 
 
+def _extract_hook_opening_from_text(text: str) -> tuple[str, str]:
+    """Extract a hook + opening pair from raw pipeline text.
+
+    Handles two shapes:
+      1. Sectioned story format produced by /story/generate:
+         "Hook: ...\n\nBuild: ...\n\nClimax: ...\n\nCTA: ..."
+         → hook = the Hook line, opening = first sentence of Build
+      2. Plain prose pasted by the user:
+         → hook = first sentence, opening = second sentence
+
+    Both fields are best-effort. Empty strings are valid and just mean
+    the history entry will be sparse.
+    """
+    text = (text or "").strip()
+    if not text:
+        return "", ""
+
+    hook_match = re.search(r"hook\s*:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+    if hook_match:
+        hook = hook_match.group(1).strip()
+        build_match = re.search(r"build\s*:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+        opening = ""
+        if build_match:
+            opening = build_match.group(1).strip().split(".")[0].strip()
+        return hook, opening
+
+    # Plain prose: split on sentence boundaries.
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    hook = sentences[0] if sentences else ""
+    opening = sentences[1] if len(sentences) > 1 else ""
+    return hook, opening
+
+
+def _record_pipeline_history(config: dict) -> None:
+    """Append the pipeline's input text to the per-preset story history.
+
+    The pipeline accepts text from three sources:
+      1. /story/generate output (already recorded by the story route — this
+         call will dedup against the last entry and become a no-op)
+      2. User-pasted prose (we record it here so the next Gemini call dodges it)
+      3. Resumed projects (skipped — same text was recorded on the original run)
+
+    All failures are swallowed so a history bug never breaks pipeline start.
+    """
+    try:
+        if config.get("resume_from"):
+            return  # original run already recorded this story
+
+        hook, opening = _extract_hook_opening_from_text(config.get("text") or "")
+        if not hook:
+            return  # nothing useful to record
+
+        from studio.story.history import append_history
+
+        append_history(
+            preset_style=config.get("style") or config.get("visual_style") or "default",
+            category=config.get("category") or "default",
+            language=config.get("language") or "english",
+            hook=hook,
+            opening=opening,
+            timestamp=datetime.now().isoformat(),
+        )
+    except Exception as e:
+        logger.debug("Could not record pipeline history: {}", e)
+
+
 class PipelineStopped(RuntimeError):
     """Raised when a running pipeline is stopped by the user."""
 
@@ -167,6 +233,7 @@ def run_pipeline(data: PipelineRunRequest):
 
     config = {
         "text": data.text.strip(),
+        "language": data.language,
         "voice": data.voice,
         "speed": data.speed,
         "style": data.style,
@@ -209,6 +276,13 @@ def run_pipeline(data: PipelineRunRequest):
     # Auto-resolve Inworld voice from niche if not explicitly set
     if config.get("tts_provider") == "inworld" and not config.get("tts_voice"):
         config["tts_voice"] = resolved_niche.get("inworld_voice", "Dennis")
+
+    # Record this story in the per-preset history so the next Gemini call
+    # in the same preset combo can dodge its hook/opening. Runs after niche
+    # resolution so we use the FINAL style+category, not the raw input.
+    # Dedups against the most recent entry, so generate-then-pipeline of the
+    # same story produces only one entry.
+    _record_pipeline_history(config)
 
     # Compute which steps will run
     all_steps = ALL_PIPELINE_STEPS
@@ -1755,6 +1829,7 @@ def _normalize_export_audio(assembled):
             return normalized
 
     disabled_tracks = set(assembled.get("disabled_tracks") or [])
+    usable_tracks = []
     for track in assembled.get("audio_tracks") or []:
         if not isinstance(track, dict):
             continue
@@ -1768,8 +1843,13 @@ def _normalize_export_audio(assembled):
         if not track_path:
             continue
 
+        usable_tracks.append(track)
+
+    for track in usable_tracks:
+        if (track.get("type") or "").lower() != "voice":
+            continue
         return {
-            "path": track_path,
+            "path": track.get("path") or track.get("url") or "",
             "volume": track.get("volume", 1.0),
             "start_offset": track.get("startOffset", track.get("start_offset", 0)),
             "timeline_offset": track.get("timelineOffset", track.get("timeline_offset", 0)),
@@ -1778,6 +1858,46 @@ def _normalize_export_audio(assembled):
             "fade_out": track.get("fadeOut", track.get("fade_out", 0.5)),
         }
 
+    for track in usable_tracks:
+        return {
+            "path": track.get("path") or track.get("url") or "",
+            "volume": track.get("volume", 1.0),
+            "start_offset": track.get("startOffset", track.get("start_offset", 0)),
+            "timeline_offset": track.get("timelineOffset", track.get("timeline_offset", 0)),
+            "trimmed_duration": track.get("trimmedDuration", track.get("trimmed_duration")),
+            "fade_in": track.get("fadeIn", track.get("fade_in", 0)),
+            "fade_out": track.get("fadeOut", track.get("fade_out", 0.5)),
+        }
+
+    return None
+
+
+def _extract_music_track(assembled):
+    """Pull the first non-muted/non-disabled music track out of audio_tracks."""
+    if not isinstance(assembled, dict):
+        return None
+    disabled_tracks = set(assembled.get("disabled_tracks") or [])
+    for track in assembled.get("audio_tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        if (track.get("type") or "").lower() != "music":
+            continue
+        if track.get("muted"):
+            continue
+        if track.get("id") and track.get("id") in disabled_tracks:
+            continue
+        track_path = track.get("path") or track.get("url") or ""
+        if not track_path:
+            continue
+        return {
+            "path": track_path,
+            "volume": track.get("volume", 0.15),
+            "fade_in": track.get("fadeIn", track.get("fade_in", 2.0)),
+            "fade_out": track.get("fadeOut", track.get("fade_out", 3.0)),
+            "loop": track.get("loop", True),
+            "ducking_enabled": track.get("duckingEnabled", track.get("ducking_enabled", True)),
+            "ducking_level": track.get("duckingLevel", track.get("ducking_level", 0.20)),
+        }
     return None
 
 
@@ -1902,11 +2022,13 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
         if not sfx_history:
             sfx_history = list(persisted_audio_history.get("sfx_history") or [])
 
-    bg_music = assembled.get("bgMusic")
-    if not bg_music and story_tone:
-        from studio.music.selector import persist_project_audio_history, select_music
-        bg_music = select_music(story_tone, history=music_history)
-        if bg_music:
+    bg_music = assembled.get("bgMusic") or _extract_music_track(assembled)
+    if not bg_music:
+        from studio.music.selector import persist_project_audio_history, recall_last_music, select_music
+        bg_music = recall_last_music(music_history)
+        if not bg_music and story_tone:
+            bg_music = select_music(story_tone, history=music_history)
+        if bg_music and bg_music.get("history") is not None:
             music_history = list(bg_music.get("history") or music_history)
             persist_project_audio_history(project_id, music_history=music_history)
             bg_music.pop("history", None)
@@ -1918,12 +2040,12 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
     # otherwise pick a fresh one from the SFX library. SFX is optional —
     # if neither path produces a track, it's silently skipped.
     sfx = _extract_sfx_track(assembled)
-    if not sfx and story_tone:
-        from studio.music.selector import persist_project_audio_history, select_sfx
-        picked = select_sfx(story_tone, history=sfx_history)
+    if not sfx:
+        from studio.music.selector import persist_project_audio_history, recall_last_sfx, select_sfx
+        picked = recall_last_sfx(sfx_history)
+        if not picked and story_tone:
+            picked = select_sfx(story_tone, history=sfx_history)
         if picked:
-            sfx_history = list(picked.get("history") or sfx_history)
-            persist_project_audio_history(project_id, sfx_history=sfx_history)
             sfx = {
                 "path": picked["path"],
                 "volume": picked.get("volume", 0.10),
@@ -1933,6 +2055,9 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
                 "ducking_enabled": picked.get("ducking_enabled", True),
                 "ducking_level": picked.get("ducking_level", 0.20),
             }
+            if picked.get("history") is not None:
+                sfx_history = list(picked.get("history") or sfx_history)
+                persist_project_audio_history(project_id, sfx_history=sfx_history)
             logger.info("Pipeline Export: auto-selected SFX for tone '{}' → '{}'",
                         story_tone, os.path.basename(picked["path"]))
 

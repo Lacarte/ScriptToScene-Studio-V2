@@ -59,11 +59,25 @@ def append_history(
     opening: str,
     timestamp: str,
 ) -> None:
-    """Append one story summary to the preset's history file (trims to last N)."""
+    """Append one story summary to the preset's history file (trims to last N).
+
+    Deduplicates against the most recent entry: if the incoming hook matches
+    the last recorded hook (case-insensitive, whitespace-trimmed), the call
+    is a no-op. This protects against the common double-record case where the
+    user generates a story via /story/generate (which records once) and then
+    runs the pipeline with that same text (which would record again).
+    """
+    new_hook = (hook or "").strip()
     path = _history_path(preset_style, category, language)
     history = load_history(preset_style, category, language)
+
+    if history and new_hook:
+        last_hook = (history[-1].get("hook") or "").strip()
+        if last_hook.lower() == new_hook.lower():
+            return  # already recorded — pipeline re-run of an existing story
+
     history.append({
-        "hook": (hook or "").strip()[:300],
+        "hook": new_hook[:300],
         "opening": (opening or "").strip()[:300],
         "timestamp": timestamp,
     })

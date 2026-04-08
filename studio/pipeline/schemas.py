@@ -21,6 +21,7 @@ _VALID_STEPS = ("tts", "timing", "alignment", "segment", "scenes", "storyboard",
 
 class PipelineRunRequest(BaseModel):
     text: str = Field(min_length=1, max_length=10000)
+    language: str = "english"
     voice: str = "af_heart"
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     style: str = "cinematic"
