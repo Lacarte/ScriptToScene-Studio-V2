@@ -2119,6 +2119,40 @@ class VideoProcessor:
             logger.debug("Captions present but no entries")
             return video_path
 
+        # Compute timespans of text scenes that requested caption hiding so we
+        # can drop caption entries that fall inside them.
+        hide_spans = []
+        cumulative = 0.0
+        for scene in self.export_data.get('scenes', []) or []:
+            try:
+                duration = float(scene.get('duration', 0) or 0)
+            except (TypeError, ValueError):
+                duration = 0.0
+            scene_start = float(scene.get('start_time', cumulative) or cumulative)
+            scene_end = float(scene.get('end_time', scene_start + duration) or (scene_start + duration))
+            scene_type = str(scene.get('type') or '').lower()
+            if scene_type in ('text', 'cta'):
+                text_cfg = scene.get('text') or {}
+                if text_cfg.get('hide_captions', True):
+                    hide_spans.append((scene_start, scene_end))
+            cumulative = scene_end if scene_end > cumulative else (cumulative + duration)
+
+        if hide_spans:
+            def _in_hidden_span(start_t):
+                for s, e in hide_spans:
+                    if s <= start_t < e:
+                        return True
+                return False
+
+            filtered = [e for e in entries if not _in_hidden_span(float(e.get('start', 0) or 0))]
+            dropped = len(entries) - len(filtered)
+            if dropped:
+                logger.info("Suppressing {} caption(s) inside {} text scene span(s)", dropped, len(hide_spans))
+            entries = filtered
+            if not entries:
+                logger.debug("All captions filtered out by text scenes")
+                return video_path
+
         style = captions.get('style', {})
         # Support both camelCase and snake_case keys from frontend
         font_family = style.get('fontFamily', style.get('font_family', 'Inter'))

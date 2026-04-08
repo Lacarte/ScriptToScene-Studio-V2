@@ -616,6 +616,198 @@ def _append_audio_history(history: list[str], path: str | None) -> list[str]:
     return normalized[-_AUDIO_HISTORY_LIMIT:]
 
 
+# ---------------------------------------------------------------------------
+# Per-scene SFX placement (vocabulary-driven, see resources/sfx-vocabulary.json)
+# ---------------------------------------------------------------------------
+
+def _list_sfx_files_in_folder(folder: str) -> list[str]:
+    """List all audio files in resources/sounds/sfx/<folder>/. Returns absolute paths."""
+    sfx_dir = os.path.join(APP_ASSETS_DIR, "sounds", "sfx", folder)
+    if not os.path.isdir(sfx_dir):
+        return []
+    audio_exts = (".mp3", ".wav", ".ogg", ".m4a", ".flac")
+    return [
+        os.path.join(sfx_dir, f)
+        for f in sorted(os.listdir(sfx_dir))
+        if f.lower().endswith(audio_exts)
+        and os.path.isfile(os.path.join(sfx_dir, f))
+    ]
+
+
+def _pick_sfx_file_for_hint(entry: dict, history: list[str]) -> str | None:
+    """Pick a real file matching a vocabulary entry, with history-deduped randomization.
+
+    Looks at `folder` first, narrowed by `filename_match` regex if present.
+    Falls back to `fallback_folder` (also narrowed by the same regex) if the
+    primary folder produces nothing.
+
+    Returns the absolute file path, or None if no candidates exist.
+    """
+    import random
+    import re
+
+    folder = entry.get("folder")
+    if not folder:
+        return None  # silence hint or unmapped entry
+
+    pattern = entry.get("filename_match")
+    regex = re.compile(pattern, re.IGNORECASE) if pattern else None
+
+    def _candidates(in_folder: str) -> list[str]:
+        all_files = _list_sfx_files_in_folder(in_folder)
+        if not regex:
+            return all_files
+        return [p for p in all_files if regex.search(os.path.basename(p))]
+
+    candidates = _candidates(folder)
+    if not candidates:
+        fallback = entry.get("fallback_folder")
+        if fallback:
+            candidates = _candidates(fallback)
+
+    if not candidates:
+        return None
+
+    # Prefer files NOT in recent history
+    fresh = [p for p in candidates if p not in history]
+    pool = fresh if fresh else candidates
+    return random.choice(pool)
+
+
+def _build_per_scene_sfx_tracks(
+    editor_scenes: list[dict],
+    raw_scenes: list[dict],
+    sfx_history: list[str],
+) -> tuple[list[dict], list[str]]:
+    """Build per-scene SFX tracks from validated sfx_hint fields.
+
+    For each scene that carries a non-null `sfx_hint`, look up the vocabulary
+    entry, pick a real file, compute the timeline offset based on the entry's
+    placement mode, and produce an audio_tracks-shaped dict.
+
+    Returns (tracks_to_append, updated_sfx_history). The history is grown by
+    each successful pick so the next pick within the same project doesn't
+    re-roll the same file.
+
+    Placement modes:
+      - scene_start    : timelineOffset = scene start time (one-shot, fires on cut into scene)
+      - scene_duration : timelineOffset = scene start, trimmedDuration = scene length (looped texture)
+      - lead_in        : timelineOffset = scene start - lead_in_seconds (one-shot fires before cut)
+
+    Skipped silently when:
+      - sfx_hint is null/empty
+      - hint key is not in the loaded vocabulary
+      - the entry's folder (and fallback) contain no matching files
+      - the hint is `silence` (intentional no-op — the bed track will be ducked)
+    """
+    from studio.build_scene_blueprints.sfx_validator import load_sfx_vocabulary
+
+    vocab = load_sfx_vocabulary()
+    hints_by_id = vocab.get("hints") or {}
+    if not hints_by_id:
+        return [], sfx_history
+
+    history = list(sfx_history or [])
+    tracks: list[dict] = []
+    seq = 0  # for unique track ids
+
+    # Build a fast index from scene index/id to its computed timestamp + duration.
+    # editor_scenes already has timestamps computed at the cumulative-position step.
+    scene_by_id = {es["id"]: es for es in editor_scenes}
+
+    for raw in raw_scenes:
+        # Try several keys to find the matching editor scene — raw scenes
+        # use `index`, editor scenes use `id` (which is the array position).
+        # The assemble loop builds editor_scenes in raw_scenes order, so the
+        # raw_scenes index in the loop is the editor scene id.
+        try:
+            raw_index = int(raw.get("index", -1))
+        except (TypeError, ValueError):
+            raw_index = -1
+
+        # The editor scene id is the array position from the assemble loop.
+        # raw_scenes and editor_scenes are 1:1 ordered, so we use the loop
+        # position. But we don't have the loop position here — instead use
+        # the raw_index which is what was set as `id` in the loop above.
+        # Defensively, fall back to scanning by raw index.
+        editor_scene = scene_by_id.get(raw_index)
+        if editor_scene is None:
+            continue
+
+        hint_id = raw.get("sfx_hint")
+        if not hint_id:
+            continue
+
+        entry = hints_by_id.get(hint_id)
+        if not entry:
+            continue  # validator should have caught this, defense in depth
+
+        if hint_id == "silence":
+            # Explicit no-op. The audio bed will keep playing — silence is a
+            # creative choice to NOT add an accent here, not a request to
+            # mute the existing layers.
+            continue
+
+        chosen_path = _pick_sfx_file_for_hint(entry, history)
+        if not chosen_path:
+            logger.debug("SFX hint '{}' has no available files (folder={}, fallback={})",
+                         hint_id, entry.get("folder"), entry.get("fallback_folder"))
+            continue
+
+        history.append(chosen_path)
+
+        # Compute timeline offset based on placement mode
+        scene_start = float(editor_scene.get("timestamp", 0) or 0)
+        scene_duration = float(editor_scene.get("duration", 0) or 0)
+        placement = entry.get("placement", "scene_start")
+
+        if placement == "lead_in":
+            lead = float(entry.get("lead_in_seconds", 0.5) or 0.5)
+            timeline_offset = max(0.0, scene_start - lead)
+            trimmed_duration = None
+        elif placement == "scene_duration":
+            timeline_offset = scene_start
+            trimmed_duration = scene_duration
+        else:  # scene_start (default)
+            timeline_offset = scene_start
+            trimmed_duration = None
+
+        # Build the asset URL the editor's audio system uses.
+        # Files live under resources/sounds/sfx/<folder>/<file>; the editor
+        # serves them via /assets/sounds/sfx/<folder>/<file>.
+        sfx_file = os.path.basename(chosen_path)
+        sfx_folder = os.path.basename(os.path.dirname(chosen_path))
+        sfx_url = f"/assets/sounds/sfx/{sfx_folder}/{sfx_file}"
+
+        seq += 1
+        tracks.append({
+            "id": f"at_sfx_scene{raw_index}_{hint_id}_{seq}",
+            "label": entry.get("label", hint_id.upper()),
+            "type": "sfx",
+            "file": sfx_file,
+            "path": sfx_url,
+            "duration": 0,
+            "timelineOffset": round(timeline_offset, 3),
+            "startOffset": 0,
+            "trimmedDuration": round(trimmed_duration, 3) if trimmed_duration is not None else None,
+            "volume": float(entry.get("volume", 0.15)),
+            "loop": bool(entry.get("loop", False)),
+            "muted": False,
+            "duckingEnabled": True,
+            "duckingLevel": 0.20,
+            "fadeIn": float(entry.get("fade_in", 0.0)),
+            "fadeOut": float(entry.get("fade_out", 0.3)),
+            # Provenance — useful for debugging when a hint fires the wrong file
+            "sfx_hint": hint_id,
+            "scene_index": raw_index,
+        })
+
+        logger.info("Per-scene SFX: scene {} -> {} ({}) @ {:.2f}s [{}]",
+                    raw_index, hint_id, sfx_file, timeline_offset, placement)
+
+    return tracks, history
+
+
 def _builtin_audio_url_to_abs(track_type: str, path: str | None) -> str | None:
     """Convert a built-in /assets/sounds/{music|sfx}/... URL back to an absolute path."""
     if not isinstance(path, str) or not path.strip():
@@ -1038,6 +1230,11 @@ def assemble_project_for_editor(project_id):
             "segment_end": s.get("segment_end"),
             "segment_duration": s.get("segment_duration"),
             "asset_files": [media_url] if media_url else [],
+            # SFX hint chosen by the scene planner LLM and validated by sfx_validator.
+            # The renderer turns this into an actual per-scene audio track in the
+            # _build_per_scene_sfx_tracks step below; we also keep the raw value
+            # on the editor scene for debugging and for future editor-UI surfacing.
+            "sfx_hint": s.get("sfx_hint"),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
         })
 
@@ -1152,6 +1349,21 @@ def assemble_project_for_editor(project_id):
                             story_tone, sfx_file)
         except Exception as e:
             logger.debug("Could not auto-select bgMusic/SFX for {}: {}", safe_id, e)
+
+    # Per-scene SFX placement based on validated sfx_hint fields from the
+    # scene planner. Runs AFTER the tone-driven music + SFX bed so the per-scene
+    # accents layer ON TOP of the ambient bed without competing with the bed's
+    # tone-matching. The bed is the atmosphere layer; these are the punctuation
+    # layer. Both can coexist with ducking handling the voice mix.
+    try:
+        scene_sfx_tracks, sfx_history = _build_per_scene_sfx_tracks(
+            editor_scenes, raw_scenes, sfx_history,
+        )
+        if scene_sfx_tracks:
+            audio_tracks.extend(scene_sfx_tracks)
+            logger.info("Built {} per-scene SFX track(s) for {}", len(scene_sfx_tracks), safe_id)
+    except Exception as e:
+        logger.warning("Could not build per-scene SFX tracks for {}: {}", safe_id, e)
 
     total_duration = sum(s["duration"] for s in editor_scenes)
     editor_data = {

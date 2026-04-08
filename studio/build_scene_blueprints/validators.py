@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from studio.build_scene_blueprints.sfx_validator import validate_and_enforce_sfx
+
 
 SHOT_TYPES = [
     "extreme-close-up",
@@ -236,4 +238,29 @@ def finalize_scene_result(result: dict, scene_blueprints: list[dict], visual_bib
     annotated = annotate_scenes(scenes, scene_blueprints, visual_bible)
     result["scenes"] = annotated
     result.update(score_scene_coherence(annotated, scene_blueprints, visual_bible))
+
+    # SFX hint validation + budget enforcement.
+    # Reads context from the result dict (the route-level hydration sets these
+    # fields before calling finalize_scene_result). Mutates scenes IN PLACE,
+    # then merges its warnings into the existing coherence_warnings list so
+    # there's a single warning surface for callers.
+    analysis = result.get("analysis") or {}
+    sfx_report = validate_and_enforce_sfx(
+        annotated,
+        visual_style=result.get("style") or analysis.get("visual_style"),
+        category=analysis.get("category") or result.get("category"),
+        story_tone=analysis.get("story_tone") or result.get("story_tone"),
+        total_duration_seconds=result.get("total_duration") or analysis.get("total_duration"),
+    )
+    result["sfx_report"] = {
+        "hint_count": sfx_report["hint_count"],
+        "hint_max": sfx_report["hint_max"],
+        "hint_min": sfx_report["hint_min"],
+        "dropped": sfx_report["dropped"],
+    }
+    if sfx_report.get("warnings"):
+        existing_warnings = list(result.get("coherence_warnings") or [])
+        existing_warnings.extend(f"[sfx] {w}" for w in sfx_report["warnings"])
+        result["coherence_warnings"] = existing_warnings
+
     return result

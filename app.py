@@ -201,16 +201,33 @@ def pipeline_preflight():
     needs_storyboard = stop_after in ("", "storyboard", "assets", "assemble", "export")
     needs_assets = stop_after in ("", "assets", "assemble", "export")
 
+    # Extension WS reconnect cycle is ~2s — give it a brief grace window
+    # before declaring a provider unavailable. This prevents false negatives
+    # between back-to-back jobs when the tab is mid-reconnect.
+    import time as _time
+
     if needs_storyboard and storyboard_provider == "gemini":
         from studio.storyboard.gemini_ws import is_extension_connected as gemini_connected
-        if not gemini_connected():
+        connected = False
+        for _ in range(3):
+            if gemini_connected():
+                connected = True
+                break
+            _time.sleep(1)
+        if not connected:
             issues.append({"target": "gemini", "message": "Gemini extension not connected"})
 
     if needs_assets and asset_provider == "grok":
         from studio.animator.routes import _ws_clients as grok_clients, _ws_lock as grok_lock
-        with grok_lock:
-            if not grok_clients:
-                issues.append({"target": "grok", "message": "Grok extension not connected"})
+        connected = False
+        for _ in range(3):
+            with grok_lock:
+                if grok_clients:
+                    connected = True
+                    break
+            _time.sleep(1)
+        if not connected:
+            issues.append({"target": "grok", "message": "Grok extension not connected"})
 
     return jsonify({"ok": len(issues) == 0, "issues": issues})
 

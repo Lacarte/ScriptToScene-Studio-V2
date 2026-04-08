@@ -94,7 +94,7 @@ const STORAGE_KEYS = {
 const MAX_HISTORY_ENTRIES = 50;
 
 const LOCAL_CAPTION_PRESETS = {
-    bold_popup: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2 },
+    bold_popup: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 65, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2 },
     popup_highlight: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_color: '#4ECDC4' },
     popup_highlight_box: { font_family: 'Montserrat', font_size: 64, font_weight: '800', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 75, animation: 'pop', text_transform: 'uppercase', shadow_color: '#000000', shadow_blur: 8, shadow_offset_x: 2, shadow_offset_y: 2, highlight: true, highlight_mode: 'box', highlight_color: '#2563EB' },
     subtitle_bar: { font_family: 'Inter', font_size: 48, font_weight: '600', color: '#FFFFFF', stroke_color: 'none', stroke_width: 0, position_y: 85, animation: 'none', text_transform: 'none', bg_bar: true, shadow_color: '#000000', shadow_blur: 6, shadow_offset_x: 1, shadow_offset_y: 1 },
@@ -897,13 +897,19 @@ function buildTextSceneFromTool(text, duration, displayMode, animation) {
         text_content: text,
         script: text,
         text_color: 'white',
-        text_size: 48,
+        text_size: 72,
         font_family: 'Inter',
         font_style: 'bold',
         text_align: 'center',
         vertical_align: 'center',
+        // Default text_y places new text scenes in the upper third of the frame.
+        // 30% gives "title card / hero text" energy: clearly above center, with
+        // captions at 75-85% creating breathing room below. Reset-position button
+        // (clears text_y) still falls back to vertical_align: center.
+        text_y: 30,
         text_background_enabled: true,
         text_background_color: '#000000',
+        text_hide_captions: true,
         text_display_mode: displayMode || 'emphasis',
         text_hook_animation: getDefaultHookAnimation(),
         text_animation: _resolveHookParts(getDefaultHookAnimation()).animation,
@@ -1015,7 +1021,8 @@ function addTextOverlayFromTool() {
     scene.text_timeline_offset = 0;
     scene.text_overlay_duration = Math.min(duration, Math.max(MIN_TEXT_OVERLAY_DURATION, scene.duration || duration));
     scene.text_color = scene.text_color || 'white';
-    scene.text_size = scene.text_size || 48;
+    scene.text_size = scene.text_size || 72;
+    if (scene.text_hide_captions === undefined) scene.text_hide_captions = true;
     scene.font_family = scene.font_family || 'Inter';
     scene.font_style = scene.font_style || 'bold';
     scene.text_align = scene.text_align || 'center';
@@ -8071,7 +8078,7 @@ function renderSceneProperties() {
         <div class="property-group">
             <label>Size</label>
             <input type="number" class="property-input" id="prop-text-size"
-                   value="${scene.text_size || 48}" min="12" max="200" step="2">
+                   value="${scene.text_size || 72}" min="12" max="200" step="2">
         </div>
         <div class="property-group">
             <label>Style</label>
@@ -8170,6 +8177,14 @@ function renderSceneProperties() {
             </div>
         ` : ''}
         ${isTextScene ? `
+            <div class="property-section-divider"></div>
+            <div class="property-group property-stack">
+                <label style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <span>Hide captions during scene</span>
+                    <input type="checkbox" id="prop-text-hide-captions" ${scene.text_hide_captions !== false ? 'checked' : ''}>
+                </label>
+                <span class="property-hint">Suppress burned-in captions while this text scene is on screen.</span>
+            </div>
             <div class="property-section-divider"></div>
             <div class="property-group property-stack">
                 <button class="btn btn-small" id="convert-text-scene-to-overlay" ${canConvertTextSceneToOverlay ? '' : 'disabled'}>
@@ -8447,6 +8462,21 @@ function renderSceneProperties() {
 
     convertTextSceneBtn?.addEventListener('click', () => {
         convertTextSceneToOverlay(scene.id);
+    });
+
+    // Hide-captions toggle for text scenes — suppress burned-in captions
+    // while this scene is on screen.
+    const hideCaptionsInput = document.getElementById('prop-text-hide-captions');
+    hideCaptionsInput?.addEventListener('change', (e) => {
+        const oldValue = scene.text_hide_captions !== false;
+        const newValue = !!e.target.checked;
+        scene.text_hide_captions = newValue;
+        recordEdit(`Toggle hide captions (Scene ${scene.id})`, scene.id, 'text_hide_captions', oldValue, newValue);
+        saveProjectEdits();
+        if (EditorState.preview) {
+            EditorState.preview.setScenes(EditorState.scenes);
+            EditorState.preview.seek(EditorState.playbackPosition);
+        }
     });
 
     // Reset text position - clear custom position to use alignment

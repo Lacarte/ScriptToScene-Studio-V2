@@ -454,7 +454,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                 text: isTextScene ? {
                     content: scene.text_content || scene.script || '',
                     font_family: scene.font_family || 'Inter',
-                    font_size: scene.text_size || 48,
+                    font_size: scene.text_size || 72,
                     font_style: scene.font_style || 'bold',
                     color: scene.text_color || 'white',
                     color_hex: _resolveColorHex(scene.text_color || 'white'),
@@ -477,7 +477,8 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                             _resolveContrastHex(scene.text_color || 'white')
                     },
                     fade_in: 0.25,
-                    fade_out: 0.25
+                    fade_out: 0.25,
+                    hide_captions: scene.text_hide_captions !== false
                 } : null,
 
                 text_overlay: hasTextOverlay ? {
@@ -486,7 +487,7 @@ export function prepareExportData(project, scenes, mediaFolder, audioConfig = nu
                     end_time: textOverlayStart + textOverlayDuration,
                     content: scene.text_content || '',
                     font_family: scene.font_family || 'Inter',
-                    font_size: scene.text_size || 48,
+                    font_size: scene.text_size || 72,
                     font_style: scene.font_style || 'bold',
                     color: scene.text_color || 'white',
                     color_hex: _resolveColorHex(scene.text_color || 'white'),

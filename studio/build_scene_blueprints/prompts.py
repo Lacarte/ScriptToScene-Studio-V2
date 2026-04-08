@@ -4,6 +4,15 @@ from __future__ import annotations
 
 import json
 
+from studio.build_scene_blueprints.sfx_validator import (
+    SFX_BUDGET_MAX,
+    SFX_BUDGET_MAX_SHORT,
+    SFX_BUDGET_MIN,
+    SFX_BUDGET_MIN_SHORT,
+    SFX_SHORT_THRESHOLD_SECONDS,
+    load_sfx_vocabulary,
+)
+
 
 SHOT_TYPES = (
     "extreme-close-up | close-up | medium | wide | POV | bird's-eye | "
@@ -31,6 +40,95 @@ def _build_header(chapter_context: str = "") -> str:
     if chapter_context:
         parts.extend(["", chapter_context.strip()])
     return "\n".join(parts)
+
+
+def _build_sfx_section() -> str:
+    """Render the SFX vocabulary + budget rules block for the LLM prompt.
+
+    Reads the live vocabulary file so adding or removing a hint in
+    resources/sfx-vocabulary.json automatically updates the prompt without
+    any code change. The budget numbers come from the validator constants
+    so the prompt and the enforcement layer can never drift apart.
+    """
+    vocab = load_sfx_vocabulary()
+    hints = vocab.get("hints") or {}
+    if not hints:
+        return ""
+
+    # Render each hint as a compact one-line entry: id + label + description.
+    # The LLM uses the description to decide WHEN to pick this hint, the id
+    # to write into the sfx_hint field. Labels are informational only (the
+    # editor uses them on the timeline track row).
+    hint_lines = []
+    for hint_id, entry in hints.items():
+        label = entry.get("label", "")
+        description = entry.get("description", "").strip()
+        # Strip the "Files for this hint live in..." trailing sentences from
+        # the description — they're for the human curator, not the LLM.
+        description = description.split(" Files for this hint live in")[0].rstrip(". ") + "."
+        hint_lines.append(f"- `{hint_id}` ({label}): {description}")
+
+    hints_block = "\n".join(hint_lines)
+
+    return f"""
+## SFX HINTS (optional `sfx_hint` field)
+
+You may optionally tag scenes with an `sfx_hint` field that requests a
+specific sound effect at that scene's position on the timeline. The renderer
+will pick a real sound file matching the hint and place it on the timeline
+with proper volume, ducking, and timing.
+
+### Available hints (closed list — pick from these or `null`)
+
+{hints_block}
+
+### SFX BUDGET (HARD RULES)
+
+- TOTAL BUDGET per video: {SFX_BUDGET_MIN}-{SFX_BUDGET_MAX} hints maximum.
+  For videos under {SFX_SHORT_THRESHOLD_SECONDS} seconds: {SFX_BUDGET_MIN_SHORT}-{SFX_BUDGET_MAX_SHORT} hints.
+- Most scenes (60-80%) MUST have `sfx_hint: null`. SFX is punctuation, not wallpaper.
+- `bass_drop_impact` may appear AT MOST ONCE per video, on the FINAL CLIMAX scene only.
+- `tension_riser` may appear AT MOST ONCE per video, on the scene IMMEDIATELY BEFORE the climax.
+- Two consecutive scenes may NOT both have hints UNLESS the pattern is exactly
+  `tension_riser` followed by `bass_drop_impact` / `cinematic_hit` / `glass_shatter` / `gunshot_punctuation`.
+  This riser -> impact pair is the only legal back-to-back stack.
+- `text_appear`, `text_disappear`, `text_emphasis` may ONLY be used on text-type scenes
+  (`type_of_scene: "text"`). Never on image or video scenes.
+- `cartoon_pop` and `crowd_laugh` are FORBIDDEN unless the visual style is comedic.
+  For dramatic, philosophical, suspenseful, or contemplative content: never use them.
+- Looping textures (`heartbeat_pulse`, `clock_tick`, `viscous_liquid`, `keyboard_typing`,
+  `rain_ambience`, `nature_ambience`, `thinking_pad`) work best on short scenes (≤4s).
+  Do not place a texture on a long scene — it becomes background wallpaper and the ear stops hearing it.
+
+### WHEN TO ADD A HINT (criteria)
+
+A scene gets an `sfx_hint` if and only if AT LEAST ONE of these is true:
+
+1. The script LITERALLY names an event a sound represents — a phone call, a gunshot,
+   glass breaking, a clock ticking, applause. Use the matching hint.
+2. The scene marks a STRUCTURAL PIVOT - hook to build, build to climax, climax to CTA.
+   Use a transition or impact hint.
+3. The scene is the SINGLE DOMINANT EMOTIONAL BEAT of the story — the betrayal, the
+   revelation, the realization. Use the strongest fitting impact hint.
+
+If a scene doesn't pass any of these tests, leave `sfx_hint: null`. SFX without
+a specific reason is decoration and decoration is what makes videos feel cluttered.
+
+### IDEAL ALLOCATION (mental model)
+
+For a typical 60-second video, the {SFX_BUDGET_MAX}-hint allocation looks like:
+- 1 hit on the HOOK (a bright accent, magic_shimmer or text_appear)
+- 1 hit on a BUILD escalation (a subtle marker, whoosh_transition or glitch_distort)
+- 1 lead-in RISER on the scene before the climax (`tension_riser`)
+- 1 IMPACT on the climax scene itself (`bass_drop_impact` or `cinematic_hit`)
+
+For a 30-second video drop the build-escalation hit and use {SFX_BUDGET_MAX_SHORT} hints total.
+
+### THE NUCLEAR RULE
+
+Never exceed {SFX_BUDGET_MAX} hints. If you find yourself wanting a 5th hint, REMOVE one of
+the existing hints instead. Restraint produces better videos than abundance.
+"""
 
 
 def _build_scene_contract(include_analysis: bool) -> str:
@@ -91,6 +189,7 @@ The viewer hears the transcript while seeing the image. The image should deepen 
 - type_of_scene: "image" | "video" | "text"
 - image_prompt: scene description
 - text_content: string or null
+- sfx_hint: string or null (see SFX HINTS section below for the closed list of legal values and budget rules)
 
 ## TYPE RULES
 - First and last scenes must NOT be text.
@@ -124,6 +223,8 @@ ALL TYPES:
 - Weave style cues naturally into the description (lighting, texture, mood).
 - NEVER append raw style labels or tag lists at the end of a prompt (e.g. "Noir, Mystery, High contrast").
   Instead, embed the style through concrete visual details throughout the description.
+
+{_build_sfx_section()}
 
 ## OUTPUT
 Return ONLY valid JSON. No markdown. No code fences. No commentary. ENGLISH ONLY.
@@ -171,7 +272,17 @@ def build_scene_system_prompt(
     "visual_style": "...",
     "visual_bible": { "...": "..." }
   },
-  "scenes": [ ... ]
+  "scenes": [
+    {
+      "index": 0,
+      "title": "...",
+      "narrative_role": "hook",
+      "type_of_scene": "image",
+      "image_prompt": "...",
+      "text_content": null,
+      "sfx_hint": "magic_shimmer"
+    }
+  ]
 }""",
     ])
     return "\n".join(sections)

@@ -178,9 +178,9 @@ async function start() {
   const { maybeOpenProviderLoadingTab } = useProviderTabs()
 
   const t = form.text.value.trim()
-  if (!t) { toast.error('Enter story text'); return }
+  if (!t) { toast.error('Enter story text'); return false }
   if (form.speed.value < 0.5 || form.speed.value > 2.0) {
-    toast.error('Speed must be between 0.5 and 2.0'); return
+    toast.error('Speed must be between 0.5 and 2.0'); return false
   }
 
   // Preflight: check extension connectivity before starting
@@ -199,7 +199,7 @@ async function start() {
       for (const issue of preflight.issues) {
         toast.error(`${issue.message} — open the ${issue.target} tab first`, 6000)
       }
-      return
+      return false
     }
   } catch {
     // Preflight endpoint unavailable — proceed anyway
@@ -240,10 +240,12 @@ async function start() {
     globalStatus.value = 'running'
     toast.success('Pipeline started')
     startSSE(res.job_id)
+    return true
   } catch (e) {
     toast.error(e.message || 'Pipeline failed to start')
     running.value = false
     stopping.value = false
+    return false
   }
 }
 

@@ -6,9 +6,98 @@ import os
 from flask import Blueprint, jsonify
 from loguru import logger
 
-from config import APP_ASSETS_DIR, CAPTIONS_DIR
+from config import APP_ASSETS_DIR, APP_CONFIG_PATH, CAPTIONS_DIR
 
 captions_bp = Blueprint("captions", __name__)
+
+
+# ---------------------------------------------------------------------------
+# Helpers consumed by the editor's auto-caption pipeline
+#
+# These two functions used to live here, were dropped during a refactor, and
+# the editor's `_resolve_project_captions` and `editor_assemble` paths still
+# import them. Their absence caused captions to silently disappear from every
+# new project (the import error was swallowed by a debug-level except block,
+# leaving exports with `captions: None` and no on-screen warning).
+#
+# Restoring them is the smallest fix that makes captions reappear without
+# refactoring the editor.
+# ---------------------------------------------------------------------------
+
+DEFAULT_CAPTION_PRESET_ID = "bold_popup"
+_CAPTION_SETTING_KEY = "sts-caption-preset"
+
+
+def _get_default_caption_preset_id() -> str:
+    """Resolve the user's preferred caption preset id, with a sane fallback.
+
+    Order of precedence:
+      1. `sts-caption-preset` in app-config.json (if set and valid)
+      2. The hard-coded `DEFAULT_CAPTION_PRESET_ID` (`bold_popup`)
+    """
+    try:
+        if os.path.isfile(APP_CONFIG_PATH):
+            with open(APP_CONFIG_PATH, encoding="utf-8") as f:
+                settings = json.load(f) or {}
+            preset = str(settings.get(_CAPTION_SETTING_KEY) or "").strip()
+            if preset and preset in CAPTION_PRESETS:
+                return preset
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.debug("Could not read caption preset from settings: {}", exc)
+    return DEFAULT_CAPTION_PRESET_ID
+
+
+def _group_words_into_captions(alignment, words_per_group: int = 3) -> list:
+    """Group timed words from alignment.json into N-word caption chunks.
+
+    Accepts the schema produced by the alignment step:
+        [{"word": "Hello", "begin": 0.12, "end": 0.34}, ...]
+
+    Returns a list of caption dicts shaped for the editor / renderer:
+        [{"text": "Hello world today",
+          "start": 0.12, "end": 0.95,
+          "words": [{"word": ..., "begin": ..., "end": ...}, ...]}, ...]
+
+    The `words` sub-list is preserved so karaoke-style presets can highlight
+    each word as it is spoken. Empty/invalid entries are skipped silently.
+    """
+    if not isinstance(alignment, list) or not alignment:
+        return []
+
+    n = max(1, int(words_per_group or 1))
+    captions = []
+    bucket = []
+
+    def _flush():
+        if not bucket:
+            return
+        text = " ".join(str(w.get("word", "")).strip() for w in bucket if w.get("word"))
+        if not text:
+            return
+        starts = [float(w.get("begin", 0) or 0) for w in bucket]
+        ends = [float(w.get("end", 0) or 0) for w in bucket]
+        captions.append({
+            "text": text,
+            "start": min(starts) if starts else 0.0,
+            "end": max(ends) if ends else 0.0,
+            "words": list(bucket),
+        })
+
+    for word in alignment:
+        if not isinstance(word, dict):
+            continue
+        if not str(word.get("word", "")).strip():
+            continue
+        bucket.append(word)
+        if len(bucket) >= n:
+            _flush()
+            bucket = []
+
+    # Trailing partial group (e.g. 11 words / 3 = 3 full + 2 leftover)
+    if bucket:
+        _flush()
+
+    return captions
 
 # ---------------------------------------------------------------------------
 # Caption style presets
@@ -25,7 +114,7 @@ CAPTION_PRESETS = {
         "stroke_color": "none",
         "stroke_width": 0,
         "background": "none",
-        "position_y": 75,
+        "position_y": 65,
         "animation": "pop",
         "text_transform": "uppercase",
         "shadow_color": "#000000",

@@ -463,6 +463,8 @@ export class CanvasPreview {
             if (this.currentTime >= accumulated && this.currentTime < accumulated + scene.duration) {
                 return {
                     scene,
+                    start: accumulated,
+                    end: accumulated + scene.duration,
                     localTime: this.currentTime - accumulated,
                     progress: (this.currentTime - accumulated) / scene.duration
                 };
@@ -592,7 +594,15 @@ export class CanvasPreview {
                 this.renderTextScene(scene, current.localTime, progress);
             }
             this.renderOverlay();
-            this.renderCaptionOverlay(this.currentTime);
+            // Captions over text scenes: when hiding is enabled, only suppress
+            // captions that *begin* inside this scene. Captions already in
+            // flight (started before) keep rendering until they end naturally,
+            // so we never cut a caption mid-word.
+            if (scene.text_hide_captions === false) {
+                this.renderCaptionOverlay(this.currentTime);
+            } else {
+                this.renderCaptionOverlay(this.currentTime, { suppressStartingAfter: current.start });
+            }
             return;
         }
 
@@ -801,7 +811,7 @@ export class CanvasPreview {
 
         this.renderTextOverlay(text, overlayProgress, {
             color: scene.text_color || 'white',
-            size: scene.text_size || 48,
+            size: scene.text_size || 72,
             style: scene.font_style || 'bold',
             fontFamily: scene.font_family || 'Inter',
             textAlign: scene.text_align || 'center',
@@ -913,7 +923,7 @@ export class CanvasPreview {
                 : progress;
             this.renderTextOverlay(textContent, overlayProgress, {
                 color: textColor,
-                size: scene.text_size || 48,
+                size: scene.text_size || 72,
                 style: scene.font_style || 'bold',
                 fontFamily: scene.font_family || 'Inter',
                 textAlign: scene.text_align || 'center',
@@ -1896,10 +1906,20 @@ export class CanvasPreview {
     }
 
     /**
-     * Render active caption on top of scene at the given time
+     * Render active caption on top of scene at the given time.
+     *
+     * @param {number} time
+     * @param {object} [opts]
+     * @param {number} [opts.suppressStartingAfter] - drop captions whose
+     *        start time is at or after this value (used by text scenes that
+     *        hide captions but still let in-flight captions finish).
      */
-    renderCaptionOverlay(time) {
+    renderCaptionOverlay(time, opts = {}) {
         if (!this.captions.length) return;
+
+        const suppressStartingAfter = typeof opts.suppressStartingAfter === 'number'
+            ? opts.suppressStartingAfter
+            : null;
 
         // Find active caption
         let active = null;
@@ -1907,6 +1927,9 @@ export class CanvasPreview {
             if (time >= cap.start && time < cap.end) { active = cap; break; }
         }
         if (!active) return;
+        // If a text scene is hiding captions, only render this one if it
+        // started *before* the text scene began (mid-flight finishing).
+        if (suppressStartingAfter !== null && active.start >= suppressStartingAfter) return;
 
         const style = this.captionStyle;
         const fontFamily = style.font_family || 'Montserrat';

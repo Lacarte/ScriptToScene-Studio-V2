@@ -694,6 +694,10 @@ async function runAllSavedStories() {
   savedQueueRunning.value = true
   batchMode.value = true
   const stories = [...savedStories.value]
+  let succeeded = 0
+  let failed = 0
+  let aborted = false
+  let abortReason = ''
 
   for (let i = 0; i < stories.length; i++) {
     if (!savedQueueRunning.value) break // stopped
@@ -714,18 +718,35 @@ async function runAllSavedStories() {
     await nextTick()
 
     try {
-      await start()
+      const started = await start()
+      if (started === false) {
+        // Preflight bail or validation failure — don't keep retrying the same broken state
+        aborted = true
+        abortReason = 'preflight failed (extension not connected?)'
+        break
+      }
       // Wait for pipeline to finish
+      let endStatus = null
       await new Promise((resolve) => {
         const unwatch = watch(globalStatus, (status) => {
           if (status === 'done' || status === 'error' || status === 'stopped') {
+            endStatus = status
             unwatch()
             resolve()
           }
         })
         if (!running.value) { unwatch(); resolve() }
       })
+      if (endStatus === 'done') succeeded++
+      else if (endStatus === 'error' || endStatus === 'stopped') failed++
+      else {
+        // Never reached a terminal status — treat as abort
+        aborted = true
+        abortReason = 'pipeline did not start'
+        break
+      }
     } catch (e) {
+      failed++
       toast.error(`Saved job ${i + 1} error: ${e.message || 'unknown'}`)
     }
   }
@@ -734,7 +755,13 @@ async function runAllSavedStories() {
   savedQueueCurrent.value = null
   batchMode.value = false
   useDoneSound().play()
-  toast.success(`All ${stories.length} saved stories processed`)
+  if (aborted) {
+    toast.error(`Saved queue aborted: ${abortReason} — ${succeeded}/${stories.length} processed`)
+  } else if (failed > 0) {
+    toast.warning(`Saved queue: ${succeeded}/${stories.length} succeeded, ${failed} failed`)
+  } else {
+    toast.success(`All ${stories.length} saved stories processed`)
+  }
 }
 
 function stopSavedQueue() {
@@ -1852,6 +1879,13 @@ function logStepLabel(step) {
       <span class="job-queue-badge">Job {{ jobQueueCurrent.index }}/{{ jobQueueCurrent.total }}</span>
       <span class="job-queue-label">{{ jobQueueCurrent.label }}</span>
       <span class="job-queue-remaining">{{ jobQueueCurrent.total - jobQueueCurrent.index }} remaining</span>
+    </div>
+
+    <!-- Saved stories queue indicator -->
+    <div v-else-if="savedQueueRunning && savedQueueCurrent" class="job-queue-banner">
+      <span class="job-queue-badge">Saved {{ savedQueueCurrent.index }}/{{ savedQueueCurrent.total }}</span>
+      <span class="job-queue-label">{{ savedQueueCurrent.title }}</span>
+      <span class="job-queue-remaining">{{ savedQueueCurrent.total - savedQueueCurrent.index }} remaining</span>
     </div>
 
     <!-- Progress -->

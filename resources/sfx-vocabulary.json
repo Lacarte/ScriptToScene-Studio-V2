@@ -1,0 +1,337 @@
+{
+  "version": 1,
+  "_comment": "Controlled vocabulary for per-scene SFX placement. The scene planner LLM picks one of the keys below as `sfx_hint` on each scene; the assemble step looks up the entry, picks a real file from `folder` (narrowed by `filename_match` if present), and places it on the timeline using the `placement` mode. Adding a hint = add an entry here. Removing a folder = update or delete entries that point to it. The `label` field is the human-readable marker shown on the timeline track in the editor.",
+
+  "hints": {
+
+    "tension_riser": {
+      "label": "RISER",
+      "description": "Long swelling drone or build-up that escalates tension before a reveal. Use sparingly — at most once per video, on a build → climax transition. Pairs naturally with hook or build → climax pivots.",
+      "folder": "cinematic",
+      "filename_match": "growling|downer|mystery|bass-pulse|game-show",
+      "fallback_folder": "ambient",
+      "placement": "lead_in",
+      "lead_in_seconds": 1.0,
+      "volume": 0.16,
+      "loop": false,
+      "fade_in": 0.4,
+      "fade_out": 0.6
+    },
+
+    "bass_drop_impact": {
+      "label": "BASS DROP",
+      "description": "Single deep bass impact — the heaviest sting available. Use ONCE per video, on the climax scene only, on the hardest emotional beat. Never on a build scene; never twice.",
+      "folder": "bass-drops",
+      "filename_match": "boom|classic-bass-drop|medium-bass-drop|bass-sound",
+      "placement": "scene_start",
+      "volume": 0.22,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.6
+    },
+
+    "cinematic_hit": {
+      "label": "HIT",
+      "description": "Mid-weight cinematic stinger for a strong revelation that isn't the final climax. Use on a major reveal in the build section, or as a softer climax alternative when bass_drop_impact would be too much.",
+      "folder": "cinematic",
+      "filename_match": "cinematic-hit|impact-movie|trailer|realistic",
+      "placement": "scene_start",
+      "volume": 0.18,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.4
+    },
+
+    "whoosh_transition": {
+      "label": "WHOOSH",
+      "description": "Quick whoosh marking a hard cut between scenes. Use sparingly — at most once every 3 scenes — or it loses impact. Best on perspective shifts (zoom out, jump cut to a new angle, time skip).",
+      "folder": "whoosh",
+      "filename_match": "air-woosh|arrow-whoosh|fast-sweep|cinematic-fast",
+      "placement": "scene_start",
+      "volume": 0.15,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.2
+    },
+
+    "rocket_whoosh": {
+      "label": "ROCKET",
+      "description": "Heavier, longer whoosh with momentum. Use for forward motion, escalation, or 'launching into something' beats. More dramatic than whoosh_transition.",
+      "folder": "whoosh",
+      "filename_match": "rocket|epic-orchestra|cine-woosh",
+      "placement": "lead_in",
+      "lead_in_seconds": 0.4,
+      "volume": 0.16,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.3
+    },
+
+    "heartbeat_pulse": {
+      "label": "HEARTBEAT",
+      "description": "Steady human heartbeat looping under the scene. Use during moments of intimate fear, tension, or vulnerability. Plays for the full scene duration. Most powerful when the scene is short (3-6s).",
+      "folder": "heartbeat",
+      "placement": "scene_duration",
+      "volume": 0.12,
+      "loop": true,
+      "fade_in": 0.4,
+      "fade_out": 0.5
+    },
+
+    "clock_tick": {
+      "label": "CLOCK",
+      "description": "Quiet ticking clock under the scene. Use during scenes about time, memory, waiting, deadlines, or 'meanwhile…' beats. Plays for the full scene duration.",
+      "folder": "clock",
+      "placement": "scene_duration",
+      "volume": 0.10,
+      "loop": true,
+      "fade_in": 0.3,
+      "fade_out": 0.3
+    },
+
+    "thinking_pad": {
+      "label": "THINK",
+      "description": "Soft 'hmm' / contemplative pad. Use during reflection, internal monologue, or 'consider this…' moments. Plays for the full scene duration.",
+      "folder": "thinking",
+      "filename_match": "hmm|reflection|thinking",
+      "placement": "scene_duration",
+      "volume": 0.10,
+      "loop": false,
+      "fade_in": 0.4,
+      "fade_out": 0.4
+    },
+
+    "magic_shimmer": {
+      "label": "SHIMMER",
+      "description": "Soft sparkle / chime / 'aha moment' shimmer. Use on insights, realizations, idea-having, or 'something beautiful is happening' beats. Light and brief.",
+      "folder": "magic",
+      "filename_match": "glitter|magic-reveal|sound-of-an-idea|hero",
+      "placement": "scene_start",
+      "volume": 0.13,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.5
+    },
+
+    "money_sting": {
+      "label": "MONEY",
+      "description": "Coin / cash register / value-related ding. Use ONLY on scenes literally about money, wealth, cost, or value. Never decorative.",
+      "folder": "magic",
+      "filename_match": "coin|money",
+      "placement": "scene_start",
+      "volume": 0.16,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.3
+    },
+
+    "glass_shatter": {
+      "label": "GLASS",
+      "description": "Sharp, harsh impact suitable for shattering, breaking, or violent rupture. Use on a single moment — a betrayal, a shattering belief, a violent revelation. Maximum once per video.",
+      "folder": "explosions",
+      "filename_match": "explosion|slap|gunshot",
+      "fallback_folder": "cinematic",
+      "placement": "scene_start",
+      "volume": 0.20,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.4
+    },
+
+    "gunshot_punctuation": {
+      "label": "GUNSHOT",
+      "description": "Single sharp punctuation mark. Use on violence, sudden death, or extremely abrupt narrative breaks. Use only when the script explicitly references such a moment — never decoratively.",
+      "folder": "explosions",
+      "filename_match": "gunshot|handgun",
+      "placement": "scene_start",
+      "volume": 0.20,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.2
+    },
+
+    "rain_ambience": {
+      "label": "RAIN",
+      "description": "Rain or thunderstorm bed under the scene. Use for melancholy, isolation, contemplation, or scenes literally set in bad weather. Plays for the full scene duration.",
+      "folder": "ambient",
+      "filename_match": "rain|thunder|storm",
+      "placement": "scene_duration",
+      "volume": 0.10,
+      "loop": true,
+      "fade_in": 0.6,
+      "fade_out": 0.8
+    },
+
+    "nature_ambience": {
+      "label": "NATURE",
+      "description": "Birdsong, footsteps in grass, calm outdoor textures. Use for peaceful, wholesome, or rural scenes. Plays for the full scene duration.",
+      "folder": "ambient",
+      "filename_match": "birds|footsteps-grass|calm-ambient",
+      "placement": "scene_duration",
+      "volume": 0.10,
+      "loop": true,
+      "fade_in": 0.6,
+      "fade_out": 0.8
+    },
+
+    "crowd_cheer": {
+      "label": "CHEER",
+      "description": "Crowd applause / cheering / stadium energy. Use on triumph, victory, recognition, or shared joy beats. One-shot, not looped.",
+      "folder": "crowd",
+      "filename_match": "cheer|applause",
+      "placement": "scene_start",
+      "volume": 0.16,
+      "loop": false,
+      "fade_in": 0.1,
+      "fade_out": 0.6
+    },
+
+    "crowd_laugh": {
+      "label": "LAUGH",
+      "description": "Audible group laughter — sitcom-style. Use ONLY on comedic relief beats or punchlines. Never on dramatic/serious content; the tonal mismatch is jarring.",
+      "folder": "crowd",
+      "filename_match": "laugh",
+      "placement": "scene_start",
+      "volume": 0.15,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.5
+    },
+
+    "camera_shutter": {
+      "label": "SHUTTER",
+      "description": "Camera shutter / photo snap. Use on 'a moment captured', evidence reveals, photographic memory beats, or paparazzi/surveillance scenes.",
+      "folder": "camera",
+      "placement": "scene_start",
+      "volume": 0.16,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.2
+    },
+
+    "keyboard_typing": {
+      "label": "TYPING",
+      "description": "Keyboard / typewriter typing texture. Use on scenes about writing, coding, messaging, or research montages. Plays for the full scene duration.",
+      "folder": "keyboard",
+      "placement": "scene_duration",
+      "volume": 0.12,
+      "loop": true,
+      "fade_in": 0.3,
+      "fade_out": 0.3
+    },
+
+    "telephone_ring": {
+      "label": "PHONE",
+      "description": "Telephone ring or dial tone. Use ONLY when the scene literally involves a phone call. Never decorative.",
+      "folder": "telephone",
+      "placement": "scene_start",
+      "volume": 0.16,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.4
+    },
+
+    "glitch_distort": {
+      "label": "GLITCH",
+      "description": "Digital glitch / corruption / reality-tear sound. Use on jarring transitions, system breakdowns, surreal pivots, or 'something is wrong' beats. Sharp and disorienting on purpose.",
+      "folder": "glitch",
+      "placement": "scene_start",
+      "volume": 0.16,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.3
+    },
+
+    "viscous_liquid": {
+      "label": "VISCOUS",
+      "description": "Slow gloopy liquid texture. Use on body horror, dread, things-going-wrong slow burns, or unsettling slow-motion beats. Loops under the scene.",
+      "folder": "viscous",
+      "placement": "scene_duration",
+      "volume": 0.10,
+      "loop": true,
+      "fade_in": 0.4,
+      "fade_out": 0.5
+    },
+
+    "notification_ding": {
+      "label": "DING",
+      "description": "UI notification / alert / 'message received' ding. Use on social-media beats, alarm beats, or 'something just happened' attention-grabs. Modern and short-form-native.",
+      "folder": "notification",
+      "filename_match": "alert|alarm|win|notification|countdown",
+      "placement": "scene_start",
+      "volume": 0.15,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.3
+    },
+
+    "click_confirm": {
+      "label": "CLICK",
+      "description": "Sharp UI click / 'correct answer' / 'done' click. Use on confirmation beats, list items being checked off, decision-made moments. Subtle and structural.",
+      "folder": "clicks",
+      "filename_match": "click|correct|done|confirm|enter",
+      "placement": "scene_start",
+      "volume": 0.12,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.2
+    },
+
+    "cartoon_pop": {
+      "label": "POP",
+      "description": "Light cartoon pop / boing / appearance sound. Use ONLY on comedic or playful content; tonally wrong for drama, philosophy, or true crime.",
+      "folder": "cartoon",
+      "filename_match": "appeared|fuwa|harp-transition|flute-up|cartoon-blinking",
+      "placement": "scene_start",
+      "volume": 0.13,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.3
+    },
+
+    "text_appear": {
+      "label": "TEXT IN",
+      "description": "Short bright accent marking the moment a text overlay appears on screen. Use ONLY on text-type scenes (scene.type == 'text') — never on image/video scenes. Pairs with the visual pop animation. Keep it gentle: it should support the text reveal, not compete with it. At most one per text scene. Files for this hint live in the dedicated text_scene folder — drop your preferred 'text in' sounds there (any files matching the pattern below).",
+      "folder": "text_scene",
+      "filename_match": "in|appear|enter|on|pop",
+      "placement": "scene_start",
+      "volume": 0.12,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.25
+    },
+
+    "text_disappear": {
+      "label": "TEXT OUT",
+      "description": "Soft sweep marking the moment a text overlay leaves the screen. Use ONLY on text-type scenes (scene.type == 'text') — never on image/video scenes. Should be airy and brief, the audio equivalent of a fade. Pairs with text_appear at the start of the same scene; using one without the other is fine. Files for this hint live in the dedicated text_scene folder — drop your preferred 'text out' sounds there (any files matching the pattern below).",
+      "folder": "text_scene",
+      "filename_match": "out|disappear|exit|off|sweep",
+      "placement": "scene_start",
+      "volume": 0.10,
+      "loop": false,
+      "fade_in": 0.05,
+      "fade_out": 0.2
+    },
+
+    "text_emphasis": {
+      "label": "TEXT HIT",
+      "description": "Subtle ding/chime that lands on the emphasized word inside a text scene. Use ONLY on hook text scenes where one word is highlighted/animated (scene.type == 'text' AND a hook animation is present). Pairs with the visual emphasis beat. Use sparingly — at most once per text scene, and not on every text scene. Files for this hint live in the dedicated text_scene folder — drop your preferred 'emphasis hit' sounds there (any files matching the pattern below).",
+      "folder": "text_scene",
+      "filename_match": "hit|emphasis|accent|highlight|ding",
+      "placement": "scene_start",
+      "volume": 0.13,
+      "loop": false,
+      "fade_in": 0.0,
+      "fade_out": 0.3
+    },
+
+    "silence": {
+      "label": "— SILENCE —",
+      "description": "Explicit silence — render no SFX on this scene. Use when the absence of sound is itself the effect (a beat of stillness, a held breath before a reveal). Different from leaving sfx_hint null: this is a deliberate creative choice to suppress any ambient/auto SFX during this scene window.",
+      "folder": null,
+      "placement": "scene_duration",
+      "volume": 0.0,
+      "loop": false
+    }
+  }
+}
