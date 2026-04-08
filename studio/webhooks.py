@@ -11,11 +11,16 @@ BASE_DELAY = 2  # seconds — doubles each retry (2s, 4s, 8s)
 RETRYABLE_STATUS = {502, 503, 504, 429}
 
 
+class RetryableWebhookResponseError(RuntimeError):
+    """Raised when the webhook responded, but the body is transiently unusable."""
+
+
 def call_webhook(webhook_url, payload, *, timeout=180, label="Webhook"):
     """POST payload to webhook with retry + exponential backoff.
 
     Retries on connection errors, timeouts, and 502/503/504/429 responses.
-    Fails immediately on 4xx (except 429), bad JSON, or empty responses.
+    Also retries on empty responses / empty arrays from flaky webhook runs.
+    Fails immediately on 4xx (except 429) or bad JSON / unexpected formats.
     """
     last_exc = None
 
@@ -57,7 +62,18 @@ def call_webhook(webhook_url, payload, *, timeout=180, label="Webhook"):
                 raise RuntimeError(error_msg)
 
             # Parse response body
-            return parse_webhook_response(resp, label=label)
+            try:
+                return parse_webhook_response(resp, label=label)
+            except RetryableWebhookResponseError as e:
+                logger.warning(
+                    "{} transient response issue (attempt {}/{}): {}",
+                    label, attempt, MAX_RETRIES, e,
+                )
+                last_exc = e
+                if attempt < MAX_RETRIES:
+                    _backoff(attempt)
+                    continue
+                raise
 
         except (http_requests.ConnectionError, http_requests.Timeout) as e:
             logger.warning(
@@ -84,7 +100,7 @@ def parse_webhook_response(resp, *, label="Webhook"):
     """Validate and parse a successful webhook response (handles n8n array wrapping)."""
     body = resp.text.strip()
     if not body:
-        raise RuntimeError(
+        raise RetryableWebhookResponseError(
             f"{label} returned an empty response. If using n8n, make sure "
             "the workflow is activated and uses the production URL (/webhook/) "
             "instead of the test URL (/webhook-test/)."
@@ -98,7 +114,7 @@ def parse_webhook_response(resp, *, label="Webhook"):
     # n8n returns an array — unwrap the first element
     if isinstance(result, list):
         if not result:
-            raise RuntimeError(f"{label} returned an empty array")
+            raise RetryableWebhookResponseError(f"{label} returned an empty array")
         result = result[0]
 
     if not isinstance(result, dict):

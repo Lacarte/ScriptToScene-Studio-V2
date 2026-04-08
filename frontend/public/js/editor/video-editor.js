@@ -328,8 +328,25 @@ const AUDIO_TRACK_COLORS = {
     voice: 'rgba(78, 205, 196, 0.8)',
     music: 'rgba(167, 139, 250, 0.8)',
     fx: 'rgba(255, 183, 77, 0.8)',
+    sfx: 'rgba(255, 183, 77, 0.8)',
 };
 const DEFAULT_MUSIC_DUCKING_LEVEL = 0.20;
+
+function normalizeAudioTrackType(type = 'voice') {
+    const normalized = String(type || 'voice').toLowerCase();
+    return normalized === 'fx' ? 'sfx' : normalized;
+}
+
+function isSfxTrackType(type = '') {
+    return normalizeAudioTrackType(type) === 'sfx';
+}
+
+function getVolumeStorageKeys(type = 'voice') {
+    const normalized = normalizeAudioTrackType(type);
+    return normalized === 'sfx'
+        ? ['sts-vol-sfx', 'sts-vol-fx']
+        : [`sts-vol-${normalized}`];
+}
 
 /**
  * Read user-configured ducking default from settings (saved by SettingsPage),
@@ -401,19 +418,30 @@ async function resolveDefaultVoiceAudio(projectId, sourceFolder, stagedAudio) {
 }
 
 function _getSavedVolume(type) {
-    try { const v = parseFloat(localStorage.getItem(`sts-vol-${type}`)); return isNaN(v) ? null : v; } catch { return null; }
+    try {
+        for (const key of getVolumeStorageKeys(type)) {
+            const v = parseFloat(localStorage.getItem(key));
+            if (!isNaN(v)) return v;
+        }
+        return null;
+    } catch {
+        return null;
+    }
 }
 function _saveVolume(type, vol) {
-    try { localStorage.setItem(`sts-vol-${type}`, vol); } catch {}
+    try {
+        const keys = getVolumeStorageKeys(type);
+        keys.forEach(key => localStorage.setItem(key, vol));
+    } catch {}
 }
 
 function createAudioTrack(overrides = {}) {
-    const type = overrides.type || 'voice';
+    const type = normalizeAudioTrackType(overrides.type || 'voice');
     const savedVol = _getSavedVolume(type);
     const defaults = {
         id: nextAudioTrackId(),
         label: 'Audio',
-        type: 'voice',           // 'voice' | 'music' | 'fx'
+        type,                    // 'voice' | 'music' | 'sfx'
         file: null,
         path: null,
         duration: 0,
@@ -430,14 +458,19 @@ function createAudioTrack(overrides = {}) {
         error: false,
         muted: false,
         element: null,           // HTML Audio element
-        color: AUDIO_TRACK_COLORS.voice,
-        clips: null,             // Multi-clip array for FX tracks: [{id, file, path, label, duration, offset, element}]
+        color: AUDIO_TRACK_COLORS[type] || AUDIO_TRACK_COLORS.voice,
+        clips: null,             // Multi-clip array for SFX tracks: [{id, file, path, label, duration, offset, element}]
     };
     // Apply saved volume if no explicit volume override
     if (savedVol !== null && !('volume' in overrides)) {
         defaults.volume = savedVol;
     }
-    return { ...defaults, ...overrides };
+    return {
+        ...defaults,
+        ...overrides,
+        type,
+        color: overrides.color || defaults.color,
+    };
 }
 
 let _nextClipId = 1;
@@ -1457,7 +1490,7 @@ function renderAudioProperties() {
     }
 
     const volPct = Math.round(track.volume * 100);
-    const trackLabel = track.label || (track.type === 'voice' ? 'Voice' : track.type === 'music' ? 'Music' : 'FX');
+    const trackLabel = track.label || (track.type === 'voice' ? 'Voice' : track.type === 'music' ? 'Music' : 'SFX');
     const color = track.color || AUDIO_TRACK_COLORS[track.type] || AUDIO_TRACK_COLORS.voice;
 
     elements.sceneProperties.innerHTML = `
@@ -3342,7 +3375,7 @@ function _applyExtraState(saved) {
         }
     }
 
-    // Restore non-voice audio tracks (music, fx)
+    // Restore non-voice audio tracks (music, SFX)
     for (const t of (saved.audio_tracks || [])) {
         const hasClips = t.clips && t.clips.length > 0;
         if (!hasClips && (!t.file || !t.path)) continue;
@@ -3488,7 +3521,7 @@ function _restoreSavedEditorState() {
         }
     }
 
-    // Restore non-voice audio tracks (music, fx)
+    // Restore non-voice audio tracks (music, SFX)
     const nonVoiceTracks = saved.audio_tracks || [];
     for (const t of nonVoiceTracks) {
         const hasClips = t.clips && t.clips.length > 0;
@@ -5619,8 +5652,9 @@ function renderAllAudioTracks() {
 
     container.innerHTML = tracks.map(track => {
         const isVoice = track.type === 'voice';
+        const isSfx = isSfxTrackType(track.type);
         const color = track.color || AUDIO_TRACK_COLORS[track.type] || AUDIO_TRACK_COLORS.voice;
-        const trackLabel = track.label || (isVoice ? 'Voice' : track.type === 'music' ? 'Music' : 'FX');
+        const trackLabel = track.label || (isVoice ? 'Voice' : track.type === 'music' ? 'Music' : 'SFX');
         const displayFile = isVoice
             ? (getPathFileName(track.path) || track.file || trackLabel)
             : (track.file || getPathFileName(track.path) || trackLabel);
@@ -5688,7 +5722,7 @@ function renderAllAudioTracks() {
         } else {
             const emptyLabel = isVoice
                 ? 'voice audio'
-                : (track.type === 'fx' ? 'sound FX — drag SFX here' : 'audio');
+                : (isSfx ? 'sound FX — drag SFX here' : 'audio');
             clipHTML = `
                 <div class="audio-placeholder audio-track-empty-target"
                      data-track-id="${track.id}"
@@ -9107,18 +9141,18 @@ function showAddTrackMenu(anchor) {
             if (action === 'music') {
                 showMusicPicker();
             } else if (action === 'fx') {
-                // Create an empty FX track
+                // Create an empty SFX track
                 const fxTrack = createAudioTrack({
-                    label: `FX ${EditorState.audioTracks.filter(t => t.type === 'fx').length + 1}`,
-                    type: 'fx',
-                    color: AUDIO_TRACK_COLORS.fx,
+                    label: `SFX ${EditorState.audioTracks.filter(t => isSfxTrackType(t.type)).length + 1}`,
+                    type: 'sfx',
+                    color: AUDIO_TRACK_COLORS.sfx,
                     volume: 1.0,
                 });
                 EditorState.audioTracks.push(fxTrack);
                 selectAudioTrack(fxTrack.id);
                 renderAllAudioTracks();
                 saveProjectEdits();
-                showToast('FX track added. Click the new lane to upload audio.', 'info');
+                showToast('SFX track added. Click the new lane to upload audio.', 'info');
             } else if (action === 'upload') {
                 promptAudioFileUpload();
             }
@@ -9221,7 +9255,7 @@ async function _handleAudioFileUpload(file, options = {}) {
         }
         // Add as a new audio track
         const ext = file.name.split('.').pop().toLowerCase();
-        const type = ['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext) ? 'fx' : 'fx';
+        const type = ['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext) ? 'sfx' : 'sfx';
         const track = createAudioTrack({
             label: file.name.replace(/\.[^.]+$/, ''),
             type: type,
@@ -10879,8 +10913,8 @@ function _initSfxDropZone() {
             let targetTrackId = dropTarget?.dataset?.audioTrackId || dropTarget?.dataset?.trackId;
             let targetTrack = targetTrackId ? getAudioTrackById(targetTrackId) : null;
 
-            // Only add to existing FX tracks (not voice/music)
-            if (targetTrack && targetTrack.type === 'fx') {
+            // Only add to existing SFX tracks (not voice/music)
+            if (targetTrack && isSfxTrackType(targetTrack.type)) {
                 addClipToFxTrack(targetTrack, sfx, dropTime);
                 selectAudioTrack(targetTrack.id);
                 renderAllAudioTracks();
@@ -10889,9 +10923,9 @@ function _initSfxDropZone() {
                 return;
             }
 
-            // Find an existing empty FX track (no file, no clips) to use
+            // Find an existing empty SFX track (no file, no clips) to use
             let emptyFxTrack = EditorState.audioTracks.find(t =>
-                t.type === 'fx' && !t.file && !t.path && (!t.clips || t.clips.length === 0)
+                isSfxTrackType(t.type) && !t.file && !t.path && (!t.clips || t.clips.length === 0)
             );
 
             if (emptyFxTrack) {
@@ -10903,12 +10937,12 @@ function _initSfxDropZone() {
                 return;
             }
 
-            // No existing FX track — create a new multi-clip FX track
+            // No existing SFX track — create a new multi-clip SFX track
             const fxTrack = createAudioTrack({
                 label: 'SFX',
-                type: 'fx',
-                volume: _getSavedVolume('fx') ?? 1.0,
-                color: AUDIO_TRACK_COLORS.fx,
+                type: 'sfx',
+                volume: _getSavedVolume('sfx') ?? 1.0,
+                color: AUDIO_TRACK_COLORS.sfx,
             });
             addClipToFxTrack(fxTrack, sfx, dropTime);
             EditorState.audioTracks.push(fxTrack);
@@ -11907,7 +11941,7 @@ function handleKeyboard(e) {
 
     // D or E - Delete selected element (audio track, scene, text overlay, SFX clip)
     if ((e.code === 'KeyD' || e.code === 'KeyE') && !e.target.matches('input, textarea, [contenteditable="true"]')) {
-        // 1. Selected audio track (music, fx — not voice)
+        // 1. Selected audio track (music, SFX — not voice)
         const selTrack = EditorState.selectedAudioTrack;
         if (selTrack && selTrack.type !== 'voice') {
             e.preventDefault();

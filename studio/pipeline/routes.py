@@ -24,7 +24,7 @@ from flask import Blueprint, Response, jsonify, request
 from loguru import logger
 
 from config import (
-    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ANIMATOR_DIR, EXPORT_DIR,
+    TTS_DIR, ALIGN_DIR, SEGMENTER_DIR, SCENES_DIR, ANIMATOR_DIR, APP_ASSETS_DIR, EXPORT_DIR,
     PIPELINE_DIR, PROJECTS_DIR, STORYBOARD_DIR, N8N_WEBHOOK_URL, generate_project_id,
 )
 from studio.io_utils import safe_json_write, safe_json_read
@@ -1935,6 +1935,106 @@ def _extract_sfx_track(assembled):
     return None
 
 
+def _builtin_audio_abs_to_url(bucket: str, abs_path: str) -> str | None:
+    """Convert a built-in audio file under APP_ASSETS_DIR into a /assets URL."""
+    if bucket not in {"music", "sfx"} or not abs_path:
+        return None
+    try:
+        normalized = os.path.normpath(abs_path)
+        assets_root = os.path.normpath(APP_ASSETS_DIR)
+        if os.path.commonpath([normalized, assets_root]) != assets_root:
+            return None
+    except ValueError:
+        return None
+    rel = os.path.relpath(normalized, assets_root).replace("\\", "/")
+    return f"/assets/{rel}"
+
+
+def _persist_auto_selected_export_audio(project_id: str, *, bg_music=None, sfx=None) -> None:
+    """Persist fallback export picks into project JSON so editor/export stay aligned."""
+    if not project_id:
+        return
+
+    track_specs = []
+    if isinstance(bg_music, dict) and bg_music.get("path"):
+        music_path = bg_music.get("path")
+        music_url = _builtin_audio_abs_to_url("music", music_path)
+        if music_path and music_url:
+            track_specs.append({
+                "id": "at_music_export",
+                "label": "Music",
+                "type": "music",
+                "file": os.path.basename(music_path),
+                "path": music_url,
+                "duration": 0,
+                "timelineOffset": 0,
+                "startOffset": 0,
+                "trimmedDuration": None,
+                "volume": bg_music.get("volume", 0.15),
+                "loop": bg_music.get("loop", True),
+                "muted": False,
+                "duckingEnabled": bg_music.get("ducking_enabled", True),
+                "duckingLevel": bg_music.get("ducking_level", 0.20),
+                "fadeIn": bg_music.get("fade_in", 2.0),
+                "fadeOut": bg_music.get("fade_out", 3.0),
+            })
+
+    if isinstance(sfx, dict) and sfx.get("path"):
+        sfx_path = sfx.get("path")
+        sfx_url = _builtin_audio_abs_to_url("sfx", sfx_path)
+        if sfx_path and sfx_url:
+            track_specs.append({
+                "id": "at_sfx_export",
+                "label": "SFX",
+                "type": "sfx",
+                "file": os.path.basename(sfx_path),
+                "path": sfx_url,
+                "duration": 0,
+                "timelineOffset": 0,
+                "startOffset": 0,
+                "trimmedDuration": None,
+                "volume": sfx.get("volume", 0.10),
+                "loop": sfx.get("loop", True),
+                "muted": False,
+                "duckingEnabled": sfx.get("ducking_enabled", True),
+                "duckingLevel": sfx.get("ducking_level", 0.20),
+                "fadeIn": sfx.get("fade_in", 1.5),
+                "fadeOut": sfx.get("fade_out", 2.0),
+            })
+
+    if not track_specs:
+        return
+
+    for filename in ("initial.json", "work@in@progress.json"):
+        project_path = os.path.join(PROJECTS_DIR, project_id, filename)
+        if not os.path.isfile(project_path):
+            continue
+        try:
+            data = safe_json_read(project_path) or {}
+        except Exception as error:
+            logger.debug("Could not read {} for export audio persist: {}", project_path, error)
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        existing_tracks = data.get("audio_tracks")
+        if not isinstance(existing_tracks, list):
+            existing_tracks = []
+
+        kept_tracks = []
+        for track in existing_tracks:
+            if not isinstance(track, dict):
+                kept_tracks.append(track)
+                continue
+            track_type = str(track.get("type") or "").lower()
+            if track_type in {"music", "sfx"}:
+                continue
+            kept_tracks.append(track)
+
+        data["audio_tracks"] = kept_tracks + [dict(spec) for spec in track_specs]
+        safe_json_write(project_path, data, indent=2)
+
+
 def _normalize_export_captions(assembled):
     """Normalize editor caption payload into export caption payload."""
     captions = assembled.get("captions")
@@ -2023,11 +2123,14 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
             sfx_history = list(persisted_audio_history.get("sfx_history") or [])
 
     bg_music = assembled.get("bgMusic") or _extract_music_track(assembled)
+    used_auto_bg_music = False
     if not bg_music:
         from studio.music.selector import persist_project_audio_history, recall_last_music, select_music
         bg_music = recall_last_music(music_history)
         if not bg_music and story_tone:
             bg_music = select_music(story_tone, history=music_history)
+        if bg_music:
+            used_auto_bg_music = True
         if bg_music and bg_music.get("history") is not None:
             music_history = list(bg_music.get("history") or music_history)
             persist_project_audio_history(project_id, music_history=music_history)
@@ -2040,12 +2143,14 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
     # otherwise pick a fresh one from the SFX library. SFX is optional —
     # if neither path produces a track, it's silently skipped.
     sfx = _extract_sfx_track(assembled)
+    used_auto_sfx = False
     if not sfx:
         from studio.music.selector import persist_project_audio_history, recall_last_sfx, select_sfx
         picked = recall_last_sfx(sfx_history)
         if not picked and story_tone:
             picked = select_sfx(story_tone, history=sfx_history)
         if picked:
+            used_auto_sfx = True
             sfx = {
                 "path": picked["path"],
                 "volume": picked.get("volume", 0.10),
@@ -2060,6 +2165,13 @@ def _step_export(assemble_result, project_id, job_id, *, story_tone=None):
                 persist_project_audio_history(project_id, sfx_history=sfx_history)
             logger.info("Pipeline Export: auto-selected SFX for tone '{}' → '{}'",
                         story_tone, os.path.basename(picked["path"]))
+
+    if project_id and (used_auto_bg_music or used_auto_sfx):
+        _persist_auto_selected_export_audio(
+            project_id,
+            bg_music=bg_music if used_auto_bg_music else None,
+            sfx=sfx if used_auto_sfx else None,
+        )
 
     export_payload = {
         "project_id": project_id,

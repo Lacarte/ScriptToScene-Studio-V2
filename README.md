@@ -392,6 +392,8 @@ Each preset is fully customizable:
 - **Stop-after control** — halt the pipeline at any step (`stop_after=tts`, `scenes`, `assets`, etc.)
 - **Chapter-based generation** — long scripts are automatically chunked into chapters for scene generation
 
+**Job History note:** `Process again` reruns the pipeline with the exact saved story text for that job. To get a completely new story concept for the same niche, start a new job so story generation runs again and anti-repeat logic can apply.
+
 ### TTS (Text-to-Speech)
 - **Kokoro TTS** — high-quality neural TTS with 50+ voices (American, British, Japanese, Chinese, Spanish, French, Hindi, Italian, Portuguese)
 - **Voice blending** — SLERP interpolation between voices for custom styles

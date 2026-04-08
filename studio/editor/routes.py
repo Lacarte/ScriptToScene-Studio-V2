@@ -2136,6 +2136,12 @@ def _process_video(job_id, export_data, output_path):
         _probe = _ffprobe_video(output_path)
         scene_count = len(export_data.get("scenes", []))
 
+        export_audio_summary = {
+            "narration": export_data.get("audio") if isinstance(export_data.get("audio"), dict) else None,
+            "bg_music": export_data.get("bgMusic") if isinstance(export_data.get("bgMusic"), dict) else None,
+            "sfx": export_data.get("sfx") if isinstance(export_data.get("sfx"), dict) else None,
+        }
+
         safe_json_write(os.path.splitext(output_path)[0] + ".json", {
             "job_id": job_id,
             "project_id": job.get("project_id", ""),
@@ -2147,6 +2153,7 @@ def _process_video(job_id, export_data, output_path):
             "duration": _probe.get("duration", 0),
             "width": _probe.get("width", 0),
             "height": _probe.get("height", 0),
+            "export_audio": export_audio_summary,
         }, indent=2)
 
         safe_json_write(_metadata_path(), {
