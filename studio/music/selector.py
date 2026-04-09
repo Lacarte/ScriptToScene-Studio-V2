@@ -18,13 +18,13 @@ _AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 
 # story_tone -> ordered list of music sub-folders (primary first, fallbacks after)
 TONE_MUSIC_MAP = {
-    "suspenseful": ["dark", "ambient", "chill"],
-    "dramatic": ["dark", "ambient", "chill", "historic"],
-    "religious": ["religion", "ambient", "dark"],
-    "educational": ["ambient", "chill", "historic"],
-    "inspirational": ["chill", "ambient", "romantic"],
-    "comedic": ["chill", "ambient", "romantic"],
-    "wholesome": ["romantic", "chill", "ambient"],
+    "suspenseful": ["dark", "sad", "ambient", "chill"],
+    "dramatic": ["dark", "sad", "historic", "ambient", "chill"],
+    "religious": ["religion", "sad", "ambient", "dark"],
+    "educational": ["ambient", "historic", "chill"],
+    "inspirational": ["joy", "chill", "ambient", "romantic"],
+    "comedic": ["joy", "chill", "ambient", "romantic"],
+    "wholesome": ["romantic", "joy", "chill", "ambient"],
 }
 
 # story_tone -> ordered list of SFX sub-folders to draw a single ambience-style
