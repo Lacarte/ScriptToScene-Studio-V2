@@ -148,7 +148,10 @@ function startSSE(id) {
   eventSource.onerror = () => {
     const wasRunning = globalStatus.value === 'running'
     _closeSSE()
-    if (wasRunning) globalStatus.value = 'error'
+    if (wasRunning) {
+      globalStatus.value = 'error'
+      activity.push('Pipeline connection lost', 'error', { source: 'pipeline' })
+    }
   }
 }
 
@@ -187,14 +190,26 @@ async function start() {
   const { settings: _s } = useSettings()
   const storyboardProvider = _s.value['sts-storyboard-provider'] || 'gemini'
   const assetProvider = _s.value['sts-asset-provider'] || 'grok'
+  const stopValue = form.stopAfter.value || undefined
+
+  // Try to wake provider tabs before preflight so reconnects settle sooner.
+  maybeOpenProviderLoadingTab({ stopValue })
   try {
     const preflight = await api.post('/api/pipeline/preflight', {
       body: {
-        stop_after: form.stopAfter.value || '',
+        stop_after: stopValue || '',
         storyboard_provider: storyboardProvider,
         asset_provider: assetProvider,
       },
     })
+    if (preflight.warnings?.length) {
+      for (const warning of preflight.warnings) {
+        const detail = warning.queued
+          ? `run will queue and continue when the ${warning.target} tab reconnects`
+          : 'run may wait for the provider tab'
+        toast.warning(`${warning.message} — ${detail}`, 7000)
+      }
+    }
     if (!preflight.ok && preflight.issues?.length) {
       for (const issue of preflight.issues) {
         toast.error(`${issue.message} — open the ${issue.target} tab first`, 6000)
@@ -220,7 +235,7 @@ async function start() {
     tts_voice: form.inworldVoice.value,
     auto_scenes: true,
     auto_storyboard: true,
-    stop_after: form.stopAfter.value || undefined,
+    stop_after: stopValue,
     webhook_url: webhookUrl || undefined,
     image_model: form.imageModel.value || undefined,
     storyboard_provider: storyboardProvider,
@@ -228,8 +243,6 @@ async function start() {
     provider: assetProvider,
     auto_type: true,
   }
-
-  maybeOpenProviderLoadingTab({ stopValue: config.stop_after })
 
   try {
     const res = await api.post('/api/pipeline/run', { body: config })

@@ -5,6 +5,11 @@
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 const results = $('#results');
+const promptSection = $('#prompt-section');
+const promptText = $('#prompt-text');
+const copyPromptBtn = $('#btn-copy-prompt');
+let currentPrompt = '';
+let promptGenerating = false;
 
 // ── Messaging ────────────────────────────────────────────────────────────
 
@@ -51,6 +56,60 @@ function escHtml(s) {
   return d.innerHTML;
 }
 
+async function copyText(text) {
+  const value = String(text || '');
+  if (!value.trim()) throw new Error('No prompt to copy');
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {}
+  }
+
+  const input = document.createElement('textarea');
+  input.value = value;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+  input.select();
+  input.setSelectionRange(0, input.value.length);
+  const copied = document.execCommand('copy');
+  input.remove();
+  if (!copied) throw new Error('Copy failed');
+}
+
+function setPrompt(prompt) {
+  currentPrompt = typeof prompt === 'string' && prompt.trim() ? prompt : '';
+  if (!promptText || !copyPromptBtn) return;
+
+  promptText.textContent = currentPrompt || 'No prompt detected on this page.';
+  promptText.classList.toggle('empty', !currentPrompt);
+  copyPromptBtn.disabled = !currentPrompt;
+  copyPromptBtn.textContent = 'Copy';
+}
+
+function setPromptGenerating(isGenerating) {
+  promptGenerating = !!isGenerating && !!currentPrompt;
+  promptSection?.classList.toggle('active-current', promptGenerating);
+  if (!promptGenerating) return;
+
+  document.scrollingElement?.scrollTo({ top: 0, behavior: 'auto' });
+  promptSection?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  promptText?.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+function flashCopyButton(button, label = 'Copied') {
+  if (!button) return;
+  if (button._copyTimer) clearTimeout(button._copyTimer);
+  button.textContent = label;
+  button._copyTimer = setTimeout(() => {
+    button.textContent = 'Copy';
+  }, 1200);
+}
+
 // ── Status Check ─────────────────────────────────────────────────────────
 
 async function refreshStatus() {
@@ -73,13 +132,19 @@ async function refreshStatus() {
       if (state.story_text_length) parts.push(`${state.story_text_length} chars`);
       if (state.errors?.length) parts.push(`${state.errors.length} errors`);
       if (state.log_entries?.length) parts.push(`${state.log_entries.length} logs`);
-      $('#page-meta').textContent = parts.join(' · ') || '';
+      $('#page-meta').textContent = parts.join(' | ') || '';
+      setPrompt(state.story_text || '');
+      setPromptGenerating(state.is_generating);
     } else {
       $('#current-route').textContent = 'Not on STS';
       $('#page-meta').textContent = '';
+      setPrompt('');
+      setPromptGenerating(false);
     }
   } catch {
-    $('#current-route').textContent = '—';
+    $('#current-route').textContent = '-';
+    setPrompt('');
+    setPromptGenerating(false);
   }
 }
 
@@ -123,7 +188,20 @@ $('#btn-screenshot').addEventListener('click', async () => {
 
 $('#btn-page-state').addEventListener('click', async () => {
   const state = await sendContent('get_page_state');
+  if (state && !state.error) {
+    setPrompt(state.story_text || '');
+    setPromptGenerating(state.is_generating);
+  }
   showResults(state);
+});
+
+copyPromptBtn?.addEventListener('click', async () => {
+  try {
+    await copyText(currentPrompt);
+    flashCopyButton(copyPromptBtn);
+  } catch (e) {
+    showResults(e.message, 'result-fail');
+  }
 });
 
 $('#btn-interactive').addEventListener('click', async () => {
@@ -205,3 +283,4 @@ $('#btn-test-all').addEventListener('click', async () => {
 // ── Init ─────────────────────────────────────────────────────────────────
 
 refreshStatus();
+setInterval(refreshStatus, 1500);

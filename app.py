@@ -164,10 +164,26 @@ def health():
     })
 
 
+def _retry_until(predicate, timeout_s=4.0, interval_s=1.0):
+    """Retry a connectivity check until it succeeds or a timeout elapses."""
+    import time as _time
+
+    # Extension WS reconnect cycle is roughly 2-3s. Keep checking a bit
+    # longer so runs started mid-reconnect do not false-fail preflight.
+
+    deadline = _time.monotonic() + timeout_s
+    while True:
+        if predicate():
+            return True
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            return False
+        _time.sleep(min(interval_s, remaining))
+
+
 @app.route("/api/chromium/activate-tab", methods=["POST"])
 def activate_chromium_tab():
     """Activate a provider tab via WebSocket to the extension."""
-    import time as _time
     data = request.get_json(silent=True) or {}
     target = data.get("target", "gemini")
 
@@ -179,10 +195,8 @@ def activate_chromium_tab():
         return jsonify({"ok": False, "error": f"Unknown target: {target}"}), 400
 
     # Retry briefly — extension WS may be mid-reconnect (2s cycle)
-    for _ in range(3):
-        if activate_tab():
-            return jsonify({"ok": True, "target": target})
-        _time.sleep(1)
+    if _retry_until(activate_tab, timeout_s=4.0, interval_s=1.0):
+        return jsonify({"ok": True, "target": target})
 
     return jsonify({"ok": False, "error": f"No {target} extension connected"}), 404
 
@@ -196,6 +210,7 @@ def pipeline_preflight():
     asset_provider = data.get("asset_provider", "grok")
 
     issues = []
+    warnings = []
 
     # Determine which extensions are needed based on pipeline scope
     needs_storyboard = stop_after in ("", "storyboard", "assets", "assemble", "export")
@@ -204,32 +219,27 @@ def pipeline_preflight():
     # Extension WS reconnect cycle is ~2s — give it a brief grace window
     # before declaring a provider unavailable. This prevents false negatives
     # between back-to-back jobs when the tab is mid-reconnect.
-    import time as _time
-
     if needs_storyboard and storyboard_provider == "gemini":
         from studio.storyboard.gemini_ws import is_extension_connected as gemini_connected
-        connected = False
-        for _ in range(3):
-            if gemini_connected():
-                connected = True
-                break
-            _time.sleep(1)
-        if not connected:
-            issues.append({"target": "gemini", "message": "Gemini extension not connected"})
+        if not _retry_until(gemini_connected, timeout_s=4.0, interval_s=1.0):
+            warnings.append({
+                "target": "gemini",
+                "message": "Gemini extension not connected yet",
+                "recoverable": True,
+                "queued": True,
+            })
 
     if needs_assets and asset_provider == "grok":
-        from studio.animator.routes import _ws_clients as grok_clients, _ws_lock as grok_lock
-        connected = False
-        for _ in range(3):
-            with grok_lock:
-                if grok_clients:
-                    connected = True
-                    break
-            _time.sleep(1)
-        if not connected:
-            issues.append({"target": "grok", "message": "Grok extension not connected"})
+        from studio.animator.routes import is_extension_connected as grok_connected
+        if not _retry_until(grok_connected, timeout_s=4.0, interval_s=1.0):
+            warnings.append({
+                "target": "grok",
+                "message": "Grok extension not connected yet",
+                "recoverable": True,
+                "queued": True,
+            })
 
-    return jsonify({"ok": len(issues) == 0, "issues": issues})
+    return jsonify({"ok": len(issues) == 0, "issues": issues, "warnings": warnings})
 
 
 @app.route("/api/open-folder", methods=["POST"])

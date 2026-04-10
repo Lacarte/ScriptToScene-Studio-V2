@@ -1939,7 +1939,7 @@ export class CanvasPreview {
         const color = style.color || '#FFFFFF';
         const strokeColor = style.stroke_color ?? '#000000';
         const strokeWidth = (style.stroke_width ?? 4) * scale;
-        const posY = (style.position_y || 75) / 100;
+        const posY = (style.position_y || 80) / 100;
         const textAlign = (style.text_align || 'center').toLowerCase();
         const currentWordScale = Math.min(1.18, Math.max(1, Number(style.current_word_scale || 1)));
         const wrapWordsPerLine = Math.max(0, parseInt(style.wrap_words_per_line || 0, 10) || 0);

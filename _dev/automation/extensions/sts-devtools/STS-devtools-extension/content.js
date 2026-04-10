@@ -21,6 +21,40 @@
     return chrome.runtime.sendMessage({ channel: 'sts-devtools', action, payload });
   }
 
+  function getPrimaryPromptText() {
+    const fields = document.querySelectorAll(
+      'textarea[class*="story"], textarea[class*="prompt"], textarea[class*="text"], textarea'
+    );
+    for (const field of fields) {
+      if (!field || field.offsetParent === null) continue;
+      const value = typeof field.value === 'string' ? field.value : field.textContent;
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return '';
+  }
+
+  function hasVisibleGeneratingIndicator() {
+    const selector = [
+      '.status-badge.generating',
+      '.status--generating',
+      '.status-generating',
+      '[class*="generating"]',
+      '[class*="processing"]',
+      '[class*="loading"]',
+      '.spinner',
+      '.spinner-ring'
+    ].join(', ');
+    const visibleIndicator = Array.from(document.querySelectorAll(selector))
+      .some((el) => el.offsetParent !== null);
+    if (visibleIndicator) return true;
+
+    const textIndicators = Array.from(document.querySelectorAll('button, span, div, p'))
+      .filter((el) => el.offsetParent !== null)
+      .some((el) => /\b(generating|processing|downloading)\b/i.test(el.textContent || ''));
+
+    return textIndicators;
+  }
+
   // ── Vue App State Extraction ───────────────────────────────────────────
 
   function getVueAppState() {
@@ -51,8 +85,12 @@
     }
 
     // Active form values
-    const textArea = document.querySelector('textarea[class*="story"], textarea[class*="text"], textarea');
-    if (textArea) state.story_text_length = textArea.value?.length || textArea.textContent?.length || 0;
+    const promptText = getPrimaryPromptText();
+    if (promptText) {
+      state.story_text = promptText;
+      state.story_text_length = promptText.length;
+    }
+    state.is_generating = hasVisibleGeneratingIndicator();
 
     // Toast/notification messages
     const toasts = document.querySelectorAll('[class*="toast"], [class*="notification"], [class*="snackbar"]');

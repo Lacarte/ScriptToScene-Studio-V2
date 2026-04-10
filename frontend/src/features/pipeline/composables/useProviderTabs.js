@@ -48,9 +48,11 @@ function maybeOpenProviderLoadingTab({ stopValue, resumeStep = null }) {
 
   const { settings: _s } = useSettings()
   const storyboardProvider = _s.value['sts-storyboard-provider'] || 'gemini'
+  const assetProvider = _s.value['sts-asset-provider'] || 'grok'
   if (storyboardProvider === 'gemini' && _reaches('storyboard')) {
     _activateProviderTab('gemini')
-  } else if (_reaches('assets')) {
+  }
+  if (assetProvider === 'grok' && _reaches('assets')) {
     _activateProviderTab('grok')
   }
 }

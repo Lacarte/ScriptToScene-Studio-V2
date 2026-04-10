@@ -330,7 +330,7 @@ const AUDIO_TRACK_COLORS = {
     fx: 'rgba(255, 183, 77, 0.8)',
     sfx: 'rgba(255, 183, 77, 0.8)',
 };
-const DEFAULT_MUSIC_DUCKING_LEVEL = 0.20;
+const DEFAULT_MUSIC_DUCKING_LEVEL = 0.15;
 
 function normalizeAudioTrackType(type = 'voice') {
     const normalized = String(type || 'voice').toLowerCase();
@@ -7454,9 +7454,9 @@ function _capSyncStyleUI() {
     s('cap-ed-color', style.color || '#FFFFFF');
     s('cap-ed-stroke', style.stroke_color || '#000000');
     s('cap-ed-stroke-width', style.stroke_width ?? 4);
-    s('cap-ed-position', style.position_y || 75);
+    s('cap-ed-position', style.position_y || 80);
     const posVal = document.getElementById('cap-ed-pos-val');
-    if (posVal) posVal.textContent = (style.position_y || 75) + '%';
+    if (posVal) posVal.textContent = (style.position_y || 80) + '%';
 
     const ls = style.letter_spacing || 0;
     s('cap-ed-letter-spacing', ls);

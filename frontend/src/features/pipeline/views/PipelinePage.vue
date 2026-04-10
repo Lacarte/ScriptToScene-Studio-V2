@@ -598,8 +598,19 @@ async function runJobQueue() {
 
   const aborted = !jobQueueRunning.value
   jobQueueRunning.value = false
-  jobQueueCurrent.value = null
   batchMode.value = false
+  // Keep banner visible with final status instead of hiding it
+  const errorCount = jobHistory.value.filter(j => j.status === 'error').length
+  const successCount = jobHistory.value.filter(j => j.status === 'success').length
+  if (jobQueueCurrent.value) {
+    jobQueueCurrent.value = {
+      ...jobQueueCurrent.value,
+      finished: true,
+      aborted,
+      errorCount,
+      successCount,
+    }
+  }
   if (!aborted) {
     clearQueue()
     useDoneSound().play()
@@ -627,7 +638,9 @@ async function runJobQueue() {
 
 function stopJobQueue() {
   jobQueueRunning.value = false
-  jobQueueCurrent.value = null
+  if (jobQueueCurrent.value) {
+    jobQueueCurrent.value = { ...jobQueueCurrent.value, finished: true, aborted: true }
+  }
   clearQueue()
   if (running.value) stop()
 }
@@ -722,7 +735,7 @@ async function runAllSavedStories() {
       if (started === false) {
         // Preflight bail or validation failure — don't keep retrying the same broken state
         aborted = true
-        abortReason = 'preflight failed (extension not connected?)'
+        abortReason = 'pipeline failed to start'
         break
       }
       // Wait for pipeline to finish
@@ -1879,10 +1892,16 @@ function logStepLabel(step) {
     </div>
 
     <!-- Job queue indicator -->
-    <div v-if="jobQueueRunning && jobQueueCurrent" class="job-queue-banner">
+    <div v-if="jobQueueCurrent" class="job-queue-banner" :class="{ 'job-queue-banner--finished': jobQueueCurrent.finished, 'job-queue-banner--error': jobQueueCurrent.finished && jobQueueCurrent.errorCount }">
       <span class="job-queue-badge">Job {{ jobQueueCurrent.index }}/{{ jobQueueCurrent.total }}</span>
       <span class="job-queue-label">{{ jobQueueCurrent.label }}</span>
-      <span class="job-queue-remaining">{{ jobQueueCurrent.total - jobQueueCurrent.index }} remaining</span>
+      <template v-if="jobQueueCurrent.finished">
+        <span v-if="jobQueueCurrent.aborted" class="job-queue-remaining job-queue-status--warn">aborted</span>
+        <span v-else-if="jobQueueCurrent.errorCount" class="job-queue-remaining job-queue-status--error">{{ jobQueueCurrent.errorCount }} failed</span>
+        <span v-else class="job-queue-remaining job-queue-status--done">complete</span>
+        <button class="job-queue-dismiss" @click="jobQueueCurrent = null" title="Dismiss">&times;</button>
+      </template>
+      <span v-else class="job-queue-remaining">{{ jobQueueCurrent.total - jobQueueCurrent.index }} remaining</span>
     </div>
 
     <!-- Saved stories queue indicator -->
@@ -5707,6 +5726,28 @@ function logStepLabel(step) {
   color: var(--text-muted);
   white-space: nowrap;
 }
+.job-queue-status--done { color: #26DE81; font-weight: 600; }
+.job-queue-status--error { color: #FF6B6B; font-weight: 600; }
+.job-queue-status--warn { color: #FFB347; font-weight: 600; }
+.job-queue-banner--finished {
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.06), rgba(167, 139, 250, 0.02));
+  border-color: rgba(167, 139, 250, 0.2);
+}
+.job-queue-banner--error {
+  border-color: rgba(255, 107, 107, 0.3);
+}
+.job-queue-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.job-queue-dismiss:hover { opacity: 1; color: var(--text); }
 
 .provider-redirect-banner {
   display: flex;

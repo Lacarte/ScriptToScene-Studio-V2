@@ -58,21 +58,35 @@ def _broadcast(msg):
             logger.info("Grok WS broadcast {} — pruned {} dead client(s)", mt, len(dead))
 
 
+def _prune_dead_clients():
+    """Remove dead WebSocket connections by sending a PING. Must hold _ws_lock."""
+    alive = []
+    ping = json.dumps({"type": "PING"})
+    for ws in _ws_clients:
+        try:
+            ws.send(ping)
+            alive.append(ws)
+        except Exception:
+            pass
+    _ws_clients[:] = alive
+    return alive
+
+
+def is_extension_connected():
+    """Check if at least one Grok extension client is connected."""
+    with _ws_lock:
+        alive = _prune_dead_clients()
+        logger.info("Grok WS connection check: {} alive client(s)", len(alive))
+        return len(alive) > 0
+
+
 def activate_tab():
     """Send ACTIVATE_TAB to all connected Grok extension clients."""
     msg = json.dumps({"type": "ACTIVATE_TAB"})
-    ping = json.dumps({"type": "PING"})
     sent = False
     with _ws_lock:
         # Prune dead connections first
-        alive = []
-        for ws in _ws_clients:
-            try:
-                ws.send(ping)
-                alive.append(ws)
-            except Exception:
-                pass
-        _ws_clients[:] = alive
+        alive = _prune_dead_clients()
         logger.info("ACTIVATE_TAB → {} alive Grok client(s)", len(alive))
         for ws in alive:
             try:

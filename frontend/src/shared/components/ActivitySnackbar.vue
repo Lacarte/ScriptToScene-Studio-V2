@@ -2,11 +2,13 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useActivityFeed } from '@/shared/composables/useActivityFeed.js'
 import { useAppStore } from '@/shared/stores/appStore.js'
+import { usePipeline } from '@/features/pipeline/composables/usePipeline.js'
 
 defineOptions({ name: 'ActivitySnackbar' })
 
 const { entries, latest, count, clear, urgentPing } = useActivityFeed()
 const app = useAppStore()
+const { running, globalStatus } = usePipeline()
 const expanded = ref(false)
 const listEl = ref(null)
 const showScrollTop = ref(false)
@@ -32,7 +34,8 @@ function scrollToBottom() {
   }
 }
 
-const hasEntries = computed(() => count.value > 0)
+const isActive = computed(() => running.value || globalStatus.value === 'error' || globalStatus.value === 'stopped')
+const hasEntries = computed(() => count.value > 0 || isActive.value)
 
 // Auto-expand on urgent events (error / warning)
 watch(urgentPing, () => {
@@ -114,9 +117,16 @@ function handleClear() {
 
       <!-- Bottom bar: latest entry -->
       <button class="snackbar-bar" :class="{ 'snackbar-bar--urgent': latest?.type === 'error' || latest?.type === 'warning' }" @click="toggle">
-        <span class="snackbar-dot" :style="{ background: entryColor(latest?.type), boxShadow: '0 0 6px ' + entryColor(latest?.type) + '66' }"></span>
-        <span class="snackbar-icon" :style="{ color: entryColor(latest?.type) }">{{ entryIcon(latest?.type) }}</span>
-        <span class="snackbar-text">{{ latest?.message }}</span>
+        <span v-if="running" class="snackbar-dot snackbar-dot--pulse" style="background: #26DE81; box-shadow: 0 0 6px #26DE8166"></span>
+        <span v-else-if="globalStatus === 'error'" class="snackbar-dot" style="background: #FF6B6B; box-shadow: 0 0 6px #FF6B6B66"></span>
+        <span v-else class="snackbar-dot" :style="{ background: entryColor(latest?.type), boxShadow: '0 0 6px ' + entryColor(latest?.type) + '66' }"></span>
+        <span v-if="running" class="snackbar-status">STS: pipeline</span>
+        <span v-else-if="globalStatus === 'error' && !latest" class="snackbar-status" style="color: #FF6B6B">Pipeline error</span>
+        <template v-if="latest">
+          <span class="snackbar-icon" :style="{ color: entryColor(latest?.type) }">{{ entryIcon(latest?.type) }}</span>
+          <span class="snackbar-text">{{ latest?.message }}</span>
+        </template>
+        <span v-else-if="!running && globalStatus !== 'error'" class="snackbar-text" style="opacity:0.5">No activity</span>
         <span v-if="count > 1" class="snackbar-badge">{{ count }}</span>
         <svg class="snackbar-chevron" :class="{ open: expanded }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
@@ -170,6 +180,23 @@ function handleClear() {
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.snackbar-dot--pulse {
+  animation: dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.snackbar-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #26DE81;
 }
 
 .snackbar-icon {

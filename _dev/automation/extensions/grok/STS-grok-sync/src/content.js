@@ -916,20 +916,234 @@ function initSync() {
 
   // ── Grok Actions ───────────────────────────────────────
 
+  function findComposerRoot() {
+    const editor = findGrokInputElement();
+    if (editor) {
+      const editorForm = editor.closest("form");
+      if (editorForm) return editorForm;
+    }
+
+    const fileInput = document.querySelector('input[type="file"]');
+    if (fileInput) {
+      const fileForm = fileInput.closest("form");
+      if (fileForm) return fileForm;
+    }
+
+    return document.querySelector("form") || document.body;
+  }
+
+  function approximateDataUrlBytes(dataUrl) {
+    const value = String(dataUrl || "");
+    const raw = value.includes(",") ? value.split(",").pop() : value;
+    const padding = raw.endsWith("==") ? 2 : raw.endsWith("=") ? 1 : 0;
+    return Math.max(0, Math.floor((raw.length * 3) / 4) - padding);
+  }
+
+  function getComposerUploadState() {
+    const root = findComposerRoot();
+    const scope = root || document.body;
+    const removeButtons = Array.from(scope.querySelectorAll('button[aria-label="Remove image"]'));
+    const thumbImages = Array.from(scope.querySelectorAll('img[src^="blob:"], img[src^="data:image/"]'));
+    const alertIcons = Array.from(scope.querySelectorAll('.lucide-triangle-alert, svg[class*="triangle-alert"]'));
+    const scopeText = normalizeText((scope.innerText || scope.textContent || ""));
+    const oversizePattern = /files?\s+(?:was|were)\s+too\s+large/i;
+    const hasOversizeText = oversizePattern.test(scopeText);
+    const hasPending = [
+      '.animate-spin',
+      '[class*="uploading"]',
+      '[class*="loading"]',
+      '[aria-busy="true"]',
+      '[data-state="loading"]',
+    ].some((selector) => !!scope.querySelector(selector));
+
+    return {
+      root: scope,
+      removeButtons,
+      thumbImages,
+      alertIcons,
+      hasAttachment: removeButtons.length > 0 || thumbImages.length > 0,
+      hasAlertIcon: alertIcons.length > 0,
+      hasOversizeText,
+      hasOversize: hasOversizeText || alertIcons.length > 0,
+      hasPending,
+    };
+  }
+
+  async function removeComposerImages(maxPasses = 10) {
+    let removedAny = false;
+    for (let pass = 0; pass < maxPasses; pass++) {
+      const { removeButtons } = getComposerUploadState();
+      if (!removeButtons.length) break;
+      for (const btn of removeButtons) {
+        try {
+          btn.style.opacity = "1";
+          btn.style.pointerEvents = "auto";
+          simulateClick(btn);
+          removedAny = true;
+        } catch {}
+        await sleep(180);
+      }
+      await sleep(350);
+    }
+
+    const settleUntil = Date.now() + 4000;
+    while (Date.now() < settleUntil) {
+      if (!getComposerUploadState().hasAttachment) break;
+      await sleep(200);
+    }
+    return removedAny;
+  }
+
+  function dataUrlToFile(dataUrl, fileName) {
+    const raw = dataUrl.includes(",") ? dataUrl.split(",").pop() : dataUrl;
+    const binaryString = atob(raw);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+
+    const mimeMatch = dataUrl.match(/data:([^;]+);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const blob = new Blob([bytes], { type: mimeType });
+    const ext = mimeType.split("/").pop() || "jpg";
+    return new File([blob], fileName || ("sts-input-" + Date.now() + "." + ext), { type: mimeType });
+  }
+
+  function drawCanvasLabel(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+
+  function paintResizedMarker(ctx, width, height) {
+    const minSide = Math.max(1, Math.min(width, height));
+    const fontSize = Math.max(14, Math.round(minSide * 0.07));
+    const padX = Math.max(10, Math.round(fontSize * 0.55));
+    const padY = Math.max(6, Math.round(fontSize * 0.35));
+    const inset = Math.max(10, Math.round(minSide * 0.04));
+    const radius = Math.max(8, Math.round(fontSize * 0.45));
+    const label = "RESIZED";
+
+    ctx.save();
+    ctx.font = "700 " + fontSize + "px Arial";
+    const textWidth = ctx.measureText(label).width;
+    const boxWidth = Math.ceil(textWidth + padX * 2);
+    const boxHeight = Math.ceil(fontSize + padY * 2);
+    const x = Math.max(inset, width - boxWidth - inset);
+    const y = Math.max(inset, height - boxHeight - inset);
+
+    drawCanvasLabel(ctx, x, y, boxWidth, boxHeight, radius);
+    ctx.fillStyle = "rgba(10, 24, 38, 0.82)";
+    ctx.fill();
+    ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.12));
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.78)";
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, x + boxWidth / 2, y + boxHeight / 2 + 1);
+    ctx.restore();
+  }
+
+  async function resizeImageDataUrl(dataUrl, scaleFactor = 0.75, quality = 0.86) {
+    if (!dataUrl) throw new Error("Missing image data");
+
+    const img = new Image();
+    const loaded = new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error("Failed to decode image for resize"));
+    });
+    img.src = dataUrl;
+    await loaded;
+
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) throw new Error("Image size unavailable");
+
+    const scale = Math.max(0.1, Math.min(1, scaleFactor));
+    const width = Math.max(1, Math.round(srcW * scale));
+    const height = Math.max(1, Math.round(srcH * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas resize unavailable");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    paintResizedMarker(ctx, width, height);
+
+    return canvas.toDataURL("image/jpeg", quality);
+  }
+
+  async function findGrokFileInput(timeoutMs = 10000) {
+    let fileInput = document.querySelector('input[type="file"]');
+    if (fileInput) return fileInput;
+    const maxAttempts = Math.ceil(timeoutMs / 250);
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await sleep(250);
+      fileInput = document.querySelector('input[type="file"]');
+      if (fileInput) return fileInput;
+    }
+    return null;
+  }
+
+  async function injectImageFileToGrok(file) {
+    const fileInput = await findGrokFileInput();
+    if (!fileInput) throw new Error("File input not found");
+
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    try { fileInput.value = ""; } catch {}
+    fileInput.files = dataTransfer.files;
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function waitForUploadOutcome(timeoutMs = 16000) {
+    const start = Date.now();
+    let stableAttachmentCount = 0;
+    let lastSignature = "";
+
+    while (Date.now() - start < timeoutMs) {
+      const state = getComposerUploadState();
+      const signature = state.removeButtons.length + "|" + state.thumbImages.length + "|" + state.alertIcons.length;
+      const oversizeTriggered = state.hasOversize;
+
+      if (oversizeTriggered) return { status: "oversize", state };
+
+      if (state.hasAttachment) {
+        stableAttachmentCount = (signature === lastSignature) ? stableAttachmentCount + 1 : 0;
+        lastSignature = signature;
+
+        if (!state.hasPending && stableAttachmentCount >= 2) return { status: "ready", state };
+        if (stableAttachmentCount >= 4) return { status: "ready", state };
+      } else {
+        stableAttachmentCount = 0;
+        lastSignature = "";
+      }
+
+      await sleep(350);
+    }
+
+    const finalState = getComposerUploadState();
+    const finalOversize = finalState.hasOversize;
+    if (finalOversize) return { status: "oversize", state: finalState };
+    if (finalState.hasAttachment) return { status: "ready", state: finalState };
+    return { status: "timeout", state: finalState };
+  }
+
   async function resetGrokInput() {
     console.log("[STS] Resetting Grok input...");
     // Remove uploaded images
-    for (let pass = 0; pass < 10; pass++) {
-      const removeBtns = document.querySelectorAll('button[aria-label="Remove image"]');
-      if (removeBtns.length === 0) break;
-      for (const btn of removeBtns) {
-        btn.style.opacity = "1";
-        btn.style.pointerEvents = "auto";
-        simulateClick(btn);
-        await sleep(300);
-      }
-      await sleep(500);
-    }
+    await removeComposerImages();
 
     // Clear text input
     const editor = findGrokInputElement();
@@ -957,12 +1171,7 @@ function initSync() {
     }
 
     // Verify images cleared
-    const remaining = document.querySelectorAll('button[aria-label="Remove image"]');
-    for (const btn of remaining) {
-      btn.style.opacity = "1";
-      simulateClick(btn);
-      await sleep(300);
-    }
+    await removeComposerImages(4);
   }
 
   async function setupGrokMode() {
@@ -1049,40 +1258,44 @@ function initSync() {
 
   async function uploadImageToGrok(base64Data) {
     if (!base64Data) return false;
-    const raw = base64Data.includes(",") ? base64Data.split(",").pop() : base64Data;
-    const binaryString = atob(raw);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+    let currentDataUrl = base64Data;
+    let resizeCount = 0;
+    const maxAttempts = 8;
 
-    const mimeMatch = base64Data.match(/data:([^;]+);/);
-    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
-    const blob = new Blob([bytes], { type: mimeType });
-    const file = new File([blob], "sts-input-" + Date.now() + ".jpg", { type: mimeType });
+    for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
+      const attemptLabel = resizeCount ? ("resized " + resizeCount + "x") : "original";
+      const file = dataUrlToFile(currentDataUrl, "sts-input-" + Date.now() + "-" + attemptIndex + ".jpg");
+      console.log("[STS] Uploading image attempt", attemptIndex + 1, "(" + attemptLabel + ", " + approximateDataUrlBytes(currentDataUrl) + " bytes)");
 
-    let fileInput = document.querySelector('input[type="file"]');
-    if (!fileInput) {
-      for (let attempt = 0; attempt < 20; attempt++) {
+      await injectImageFileToGrok(file);
+      const outcome = await waitForUploadOutcome();
+
+      if (outcome.status === "ready") {
+        const verifiedState = getComposerUploadState();
+        if (verifiedState.hasOversize) {
+          console.warn("[STS] Oversize warning still visible after upload; resizing again");
+          await removeComposerImages();
+          await sleep(500);
+        } else {
+          console.log("[STS] Image upload complete");
+          return currentDataUrl;
+        }
+      } else if (outcome.status === "oversize") {
+        console.warn("[STS] Grok rejected image as too large; removing thumbnail and retrying smaller size");
+        await removeComposerImages();
         await sleep(500);
-        fileInput = document.querySelector('input[type="file"]');
-        if (fileInput) break;
+      } else {
+        console.warn("[STS] Image upload did not settle cleanly; clearing thumbnail before retry");
+        await removeComposerImages();
+        await sleep(500);
       }
-    }
-    if (!fileInput) { console.error("[STS] File input not found"); return false; }
 
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    fileInput.files = dataTransfer.files;
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    console.log("[STS] Image injected, waiting for upload...");
-
-    await sleep(1000);
-    for (let w = 0; w < 60; w++) {
-      if (!document.querySelector('.animate-spin, [class*="uploading"], [class*="loading"]')) break;
-      await sleep(500);
+      if (attemptIndex >= maxAttempts - 1) break;
+      currentDataUrl = await resizeImageDataUrl(currentDataUrl, 0.75, resizeCount ? 0.82 : 0.86);
+      resizeCount++;
     }
-    await sleep(500);
-    console.log("[STS] Image upload complete");
-    return true;
+
+    throw new Error("Image upload failed after resize retries");
   }
 
   async function typeIntoGrok(text) {
@@ -1533,7 +1746,8 @@ function initSync() {
 
         // Upload storyboard image if available
         if (item.imageUrl && item.imageUrl.startsWith("data:")) {
-          await uploadImageToGrok(item.imageUrl);
+          item.imageUrl = await uploadImageToGrok(item.imageUrl);
+          if (S.scenes[item.scene]) S.scenes[item.scene].imageUrl = item.imageUrl;
         }
 
         await typeIntoGrok(item.fullPrompt);
@@ -1642,7 +1856,10 @@ function initSync() {
 
         try {
           document.querySelectorAll('video[src*="assets.grok.com"]').forEach(v => addSeen(seenVideoUrls, v.src || ""));
-          if (item.imageUrl && item.imageUrl.startsWith("data:")) await uploadImageToGrok(item.imageUrl);
+          if (item.imageUrl && item.imageUrl.startsWith("data:")) {
+            item.imageUrl = await uploadImageToGrok(item.imageUrl);
+            if (S.scenes[item.scene]) S.scenes[item.scene].imageUrl = item.imageUrl;
+          }
           await typeIntoGrok(item.fullPrompt);
           await sleep(500);
           captureContainerForScene(item.scene);
@@ -2042,21 +2259,100 @@ function initSync() {
   }
 
   function escHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+  function encodeCopyText(s) { return encodeURIComponent(String(s || "")); }
 
-  function hideImagePreview() {
-    const overlay = document.getElementById("sts-img-overlay");
-    if (overlay) overlay.remove();
+  async function copyText(text) {
+    const value = String(text || "");
+    if (!value.trim()) throw new Error("No prompt to copy");
+
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return;
+      } catch {}
+    }
+
+    const input = document.createElement("textarea");
+    input.value = value;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    input.style.opacity = "0";
+    document.body.appendChild(input);
+    input.select();
+    input.setSelectionRange(0, input.value.length);
+    const copied = document.execCommand("copy");
+    input.remove();
+    if (!copied) throw new Error("Copy failed");
   }
 
-  function showImagePreview(src) {
-    if (!src) return;
-    let overlay = document.getElementById("sts-img-overlay");
-    if (!overlay) {
-      overlay = document.createElement("div");
-      overlay.id = "sts-img-overlay";
-      document.body.appendChild(overlay);
+  function flashCopyButton(button, label = "Copied", cls = "copied") {
+    if (!button) return;
+    const original = button.dataset.defaultLabel || button.textContent || "Copy";
+    button.dataset.defaultLabel = original;
+    if (button._copyTimer) clearTimeout(button._copyTimer);
+    button.textContent = label;
+    button.classList.remove("copied", "failed");
+    if (cls) button.classList.add(cls);
+    button._copyTimer = setTimeout(() => {
+      button.textContent = original;
+      button.classList.remove("copied", "failed");
+    }, 1200);
+  }
+
+  function hideImagePreview() {
+    const preview = document.getElementById("sts-img-overlay");
+    if (preview) preview.remove();
+  }
+
+  function moveImagePreview(e) {
+    const preview = document.getElementById("sts-img-overlay");
+    if (!preview || !e) return;
+    const margin = 18;
+    const offset = 20;
+    const rect = preview.getBoundingClientRect();
+    let left = e.clientX + offset;
+    let top = e.clientY + offset;
+
+    if (left + rect.width + margin > window.innerWidth) {
+      left = e.clientX - rect.width - offset;
     }
-    overlay.innerHTML = '<img src="' + src + '" alt="Scene preview">';
+    if (top + rect.height + margin > window.innerHeight) {
+      top = e.clientY - rect.height - offset;
+    }
+
+    left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
+    top = Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin));
+
+    preview.style.left = left + "px";
+    preview.style.top = top + "px";
+  }
+
+  function showImagePreview(src, e) {
+    if (!src) return;
+    let preview = document.getElementById("sts-img-overlay");
+    if (!preview) {
+      preview = document.createElement("div");
+      preview.id = "sts-img-overlay";
+      preview.innerHTML = '<img alt="Scene preview">';
+      document.body.appendChild(preview);
+    }
+    const img = preview.querySelector("img");
+    if (!img) return;
+    if (img.src !== src) img.src = src;
+    if (e) moveImagePreview(e);
+    img.onload = () => moveImagePreview(e || { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 });
+  }
+
+  function pinCurrentTypingRowToTop() {
+    if (S.activeTab !== "typing" || S.typing.currentIndex < 0) return;
+    const list = $id("sts-list");
+    if (!list) return;
+    const row = list.querySelector('.sts-row[data-idx="' + S.typing.currentIndex + '"]');
+    if (!row) return;
+    const targetTop = Math.max(0, row.offsetTop - 6);
+    if (Math.abs(list.scrollTop - targetTop) <= 6) return;
+    list.scrollTop = targetTop;
   }
 
   function syncCollapsedUi() {
@@ -2211,7 +2507,8 @@ function initSync() {
           html += '<div class="sts-group-label">' + escHtml(pid || "Unknown") + '</div>';
           lastPid = pid;
         }
-        const pr = (q.displayPrompt || "").length > 46 ? q.displayPrompt.substring(0, 46) + "..." : q.displayPrompt || "";
+        const fullPrompt = q.displayPrompt || q.prompt || q.fullPrompt || "";
+        const pr = fullPrompt.length > 46 ? fullPrompt.substring(0, 46) + "..." : fullPrompt;
         let sHTML = "", meta = "";
         const isSelected = isTypingSelected(q);
         const isCurrent = S.typing.active && i === S.typing.currentIndex;
@@ -2221,12 +2518,17 @@ function initSync() {
         else if (q.status === "typed") { sHTML = '<span class="sts-d-typed">&#x2714;</span>'; meta = "typed"; }
         else if (q.status === "failed" || q.status === "error") { sHTML = '<span class="sts-d-err">&#x2718;</span>'; meta = q.status + (q.errorCount > 1 ? " (" + q.errorCount + "x)" : ""); }
         if (!isSelected) meta = "unchecked" + (meta ? " \u00b7 " + meta : "");
-        const rowCls = "sts-row" + (isCurrent ? " highlight" : "") + ((q.status === "error" || q.status === "failed") ? " error-clickable" : "");
+        const rowCls = "sts-row" +
+          (isCurrent ? " highlight" : "") +
+          (isCurrent && q.status === "generating" ? " active-generating" : "") +
+          ((q.status === "error" || q.status === "failed") ? " error-clickable" : "");
         const thumbHtml = q.imageUrl ? '<img class="sts-row-thumb" src="' + q.imageUrl + '" alt="">' : '<div class="sts-row-thumb sts-row-thumb-empty">' + q.scene + "</div>";
         const checkboxHtml = '<label class="sts-row-check-wrap"><input type="checkbox" class="sts-row-check" data-role="typing-checkbox" data-idx="' + i + '"' + (isSelected ? " checked" : "") + (S.typing.active ? " disabled" : "") + "></label>";
-        html += '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + escHtml(pr) + '</div><div class="sts-row-meta">' + meta + "</div></div><div class=\"sts-row-status\">" + sHTML + "</div></div>";
+        const copyBtnHtml = fullPrompt ? '<button class="sts-copy-btn" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(fullPrompt) + '" title="Copy full prompt">Copy</button>' : "";
+        html += '<div class="' + rowCls + '" data-idx="' + i + '">' + checkboxHtml + thumbHtml + '<div class="sts-row-num">' + q.scene + '</div><div class="sts-row-info"><div class="sts-row-prompt">' + escHtml(pr) + '</div><div class="sts-row-meta">' + meta + "</div></div><div class=\"sts-row-status\">" + copyBtnHtml + sHTML + "</div></div>";
       });
       list.innerHTML = html;
+      requestAnimationFrame(pinCurrentTypingRowToTop);
     } else if (S.activeTab === "sync") {
       const keys = Object.keys(S.scenes).sort((a, b) => parseInt(a) - parseInt(b));
       if (!keys.length) {
@@ -2235,7 +2537,8 @@ function initSync() {
       }
       list.innerHTML = keys.map(num => {
         const sc = S.scenes[num];
-        const pr = (sc.prompt || "").length > 52 ? sc.prompt.substring(0, 52) + "..." : sc.prompt || "";
+        const fullPrompt = sc.prompt || "";
+        const pr = fullPrompt.length > 52 ? fullPrompt.substring(0, 52) + "..." : fullPrompt;
         const badgeMap = {
           pending: ["pending", "pending"], processing: ["processing", "generating..."],
           ready: ["ready", sc.fileCount + " ready"], uploading: ["uploading", "uploading..."],
@@ -2243,7 +2546,8 @@ function initSync() {
           error: ["error", "error"],
         };
         const [bCls, bText] = badgeMap[sc.status] || ["pending", sc.status];
-        return '<div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">' + num + '</div><div class="sts-card-prompt">' + escHtml(pr) + '</div><span class="sts-card-badge sts-badge-' + bCls + '">' + bText + "</span></div></div>";
+        const copyBtnHtml = fullPrompt ? '<button class="sts-copy-btn" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(fullPrompt) + '" title="Copy full prompt">Copy</button>' : "";
+        return '<div class="sts-card"><div class="sts-card-head"><div class="sts-card-num">' + num + '</div><div class="sts-card-prompt">' + escHtml(pr) + '</div>' + copyBtnHtml + '<span class="sts-card-badge sts-badge-' + bCls + '">' + bText + "</span></div></div>";
       }).join("");
     } else {
       const history = historyItems;
@@ -2258,14 +2562,16 @@ function initSync() {
         const expanded = isHistoryExpanded(entry.id);
         if (!entry.endedAt && startedAt) durationMs = Date.now() - startedAt;
         const promptHtml = (entry.prompts || []).map((prompt) => {
+          const fullPrompt = prompt.prompt || "";
           let meta = prompt.status || prompt.syncStatus || "queued";
           if (prompt.error) meta += " - " + prompt.error;
           return '<div class="sts-history-prompt">' +
             '<div class="sts-history-prompt-num">' + escHtml(String(prompt.scene || "?")) + '</div>' +
             '<div class="sts-history-prompt-body">' +
-              '<div class="sts-history-prompt-text">' + escHtml(prompt.prompt || "") + '</div>' +
+              '<div class="sts-history-prompt-text">' + escHtml(fullPrompt) + '</div>' +
               '<div class="sts-history-prompt-meta">' + escHtml(meta) + '</div>' +
             '</div>' +
+            (fullPrompt ? '<button class="sts-copy-btn sts-copy-btn-sm" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(fullPrompt) + '" title="Copy full prompt">Copy</button>' : '') +
           '</div>';
           }).join("");
         return '<div class="sts-history-card' + (expanded ? ' open' : ' collapsed') + '">' +
@@ -2519,7 +2825,22 @@ function initSync() {
         render();
       }
     });
-    $id("sts-list").addEventListener("click", (e) => {
+    $id("sts-list").addEventListener("click", async (e) => {
+      const copyBtn = e.target.closest('[data-role="copy-prompt"]');
+      if (copyBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const encoded = copyBtn.getAttribute("data-copy-text") || "";
+          const text = encoded ? decodeURIComponent(encoded) : "";
+          await copyText(text);
+          flashCopyButton(copyBtn);
+        } catch (err) {
+          console.warn("[STS] Copy prompt failed:", err);
+          flashCopyButton(copyBtn, "Failed", "failed");
+        }
+        return;
+      }
       const toggle = e.target.closest(".sts-history-toggle");
       if (!toggle) return;
       const entryId = toggle.getAttribute("data-entry-id");
@@ -2531,7 +2852,12 @@ function initSync() {
     $id("sts-list").addEventListener("pointerover", (e) => {
       const thumb = e.target.closest(".sts-row-thumb");
       if (!thumb || thumb.tagName !== "IMG" || !thumb.src) return;
-      showImagePreview(thumb.src);
+      showImagePreview(thumb.src, e);
+    });
+    $id("sts-list").addEventListener("pointermove", (e) => {
+      const thumb = e.target.closest(".sts-row-thumb");
+      if (!thumb || thumb.tagName !== "IMG" || !thumb.src) return;
+      showImagePreview(thumb.src, e);
     });
     $id("sts-list").addEventListener("pointerout", (e) => {
       const thumb = e.target.closest(".sts-row-thumb");
