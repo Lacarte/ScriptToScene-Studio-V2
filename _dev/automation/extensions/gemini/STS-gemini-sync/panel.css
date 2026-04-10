@@ -265,7 +265,39 @@
 .sts-row-prompt { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sts-row-meta { font-size: 9px; color: var(--text-muted); font-family: var(--mono); margin-top: 1px; }
 .sts-row-error { font-size: 9px; color: var(--red); font-family: var(--mono); margin-top: 2px; opacity: 0.85; }
-.sts-row-status { flex-shrink: 0; }
+.sts-row-status { flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+
+.sts-copy-btn {
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+.sts-copy-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.sts-copy-btn.copied {
+  color: var(--green);
+  border-color: var(--green);
+  background: rgba(38,222,129,0.08);
+}
+.sts-copy-btn.failed {
+  color: var(--red);
+  border-color: var(--red);
+  background: rgba(255,107,107,0.08);
+}
+.sts-copy-btn-sm { align-self: flex-start; }
 
 /* Status dots */
 .sts-d-q { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
