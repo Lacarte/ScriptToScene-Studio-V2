@@ -101,6 +101,22 @@ def activate_tab():
     return sent
 
 
+def focus_studio_tab():
+    """Send FOCUS_STUDIO_TAB to all connected Grok extension clients."""
+    msg = json.dumps({"type": "FOCUS_STUDIO_TAB"})
+    sent = False
+    with _ws_lock:
+        for ws in list(_ws_clients):
+            try:
+                ws.send(msg)
+                sent = True
+            except Exception as e:
+                logger.warning("FOCUS_STUDIO_TAB send failed: {}", e)
+    if sent:
+        logger.info("FOCUS_STUDIO_TAB delivered to Grok extension")
+    return sent
+
+
 def _send_to_extension(msg):
     """Send a message to the first connected extension client."""
     with _ws_lock:

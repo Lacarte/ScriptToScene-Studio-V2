@@ -638,6 +638,9 @@ function initSync() {
       case "ACTIVATE_TAB":
         chrome.runtime.sendMessage({ type: "ACTIVATE_TAB" });
         break;
+      case "FOCUS_STUDIO_TAB":
+        try { chrome.runtime.sendMessage({ type: "FOCUS_STUDIO_TAB" }); } catch {}
+        break;
       case "STOP_TYPING":
         console.log("[STS WS] STOP_TYPING received from server");
         if (S.typing.active || S.typing.starting) stopTyping();

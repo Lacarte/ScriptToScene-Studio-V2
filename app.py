@@ -201,6 +201,42 @@ def activate_chromium_tab():
     return jsonify({"ok": False, "error": f"No {target} extension connected"}), 404
 
 
+@app.route("/api/chromium/health", methods=["GET"])
+def chromium_health():
+    """Report connection status of all extension WebSocket clients."""
+    from studio.storyboard.gemini_ws import is_extension_connected as gemini_connected
+    from studio.animator.routes import is_extension_connected as grok_connected
+
+    return jsonify({
+        "gemini": {"connected": bool(gemini_connected())},
+        "grok": {"connected": bool(grok_connected())},
+    })
+
+
+@app.route("/api/chromium/focus-studio", methods=["POST"])
+def focus_studio_tab_endpoint():
+    """Ask any connected extension to focus the ScriptToScene Studio tab."""
+    from studio.storyboard.gemini_ws import focus_studio_tab as gemini_focus
+    from studio.animator.routes import focus_studio_tab as grok_focus
+
+    sent_gemini = False
+    sent_grok = False
+    try:
+        sent_gemini = bool(gemini_focus())
+    except Exception as e:
+        logger.warning("focus-studio gemini failed: {}", e)
+    try:
+        sent_grok = bool(grok_focus())
+    except Exception as e:
+        logger.warning("focus-studio grok failed: {}", e)
+
+    return jsonify({
+        "ok": sent_gemini or sent_grok,
+        "gemini": sent_gemini,
+        "grok": sent_grok,
+    })
+
+
 @app.route("/api/pipeline/preflight", methods=["POST"])
 def pipeline_preflight():
     """Check extension connectivity before starting a pipeline run."""
