@@ -88,6 +88,15 @@ init_gemini_ws(sock)
 from studio.orchestrator_ws import init_orchestrator_ws
 init_orchestrator_ws(sock)
 
+from studio.tts.providers import registry as tts_reg, init_tts_registry
+from studio.storyboard.providers import registry as storyboard_reg, init_storyboard_registry
+from studio.animator.providers import registry as animator_reg, init_animator_registry
+init_tts_registry(app=app, sock=sock)
+init_storyboard_registry(app=app, sock=sock)
+init_animator_registry(app=app, sock=sock)
+logger.info("[providers] tts: {} registered, storyboard: {} registered, animator: {} registered",
+           len(tts_reg), len(storyboard_reg), len(animator_reg))
+
 
 # ---------------------------------------------------------------------------
 # Core routes

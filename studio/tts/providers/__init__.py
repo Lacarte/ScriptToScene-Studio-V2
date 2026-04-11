@@ -1,6 +1,6 @@
-"""Animator Provider Registry — Phase 2-3.
+"""TTS Provider Registry — Phase 2-3.
 
-Performs discovery scan on module import to register all Animator providers.
+Performs discovery scan on module import to register all TTS providers.
 Providers are discovered by scanning this directory for subfolders containing manifest.py.
 """
 
@@ -11,35 +11,35 @@ from loguru import logger
 from config import ROOT_DIR
 from studio.shared.providers_common import ProviderRegistry, call_provider_runtime
 
-registry = ProviderRegistry(domain='animator')
+registry = ProviderRegistry(domain='tts')
 
-_PROVIDERS_BASE = os.path.join(ROOT_DIR, "studio", "animator", "providers")
+_PROVIDERS_BASE = os.path.join(ROOT_DIR, "studio", "tts", "providers")
 
 def discover():
-    """Scan for and register all Animator providers."""
+    """Scan for and register all TTS providers."""
     registry.discovery_scan(_PROVIDERS_BASE)
     return registry
 
 
 def get_provider(provider_id: str):
-    """Get an Animator provider by ID."""
+    """Get a TTS provider by ID."""
     return registry.get(provider_id)
 
 
 def list_providers():
-    """List all registered Animator providers."""
+    """List all registered TTS providers."""
     return registry.list_providers()
 
 
-def init_animator_registry(app=None, sock=None):
-    """Called at app startup to discover and register all Animator providers.
+def init_tts_registry(app=None, sock=None):
+    """Called at app startup to discover and register all TTS providers.
     
     Args:
         app: Flask application instance
         sock: Flask-Sock instance
     """
     discover()
-    logger.info("[providers] animator: {} registered, ids={}", 
+    logger.info("[providers] tts: {} registered, ids={}", 
                len(registry), registry.list_ids())
     
     if app is not None and sock is not None:
@@ -51,4 +51,4 @@ def init_animator_registry(app=None, sock=None):
 
 discover()
 
-__all__ = ['registry', 'discover', 'get_provider', 'list_providers', 'init_animator_registry']
+__all__ = ['registry', 'discover', 'get_provider', 'list_providers', 'init_tts_registry']

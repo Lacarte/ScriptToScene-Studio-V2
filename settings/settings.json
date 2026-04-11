@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "general": {
+    "default_style": "cinematic",
+    "sync_folder": "D:/@Sync/PHONE-S24-PC",
+    "auto_sync": true
+  },
+  "domains": {
+    "tts": {
+      "selected_provider": "inworld",
+      "per_provider": {
+        "inworld": {
+          "api_key": "",
+          "voice": "af_bella",
+          "model": "inworld-tts-1.5-max",
+          "speed": 1.0,
+          "lang": "top-picks"
+        },
+        "kokoro": {
+          "voice": "af_bella",
+          "speed": 1.0,
+          "lang": "top-picks"
+        }
+      }
+    },
+    "storyboard": {
+      "selected_provider": "gemini_ws",
+      "per_provider": {
+        "gemini_ws": {
+          "auto_type": false
+        },
+        "wavespeed_webhook": {
+          "webhook_url": "",
+          "image_model": ""
+        },
+        "wavespeed_direct": {
+          "api_key": "",
+          "image_model": ""
+        }
+      }
+    },
+    "animator": {
+      "selected_provider": "grok_automa",
+      "per_provider": {
+        "grok_automa": {
+          "mode": "video",
+          "quality": "480p",
+          "duration": "6s"
+        },
+        "kie_ai": {
+          "api_key": "",
+          "model": "google/nano-banana",
+          "resolution": "1"
+        }
+      }
+    }
+  }
+}

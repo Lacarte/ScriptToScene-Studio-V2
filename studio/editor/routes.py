@@ -25,6 +25,8 @@ from studio.ffmpeg_utils import find_ffprobe
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
 from studio.editor.schemas import EditorSaveRequest, ExportRequest
+from studio.shared.providers_common import settings_adapter as adapter
+from studio.shared.providers_common import settings_manager
 
 editor_bp = Blueprint("editor", __name__)
 
@@ -202,6 +204,72 @@ def delete_settings():
     cfg["user"] = {}
     _write_app_config(cfg)
     return jsonify({"ok": True})
+
+
+@editor_bp.route("/api/settings/v2", methods=["GET"])
+def get_settings_v2():
+    """Return nested settings from settings/settings.json.
+    
+    Phase 1: Returns full settings structure with version, general, domains.
+    Frontend compatibility via settings_adapter.nested_to_flat() until Phase 9.
+    """
+    settings = settings_manager.load_settings()
+    return jsonify(settings)
+
+
+@editor_bp.route("/api/settings/v2", methods=["PUT"])
+def put_settings_v2():
+    """Replace all settings in settings/settings.json."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected JSON object"}), 400
+    issues = settings_manager.validate_settings(data)
+    if issues:
+        errors = [i for i in issues if i["severity"] == "error"]
+        if errors:
+            return jsonify({"error": "Invalid settings", "issues": issues}), 400
+    settings_manager.save_settings(data)
+    return jsonify({"ok": True, "issues": issues})
+
+
+@editor_bp.route("/api/providers", methods=["GET"])
+def list_providers():
+    """Return registered providers by domain.
+    
+    Returns real registry contents with provider details and selected provider per domain.
+    """
+    from studio.tts.providers import registry as tts_registry
+    from studio.storyboard.providers import registry as storyboard_registry
+    from studio.animator.providers import registry as animator_registry
+    from studio.shared.providers_common import settings_manager
+
+    tts_settings = settings_manager.get_domain_settings('tts')
+    storyboard_settings = settings_manager.get_domain_settings('storyboard')
+    animator_settings = settings_manager.get_domain_settings('animator')
+
+    return jsonify({
+        "domains": {
+            "tts": tts_registry.to_dict(selected_provider=tts_settings.get("selected_provider")),
+            "storyboard": storyboard_registry.to_dict(selected_provider=storyboard_settings.get("selected_provider")),
+            "animator": animator_registry.to_dict(selected_provider=animator_settings.get("selected_provider")),
+        }
+    })
+
+
+@editor_bp.route("/api/providers/<domain>/<provider_id>/validate", methods=["POST"])
+def validate_provider_settings(domain, provider_id):
+    """Validate provider settings without saving.
+    
+    Phase 1: Stub endpoint returning empty validation.
+    Full implementation in Phase 2 with actual provider validation.
+    """
+    data = request.get_json(silent=True) or {}
+    return jsonify({
+        "valid": True,
+        "issues": [],
+        "provider_id": provider_id,
+        "domain": domain,
+    })
 
 
 @editor_bp.route("/api/settings/browse-folder", methods=["POST"])
