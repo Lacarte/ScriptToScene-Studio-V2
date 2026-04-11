@@ -19,6 +19,7 @@ from studio.validation import validate_json
 from .schemas import GrabberStartRequest
 from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
 from .providers.kie_ai import generate_image as kie_ai_generate
+from studio.shared.providers_common import settings_manager
 
 VIDEO_EXTS = (".mp4", ".webm", ".mov")
 
@@ -186,12 +187,28 @@ _load_jobs_from_disk()
 @validate_json(GrabberStartRequest)
 def grabber_start(data: GrabberStartRequest):
     """Initialize a grabber job — prepares prompts for Automa to consume."""
-    logger.info("grabber_start request: {} scenes, provider={}", len(data.scenes), data.provider)
+    # Resolve provider: override → settings → default
+    from studio.animator.providers import registry as anim_registry
+    from studio.shared.providers_common import settings_manager
+    
+    provider_id = data.provider_id
+    
+    provider = anim_registry.get(provider_id)
+    if provider is None:
+        # Fall back to grok_automa
+        provider_id = "grok_automa"
+        provider = anim_registry.get(provider_id)
+        if provider is None:
+            return jsonify({"error": f"Provider '{provider_id}' not found"}), 400
+    
+    logger.info("grabber_start request: {} scenes, provider={}", len(data.scenes), provider_id)
 
     project_id = sanitize_project_id(data.project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    provider = data.provider
+    
+    # Get provider settings
+    provider_settings = settings_manager.get_provider_settings("animator", provider_id)
     arguments = data.arguments
     scenes = [s.model_dump() for s in data.scenes]
     consistency = data.consistency
@@ -246,7 +263,7 @@ def grabber_start(data: GrabberStartRequest):
     }
 
     # Pass Grok-specific options for Automa to configure the UI
-    if provider == "grok":
+    if provider_id == "grok_automa":
         request_data = request.get_json(silent=True) or {}
         automa_payload["grok_mode"] = request_data.get("grok_mode", "video")
         automa_payload["grok_quality"] = request_data.get("grok_quality", "480p")
@@ -267,7 +284,7 @@ def grabber_start(data: GrabberStartRequest):
     job = {
         "grabber_id": grabber_id,
         "project_id": project_id,
-        "provider": provider,
+        "provider": provider_id,  # Use new provider ID
         "arguments": arguments,
         "payload": automa_payload,
         "scene_statuses": scene_statuses,
@@ -277,13 +294,15 @@ def grabber_start(data: GrabberStartRequest):
     }
 
     # Store Kie AI generation options for the background thread
-    if provider == "kie-ai":
+    if provider_id == "kie_ai":
         job["_kie_ai_options"] = {
             "model": data.model or KIE_AI_MODEL,
             "aspect_ratio": data.aspect_ratio or "9:16",
             "resolution": data.resolution or "1",
             "output_format": data.output_format or "jpg",
         }
+        # Merge provider settings
+        job["_kie_ai_options"].update(provider_settings)
 
     grabber_jobs.set(project_id, job)
     _save_job(job)
@@ -292,7 +311,7 @@ def grabber_start(data: GrabberStartRequest):
 
     # Push to connected WebSocket clients (Automa / STS extension)
     # Payload already contains base64 images from the scene_list build above
-    if provider == "grok":
+    if provider_id == "grok_automa":
         try:
             from .routes import queue_grabber_start
             queue_grabber_start({
@@ -311,7 +330,7 @@ def grabber_start(data: GrabberStartRequest):
             logger.warning("WebSocket push failed: {}", e)
 
     # Kie AI: fully server-side — spawn background thread to generate + download
-    if provider == "kie-ai":
+    if provider_id == "kie_ai":
         job["status"] = "generating"
         _save_job(job)
         threading.Thread(
@@ -324,7 +343,7 @@ def grabber_start(data: GrabberStartRequest):
         "grabber_id": grabber_id,
         "project_id": project_id,
         "scene_count": len(automa_payload["scenes"]),
-        "provider": provider,
+        "provider": provider_id,
     })
 
 

@@ -1,0 +1,19 @@
+"""WaveSpeed Direct Storyboard Provider Manifest — Phase 6."""
+
+from studio.shared.providers_common import ProviderManifest
+
+
+def manifest() -> ProviderManifest:
+    return ProviderManifest(
+        id="wavespeed_direct",
+        label="WaveSpeed Direct",
+        domain="storyboard",
+        kind="cloud",
+        version="1.0.0",
+        requires=["api_key"],
+        capabilities={
+            "test_connection": True,
+            "single_scene": True,
+            "batch": True,
+        },
+    )

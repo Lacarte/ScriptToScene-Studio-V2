@@ -7,6 +7,9 @@ import { useWelcomeOverlay } from '@/shared/composables/useWelcomeOverlay.js'
 import { api } from '@/shared/api/client.js'
 import SettingsToggle from '../components/SettingsToggle.vue'
 import ClearProjectsDialog from '../components/ClearProjectsDialog.vue'
+import ProviderSelector from '@/features/providers/components/ProviderSelector.vue'
+import ProviderSettingsModal from '@/features/providers/components/ProviderSettingsModal.vue'
+import ProviderSettingsForm from '@/features/providers/components/ProviderSettingsForm.vue'
 
 defineOptions({ name: 'SettingsPage' })
 
@@ -17,6 +20,29 @@ const welcome = useWelcomeOverlay()
 const showClearDialog = ref(false)
 const restarting = ref(false)
 const browsing = ref(false)
+
+const modalOpen = ref(false)
+const modalDomain = ref('')
+const modalProviderId = ref('')
+
+function onProviderConfigure({ domain, providerId }) {
+  modalDomain.value = domain
+  modalProviderId.value = providerId
+  modalOpen.value = true
+}
+
+function onProviderSelect({ domain, providerId }) {
+  toast.success(`Switched ${domain} provider to ${providerId}`)
+}
+
+function onProviderSaved({ domain, providerId }) {
+  toast.success(`${providerId} settings saved`)
+  modalOpen.value = false
+}
+
+function onModalClose() {
+  modalOpen.value = false
+}
 
 async function browseSyncFolder() {
   browsing.value = true
@@ -205,46 +231,32 @@ function featureLabel(val) {
             <option v-for="t in styleTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </div>
-        <div class="export-default-row">
-          <div class="export-copy">
-            <label class="export-label">TTS Provider</label>
-            <p class="export-help">Voice engine used for narration. Kokoro runs locally; Inworld uses the cloud API.</p>
-          </div>
-          <select
-            class="input-field export-select"
-            :value="settings['sts-tts-provider'] ?? 'kokoro'"
-            @change="onToggle('sts-tts-provider', $event.target.value)"
-          >
-            <option value="kokoro">Kokoro (local)</option>
-            <option value="inworld">Inworld (cloud)</option>
-          </select>
+        <div class="export-default-row provider-row">
+          <ProviderSelector
+            domain="tts"
+            label="TTS Provider"
+            description="Voice engine used for narration. Kokoro runs locally; Inworld uses the cloud API."
+            @configure="onProviderConfigure"
+            @select="onProviderSelect"
+          />
         </div>
-        <div class="export-default-row">
-          <div class="export-copy">
-            <label class="export-label">Storyboard Provider</label>
-            <p class="export-help">Image generation for storyboard. Gemini uses the browser extension; Webhook uses WaveSpeed via n8n.</p>
-          </div>
-          <select
-            class="input-field export-select"
-            :value="settings['sts-storyboard-provider'] ?? 'gemini'"
-            @change="onToggle('sts-storyboard-provider', $event.target.value)"
-          >
-            <option value="gemini">Gemini (extension)</option>
-            <option value="webhook">Webhook / WaveSpeed</option>
-          </select>
+        <div class="export-default-row provider-row">
+          <ProviderSelector
+            domain="storyboard"
+            label="Storyboard Provider"
+            description="Image generation for storyboard scenes."
+            @configure="onProviderConfigure"
+            @select="onProviderSelect"
+          />
         </div>
-        <div class="export-default-row">
-          <div class="export-copy">
-            <label class="export-label">Animator Provider</label>
-            <p class="export-help">Video generation for scene assets. Uses Grok via browser extension.</p>
-          </div>
-          <select
-            class="input-field export-select"
-            :value="settings['sts-asset-provider'] ?? 'grok'"
-            @change="onToggle('sts-asset-provider', $event.target.value)"
-          >
-            <option value="grok">Grok (extension)</option>
-          </select>
+        <div class="export-default-row provider-row">
+          <ProviderSelector
+            domain="animator"
+            label="Animator Provider"
+            description="Video generation for scene assets."
+            @configure="onProviderConfigure"
+            @select="onProviderSelect"
+          />
         </div>
       </div>
     </section>
@@ -452,6 +464,24 @@ function featureLabel(val) {
     </section>
 
     <ClearProjectsDialog v-if="showClearDialog" @close="showClearDialog = false" />
+
+    <ProviderSettingsModal
+      v-if="modalOpen"
+      :visible="modalOpen"
+      :domain="modalDomain"
+      :provider-id="modalProviderId"
+      @close="onModalClose"
+      @saved="onProviderSaved"
+    >
+      <template #form="{ formData, schema, errors, updateField }">
+        <ProviderSettingsForm
+          :model-value="formData"
+          :schema="schema"
+          :errors="errors"
+          @update:model-value="val => Object.assign(formData, val)"
+        />
+      </template>
+    </ProviderSettingsModal>
   </div>
 </template>
 
@@ -495,6 +525,26 @@ function featureLabel(val) {
   background: var(--bg-darkest);
   border: 1px solid var(--border);
   border-radius: 10px;
+}
+
+.export-default-row.provider-row {
+  padding: 12px 14px;
+}
+
+.export-default-row.provider-row :deep(.provider-selector) {
+  width: 100%;
+}
+
+.export-default-row.provider-row :deep(.selector-label) {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.export-default-row.provider-row :deep(.selector-desc) {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .export-copy {

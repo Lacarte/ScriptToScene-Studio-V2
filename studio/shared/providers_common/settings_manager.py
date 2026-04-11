@@ -121,8 +121,9 @@ def save_settings(data: dict) -> None:
             suffix=".tmp"
         )
         try:
-            with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
+            with os.fdopen(temp_fd, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(temp_path, SETTINGS_PATH)

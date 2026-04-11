@@ -129,6 +129,29 @@ def _send_to_extension(msg):
             return False
 
 
+def add_job(project_id: str, scenes: list, grok_mode: str = "video", quality: str = "480p", duration: str = "6s"):
+    """Add an animator job for the Grok extension.
+    
+    Args:
+        project_id: Project identifier
+        scenes: List of scene dicts with 'index', 'prompt'
+        grok_mode: "video" or "image"
+        quality: Video quality
+        duration: Video duration
+    """
+    msg = {
+        "type": "GRABBER_START",
+        "projectId": project_id,
+        "scenes": scenes,
+        "grokMode": grok_mode,
+        "grokQuality": quality,
+        "grokDuration": duration,
+    }
+    queue_grabber_start(msg)
+    logger.info("Added job to Grok animator queue: project={}, scenes={}", project_id, len(scenes))
+    return msg
+
+
 def queue_grabber_start(msg):
     """Queue a GRABBER_START message. Sends immediately AND keeps queued for late-connecting clients."""
     global _pending_grabber

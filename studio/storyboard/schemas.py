@@ -17,10 +17,16 @@ class StoryboardGenerateRequest(BaseModel):
     scenes: list[StoryboardScene] = Field(min_length=1)
     aspect_ratio: str = "9:16"
     webhook_url: Optional[str] = None
-    provider: str = "webhook"  # "webhook" or "gemini"
+    provider_override: Optional[str] = None  # Provider ID from registry (e.g., "gemini_ws", "wavespeed_webhook", "wavespeed_direct")
+    provider_options: dict = Field(default_factory=dict)  # Optional per-run settings
     style: Optional[str] = None
     image_model: Optional[str] = None
     auto_type: bool = True
+
+    @property
+    def provider(self) -> str:
+        """Legacy accessor for backward compatibility."""
+        return self.provider_override or "webhook"
 
     model_config = {"extra": "allow"}
 

@@ -260,13 +260,167 @@ def list_providers():
 def validate_provider_settings(domain, provider_id):
     """Validate provider settings without saving.
     
-    Phase 1: Stub endpoint returning empty validation.
-    Full implementation in Phase 2 with actual provider validation.
+    Validates the provider's settings and returns validation issues.
     """
+    from studio.tts.providers import registry as tts_registry
+    from studio.storyboard.providers import registry as storyboard_registry
+    from studio.animator.providers import registry as animator_registry
+    
+    domainRegistries = {
+        'tts': tts_registry,
+        'storyboard': storyboard_registry,
+        'animator': animator_registry,
+    }
+    
+    if domain not in domainRegistries:
+        return jsonify({"error": f"Unknown domain: {domain}"}), 400
+    
+    registry = domainRegistries[domain]
+    provider = registry.get(provider_id)
+    if provider is None:
+        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
+    
     data = request.get_json(silent=True) or {}
+    current_settings = settings_manager.get_provider_settings(domain, provider_id)
+    merged_settings = {**current_settings, **data}
+    
+    issues = provider.validate_settings(merged_settings)
+    issues_list = [
+        {"field": i.field, "severity": i.severity, "message": i.message}
+        if hasattr(i, 'field') else i
+        for i in issues
+    ]
+    
+    has_errors = any(i.get('severity') == 'error' for i in issues_list)
+    
     return jsonify({
-        "valid": True,
-        "issues": [],
+        "valid": not has_errors,
+        "issues": issues_list,
+        "provider_id": provider_id,
+        "domain": domain,
+    })
+
+
+@editor_bp.route("/api/providers/<domain>/<provider_id>/test", methods=["POST"])
+def test_provider_settings(domain, provider_id):
+    """Test provider connection/health.
+    
+    Runs health_check on the provider's current settings.
+    """
+    from studio.tts.providers import registry as tts_registry
+    from studio.storyboard.providers import registry as storyboard_registry
+    from studio.animator.providers import registry as animator_registry
+    
+    domainRegistries = {
+        'tts': tts_registry,
+        'storyboard': storyboard_registry,
+        'animator': animator_registry,
+    }
+    
+    if domain not in domainRegistries:
+        return jsonify({"error": f"Unknown domain: {domain}"}), 400
+    
+    registry = domainRegistries[domain]
+    provider = registry.get(provider_id)
+    if provider is None:
+        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
+    
+    data = request.get_json(silent=True) or {}
+    current_settings = settings_manager.get_provider_settings(domain, provider_id)
+    merged_settings = {**current_settings, **data}
+    
+    health = provider.health_check(merged_settings)
+    
+    return jsonify({
+        "provider_id": provider_id,
+        "domain": domain,
+        "health": health,
+    })
+
+
+@editor_bp.route("/api/providers/<domain>/<provider_id>/settings", methods=["GET"])
+def get_provider_settings(domain, provider_id):
+    """Get settings for a specific provider.
+    
+    Returns the provider's settings merged with defaults from schema.
+    """
+    from studio.tts.providers import registry as tts_registry
+    from studio.storyboard.providers import registry as storyboard_registry
+    from studio.animator.providers import registry as animator_registry
+    
+    domainRegistries = {
+        'tts': tts_registry,
+        'storyboard': storyboard_registry,
+        'animator': animator_registry,
+    }
+    
+    if domain not in domainRegistries:
+        return jsonify({"error": f"Unknown domain: {domain}"}), 400
+    
+    registry = domainRegistries[domain]
+    provider = registry.get(provider_id)
+    if provider is None:
+        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
+    
+    settings = settings_manager.get_provider_settings(domain, provider_id)
+    schema = provider.settings_schema()
+    
+    return jsonify({
+        "provider_id": provider_id,
+        "domain": domain,
+        "settings": settings,
+        "schema": schema,
+        "manifest": provider.to_dict(),
+    })
+
+
+@editor_bp.route("/api/providers/<domain>/<provider_id>/settings", methods=["PUT"])
+def put_provider_settings(domain, provider_id):
+    """Update settings for a specific provider.
+    
+    Merges provided settings with existing and saves to settings.json.
+    """
+    from studio.tts.providers import registry as tts_registry
+    from studio.storyboard.providers import registry as storyboard_registry
+    from studio.animator.providers import registry as animator_registry
+    
+    domainRegistries = {
+        'tts': tts_registry,
+        'storyboard': storyboard_registry,
+        'animator': animator_registry,
+    }
+    
+    if domain not in domainRegistries:
+        return jsonify({"error": f"Unknown domain: {domain}"}), 400
+    
+    registry = domainRegistries[domain]
+    provider = registry.get(provider_id)
+    if provider is None:
+        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
+    
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected JSON object"}), 400
+    
+    merged = settings_manager.get_provider_settings(domain, provider_id)
+    merged.update(data)
+    
+    issues = provider.validate_settings(merged)
+    issues_list = [
+        {"field": i.field, "severity": i.severity, "message": i.message}
+        if hasattr(i, 'field') else i
+        for i in issues
+    ]
+    
+    has_errors = any(i.get('severity') == 'error' for i in issues_list)
+    if has_errors:
+        return jsonify({"error": "Validation failed", "issues": issues_list}), 400
+    
+    settings_manager.set_provider_settings(domain, provider_id, merged)
+    
+    return jsonify({
+        "ok": True,
+        "issues": issues_list,
         "provider_id": provider_id,
         "domain": domain,
     })

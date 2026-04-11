@@ -28,8 +28,12 @@ _pending_job_lock = threading.Lock()
 _storyboard_json_lock = threading.Lock()  # Protects read-modify-write on storyboard.json
 
 
-def init_gemini_ws(sock):
+def register_runtime(app, sock=None):
     """Register the /ws/storyboard-gemini-image-grabber WebSocket route."""
+    if sock is None:
+        from loguru import logger
+        logger.warning("[gemini_ws] No socket provided, skipping runtime registration")
+        return
 
     @sock.route("/ws/storyboard-gemini-image-grabber")
     def gemini_ws(ws):
@@ -84,6 +88,27 @@ def is_extension_connected():
         alive = _prune_dead_clients()
         logger.info("Gemini WS connection check: {} alive client(s)", len(alive))
         return len(alive) > 0
+
+
+def add_job(project_id: str, scenes: list, auto_type: bool = False):
+    """Add a storyboard job for the Gemini extension.
+    
+    Args:
+        project_id: Project identifier
+        scenes: List of scene dicts with 'index', 'prompt', 'aspect_ratio'
+        auto_type: Auto-type images as they arrive
+    """
+    aspect_ratio = "16:9"
+    msg = {
+        "type": "IMAGE_JOB",
+        "projectId": project_id,
+        "scenes": scenes,
+        "aspectRatio": aspect_ratio,
+        "autoType": auto_type,
+    }
+    queue_image_job(msg)
+    logger.info("Added job to Gemini WS queue: project={}, scenes={}", project_id, len(scenes))
+    return msg
 
 
 def queue_image_job(msg):

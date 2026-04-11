@@ -304,21 +304,36 @@ def generate(data: StoryboardGenerateRequest):
     _jobs.set(project_id, job)
     _save_storyboard_json(project_id, job)
 
-    provider = getattr(data, "provider", "webhook") or "webhook"
-    logger.info("[{}] Storyboard generate — provider={}, aspect={}, scenes={}",
-                project_id, provider, data.aspect_ratio, len(scenes))
-
-    if provider == "gemini":
+    # Resolve provider: request override → settings → default
+    from studio.storyboard.providers import registry as sb_registry
+    from studio.shared.providers_common import settings_manager
+    
+    provider_override = getattr(data, "provider_override", None)
+    if provider_override:
+        provider_id = provider_override
+    else:
+        domain_settings = settings_manager.get_domain_settings("storyboard")
+        provider_id = domain_settings.get("selected_provider", "gemini_ws")
+    
+    provider = sb_registry.get(provider_id)
+    if provider is None:
+        logger.warning("[{}] Provider '{}' not found, falling back to gemini_ws", project_id, provider_id)
+        provider = sb_registry.get("gemini_ws")
+        provider_id = "gemini_ws"
+    
+    if provider_id == "gemini_ws":
         # Gemini provider: queue prompts via WebSocket to Chrome extension
-        # Job is queued immediately — if extension isn't connected yet, it will
-        # receive the job as soon as it connects (tab may still be loading).
         from studio.storyboard.gemini_ws import queue_image_job, is_extension_connected
-
+        
+        # Merge settings with provider_options from request
+        provider_settings = settings_manager.get_provider_settings("storyboard", provider_id)
+        merged_settings = {**provider_settings, **data.provider_options}
+        
         job_msg = {
             "type": "IMAGE_JOB",
             "projectId": project_id,
             "aspectRatio": data.aspect_ratio,
-            "autoType": getattr(data, "auto_type", True),
+            "autoType": merged_settings.get("auto_type", True),
             "scenes": [{"scene": s["scene"], "prompt": s["prompt"]} for s in scenes],
         }
 
@@ -330,9 +345,9 @@ def generate(data: StoryboardGenerateRequest):
             logger.info("[{}] Gemini storyboard job queued (waiting for extension) — {} scenes",
                         project_id, len(scenes))
 
-        return jsonify({"status": "running", "project_id": project_id, "total": len(scenes), "provider": "gemini"}), 202
+        return jsonify({"status": "running", "project_id": project_id, "total": len(scenes), "provider": provider_id}), 202
 
-    # Default: webhook provider
+    # Default: webhook/direct providers
     t = threading.Thread(
         target=_generate_storyboard,
         args=(project_id, scenes, data.aspect_ratio, data.webhook_url),
