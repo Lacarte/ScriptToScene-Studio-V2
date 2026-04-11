@@ -1,9 +1,8 @@
-"""Shared provider utilities — Phase 1-3.
+"""Shared provider utilities — Phase 9.
 
 Modules:
   - settings_migrations: version-to-version migrations
   - settings_manager: canonical load/save/validate for settings.json
-  - settings_adapter: DEPRECATED flat<->nested translator (Phase 9 removal)
   - registry: provider discovery and domain-scoped registries
   - runtime: base class for extension provider runtimes
   - http_client: retry/backoff wrapped requests
@@ -24,14 +23,6 @@ from studio.shared.providers_common.settings_manager import (
     redact_settings,
     redacted_provider_settings,
     validate_settings,
-)
-from studio.shared.providers_common.settings_adapter import (
-    flat_to_nested,
-    nested_to_flat,
-    read_flat_settings,
-    write_flat_settings,
-    get_flat_setting,
-    set_flat_setting,
 )
 from studio.shared.providers_common.registry import (
     ProviderRegistry,
@@ -71,12 +62,6 @@ __all__ = [
     "redact_settings",
     "redacted_provider_settings",
     "validate_settings",
-    "flat_to_nested",
-    "nested_to_flat",
-    "read_flat_settings",
-    "write_flat_settings",
-    "get_flat_setting",
-    "set_flat_setting",
     "ProviderRegistry",
     "ProviderManifest",
     "ProviderInstance",

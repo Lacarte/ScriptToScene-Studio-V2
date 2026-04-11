@@ -25,7 +25,6 @@ from studio.ffmpeg_utils import find_ffprobe
 from studio.io_utils import safe_json_write, safe_json_read
 from studio.validation import validate_json
 from studio.editor.schemas import EditorSaveRequest, ExportRequest
-from studio.shared.providers_common import settings_adapter as adapter
 from studio.shared.providers_common import settings_manager
 
 editor_bp = Blueprint("editor", __name__)
@@ -208,11 +207,7 @@ def delete_settings():
 
 @editor_bp.route("/api/settings/v2", methods=["GET"])
 def get_settings_v2():
-    """Return nested settings from settings/settings.json.
-    
-    Phase 1: Returns full settings structure with version, general, domains.
-    Frontend compatibility via settings_adapter.nested_to_flat() until Phase 9.
-    """
+    """Return nested settings from settings/settings.json."""
     settings = settings_manager.load_settings()
     return jsonify(settings)
 

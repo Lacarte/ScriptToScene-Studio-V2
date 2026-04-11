@@ -31,7 +31,6 @@ _storyboard_json_lock = threading.Lock()  # Protects read-modify-write on storyb
 def register_runtime(app, sock=None):
     """Register the /ws/storyboard-gemini-image-grabber WebSocket route."""
     if sock is None:
-        from loguru import logger
         logger.warning("[gemini_ws] No socket provided, skipping runtime registration")
         return
 
