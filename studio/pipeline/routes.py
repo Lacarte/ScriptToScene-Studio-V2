@@ -116,6 +116,55 @@ class PipelineStopped(RuntimeError):
         self.message = message
 
 
+def _preflight_provider_check(config: dict, project_id: str) -> None:
+    """Validate providers before pipeline runs. Raise if misconfigured.
+    
+    Phase 8: Validates TTS, storyboard, and animator providers.
+    """
+    from studio.shared.providers_common import settings_manager
+    
+    # Validate TTS provider
+    tts_override = config.get("tts_provider_override")
+    if tts_override:
+        from studio.tts.providers import registry as tts_registry
+        provider = tts_registry.get(tts_override)
+        if provider is None:
+            raise ValueError(f"TTS provider '{tts_override}' not found. Available: {tts_registry.list_ids()}")
+        
+        issues = provider.validate_settings(settings_manager.get_provider_settings("tts", tts_override))
+        if any(i.severity == "error" for i in issues):
+            errors = [f"{i.field}: {i.message}" for i in issues if i.severity == "error"]
+            raise ValueError(f"TTS provider '{tts_override}' misconfigured: {errors}")
+    
+    # Validate storyboard provider
+    sb_override = config.get("storyboard_provider_override")
+    if sb_override:
+        from studio.storyboard.providers import registry as sb_registry
+        provider = sb_registry.get(sb_override)
+        if provider is None:
+            raise ValueError(f"Storyboard provider '{sb_override}' not found. Available: {sb_registry.list_ids()}")
+        
+        issues = provider.validate_settings(settings_manager.get_provider_settings("storyboard", sb_override))
+        if any(i.severity == "error" for i in issues):
+            errors = [f"{i.field}: {i.message}" for i in issues if i.severity == "error"]
+            raise ValueError(f"Storyboard provider '{sb_override}' misconfigured: {errors}")
+    
+    # Validate animator provider
+    anim_override = config.get("animator_provider_override")
+    if anim_override:
+        from studio.animator.providers import registry as anim_registry
+        provider = anim_registry.get(anim_override)
+        if provider is None:
+            raise ValueError(f"Animator provider '{anim_override}' not found. Available: {anim_registry.list_ids()}")
+        
+        issues = provider.validate_settings(settings_manager.get_provider_settings("animator", anim_override))
+        if any(i.severity == "error" for i in issues):
+            errors = [f"{i.field}: {i.message}" for i in issues if i.severity == "error"]
+            raise ValueError(f"Animator provider '{anim_override}' misconfigured: {errors}")
+    
+    logger.debug("[{}] Preflight provider check passed", project_id)
+
+
 def _emit(job_id, event):
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -249,15 +298,19 @@ def run_pipeline(data: PipelineRunRequest):
         "stop_after": stop_after,
         "project_id": project_id,
         "resume_from": resume_from,
-        # Storyboard provider (gemini/webhook)
-        "storyboard_provider": data.storyboard_provider,
+        # Generic provider overrides (Phase 8)
+        "tts_provider_override": data.tts_provider_override,
+        "tts_provider_options": data.tts_provider_options,
+        "storyboard_provider_override": data.storyboard_provider_override,
+        "storyboard_provider_options": data.storyboard_provider_options,
+        "animator_provider_override": data.animator_provider_override,
+        "animator_provider_options": data.animator_provider_options,
+        # Legacy fields (backward compat)
         "prompt_prefix": data.prompt_prefix,
         "aspect_ratio": data.aspect_ratio,
         "auto_type": data.auto_type,
-        # TTS provider (kokoro/inworld)
         "tts_provider": data.tts_provider,
         "tts_voice": data.tts_voice,
-        # Asset grabber options (grok videos)
         "provider": data.provider,
         "grok_mode": data.grok_mode,
         "grok_quality": data.grok_quality,
@@ -808,9 +861,10 @@ def _run_pipeline(job_id):
 
     stop_after = config.get("stop_after")
     step_seq = job.get("step_sequence", [])
-    provider = config.get("provider", "grok")  # Assets provider (grok videos)
-    storyboard_provider = config.get("storyboard_provider", "webhook")  # Storyboard provider (gemini/webhook)
     resume_from = config.get("resume_from")
+    
+    # Phase 8: Validate providers at preflight
+    _preflight_provider_check(config, project_id)
 
     all_steps = ALL_PIPELINE_STEPS
     resume_idx = all_steps.index(resume_from) if resume_from in all_steps else 0
@@ -1214,7 +1268,7 @@ def _step_tts(config, project_id):
         raise ValueError(f"TTS provider '{provider_id}' not found. Available: {tts_registry.list_ids()}")
 
     provider_settings = settings_manager.get_provider_settings("tts", provider_id)
-    merged_settings = {**provider_settings, **config.get("provider_options", {})}
+    merged_settings = {**provider_settings, **config.get("tts_provider_options", {})}
 
     job_dir = _tts_job_dir(project_id)
     os.makedirs(job_dir, exist_ok=True)
@@ -1280,9 +1334,9 @@ def _step_tts_inworld_pipeline(config, project_id, text, voice, speed, job_dir, 
     metadata["job_meta"] = {
         "provider_id": provider_id,
         "provider_version": provider_version,
-        "provider_kind": "cloud",
+        "provider_kind": provider.kind if provider else "unknown",
         "resolved_settings_redacted": settings_manager.redact_settings(provider_settings),
-        "provider_options": config.get("provider_options", {}),
+        "provider_options": config.get("tts_provider_options", {}),
         "resolved_at": datetime.now(timezone.utc).isoformat(),
         "settings_version": settings.get("version", 1),
     }
@@ -1386,9 +1440,9 @@ def _step_tts_kokoro_pipeline(config, project_id, text, voice, speed, job_dir, w
     metadata["job_meta"] = {
         "provider_id": provider_id,
         "provider_version": provider_version,
-        "provider_kind": "local",
+        "provider_kind": provider.kind if provider else "unknown",
         "resolved_settings_redacted": settings_manager.redact_settings(provider_settings),
-        "provider_options": config.get("provider_options", {}),
+        "provider_options": config.get("tts_provider_options", {}),
         "resolved_at": datetime.now(timezone.utc).isoformat(),
         "settings_version": settings.get("version", 1),
     }
@@ -1660,7 +1714,13 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
     if _stop_requested(job_id):
         raise PipelineStopped(step_name="storyboard")
 
-    sb_provider = config.get("storyboard_provider", "webhook")
+    # Resolve provider: override → settings → default
+    sb_override = config.get("storyboard_provider_override")
+    sb_options = config.get("storyboard_provider_options", {})
+    
+    # Map new IDs to legacy names for backward compat
+    id_to_legacy = {"gemini_ws": "gemini", "wavespeed_webhook": "webhook", "wavespeed_direct": "direct"}
+    sb_provider = id_to_legacy.get(sb_override) if sb_override else config.get("storyboard_provider", "webhook")
     prompt_prefix = config.get("prompt_prefix", "") if sb_provider == "gemini" else ""
     if prompt_prefix:
         for sp in scenes_payload:
@@ -1748,14 +1808,21 @@ def _step_assets(scenes_result, config, project_id, job_id):
     if not scenes:
         raise RuntimeError("No scenes to grab assets for")
 
-    # Build grabber payload
-    provider = config.get("provider", "grok")
+    # Resolve provider: override → settings → default
+    anim_override = config.get("animator_provider_override")
+    anim_options = config.get("animator_provider_options", {})
+    
+    # Map new IDs to legacy names for backward compat
+    id_to_legacy = {"grok_automa": "grok", "kie_ai": "kie-ai"}
+    provider = id_to_legacy.get(anim_override) if anim_override else config.get("provider", "grok")
+    
     aspect_ratio = config.get("aspect_ratio", "9:16")
     auto_type = config.get("auto_type", True)
 
     payload = {
         "project_id": project_id,
-        "provider": provider,
+        "provider_override": anim_override,
+        "provider_options": anim_options,
         "arguments": config.get("arguments", ""),
         "aspect_ratio": aspect_ratio,
         "auto_type": auto_type,
@@ -1765,11 +1832,11 @@ def _step_assets(scenes_result, config, project_id, job_id):
             if s.get("image_prompt")
         ],
     }
-    # Add provider-specific options
-    if provider == "grok":
-        payload["grok_mode"] = config.get("grok_mode", "video")
-        payload["grok_quality"] = config.get("grok_quality", "480p")
-        payload["grok_duration"] = config.get("grok_duration", "6s")
+    # Add provider-specific options from new format or legacy
+    if anim_override == "grok_automa" or provider == "grok":
+        payload["grok_mode"] = anim_options.get("mode", config.get("grok_mode", "video"))
+        payload["grok_quality"] = anim_options.get("quality", config.get("grok_quality", "480p"))
+        payload["grok_duration"] = anim_options.get("duration", config.get("grok_duration", "6s"))
 
     # Start grabber via internal API call
     base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"

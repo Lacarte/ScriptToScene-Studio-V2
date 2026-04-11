@@ -76,16 +76,24 @@ class PipelineRunRequest(BaseModel):
         return self
     # Image model override for storyboard (empty = auto from style config)
     image_model: Optional[str] = None
-    # Storyboard provider: "gemini" (Chrome extension) or "webhook" (WaveSpeed via n8n)
-    storyboard_provider: str = "webhook"
     # Prompt prefix prepended to each image prompt (e.g. "generate an image ")
     prompt_prefix: str = ""
-    # Asset grabber provider (grok videos)
-    provider: str = "grok"
     aspect_ratio: str = "9:16"
     auto_type: bool = True
-    grok_mode: str = "video"
-    grok_quality: str = "480p"
-    grok_duration: str = "6s"
+    
+    # Generic provider overrides for each step (Phase 8)
+    tts_provider_override: Optional[str] = None
+    tts_provider_options: dict = Field(default_factory=dict)
+    storyboard_provider_override: Optional[str] = None
+    storyboard_provider_options: dict = Field(default_factory=dict)
+    animator_provider_override: Optional[str] = None
+    animator_provider_options: dict = Field(default_factory=dict)
+    
+    # Legacy aliases (deprecated, for backward compatibility)
+    storyboard_provider: str = "webhook"  # Deprecated: use storyboard_provider_override
+    provider: str = "grok"  # Deprecated: use animator_provider_override
+    grok_mode: str = "video"  # Deprecated: use animator_provider_options
+    grok_quality: str = "480p"  # Deprecated: use animator_provider_options
+    grok_duration: str = "6s"  # Deprecated: use animator_provider_options
 
     model_config = {"extra": "allow"}
