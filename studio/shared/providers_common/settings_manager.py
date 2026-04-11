@@ -29,11 +29,17 @@ def _ensure_settings_dir() -> None:
     os.makedirs(SETTINGS_DIR, exist_ok=True)
 
 
+_settings_seeded = False
+
+
 def load_settings() -> dict:
     """Load settings from settings/settings.json, applying migrations if needed.
     
+    On first load, seeds from environment variables if settings.json doesn't exist.
     Returns the full settings dict with version, general, and domains keys.
     """
+    global _settings_seeded
+    
     _ensure_settings_dir()
     
     with _lock:
@@ -41,8 +47,11 @@ def load_settings() -> dict:
             with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except FileNotFoundError:
-            logger.warning("[settings] settings.json not found, returning defaults")
-            return _default_settings()
+            logger.warning("[settings] settings.json not found, seeding from env vars")
+            data = _seed_from_env()
+            save_settings(data)
+            _settings_seeded = True
+            return data
         except json.JSONDecodeError as e:
             logger.error("[settings] Corrupted settings.json: {}, returning defaults", e)
             return _default_settings()
@@ -51,8 +60,51 @@ def load_settings() -> dict:
     if changed:
         logger.info("[settings] Applied migrations, version now {}", migrated.get("version"))
         save_settings(migrated)
-    
+
     return migrated
+
+
+def _seed_from_env() -> dict:
+    """Seed default settings from environment variables."""
+    import os as os_module
+
+    def env(key: str, default: Any = None) -> str:
+        return os_module.environ.get(key, default) or default or ""
+
+    settings = _default_settings()
+    tts_pp = settings["domains"]["tts"]["per_provider"]
+    sb_pp = settings["domains"]["storyboard"]["per_provider"]
+    an_pp = settings["domains"]["animator"]["per_provider"]
+
+    sync_folder = env("STS_SYNC_FOLDER", "")
+    if sync_folder:
+        settings["general"]["sync_folder"] = sync_folder
+
+    settings["general"]["auto_sync"] = env("STS_AUTO_SYNC", "true").lower() in ("true", "1", "yes")
+
+    inworld_api_key = env("INWORLD_API_KEY", "")
+    if inworld_api_key:
+        tts_pp.setdefault("inworld", {})["api_key"] = inworld_api_key
+        settings["domains"]["tts"]["selected_provider"] = "inworld"
+
+    inworld_model = env("INWORLD_TTS_MODEL", "")
+    if inworld_model:
+        tts_pp.setdefault("inworld", {})["model"] = inworld_model
+
+    wavespeed_api_key = env("WAVESPEED_API_KEY", "")
+    if wavespeed_api_key:
+        sb_pp.setdefault("wavespeed_direct", {})["api_key"] = wavespeed_api_key
+
+    kie_api_key = env("KIE_AI_API_KEY", "")
+    if kie_api_key:
+        an_pp.setdefault("kie_ai", {})["api_key"] = kie_api_key
+
+    kie_model = env("KIE_AI_MODEL", "")
+    if kie_model:
+        an_pp.setdefault("kie_ai", {})["model"] = kie_model
+
+    logger.info("[settings] Seeded settings from environment variables")
+    return settings
 
 
 def save_settings(data: dict) -> None:

@@ -16,7 +16,9 @@ registry = ProviderRegistry(domain='animator')
 _PROVIDERS_BASE = os.path.join(ROOT_DIR, "studio", "animator", "providers")
 
 def discover():
-    """Scan for and register all Animator providers."""
+    """Scan for and register all Animator providers (idempotent)."""
+    if registry._discovered:
+        return registry
     registry.discovery_scan(_PROVIDERS_BASE)
     return registry
 
@@ -46,7 +48,8 @@ def init_animator_registry(app=None, sock=None):
         for provider_id in registry.list_ids():
             provider = registry.get(provider_id)
             if provider and provider.kind == 'extension':
-                call_provider_runtime(provider_id, provider.module, app, sock)
+                runtime_mod = provider.provider_module or provider.module
+                call_provider_runtime(provider_id, runtime_mod, app, sock)
 
 
 discover()

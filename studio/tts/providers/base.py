@@ -5,8 +5,8 @@ All TTS providers must implement these methods.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Callable, Iterator
+from dataclasses import dataclass, field
+from typing import Any, Callable, Iterator, Optional
 
 
 @dataclass
@@ -15,8 +15,8 @@ class Voice:
     id: str
     name: str
     language: str
-    gender: str | None = None
-    preview_url: str | None = None
+    gender: Optional[str] = None
+    preview_url: Optional[str] = None
 
 
 @dataclass
@@ -26,7 +26,7 @@ class TTSResult:
     duration_seconds: float
     format: str = "wav"
     sample_rate: int = 24000
-    metadata: dict | None = None
+    metadata: Optional[dict] = None
 
 
 @dataclass
@@ -54,9 +54,9 @@ class TTSProvider(ABC):
         self,
         text: str,
         settings: dict,
-        voice: str | None = None,
+        voice: Optional[str] = None,
         speed: float = 1.0,
-        on_progress: Callable[[str], None] | None = None,
+        on_progress: Optional[Callable] = None,
     ) -> TTSResult:
         """Synthesize speech from text.
         
@@ -111,7 +111,7 @@ class TTSProvider(ABC):
         self,
         text: str,
         settings: dict,
-        voice: str | None = None,
+        voice: Optional[str] = None,
         speed: float = 1.0,
     ) -> Iterator[TTSStreamChunk]:
         """Stream audio chunks. Optional.
