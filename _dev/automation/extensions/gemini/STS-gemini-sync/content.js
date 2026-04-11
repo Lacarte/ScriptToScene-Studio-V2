@@ -557,12 +557,11 @@
                 if (S.typing.queue[qi].queueKey === queueKey) { exists = true; break; }
               }
               if (!exists) {
-                var arSuffix = scAspect ? ' ' + scAspect : '';
                 S.typing.queue.push({
                   scene: k, queueKey: queueKey, projectId: pid,
                   displayPrompt: sc.prompt,
                   aspectRatio: scAspect,
-                  fullPrompt: sc.prompt + arSuffix,
+                  fullPrompt: decorateGeminiPrompt(sc.prompt),
                   selected: true, status: 'queued', error: null,
                 });
               }
@@ -1450,6 +1449,16 @@
     function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
     function encodeCopyText(s) { return encodeURIComponent(String(s || '')); }
 
+    // Wrap raw scene prompt with image-generation guidance + target aspect ratio.
+    // Applied to both the text typed into Gemini and the "Copy" button payload.
+    var GEMINI_PROMPT_PREFIX = 'Create a cinematic, high-quality image based on the following scene description:\n\n';
+    var GEMINI_PROMPT_SUFFIX = '\n\nAspect ratio: 9:16.';
+    function decorateGeminiPrompt(raw) {
+      var value = String(raw || '').trim();
+      if (!value) return '';
+      return GEMINI_PROMPT_PREFIX + value + GEMINI_PROMPT_SUFFIX;
+    }
+
     function copyText(text) {
       var value = String(text || '');
       if (!value.trim()) return Promise.reject(new Error('No prompt to copy'));
@@ -2042,8 +2051,9 @@
             html += '<div class="sts-group-label">' + escHtml(pid || 'Unknown') + '</div>';
             lastPid = pid;
           }
-          var fullPrompt = item.displayPrompt || item.prompt || item.fullPrompt || '';
-          var pr = fullPrompt.length > 46 ? fullPrompt.substring(0, 46) + '...' : fullPrompt;
+          var displayText = item.displayPrompt || item.prompt || item.fullPrompt || '';
+          var copyPayload = item.fullPrompt || decorateGeminiPrompt(displayText);
+          var pr = displayText.length > 46 ? displayText.substring(0, 46) + '...' : displayText;
           var sHTML = '', meta = '';
           var isCurrent = S.typing.active && si === S.typing.currentIndex;
           if (item.status === 'queued') { sHTML = '<div class="sts-d-q"></div>'; meta = 'queued'; }
@@ -2059,7 +2069,7 @@
           var retryHtml = item.status === 'error'
             ? '<button class="sts-retry-scene-btn" data-scene="' + item.scene + '" style="background:#f39c12;color:#0d1117;border:none;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;cursor:pointer;margin-top:2px;">RETRY</button>'
             : '';
-          var copyBtnHtml = fullPrompt ? '<button class="sts-copy-btn" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(fullPrompt) + '" title="Copy full prompt">Copy</button>' : '';
+          var copyBtnHtml = copyPayload ? '<button class="sts-copy-btn" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(copyPayload) + '" title="Copy full prompt">Copy</button>' : '';
           html += '<div class="' + rowCls + '">' +
             thumbHtml +
             '<div class="sts-row-num">' + item.scene + '</div>' +
@@ -2107,7 +2117,7 @@
           var thumbHtml = sc.imageUrl
             ? '<img class="sts-row-thumb" src="' + sc.imageUrl + '" alt="">'
             : '<div class="sts-row-thumb sts-row-thumb-empty">' + sceneNum + '</div>';
-          var copyBtnHtml = fullPrompt ? '<button class="sts-copy-btn" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(fullPrompt) + '" title="Copy full prompt">Copy</button>' : '';
+          var copyBtnHtml = fullPrompt ? '<button class="sts-copy-btn" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(decorateGeminiPrompt(fullPrompt)) + '" title="Copy full prompt">Copy</button>' : '';
           syncHtml += '<div class="sts-row">' +
             thumbHtml +
             '<div class="sts-row-num">' + sceneNum + '</div>' +
@@ -2142,7 +2152,7 @@
                 '<div class="sts-history-prompt-text">' + escHtml(fullPrompt) + '</div>' +
                 '<div class="sts-history-prompt-meta">' + escHtml(meta) + '</div>' +
               '</div>' +
-              (fullPrompt ? '<button class="sts-copy-btn sts-copy-btn-sm" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(fullPrompt) + '" title="Copy full prompt">Copy</button>' : '') +
+              (fullPrompt ? '<button class="sts-copy-btn sts-copy-btn-sm" type="button" data-role="copy-prompt" data-copy-text="' + encodeCopyText(decorateGeminiPrompt(fullPrompt)) + '" title="Copy full prompt">Copy</button>' : '') +
             '</div>';
           }).join('');
           return '<div class="sts-history-card' + (expanded ? ' open' : ' collapsed') + '">' +

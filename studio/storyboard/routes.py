@@ -329,11 +329,14 @@ def generate(data: StoryboardGenerateRequest):
         provider_settings = settings_manager.get_provider_settings("storyboard", provider_id)
         merged_settings = {**provider_settings, **data.provider_options}
         
+        # Per-request auto_type (from pipeline config) takes precedence over
+        # the saved provider setting — the pipeline always wants typing to
+        # start as soon as the extension acks the job.
         job_msg = {
             "type": "IMAGE_JOB",
             "projectId": project_id,
             "aspectRatio": data.aspect_ratio,
-            "autoType": merged_settings.get("auto_type", True),
+            "autoType": data.auto_type if data.auto_type is not None else merged_settings.get("auto_type", True),
             "scenes": [{"scene": s["scene"], "prompt": s["prompt"]} for s in scenes],
         }
 

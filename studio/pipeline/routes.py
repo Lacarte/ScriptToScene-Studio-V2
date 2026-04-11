@@ -14,7 +14,7 @@ import shutil
 import time
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from queue import Queue
 
 import numpy as np
@@ -862,7 +862,9 @@ def _run_pipeline(job_id):
     stop_after = config.get("stop_after")
     step_seq = job.get("step_sequence", [])
     resume_from = config.get("resume_from")
-    
+    provider = config.get("provider", "grok")
+    storyboard_provider = config.get("storyboard_provider", "webhook")
+
     # Phase 8: Validate providers at preflight
     _preflight_provider_check(config, project_id)
 
@@ -1253,19 +1255,26 @@ def _step_tts(config, project_id):
     from studio.shared.providers_common import settings_manager, redact_settings
 
     text = config["text"]
-    voice = config.get("voice") or "af_bella"
     speed = float(config.get("speed", 1.0))
-    
-    provider_override = config.get("tts_provider_override")
-    if provider_override:
-        provider_id = provider_override
-    else:
-        tts_domain = settings_manager.get_domain_settings("tts")
-        provider_id = tts_domain.get("selected_provider", "kokoro")
+
+    provider_id = (
+        config.get("tts_provider_override")
+        or config.get("tts_provider")
+        or settings_manager.get_domain_settings("tts").get("selected_provider")
+        or "kokoro"
+    )
 
     provider = tts_registry.get(provider_id)
     if provider is None:
         raise ValueError(f"TTS provider '{provider_id}' not found. Available: {tts_registry.list_ids()}")
+
+    # Pick the voice that matches the resolved provider — the frontend sends
+    # both `voice` (kokoro) and `tts_voice` (inworld) so the wrong one must be
+    # ignored, otherwise Inworld rejects kokoro voice IDs like 'am_fenrir'.
+    if provider_id == "inworld":
+        voice = config.get("tts_voice") or config.get("voice") or "Carter"
+    else:
+        voice = config.get("voice") or "af_bella"
 
     provider_settings = settings_manager.get_provider_settings("tts", provider_id)
     merged_settings = {**provider_settings, **config.get("tts_provider_options", {})}
@@ -1277,17 +1286,19 @@ def _step_tts(config, project_id):
     if provider_id == "inworld":
         return _step_tts_inworld_pipeline(
             config, project_id, text, voice, speed, job_dir, wav_path,
-            provider_id, provider_version=provider.version, provider_settings=merged_settings
+            provider_id, provider_version=provider.version, provider_kind=provider.kind,
+            provider_settings=merged_settings,
         )
 
     return _step_tts_kokoro_pipeline(
         config, project_id, text, voice, speed, job_dir, wav_path,
-        provider_id, provider_version=provider.version, provider_settings=merged_settings
+        provider_id, provider_version=provider.version, provider_kind=provider.kind,
+        provider_settings=merged_settings,
     )
 
 
 def _step_tts_inworld_pipeline(config, project_id, text, voice, speed, job_dir, wav_path,
-                               provider_id, provider_version, provider_settings):
+                               provider_id, provider_version, provider_kind, provider_settings):
     """Pipeline TTS via Inworld cloud API."""
     from studio.tts.inworld import synthesize_to_wav
     from studio.tts.normalize import clean_for_tts
@@ -1334,7 +1345,7 @@ def _step_tts_inworld_pipeline(config, project_id, text, voice, speed, job_dir, 
     metadata["job_meta"] = {
         "provider_id": provider_id,
         "provider_version": provider_version,
-        "provider_kind": provider.kind if provider else "unknown",
+        "provider_kind": provider_kind,
         "resolved_settings_redacted": settings_manager.redact_settings(provider_settings),
         "provider_options": config.get("tts_provider_options", {}),
         "resolved_at": datetime.now(timezone.utc).isoformat(),
@@ -1350,7 +1361,7 @@ def _step_tts_inworld_pipeline(config, project_id, text, voice, speed, job_dir, 
 
 
 def _step_tts_kokoro_pipeline(config, project_id, text, voice, speed, job_dir, wav_path,
-                              provider_id, provider_version, provider_settings):
+                              provider_id, provider_version, provider_kind, provider_settings):
     """Pipeline TTS via local Kokoro ONNX with caching."""
     from studio.tts.routes import (
         load_model, _voice_to_lang, _phonemize_with_misaki,
@@ -1440,7 +1451,7 @@ def _step_tts_kokoro_pipeline(config, project_id, text, voice, speed, job_dir, w
     metadata["job_meta"] = {
         "provider_id": provider_id,
         "provider_version": provider_version,
-        "provider_kind": provider.kind if provider else "unknown",
+        "provider_kind": provider_kind,
         "resolved_settings_redacted": settings_manager.redact_settings(provider_settings),
         "provider_options": config.get("tts_provider_options", {}),
         "resolved_at": datetime.now(timezone.utc).isoformat(),

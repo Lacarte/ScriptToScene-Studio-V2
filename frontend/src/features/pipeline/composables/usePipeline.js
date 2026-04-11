@@ -178,7 +178,6 @@ async function start() {
   const toast = useToast()
   const form = usePipelineForm()
   const niches = useNiches()
-  const { maybeOpenProviderLoadingTab } = useProviderTabs()
 
   const t = form.text.value.trim()
   if (!t) { toast.error('Enter story text'); return false }
@@ -192,8 +191,9 @@ async function start() {
   const assetProvider = _s.value['sts-asset-provider'] || 'grok'
   const stopValue = form.stopAfter.value || undefined
 
-  // Try to wake provider tabs before preflight so reconnects settle sooner.
-  maybeOpenProviderLoadingTab({ stopValue })
+  // Stay focused on STS at start. Each provider tab is activated only when
+  // its step actually emits an open_url SSE event, gated by the activate-tab
+  // endpoint's WS handshake-with-retry.
   try {
     const preflight = await api.post('/api/pipeline/preflight', {
       body: {
@@ -223,6 +223,8 @@ async function start() {
   resetProgress()
   running.value = true
   stopping.value = false
+  globalStatus.value = 'running'
+  stepStatus.value = { [ALL_STEPS[0].id]: 'running' }
 
   const webhookUrl = localStorage.getItem('sts-scenes-webhook-url') || ''
   const config = {
@@ -266,7 +268,6 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
   const toast = useToast()
   const form = usePipelineForm()
   const niches = useNiches()
-  const { maybeOpenProviderLoadingTab } = useProviderTabs()
 
   if (running.value) { toast.error('Pipeline is already running'); return }
   if (!resumeStep || !resumeProject) { toast.error('No pipeline step to resume'); return }
@@ -302,8 +303,6 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     resume_from: resumeStep,
     resume_project_id: resumeProject,
   }
-
-  maybeOpenProviderLoadingTab({ stopValue: config.stop_after, resumeStep })
 
   try {
     const res = await api.post('/api/pipeline/run', { body: config })

@@ -231,7 +231,9 @@ const sceneStats = computed(() => {
   if (videoProgress.value) {
     stats.push({ key: 'videos', label: 'Videos', ready: videoProgress.value.scene || 0, total: videoProgress.value.total || 0, tone: 'video' })
   }
-  stats.push({ key: 'events', label: 'Events', ready: sceneNotifications.value.length, total: 0, tone: 'neutral' })
+  if (sceneNotifications.value.length) {
+    stats.push({ key: 'events', label: 'Events', ready: sceneNotifications.value.length, total: 0, tone: 'neutral' })
+  }
   return stats
 })
 
@@ -377,8 +379,8 @@ watch(() => running.value, (isRunning) => {
                 </svg>
               </button>
 
-              <div v-show="sceneOpen" class="activity-section-body">
-                <div class="activity-stats">
+              <div v-show="sceneOpen && (sceneStats.length || recentSceneEvents.length)" class="activity-section-body">
+                <div v-if="sceneStats.length" class="activity-stats">
                   <div v-for="stat in sceneStats" :key="stat.key" class="activity-stat" :class="'activity-stat--' + stat.tone">
                     <span class="activity-stat-label">{{ stat.label }}</span>
                     <span class="activity-stat-value">{{ stat.total ? `${stat.ready}/${stat.total}` : stat.ready }}</span>
@@ -393,7 +395,6 @@ watch(() => running.value, (isRunning) => {
                     <span class="activity-scene-time">{{ timeStr(entry.time) }}</span>
                   </div>
                 </div>
-                <div v-else class="activity-empty">{{ scenePlaceholder }}</div>
               </div>
             </section>
 
@@ -862,72 +863,81 @@ watch(() => running.value, (isRunning) => {
 
 .activity-steps-strip {
   display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-top: 12px;
-}
-
-.activity-steps-strip::-webkit-scrollbar {
-  height: 5px;
-}
-
-.activity-steps-strip::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 999px;
+  align-items: flex-start;
+  gap: 0;
+  padding-top: 14px;
 }
 
 .activity-step {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  min-width: 82px;
-  padding: 10px 8px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
-  background: rgba(255,255,255,0.02);
+  gap: 5px;
+  padding: 0;
+  background: none;
+  border: none;
 }
 
-.activity-step--active {
-  background: rgba(86, 204, 242, 0.09);
-  border-color: rgba(86, 204, 242, 0.28);
+.activity-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: calc(50% + 10px);
+  right: calc(-50% + 10px);
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  z-index: 0;
 }
 
-.activity-step--done {
-  background: rgba(38, 222, 129, 0.08);
-  border-color: rgba(38, 222, 129, 0.24);
-}
-
-.activity-step--error {
-  background: rgba(255, 107, 107, 0.09);
-  border-color: rgba(255, 107, 107, 0.26);
-}
-
-.activity-step--paused {
-  background: rgba(255, 179, 71, 0.09);
-  border-color: rgba(255, 179, 71, 0.26);
+.activity-step--done:not(:last-child)::after,
+.activity-step--active:not(:last-child)::after {
+  background: linear-gradient(90deg, rgba(38, 222, 129, 0.55), rgba(86, 204, 242, 0.35));
 }
 
 .activity-step-icon {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 16px;
+  height: 16px;
   border: 1px solid var(--border);
   border-radius: 50%;
-  font-size: 13px;
-  background: rgba(0, 0, 0, 0.18);
+  font-size: 9px;
+  line-height: 1;
+  background: var(--bg-darkest);
+}
+
+.activity-step--active .activity-step-icon {
+  box-shadow: 0 0 0 3px rgba(86, 204, 242, 0.14);
 }
 
 .activity-step-label {
   max-width: 100%;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.activity-step--active .activity-step-label,
+.activity-step--done .activity-step-label {
+  color: var(--text-secondary);
+}
+
+.activity-step--error .activity-step-label {
+  color: #FF6B6B;
+}
+
+.activity-step--paused .activity-step-label {
+  color: #FFB347;
 }
 
 .activity-section-toggle {
@@ -1000,20 +1010,20 @@ watch(() => running.value, (isRunning) => {
 }
 
 .activity-section-body {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .activity-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .activity-stat {
-  min-width: 92px;
-  padding: 10px 11px;
-  border-radius: 10px;
+  min-width: 76px;
+  padding: 6px 9px;
+  border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
   background: rgba(255,255,255,0.03);
 }
@@ -1028,8 +1038,8 @@ watch(() => running.value, (isRunning) => {
 
 .activity-stat-label {
   display: block;
-  margin-bottom: 4px;
-  font-size: 10px;
+  margin-bottom: 2px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1038,7 +1048,7 @@ watch(() => running.value, (isRunning) => {
 
 .activity-stat-value {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text);
 }
@@ -1259,11 +1269,11 @@ watch(() => running.value, (isRunning) => {
   }
 
   .activity-steps-strip {
-    padding-bottom: 4px;
+    padding-top: 12px;
   }
 
-  .activity-step {
-    min-width: 74px;
+  .activity-step-label {
+    font-size: 8px;
   }
 }
 </style>
