@@ -2082,6 +2082,16 @@
           '</div>';
         });
         list.innerHTML = html;
+        // Auto-scroll the active (highlighted) row into view so the user can
+        // always see what's currently being typed without manual scrolling.
+        if (S.typing.active) {
+          var activeRow = list.querySelector('.sts-row.highlight');
+          if (activeRow && typeof activeRow.scrollIntoView === 'function') {
+            try { activeRow.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {
+              try { activeRow.scrollIntoView(); } catch (e2) {}
+            }
+          }
+        }
       } else if (S.activeTab === 'sync') {
         // ── Sync tab — shows image upload/save status per scene ──
         var sceneKeys = Object.keys(S.scenes).sort(function(a, b) {
