@@ -18,7 +18,9 @@ selected phase or step range is complete.
 
 Double-click `run.bat` to run all remaining work phase by phase. The window
 prints the current phase, step, and stage as it runs, and stays open with the
-final exit code when the loop finishes.
+final exit code when the loop finishes. A second, read-only **Live Activity**
+window opens automatically and shows agent messages, tool calls, errors, and
+new commits while otherwise-silent builder or reviewer processes are working.
 
 ```bat
 _dev\loop-engineering\run.bat --status            &:: where am I? what's next?

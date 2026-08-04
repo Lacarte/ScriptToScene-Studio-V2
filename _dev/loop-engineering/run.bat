@@ -21,9 +21,11 @@ set EXITCODE=0
 if "%~1"=="" (
     echo ========================================================================
     echo [run.bat] LOOP STARTING - running all remaining work phase by phase.
-    echo [run.bat] Progress will appear below. Press Ctrl+C if you need to stop.
+    echo [run.bat] Opening a second window with detailed live agent activity.
+    echo [run.bat] Press Ctrl+C here if you need to stop the engineering loop.
     echo ========================================================================
     echo.
+    start "Loop Engineering - Live Activity" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0watch.ps1"
     venv\Scripts\python.exe -u "_dev\loop-engineering\loop_engineering.py" --by-phase
 ) else (
     venv\Scripts\python.exe -u "_dev\loop-engineering\loop_engineering.py" %*
