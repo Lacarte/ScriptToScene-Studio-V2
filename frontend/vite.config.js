@@ -26,6 +26,11 @@ export default defineConfig({
 
   base: isProd ? '/vue/' : '/',
 
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
+
   build: {
     outDir: resolve(__dirname, '..', 'static', 'dist'),
     emptyOutDir: true,
