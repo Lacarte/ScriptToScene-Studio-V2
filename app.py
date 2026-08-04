@@ -68,6 +68,7 @@ from studio.story import story_bp
 from studio.niches import niches_bp
 from studio.storyboard import storyboard_bp
 from studio.animator import animator_bp
+from studio.workflows import workflows_bp
 app.register_blueprint(tts_bp)
 app.register_blueprint(timing_bp)
 app.register_blueprint(segmenter_bp)
@@ -82,6 +83,7 @@ app.register_blueprint(story_bp)
 app.register_blueprint(niches_bp)
 app.register_blueprint(storyboard_bp)
 app.register_blueprint(animator_bp)
+app.register_blueprint(workflows_bp)
 from studio.orchestrator_ws import init_orchestrator_ws
 init_orchestrator_ws(sock)
 
