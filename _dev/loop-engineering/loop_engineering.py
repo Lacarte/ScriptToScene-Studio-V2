@@ -271,6 +271,24 @@ def review_prompt(step: Step, before: str, after: str) -> str:
     )
 
 
+def phase_review_prompt(phase: int, title: str, steps: list[Step], before: str, after: str) -> str:
+    ids = ", ".join(s.id for s in steps)
+    return (
+        f"Adversarial review of Phase {phase} ({title}) of "
+        f"_dev/loop-engineering/phases-plans/implementation-plan.md — commits {before}..{after}, "
+        f"covering steps {ids}.\n"
+        f"1) Hunt for real bugs across the WHOLE phase: correctness, integration "
+        f"seams between the steps, contract violations vs "
+        f"_dev/loop-engineering/phases-plans/contracts.md, security, edge cases.\n"
+        f"2) Smoke test: run pytest from the repo root; run 'npm run test' and "
+        f"'npm run build' in frontend/; verify the Flask app still boots "
+        f"(venv/Scripts/python.exe -c \"import app\").\n"
+        f"3) Fix every bug you find, keep all suites green, and commit the fixes "
+        f"with subject 'fix(review): phase {phase}'.\n"
+        f"If nothing needs fixing, change nothing."
+    )
+
+
 def agent_cmd(agent: str, prompt: str) -> str:
     escaped = prompt.replace('"', "'")
     if agent == "codex":
@@ -282,7 +300,7 @@ def agent_cmd(agent: str, prompt: str) -> str:
 # The loop
 # ---------------------------------------------------------------------------
 
-def run_step(step: Step, state: dict, args) -> bool:
+def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool = True) -> bool:
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = LOG_DIR / f"{stamp}_step_{step.id.replace('.', '-')}.log"
     step_started = time.monotonic()
@@ -334,7 +352,9 @@ def run_step(step: Step, state: dict, args) -> bool:
         return False
 
     # 3) REVIEW (adversarial pass) + re-validate
-    if args.reviewer != "none":
+    if not review:
+        say("stage 3/4 REVIEW — deferred to the phase-level review pass")
+    elif args.reviewer != "none":
         say(f"stage 3/4 REVIEW — {args.reviewer} audits commits {baseline}..{head_commit()} "
             f"for real bugs and fixes what it finds", icon="▶")
         stage = time.monotonic()
@@ -365,12 +385,69 @@ def run_step(step: Step, state: dict, args) -> bool:
     if step.id not in state["done"]:
         state["done"].append(step.id)
     record(state, step.id, "done", head_commit())
-    if not args.no_push:
+    if push and not args.no_push:
         say("pushing commits to origin")
         run_capture(["git", "push"], timeout=600)
+    elif not push:
+        say("push deferred to the end of the phase")
     else:
         say("push skipped (--no-push) — commits are local only")
     say(f"step {step.id} COMPLETE at {head_commit()} (total {elapsed(step_started)})", icon="✓")
+    return True
+
+
+def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args) -> bool:
+    """Phase-level cycle: build every step (validated individually), then one
+    adversarial review + smoke test over the whole phase before moving on."""
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = LOG_DIR / f"{stamp}_phase_{phase}.log"
+    phase_started = time.monotonic()
+    title = plan.phases.get(phase, "")
+
+    print("\n" + "#" * 72)
+    say(f"PHASE {phase} — {title}: {len(steps)} step(s) to build "
+        f"({', '.join(s.id for s in steps)})", icon="▶")
+    baseline = head_commit()
+    record(state, f"phase-{phase}", "start", baseline)
+
+    say(f"part 1/2 BUILD — claude implements each step in order; every step is "
+        f"validated (pytest/vitest/build) before the next one starts")
+    for step in steps:
+        if not run_step(step, state, args, review=False, push=False):
+            say(f"PHASE {phase} stopped inside step {step.id}", icon="✗")
+            return False
+
+    if args.reviewer != "none":
+        say(f"part 2/2 PHASE REVIEW — {args.reviewer} audits ALL phase commits "
+            f"{baseline}..{head_commit()}, smoke-tests the app, and fixes bugs", icon="▶")
+        stage = time.monotonic()
+        run_logged(agent_cmd(args.reviewer,
+                             phase_review_prompt(phase, title, steps, baseline, head_commit())),
+                   log_file)
+        say(f"phase reviewer finished in {elapsed(stage)}")
+        if working_tree_dirty():
+            say("reviewer left uncommitted fixes — committing them")
+            commit_all(f"fix(review): phase {phase} (loop auto-commit)")
+        say("re-validating the board after the phase review")
+        ok, detail = validate(log_file)
+        if not ok:
+            say("phase review left the board RED — one repair pass", icon="✗")
+            record(state, f"phase-{phase}", "review_red", detail)
+            run_logged(agent_cmd("claude", fix_prompt(steps[-1], detail)), log_file)
+            if working_tree_dirty():
+                commit_all(f"fix: phase {phase} post-review (loop auto-commit)")
+            ok, detail = validate(log_file)
+            if not ok:
+                record(state, f"phase-{phase}", "halt", "red after phase review repair")
+                say(f"HALT — phase {phase} red after review repair. Log: {log_file}", icon="✗")
+                return False
+        say("board green after phase review", icon="✓")
+
+    record(state, f"phase-{phase}", "done", head_commit())
+    if not args.no_push:
+        say("pushing the whole phase to origin")
+        run_capture(["git", "push"], timeout=600)
+    say(f"PHASE {phase} COMPLETE in {elapsed(phase_started)} — proceeding", icon="✓")
     return True
 
 
@@ -408,6 +485,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--status", action="store_true", help="show plan progress and exit")
     ap.add_argument("--all", action="store_true", help="run every remaining step, phase by phase, to the end of the plan")
+    ap.add_argument("--by-phase", action="store_true",
+                    help="phase-level cycle: build all steps of a phase, then ONE "
+                         "review+smoke-test pass over the whole phase before advancing")
     ap.add_argument("--phase", type=int, help="run until this phase is complete")
     ap.add_argument("--until", help="run through this step id (e.g. 2.5)")
     ap.add_argument("--steps", type=int, help="run at most N steps")
@@ -438,6 +518,9 @@ def main() -> None:
         save_state(state)
         print(f"Marked done through {limit.id}.")
 
+    if args.by_phase and not (args.all or args.phase is not None or args.until):
+        args.all = True  # --by-phase alone means: run everything, phase by phase
+
     if args.status or not (args.all or args.phase is not None or args.until or args.steps):
         print_status(plan, state)
         return
@@ -448,28 +531,44 @@ def main() -> None:
         return
 
     if args.dry_run:
-        print("Would run, in order:")
-        for step in targets:
-            print(f"  {step.id}  {step.title}")
+        if args.by_phase:
+            print("Would run, phase by phase (build all steps, then one phase review):")
+            for phase in sorted({s.phase for s in targets}):
+                ids = ", ".join(s.id for s in targets if s.phase == phase)
+                print(f"  Phase {phase}: {ids}  → then {args.reviewer} phase review + smoke test")
+        else:
+            print("Would run, in order:")
+            for step in targets:
+                print(f"  {step.id}  {step.title}")
         return
 
     run_started = time.monotonic()
     print("=" * 72)
     say(f"LOOP START — plan: {PLAN_PATH.relative_to(ROOT)}", icon="▶")
     say(f"scope: {len(targets)} step(s) → {', '.join(s.id for s in targets)}")
-    say(f"reviewer: {args.reviewer} · max fix attempts: {args.max_fix_attempts} · "
+    say(f"mode: {'phase-level cycles (build phase → review phase → advance)' if args.by_phase else 'step-level cycles'} · "
+        f"reviewer: {args.reviewer} · max fix attempts: {args.max_fix_attempts} · "
         f"push: {'off' if args.no_push else 'on'}")
-    say("each step runs: EXECUTE (builder agent) → VALIDATE (pytest/vitest/build) "
-        "→ CORRECT while red → REVIEW (adversarial audit) → commit + record")
 
     completed = []
-    for step in targets:
-        if not run_step(step, state, args):
-            say(f"LOOP STOPPED at step {step.id} after {elapsed(run_started)} — "
-                f"{len(completed)} step(s) completed before the halt: "
-                f"{', '.join(completed) or 'none'}", icon="✗")
-            sys.exit(1)
-        completed.append(step.id)
+    if args.by_phase:
+        for phase in sorted({s.phase for s in targets}):
+            phase_steps = [s for s in targets if s.phase == phase]
+            if not run_phase(phase, phase_steps, plan, state, args):
+                say(f"LOOP STOPPED in phase {phase} after {elapsed(run_started)} — "
+                    f"completed before the halt: {', '.join(completed) or 'none'}", icon="✗")
+                sys.exit(1)
+            completed.extend(s.id for s in phase_steps)
+    else:
+        say("each step runs: EXECUTE (builder agent) → VALIDATE (pytest/vitest/build) "
+            "→ CORRECT while red → REVIEW (adversarial audit) → commit + record")
+        for step in targets:
+            if not run_step(step, state, args):
+                say(f"LOOP STOPPED at step {step.id} after {elapsed(run_started)} — "
+                    f"{len(completed)} step(s) completed before the halt: "
+                    f"{', '.join(completed) or 'none'}", icon="✗")
+                sys.exit(1)
+            completed.append(step.id)
 
     print("\n" + "=" * 72)
     say(f"LOOP COMPLETE — {len(completed)} step(s) in {elapsed(run_started)}: "

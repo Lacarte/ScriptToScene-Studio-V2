@@ -21,7 +21,14 @@ _dev\loop-engineering\run.bat --status            &:: where am I? what's next?
 _dev\loop-engineering\run.bat --dry-run --phase 2 &:: what would run
 _dev\loop-engineering\run.bat --phase 2           &:: finish phase 2
 _dev\loop-engineering\run.bat --steps 1           &:: exactly one step
+_dev\loop-engineering\run.bat --all               &:: everything, step-level cycles
+_dev\loop-engineering\run.bat --by-phase          &:: everything, PHASE-level cycles
 ```
+
+`--by-phase` is the "one shot" mode: claude builds every step of a phase
+(each still validated individually so failures can't compound), then the
+reviewer audits + smoke-tests the **whole phase's commits** in one pass and
+fixes what it finds — only then does the loop advance to the next phase.
 
 ## How a step runs
 
