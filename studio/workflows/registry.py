@@ -9,7 +9,7 @@ field, which is never serialized.
 
 from copy import deepcopy
 
-REGISTRY_VERSION = 1
+REGISTRY_VERSION = 2
 
 # contracts.md §3 — frozen v1 port vocabulary.
 PORT_TYPES = [
@@ -405,6 +405,23 @@ _NODE_TYPES = {
         "executor": "studio.workflows.adapters.stubs:result_viewer",
     },
 }
+
+# Resilience capabilities are backend-owned just like retry/cancel support.
+# Any executable node with a normal control output may expose a distinct error
+# control path and may be treated as optional.  Trigger/result-only nodes do
+# not have meaningful recovery behavior.  The error port is deliberately a
+# control port: structured exception details remain in execution diagnostics.
+for _type_key, _definition in _NODE_TYPES.items():
+    _capabilities = _definition.setdefault("capabilities", {})
+    _has_control_output = any(
+        port.get("id") == "control" and port.get("type") == "control"
+        for port in _definition.get("outputs", [])
+    )
+    _recoverable = _has_control_output and _type_key != "trigger.manual"
+    _capabilities.setdefault("error_output", _recoverable)
+    _capabilities.setdefault("skip_optional", _recoverable)
+    if _capabilities["error_output"]:
+        _definition["outputs"].append(_out("error", "control"))
 
 # Fields internal to the backend, stripped from the served form.
 _INTERNAL_FIELDS = ("executor",)

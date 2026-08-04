@@ -202,6 +202,12 @@ Also in this step: **Result Viewer pinning** — an edited viewer payload become
 Per-node `on_error`: stop / bounded retry with delay/backoff / continue via explicit error output (control path) / skip-optional — only where capability flags permit. Structured failure payloads (stable code, user message, redacted details, attempt, recovery suggestion).
 **Done when:** pytest covers each policy including backoff timing and error-branch routing.
 
+#### Step 4.3 review status — 2026-08-04
+
+- **Complete.** Nodes persist a capability-gated `on_error` policy for stop, bounded retry, explicit error-control routing, or optional skipping. Retry attempts use bounded exponential backoff, retain per-attempt diagnostics, and emit retry events without publishing staged artifacts from failed attempts.
+- Failure records and events include node identity, stable code, user message, redacted details, attempt, timestamp, and recovery suggestion. Handled failures finish as `partial`; ordinary success paths never activate error branches.
+- The generic inspector exposes only supported policies and retry bounds. Automated verification: 121 backend tests plus 38 subtests and 81 frontend tests pass; the production frontend build succeeds.
+
 ### 4.4 Run history + deep inspection UI
 Bottom panel full version: execution list (`GET /api/workflow/executions?workflow_id=`), node timeline, per-node resolved inputs/outputs/logs/errors/attempts, cache decisions and stale reasons. Summaries by default, explicit expansion for large values.
 **Done when (Phase 4 gate):** a failed run can be diagnosed and retried from the UI without rerunning successful nodes.

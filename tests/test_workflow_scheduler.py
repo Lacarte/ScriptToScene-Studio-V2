@@ -173,6 +173,132 @@ def test_v1_stop_policy_skips_every_node_after_failure(tmp_path):
     assert calls == ["bad"]
 
 
+def _retry_workflow(policy, *, with_error_branch=False, with_success_branch=False):
+    nodes = [
+        _node("source", "script.input", config={"text": "hello"}),
+        {**_node("work", "tts.generate"), "on_error": policy},
+    ]
+    edges = [_edge("e_script", "source", "script", "work", "script", "data")]
+    if with_error_branch:
+        nodes.append(_node("recovery", "project.setup"))
+        edges.append(_edge("e_error", "work", "error", "recovery", "trigger"))
+    if with_success_branch:
+        nodes.append(_node("success", "project.setup"))
+        edges.append(_edge("e_success", "work", "control", "success", "trigger"))
+    return _workflow(nodes, edges)
+
+
+def test_retry_policy_uses_bounded_attempts_and_exponential_backoff(tmp_path):
+    workflow = _retry_workflow({
+        "policy": "retry", "max_attempts": 3, "delay_ms": 100, "backoff_multiplier": 2,
+    })
+    calls, sleeps, events = [], [], []
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            calls.append(node["id"])
+            if node["id"] == "work" and calls.count("work") < 3:
+                raise RuntimeError("temporary provider failure")
+            if node["id"] == "source":
+                return {"control": {"ok": True}, "script": "hello"}
+            return {"control": {"ok": True}, "audio": {}, "metadata": {}}
+        return execute
+
+    result = WorkflowScheduler(
+        workflow, project_id="pm_ABC123", lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path), executor_resolver=resolver, sleeper=sleeps.append,
+        on_event=events.append,
+    ).run()
+    assert result.status == "succeeded"
+    assert result.execution_record["nodes"]["work"]["attempts"] == 3
+    assert len(result.execution_record["nodes"]["work"]["attempt_errors"]) == 2
+    assert sum(sleeps) == pytest.approx(0.3)
+    assert [event["delay_ms"] for event in events if event["type"] == "node_retry"] == [100, 200]
+
+
+def test_retry_policy_stops_after_bound_and_emits_structured_failure(tmp_path):
+    workflow = _retry_workflow({
+        "policy": "retry", "max_attempts": 2, "delay_ms": 0, "backoff_multiplier": 1,
+    })
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            if node["id"] == "work":
+                raise RuntimeError("provider exploded")
+            return {"control": {"ok": True}, "script": "hello"}
+        return execute
+
+    result = WorkflowScheduler(
+        workflow, project_id="pm_ABC123", lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path), executor_resolver=resolver,
+    ).run()
+    error = result.errors["work"]
+    assert result.status == "failed"
+    assert error.keys() == {
+        "node_id", "node_name", "code", "message", "details", "attempt",
+        "timestamp", "recovery_suggestion",
+    }
+    assert error["node_id"] == "work"
+    assert error["attempt"] == 2
+    assert error["code"] == "NODE_EXECUTION_FAILED"
+    assert error["recovery_suggestion"]
+
+
+def test_continue_error_activates_only_explicit_error_control_branch(tmp_path):
+    workflow = _retry_workflow(
+        {"policy": "continue_error"}, with_error_branch=True, with_success_branch=True,
+    )
+    calls = []
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            calls.append(node["id"])
+            if node["id"] == "source":
+                return {"control": {"ok": True}, "script": "hello"}
+            if node["id"] == "work":
+                raise RuntimeError("route me")
+            return {"control": {"ok": True}, "settings": {}}
+        return execute
+
+    result = WorkflowScheduler(
+        workflow, project_id="pm_ABC123", lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path), executor_resolver=resolver,
+    ).run()
+    assert result.status == "partial"
+    assert result.node_statuses == {
+        "source": "succeeded", "work": "failed", "recovery": "succeeded", "success": "skipped",
+    }
+    assert calls == ["source", "work", "recovery"]
+    assert result.outputs["work"] == {"error": {"ok": False}}
+
+
+def test_skip_optional_records_failure_but_allows_independent_work(tmp_path):
+    workflow = _retry_workflow({"policy": "skip_optional"}, with_success_branch=True)
+    workflow["nodes"].append(_node("independent"))
+    calls = []
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            calls.append(node["id"])
+            if node["id"] == "source":
+                return {"control": {"ok": True}, "script": "hello"}
+            if node["id"] == "work":
+                raise RuntimeError("optional failure")
+            definition = get_node_type(node["type"])
+            return {port["id"]: {} for port in definition["outputs"] if port["id"] != "error"}
+        return execute
+
+    result = WorkflowScheduler(
+        workflow, project_id="pm_ABC123", lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path), executor_resolver=resolver,
+    ).run()
+    assert result.status == "partial"
+    assert result.node_statuses["work"] == "skipped"
+    assert result.node_statuses["success"] == "skipped"
+    assert result.node_statuses["independent"] == "succeeded"
+    assert "independent" in calls
+
+
 def test_project_lock_contention_is_non_blocking_and_releases(tmp_path):
     root = str(tmp_path / "locks")
     with ProjectLock("pm_ABC123", lock_root=root, execution_id="ex_FIRST1"):

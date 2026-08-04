@@ -26,6 +26,7 @@ class NodeExecutionRecord:
     outputs_summary: dict[str, Any] = field(default_factory=dict)
     artifact_refs: list[str] = field(default_factory=list)
     logs: list[dict[str, Any]] = field(default_factory=list)
+    attempt_errors: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, Any] | None = None
 
 

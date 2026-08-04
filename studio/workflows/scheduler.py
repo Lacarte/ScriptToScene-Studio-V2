@@ -372,6 +372,7 @@ class WorkflowScheduler:
         scope_node_ids: list[str] | None = None,
         stop_requested: Callable[[], bool] | None = None,
         force: bool = False,
+        sleeper: Callable[[float], None] = time.sleep,
     ):
         problems = validation_errors(validate_workflow(dict(workflow), require_complete=True))
         if problems:
@@ -391,6 +392,7 @@ class WorkflowScheduler:
         self.scope_node_ids = list(scope_node_ids or [node["id"] for node in workflow.get("nodes", [])])
         self.stop_requested = stop_requested or (lambda: False)
         self.force = force
+        self.sleeper = sleeper
         self.execution_root = execution_root
         self.cache = NodeCache(
             root=os.path.join(output_dir, "workflows", "cache"),
@@ -435,13 +437,17 @@ class WorkflowScheduler:
                 node = graph.nodes[node_id]
                 if self.stop_requested():
                     cancelled = True
-                predecessor_statuses = [statuses[edge["source_node"]] for edge in graph.incoming[node_id]]
                 if cancelled:
                     self.record.nodes[node_id].duration_ms = 0
                     self._status(statuses, node_id, "cancelled")
                     executed.append(node_id)
                     continue
-                if stopped or node.get("disabled") or any(status != "succeeded" for status in predecessor_statuses):
+                incoming_edges = graph.incoming[node_id]
+                incoming_active = all(
+                    self._edge_was_activated(edge, statuses, node_outputs)
+                    for edge in incoming_edges
+                )
+                if stopped or node.get("disabled") or not incoming_active:
                     self.record.nodes[node_id].duration_ms = 0
                     self._status(statuses, node_id, "skipped")
                     executed.append(node_id)
@@ -518,93 +524,123 @@ class WorkflowScheduler:
 
                 if lookup.reason not in {"no_prior_success", "forced_regeneration"}:
                     self._status(statuses, node_id, "stale")
-                node_record.attempts += 1
-                self._status(statuses, node_id, "running")
                 started = time.perf_counter()
-                promoter = ArtifactPromoter(output_dir=self.output_dir, execution_id=self.execution_id or node_id)
-                context = AdapterContext(
-                    project_id=self.project_id,
-                    execution_id=self.execution_id,
-                    node_id=node_id,
-                    stage_artifact=promoter.stage_path,
-                    stop_requested=self.stop_requested,
-                )
-                try:
-                    result = self.executor_resolver(node)(inputs, configuration, context)
-                    if self.stop_requested():
-                        raise CancellationRequested()
-                    if not isinstance(result, Mapping):
-                        raise SchedulerError("NODE_OUTPUT_INVALID", f"Node {node_id} returned a non-object output")
-                    result = dict(result)
-                    self._validate_outputs(node, result)
-                    promoter.promote()
-                    node_outputs[node_id] = result
-                    node_record.outputs_summary = self.redactor(_summarize(result))
-                    node_record.artifact_refs = self.redactor(_artifact_refs(result))
-                    if self.redactor(result) != result:
-                        output_fp, cache_failure = None, "sensitive_output"
-                    else:
-                        output_fp, cache_failure = self.cache.store(
-                            workflow_id=str(self.workflow.get("workflow_id", "")),
-                            project_id=self.project_id,
-                            node_id=node_id,
-                            fingerprint=fingerprint,
-                            components=components,
-                            outputs=result,
-                            artifact_refs=_artifact_refs(result),
-                        )
-                    if output_fp is None:
-                        # Execution remains successful; the reason explains why
-                        # this result cannot safely be reused.
-                        node_record.cache = {"hit": False, "reason": cache_failure}
-                        output_fp = output_fingerprint(result, {})
-                    node_output_fingerprints[node_id] = output_fp
-                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-                    self._status(statuses, node_id, "succeeded")
-                except CancellationRequested:
-                    cancelled = True
-                    node_record.error = {"code": "CANCELLED", "message": "Execution was cancelled"}
-                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-                    self._status(statuses, node_id, "cancelled")
-                except (AdapterError, SchedulerError) as exc:
-                    code = getattr(exc, "code", "NODE_EXECUTION_FAILED")
-                    if code == "CANCELLED":
+                policy = self._error_policy(node)
+                max_attempts = policy["max_attempts"] if policy["policy"] == "retry" else 1
+                while node_record.attempts < max_attempts:
+                    node_record.attempts += 1
+                    self._status(statuses, node_id, "running")
+                    promoter = ArtifactPromoter(output_dir=self.output_dir, execution_id=self.execution_id or node_id)
+                    context = AdapterContext(
+                        project_id=self.project_id,
+                        execution_id=self.execution_id,
+                        node_id=node_id,
+                        stage_artifact=promoter.stage_path,
+                        stop_requested=self.stop_requested,
+                    )
+                    failure = None
+                    try:
+                        result = self.executor_resolver(node)(inputs, configuration, context)
+                        if self.stop_requested():
+                            raise CancellationRequested()
+                        if not isinstance(result, Mapping):
+                            raise SchedulerError("NODE_OUTPUT_INVALID", f"Node {node_id} returned a non-object output")
+                        result = dict(result)
+                        self._validate_outputs(node, result)
+                        promoter.promote()
+                        node_outputs[node_id] = result
+                        node_record.outputs_summary = self.redactor(_summarize(result))
+                        node_record.artifact_refs = self.redactor(_artifact_refs(result))
+                        if self.redactor(result) != result:
+                            output_fp, cache_failure = None, "sensitive_output"
+                        else:
+                            output_fp, cache_failure = self.cache.store(
+                                workflow_id=str(self.workflow.get("workflow_id", "")),
+                                project_id=self.project_id,
+                                node_id=node_id,
+                                fingerprint=fingerprint,
+                                components=components,
+                                outputs=result,
+                                artifact_refs=_artifact_refs(result),
+                            )
+                        if output_fp is None:
+                            node_record.cache = {"hit": False, "reason": cache_failure}
+                            output_fp = output_fingerprint(result, {})
+                        node_output_fingerprints[node_id] = output_fp
+                        node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+                        node_record.error = None
+                        self._status(statuses, node_id, "succeeded")
+                        break
+                    except CancellationRequested as exc:
+                        failure = exc
                         cancelled = True
-                        node_record.error = {"code": "CANCELLED", "message": "Execution was cancelled"}
+                    except Exception as exc:  # adapters are a plugin boundary
+                        failure = exc
+                    finally:
+                        promoter.cleanup()
+
+                    if cancelled or getattr(failure, "code", None) == "CANCELLED":
+                        cancelled = True
+                        node_record.error = self._failure_payload(node, failure, node_record.attempts)
                         node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
                         self._status(statuses, node_id, "cancelled")
-                        executed.append(node_id)
+                        break
+
+                    attempt_error = self._failure_payload(node, failure, node_record.attempts)
+                    node_record.attempt_errors.append(attempt_error)
+                    if policy["policy"] == "retry" and node_record.attempts < max_attempts:
+                        delay_ms = min(
+                            60_000,
+                            round(policy["delay_ms"] * (policy["backoff_multiplier"] ** (node_record.attempts - 1))),
+                        )
+                        self._emit({
+                            "type": "node_retry", "execution_id": self.execution_id,
+                            "node_id": node_id, "attempt": node_record.attempts,
+                            "next_attempt": node_record.attempts + 1, "delay_ms": delay_ms,
+                            "error": attempt_error,
+                        })
+                        node_record.logs.append(self.redactor(ExecutionLog(
+                            ts=now_iso(), level="warning",
+                            message=f"Attempt {node_record.attempts} failed; retrying in {delay_ms} ms",
+                        ).__dict__))
+                        self._persist()
+                        if delay_ms:
+                            self._sleep_before_retry(delay_ms / 1000)
+                        if self.stop_requested():
+                            cancelled = True
+                            node_record.error = self._failure_payload(node, CancellationRequested(), node_record.attempts)
+                            self._status(statuses, node_id, "cancelled")
+                            break
                         continue
-                    errors[node_id] = self.redactor(
-                        {"code": code, "message": str(exc), "details": getattr(exc, "details", None)}
-                    )
-                    node_record.error = errors[node_id]
+
+                    error = attempt_error
+                    errors[node_id] = error
+                    node_record.error = error
                     node_record.logs.append(self.redactor(ExecutionLog(
-                        ts=now_iso(), level="error", message=str(exc)
+                        ts=now_iso(), level="error", message=error["message"]
                     ).__dict__))
                     self._emit({"type": "node_error", "execution_id": self.execution_id,
-                                "node_id": node_id, "error": errors[node_id]})
+                                "node_id": node_id, "error": error})
                     node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-                    self._status(statuses, node_id, "failed")
-                    stopped = True
-                except Exception as exc:  # adapters are a plugin boundary
-                    errors[node_id] = self.redactor(
-                        {"code": "NODE_EXECUTION_FAILED", "message": str(exc), "details": None}
-                    )
-                    node_record.error = errors[node_id]
-                    node_record.logs.append(self.redactor(ExecutionLog(
-                        ts=now_iso(), level="error", message=str(exc)
-                    ).__dict__))
-                    self._emit({"type": "node_error", "execution_id": self.execution_id,
-                                "node_id": node_id, "error": errors[node_id]})
-                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-                    self._status(statuses, node_id, "failed")
-                    stopped = True
-                finally:
-                    promoter.cleanup()
+                    if policy["policy"] == "continue_error":
+                        node_outputs[node_id] = {"error": {"ok": False}}
+                        node_output_fingerprints[node_id] = output_fingerprint(node_outputs[node_id], {})
+                        self._status(statuses, node_id, "failed")
+                    elif policy["policy"] == "skip_optional":
+                        self._status(statuses, node_id, "skipped")
+                    else:
+                        self._status(statuses, node_id, "failed")
+                        stopped = True
+                    break
                 executed.append(node_id)
 
-        overall = "cancelled" if cancelled or self.stop_requested() else ("failed" if errors else "succeeded")
+        handled = any(
+            self._error_policy(graph.nodes[node_id])["policy"] in {"continue_error", "skip_optional"}
+            for node_id in errors
+        )
+        overall = "cancelled" if cancelled or self.stop_requested() else (
+            "partial" if errors and handled and not stopped else ("failed" if errors else "succeeded")
+        )
         self.record.status = overall
         self.record.finished_at = now_iso()
         persisted = self._persist()
@@ -639,6 +675,54 @@ class WorkflowScheduler:
             self.on_event(self.redactor(event))
 
     @staticmethod
+    def _error_policy(node: Mapping[str, Any]) -> dict[str, Any]:
+        supplied = node.get("on_error") or {}
+        return {
+            "policy": supplied.get("policy", "stop"),
+            "max_attempts": supplied.get("max_attempts", 3),
+            "delay_ms": supplied.get("delay_ms", 1000),
+            "backoff_multiplier": supplied.get("backoff_multiplier", 2.0),
+        }
+
+    def _failure_payload(self, node: Mapping[str, Any], exc: Exception, attempt: int) -> dict[str, Any]:
+        code = getattr(exc, "code", "NODE_EXECUTION_FAILED")
+        message = "Execution was cancelled" if code == "CANCELLED" else str(exc)
+        suggestion = (
+            "Start a new run when ready."
+            if code == "CANCELLED"
+            else "Review the node inputs and settings, then retry the failed node."
+        )
+        return self.redactor({
+            "node_id": node["id"],
+            "node_name": node.get("name") or node["id"],
+            "code": code,
+            "message": message,
+            "details": getattr(exc, "details", None),
+            "attempt": attempt,
+            "timestamp": now_iso(),
+            "recovery_suggestion": suggestion,
+        })
+
+    def _sleep_before_retry(self, seconds: float) -> None:
+        """Wait in short intervals so a stop request interrupts long backoffs."""
+        remaining = seconds
+        while remaining > 0 and not self.stop_requested():
+            interval = min(0.1, remaining)
+            self.sleeper(interval)
+            remaining = max(0.0, remaining - interval)
+
+    @staticmethod
+    def _edge_was_activated(
+        edge: Mapping[str, Any],
+        statuses: Mapping[str, str],
+        outputs: Mapping[str, Mapping[str, Any]],
+    ) -> bool:
+        source = edge["source_node"]
+        if edge["source_port"] == "error":
+            return statuses.get(source) == "failed" and "error" in outputs.get(source, {})
+        return statuses.get(source) == "succeeded" and edge["source_port"] in outputs.get(source, {})
+
+    @staticmethod
     def _configuration(node: Mapping[str, Any]) -> dict[str, Any]:
         definition = get_node_type(node["type"])
         config = {
@@ -667,6 +751,8 @@ class WorkflowScheduler:
     def _validate_outputs(node: Mapping[str, Any], outputs: Mapping[str, Any]) -> None:
         definition = get_node_type(node["type"])
         for port in definition.get("outputs", []):
+            if port["id"] == "error":
+                continue
             if port["id"] not in outputs:
                 raise SchedulerError(
                     "NODE_OUTPUT_MISSING",

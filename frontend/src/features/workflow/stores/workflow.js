@@ -173,7 +173,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       execution.status = event.status
     }
 
-    if (['succeeded', 'failed', 'cancelled'].includes(event.status) && !event.node_id) {
+    if (['succeeded', 'failed', 'cancelled', 'partial'].includes(event.status) && !event.node_id) {
       closeExecutionStream()
       // The terminal record contains output summaries/artifact refs that are
       // intentionally not repeated in every SSE event.
@@ -420,6 +420,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       },
       configuration: defaultsFor(typeKey),
       disabled: false,
+      on_error: { policy: 'stop' },
     }
     nodes.value.push(node)
     markDocumentDirty()
@@ -907,6 +908,13 @@ export const useWorkflowStore = defineStore('workflow', () => {
     markDocumentDirty()
   }
 
+  function updateNodeErrorPolicy(nodeId, patch) {
+    const node = nodeById(nodeId)
+    if (!node) return
+    node.on_error = { ...(node.on_error || { policy: 'stop' }), ...plain(patch) }
+    markDocumentDirty()
+  }
+
   function duplicateNode(nodeId) {
     const source = nodeById(nodeId)
     if (!source) return null
@@ -923,6 +931,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       },
       configuration: plain(source.configuration),
       disabled: source.disabled,
+      ...(source.on_error ? { on_error: plain(source.on_error) } : {}),
       ...(source.extensions ? { extensions: plain(source.extensions) } : {}),
     }
     nodes.value.push(copy)
@@ -947,7 +956,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     draftSavedAt, markDocumentDirty, flushDraft, peekDraft, clearDraft, recoverDraft,
     // selection + inspector
     selectedNodeId, selectedNode, selectNode, clearSelection,
-    updateNodeConfig, setNodeDisabled, duplicateNode,
+    updateNodeConfig, updateNodeErrorPolicy, setNodeDisabled, duplicateNode,
     // validation (step 2.2)
     issuesByNode,
     // sample-data stubs (step 2.5)

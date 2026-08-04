@@ -34,8 +34,10 @@ _TOP_FIELDS = {
 }
 _NODE_FIELDS = {
     "id", "type", "type_version", "name", "position", "configuration", "disabled",
-    "extensions",
+    "on_error", "extensions",
 }
+
+_ERROR_POLICIES = {"stop", "retry", "continue_error", "skip_optional"}
 _EDGE_FIELDS = {
     "id", "source_node", "source_port", "target_node", "target_port", "edge_type",
     "extensions",
@@ -208,6 +210,52 @@ def _validate_config(
                 ))
 
 
+def _validate_error_policy(node: dict, definition: dict, path: str, problems: list[dict]) -> None:
+    policy = node.get("on_error")
+    if policy is None:
+        return
+    policy_path = f"{path}.on_error"
+    if not isinstance(policy, dict):
+        problems.append(_problem("WORKFLOW_INVALID", "on_error must be an object", policy_path))
+        return
+    allowed = {"policy", "max_attempts", "delay_ms", "backoff_multiplier"}
+    for unknown in sorted(set(policy) - allowed):
+        problems.append(_problem(
+            "WORKFLOW_INVALID", f"Unknown on_error field: {unknown}", f"{policy_path}.{unknown}"
+        ))
+    name = policy.get("policy", "stop")
+    if name not in _ERROR_POLICIES:
+        problems.append(_problem(
+            "WORKFLOW_INVALID", f"Unsupported error policy: {name}", f"{policy_path}.policy"
+        ))
+        return
+    capabilities = definition.get("capabilities", {})
+    capability = {"retry": "retry", "continue_error": "error_output", "skip_optional": "skip_optional"}.get(name)
+    if capability and not capabilities.get(capability, False):
+        problems.append(_problem(
+            "WORKFLOW_INVALID", f"{name} is not supported by this node type", f"{policy_path}.policy"
+        ))
+
+    max_attempts = policy.get("max_attempts", 3)
+    delay_ms = policy.get("delay_ms", 1000)
+    multiplier = policy.get("backoff_multiplier", 2.0)
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 10:
+        problems.append(_problem(
+            "WORKFLOW_INVALID", "max_attempts must be an integer from 1 to 10",
+            f"{policy_path}.max_attempts",
+        ))
+    if isinstance(delay_ms, bool) or not isinstance(delay_ms, int) or not 0 <= delay_ms <= 60_000:
+        problems.append(_problem(
+            "WORKFLOW_INVALID", "delay_ms must be an integer from 0 to 60000",
+            f"{policy_path}.delay_ms",
+        ))
+    if isinstance(multiplier, bool) or not isinstance(multiplier, (int, float)) or not 1 <= multiplier <= 10:
+        problems.append(_problem(
+            "WORKFLOW_INVALID", "backoff_multiplier must be a number from 1 to 10",
+            f"{policy_path}.backoff_multiplier",
+        ))
+
+
 def validate_workflow(document: Any, *, require_identity: bool = True, require_complete: bool = False) -> list[dict]:
     """Return structured errors/warnings for a workflow document."""
     problems: list[dict] = []
@@ -289,6 +337,7 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
             problems.append(_problem("WORKFLOW_INVALID", "disabled must be a boolean", f"{path}.disabled"))
         _validate_extensions(node.get("extensions"), f"{path}.extensions", problems)
         _validate_config(node, definition, path, problems, require_complete=require_complete)
+        _validate_error_policy(node, definition, path, problems)
         node_map[node_id] = (node, definition)
 
     edge_ids: set[str] = set()

@@ -170,6 +170,28 @@ describe('NodeInspector', () => {
     expect(store.dirty).toBe(true)
   })
 
+  it('renders capability-gated retry controls and persists the node policy', async () => {
+    const { store, node } = seeded()
+    store.nodeTypes['tts.generate'].capabilities = {
+      retry: true, error_output: true, skip_optional: true,
+    }
+    const wrapper = mount(NodeInspector)
+    const policy = wrapper.get('.error-policy select')
+    expect(policy.findAll('option').map((option) => option.element.value)).toEqual([
+      'stop', 'retry', 'continue_error', 'skip_optional',
+    ])
+    await policy.setValue('retry')
+    const inputs = wrapper.findAll('.retry-grid input')
+    await inputs[0].setValue(4)
+    await inputs[0].trigger('change')
+    await inputs[1].setValue(250)
+    await inputs[1].trigger('change')
+    expect(store.nodeById(node.id).on_error).toMatchObject({
+      policy: 'retry', max_attempts: 4, delay_ms: 250,
+    })
+    expect(store.toDocument().nodes[0].on_error.policy).toBe('retry')
+  })
+
   it('rename, disable, duplicate, delete actions work', async () => {
     const { store, node } = seeded()
     const wrapper = mount(NodeInspector)

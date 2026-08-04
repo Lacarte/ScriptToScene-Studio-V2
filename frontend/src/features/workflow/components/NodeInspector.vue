@@ -10,6 +10,16 @@ const store = useWorkflowStore()
 const node = computed(() => store.selectedNode)
 const def = computed(() => (node.value ? store.nodeTypes[node.value.type] : null))
 const category = computed(() => store.categories[def.value?.category] || {})
+const errorPolicy = computed(() => node.value?.on_error || { policy: 'stop' })
+const errorPolicies = computed(() => {
+  const capabilities = def.value?.capabilities || {}
+  return [
+    { value: 'stop', label: 'Stop workflow' },
+    ...(capabilities.retry ? [{ value: 'retry', label: 'Retry' }] : []),
+    ...(capabilities.error_output ? [{ value: 'continue_error', label: 'Use error output' }] : []),
+    ...(capabilities.skip_optional ? [{ value: 'skip_optional', label: 'Skip optional node' }] : []),
+  ]
+})
 
 // display_options re-evaluated on every config change (n8n NDV pattern).
 const visibleFields = computed(() =>
@@ -27,6 +37,11 @@ function onUpdate(name, value) {
 function onDelete() {
   store.removeNodes([node.value.id])
   store.clearSelection()
+}
+
+
+function updateErrorPolicy(patch) {
+  store.updateNodeErrorPolicy(node.value.id, patch)
 }
 </script>
 
@@ -63,6 +78,37 @@ function onDelete() {
     </div>
 
     <p v-if="def.description" class="inspector-desc">{{ def.description }}</p>
+
+    <section v-if="errorPolicies.length > 1" class="error-policy">
+      <label>
+        <span>On error</span>
+        <select
+          :value="errorPolicy.policy"
+          @change="updateErrorPolicy({ policy: $event.target.value })"
+        >
+          <option v-for="option in errorPolicies" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <div v-if="errorPolicy.policy === 'retry'" class="retry-grid">
+        <label>
+          <span>Max attempts</span>
+          <input type="number" min="1" max="10" :value="errorPolicy.max_attempts ?? 3"
+            @change="updateErrorPolicy({ max_attempts: Number($event.target.value) })" />
+        </label>
+        <label>
+          <span>Delay (ms)</span>
+          <input type="number" min="0" max="60000" :value="errorPolicy.delay_ms ?? 1000"
+            @change="updateErrorPolicy({ delay_ms: Number($event.target.value) })" />
+        </label>
+        <label>
+          <span>Backoff</span>
+          <input type="number" min="1" max="10" step="0.1" :value="errorPolicy.backoff_multiplier ?? 2"
+            @change="updateErrorPolicy({ backoff_multiplier: Number($event.target.value) })" />
+        </label>
+      </div>
+    </section>
 
     <ul v-if="issues.length" class="inspector-issues">
       <li v-for="issue in issues" :key="issue.kind + issue.name">{{ issue.message }}</li>
@@ -179,6 +225,27 @@ function onDelete() {
   line-height: 1.4;
   padding: 6px 14px 2px;
 }
+
+.error-policy {
+  margin: 8px 14px 2px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-dark);
+}
+
+.error-policy label { display: grid; gap: 4px; font-size: 10.5px; color: var(--text-muted); }
+.error-policy select,
+.error-policy input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  padding: 5px 6px;
+  font-size: 11px;
+}
+.retry-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 7px; }
 
 .inspector-issues {
   margin: 6px 14px 0;

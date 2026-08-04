@@ -47,6 +47,7 @@ function resolvedType(port) {
 }
 
 function portColor(port) {
+  if (port.id === 'error' && port.type === 'control') return '#fb7185'
   return PORT_COLORS[resolvedType(port)] || PORT_COLORS.generic_json
 }
 

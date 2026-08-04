@@ -50,6 +50,38 @@ class WorkflowTestBase(unittest.TestCase):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_error_policies_are_capability_gated_and_bounded(self):
+        document = draft()
+        document["nodes"][0]["on_error"] = {
+            "policy": "retry", "max_attempts": 11, "delay_ms": -1, "backoff_multiplier": 0.5,
+        }
+        problems = validation_errors(validate_workflow(document, require_identity=False))
+        messages = [problem["message"] for problem in problems]
+        self.assertTrue(any("not supported" in message for message in messages))
+        self.assertTrue(any("1 to 10" in message for message in messages))
+        self.assertTrue(any("0 to 60000" in message for message in messages))
+
+    def test_explicit_error_control_output_is_a_valid_edge(self):
+        document = draft()
+        document["nodes"].extend([
+            {
+                "id": "n_tts", "type": "tts.generate", "type_version": 1, "name": "TTS",
+                "position": {"x": 200, "y": 0}, "configuration": {}, "disabled": False,
+                "on_error": {"policy": "continue_error"},
+            },
+            {
+                "id": "n_recover", "type": "project.setup", "type_version": 1, "name": "Recover",
+                "position": {"x": 400, "y": 0}, "configuration": {}, "disabled": False,
+            },
+        ])
+        document["edges"] = [
+            {"id": "e_data", "source_node": "n_script", "source_port": "script",
+             "target_node": "n_tts", "target_port": "script", "edge_type": "data"},
+            {"id": "e_error", "source_node": "n_tts", "source_port": "error",
+             "target_node": "n_recover", "target_port": "trigger", "edge_type": "control"},
+        ]
+        self.assertEqual(validation_errors(validate_workflow(document, require_identity=False)), [])
+
     def test_conditional_field_visibility_matches_inspector_rules(self):
         field = {"display_options": {"show": {"enabled": [True]}}}
         self.assertFalse(_field_is_visible(field, {"enabled": False}))
