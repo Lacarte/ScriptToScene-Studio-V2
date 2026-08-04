@@ -35,7 +35,11 @@ _remover = WatermarkRemover()
 
 # ── Detection thresholds ──────────────────────────────────────────────────
 _TEMPLATE_SCORE_MIN = 0.45
-_BRIGHTNESS_DIFF_MIN = 8.0
+# A lower threshold admits smooth radial corner glows that correlate strongly
+# with the alpha template but are not watermarks (the clean-glow regression
+# fixture measures about 8.8). Real low-contrast watermark fixtures remain
+# comfortably above this gate (about 17 or higher).
+_BRIGHTNESS_DIFF_MIN = 10.0
 _EDGE_DENSITY_MAX = 0.14
 
 # Tiered overrides — when multiple strong signals agree, accept even if the
