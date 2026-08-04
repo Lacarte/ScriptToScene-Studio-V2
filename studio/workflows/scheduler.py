@@ -273,6 +273,76 @@ def dependency_maps(workflow: Mapping[str, Any]) -> tuple[dict[str, set[str]], d
     return dependencies, reverse_dependencies
 
 
+RUN_MODES = {
+    "full",
+    "node_with_deps",
+    "node_isolated",
+    "selected",
+    "from_node",
+    "retry_failed",
+    "retry_failed_desc",
+}
+
+
+def calculate_scope(
+    workflow: Mapping[str, Any],
+    run_mode: str,
+    target_node_ids: list[str],
+) -> list[str]:
+    """Calculate a stable execution subgraph for every topology-based run mode.
+
+    Isolation has input-port semantics in addition to graph topology and is
+    completed by ``execution.resolve_scope`` after this function validates its
+    target.  Returned IDs always follow saved node order, never traversal order.
+    """
+    if run_mode not in RUN_MODES:
+        raise ValueError(f"Unsupported run_mode: {run_mode}")
+    saved_ids = [node["id"] for node in workflow.get("nodes", [])]
+    known_ids = set(saved_ids)
+    if not isinstance(target_node_ids, list):
+        raise ValueError("target_node_ids must be an array of node IDs")
+    if len(set(target_node_ids)) != len(target_node_ids):
+        raise ValueError("target_node_ids must not contain duplicates")
+    unknown = [node_id for node_id in target_node_ids if node_id not in known_ids]
+    if unknown:
+        raise ValueError(f"Unknown target node: {unknown[0]}")
+
+    if run_mode == "full":
+        if target_node_ids:
+            raise ValueError("full mode does not accept target_node_ids")
+        return saved_ids
+
+    if run_mode == "selected":
+        if not target_node_ids:
+            raise ValueError("selected requires at least one existing target node")
+        seeds = set(target_node_ids)
+        direction = "dependencies"
+    else:
+        if len(target_node_ids) != 1:
+            raise ValueError(f"{run_mode} requires exactly one existing target node")
+        seeds = {target_node_ids[0]}
+        if run_mode in {"node_with_deps"}:
+            direction = "dependencies"
+        elif run_mode in {"from_node", "retry_failed_desc"}:
+            direction = "descendants"
+        else:
+            # node_isolated and retry_failed contain only their target at the
+            # topology layer. Isolation may add directly-connected stubs.
+            return [node_id for node_id in saved_ids if node_id in seeds]
+
+    dependencies, descendants = dependency_maps(workflow)
+    adjacency = dependencies if direction == "dependencies" else descendants
+    scope = set(seeds)
+    pending = list(seeds)
+    while pending:
+        node_id = pending.pop()
+        for related_id in adjacency[node_id]:
+            if related_id not in scope:
+                scope.add(related_id)
+                pending.append(related_id)
+    return [node_id for node_id in saved_ids if node_id in scope]
+
+
 def resolve_executor(node: Mapping[str, Any]) -> Callable:
     definition = get_node_type(node.get("type"))
     spec = definition.get("executor") if definition else None

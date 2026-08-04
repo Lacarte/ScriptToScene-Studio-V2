@@ -91,4 +91,28 @@ describe('live workflow execution state', () => {
     expect(store.currentExecution.status).toBe('cancelling')
     expect(api.post).toHaveBeenCalledWith('/api/workflow/executions/ex_ABC123/stop', { body: {} })
   })
+
+  it.each([
+    ['selected', ['node_a', 'node_b']],
+    ['from_node', ['node_a']],
+    ['retry_failed', ['node_a']],
+    ['retry_failed_desc', ['node_a']],
+  ])('sends the %s partial-run request', async (runMode, targetNodeIds) => {
+    const store = seeded()
+    vi.spyOn(api, 'post').mockResolvedValue({
+      execution_id: 'ex_ABC123', project_id: 'pm_ABC123', status: 'queued',
+    })
+    await store.runWorkflow({ runMode, targetNodeIds, EventSourceImpl: FakeEventSource })
+    expect(api.post).toHaveBeenCalledWith('/api/workflow/run', {
+      body: expect.objectContaining({
+        run_mode: runMode,
+        target_node_ids: targetNodeIds,
+        force: false,
+      }),
+    })
+    expect(store.currentExecution).toMatchObject({
+      run_mode: runMode,
+      scope_node_ids: targetNodeIds,
+    })
+  })
 })

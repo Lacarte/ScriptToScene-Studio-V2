@@ -17,11 +17,8 @@ from .adapters.common import PROJECT_ID_RE
 from .events import EventBroker, ExecutionEventBuffer, TERMINAL_STATUSES
 from .persistence import generate_execution_id, load_execution, save_execution
 from .registry import get_node_type
-from .scheduler import WorkflowScheduler, dependency_maps, resolve_executor
+from .scheduler import WorkflowScheduler, calculate_scope, resolve_executor
 from .validation import validate_workflow, validation_errors
-
-
-RUN_MODES = {"full", "node_with_deps", "node_isolated"}
 
 
 class ExecutionRequestError(ValueError):
@@ -59,31 +56,15 @@ def prepare_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def resolve_scope(workflow: Mapping[str, Any], run_mode: str, target_node_ids: list[str]) -> list[str]:
-    if run_mode not in RUN_MODES:
-        raise ExecutionRequestError("BAD_REQUEST", f"Unsupported run_mode: {run_mode}")
     nodes = {node["id"]: node for node in workflow.get("nodes", [])}
-    if run_mode == "full":
-        if target_node_ids:
-            raise ExecutionRequestError("BAD_REQUEST", "full mode does not accept target_node_ids")
-        return list(nodes)
-    if len(target_node_ids) != 1 or target_node_ids[0] not in nodes:
-        raise ExecutionRequestError("BAD_REQUEST", f"{run_mode} requires exactly one existing target node")
+    try:
+        scope = calculate_scope(workflow, run_mode, target_node_ids)
+    except ValueError as exc:
+        raise ExecutionRequestError("BAD_REQUEST", str(exc)) from exc
+    if run_mode != "node_isolated":
+        return scope
 
     target = target_node_ids[0]
-    dependencies, _ = dependency_maps(workflow)
-    if run_mode == "node_with_deps":
-        scope: set[str] = set()
-
-        def include(node_id: str) -> None:
-            if node_id in scope:
-                return
-            scope.add(node_id)
-            for predecessor in dependencies[node_id]:
-                include(predecessor)
-
-        include(target)
-        return [node_id for node_id in nodes if node_id in scope]
-
     # Isolation deliberately ignores normal upstream nodes. Required inputs
     # must instead be supplied by directly connected Sample Input nodes.
     incoming = [edge for edge in workflow.get("edges", []) if edge["target_node"] == target]

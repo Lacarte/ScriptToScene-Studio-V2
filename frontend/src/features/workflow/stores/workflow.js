@@ -166,7 +166,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return executionStream
   }
 
-  async function runWorkflow({ EventSourceImpl } = {}) {
+  async function runWorkflow({
+    runMode = 'full',
+    targetNodeIds = [],
+    EventSourceImpl,
+  } = {}) {
     executionLoading.value = true
     executionError.value = ''
     selectedExecutionNodeId.value = null
@@ -176,7 +180,12 @@ export const useWorkflowStore = defineStore('workflow', () => {
         ? { workflow_id: workflowId.value }
         : { workflow: toDocument() }
       const data = await api.post('/api/workflow/run', {
-        body: { ...payload, run_mode: 'full', target_node_ids: [], force: false },
+        body: {
+          ...payload,
+          run_mode: runMode,
+          target_node_ids: [...targetNodeIds],
+          force: false,
+        },
       })
       currentExecution.value = {
         schema_version: 1,
@@ -184,12 +193,22 @@ export const useWorkflowStore = defineStore('workflow', () => {
         workflow_id: workflowId.value || '',
         workflow_snapshot: plain(toDocument()),
         project_id: data.project_id,
-        run_mode: 'full',
-        scope_node_ids: nodes.value.map((node) => node.id),
+        run_mode: runMode,
+        // The server persists the authoritative expanded scope. Until the
+        // first snapshot arrives, show the requested targets (or every node
+        // for a complete run) as queued.
+        scope_node_ids: runMode === 'full'
+          ? nodes.value.map((node) => node.id)
+          : [...targetNodeIds],
         status: data.status || 'queued',
         started_at: new Date().toISOString(),
         finished_at: null,
-        nodes: Object.fromEntries(nodes.value.map((node) => [node.id, emptyNodeExecution('queued')])),
+        nodes: Object.fromEntries(nodes.value.map((node) => [
+          node.id,
+          emptyNodeExecution(
+            runMode === 'full' || targetNodeIds.includes(node.id) ? 'queued' : 'idle',
+          ),
+        ])),
       }
       watchExecution(data.execution_id, { EventSourceImpl })
       return data

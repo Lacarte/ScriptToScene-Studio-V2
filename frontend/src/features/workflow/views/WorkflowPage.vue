@@ -24,6 +24,8 @@ const store = useWorkflowStore()
 const toast = useToast()
 const { screenToFlowCoordinate, fitView, setViewport: setFlowViewport } = useVueFlow()
 const importInput = ref(null)
+const canvasSelection = ref(new Set())
+const runMode = ref('full')
 
 onMounted(async () => {
   try {
@@ -111,6 +113,7 @@ const flowNodes = computed(() =>
     id: n.id,
     type: 'sts',
     position: { ...n.position },
+    selected: canvasSelection.value.has(n.id),
     data: { nodeType: n.type, label: n.name, disabled: n.disabled },
   })),
 )
@@ -178,8 +181,22 @@ function onNodeDragStop({ node, nodes: draggedNodes }) {
 }
 
 function onNodesChange(changes) {
+  const selectionChanges = changes.filter((change) => change.type === 'select')
+  if (selectionChanges.length) {
+    const next = new Set(canvasSelection.value)
+    for (const change of selectionChanges) {
+      if (change.selected) next.add(change.id)
+      else next.delete(change.id)
+    }
+    canvasSelection.value = next
+  }
   const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id)
-  if (removed.length) store.removeNodes(removed)
+  if (removed.length) {
+    store.removeNodes(removed)
+    canvasSelection.value = new Set(
+      [...canvasSelection.value].filter((nodeId) => !removed.includes(nodeId)),
+    )
+  }
 }
 
 function onEdgesChange(changes) {
@@ -218,10 +235,6 @@ const contextMenu = ref(null) // {nodeId, x, y}
 
 function onNodeContextMenu({ event, node }) {
   event.preventDefault()
-  if (store.isStubType(store.nodeById(node.id)?.type)) {
-    contextMenu.value = null
-    return
-  }
   // Fixed positioning: viewport coordinates work regardless of panel layout.
   contextMenu.value = { nodeId: node.id, x: event.clientX, y: event.clientY }
 }
@@ -242,6 +255,28 @@ function onAttachResultViewer() {
   const stub = store.attachResultViewer(contextMenu.value.nodeId)
   closeContextMenu()
   toast.info(stub ? 'Result viewer attached' : 'This node has no data output to view')
+}
+
+function isFailedNode(nodeId) {
+  return store.nodeExecution(nodeId).status === 'failed'
+}
+
+function targetsForMode(mode, nodeId = store.selectedNodeId) {
+  if (mode === 'full') return []
+  if (mode === 'selected') return [...canvasSelection.value]
+  return nodeId ? [nodeId] : []
+}
+
+function canRun(mode, nodeId = store.selectedNodeId) {
+  if (!store.nodeCount || store.executionLoading || store.executionActive) return false
+  const targets = targetsForMode(mode, nodeId)
+  if (mode === 'full') return true
+  if (mode === 'selected') return targets.length > 0
+  if (targets.length !== 1) return false
+  if (mode === 'retry_failed' || mode === 'retry_failed_desc') {
+    return isFailedNode(targets[0])
+  }
+  return true
 }
 
 // Live feedback while dragging a connection: valid targets highlight,
@@ -408,13 +443,29 @@ function onExport() {
   anchor.click()
 }
 
-async function onRun() {
+async function onRun(mode = runMode.value, nodeId = store.selectedNodeId) {
+  const targets = targetsForMode(mode, nodeId)
+  if (!canRun(mode, nodeId)) {
+    const message = mode === 'selected'
+      ? 'Select one or more canvas nodes first'
+      : mode.startsWith('retry_')
+        ? 'Choose a node that failed in the current execution'
+        : 'Choose a node first'
+    toast.warning(message)
+    return
+  }
   try {
-    await store.runWorkflow()
+    await store.runWorkflow({ runMode: mode, targetNodeIds: targets })
     toast.success('Workflow run started')
   } catch (err) {
     toast.error(store.executionError || err?.message || 'Failed to run workflow')
   }
+}
+
+async function onContextRun(mode) {
+  const nodeId = contextMenu.value?.nodeId
+  closeContextMenu()
+  await onRun(mode, nodeId)
 }
 
 async function onStop() {
@@ -468,12 +519,27 @@ async function onStop() {
         <button class="wf-btn" :disabled="!store.nodeCount || validating" title="Validate workflow on the server" @click="onValidate">
           Validate
         </button>
+        <select
+          v-if="!store.executionActive"
+          v-model="runMode"
+          class="wf-select"
+          aria-label="Run mode"
+          title="Choose which part of the workflow to run"
+        >
+          <option value="full">Full workflow</option>
+          <option value="node_with_deps">Node + dependencies</option>
+          <option value="node_isolated">Node in isolation</option>
+          <option value="selected">Selected + dependencies</option>
+          <option value="from_node">From node downstream</option>
+          <option value="retry_failed">Retry failed node</option>
+          <option value="retry_failed_desc">Retry failed + downstream</option>
+        </select>
         <button
           v-if="!store.executionActive"
           class="wf-btn run"
-          :disabled="!store.nodeCount || store.executionLoading"
-          title="Run the full workflow"
-          @click="onRun"
+          :disabled="!canRun(runMode)"
+          :title="`Run mode: ${runMode}`"
+          @click="onRun()"
         >Run</button>
         <button
           v-else
@@ -538,12 +604,27 @@ async function onStop() {
           </div>
         </VueFlow>
 
-        <!-- Node context menu: manual stub attachment (step 2.5) -->
+        <!-- Node context menu: sample helpers and partial run modes. -->
         <template v-if="contextMenu">
           <div class="wf-context-backdrop" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu" />
           <div class="wf-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }">
-            <button class="wf-context-item" @click="onAttachSampleInputs">Attach sample inputs</button>
-            <button class="wf-context-item" @click="onAttachResultViewer">Attach result viewer</button>
+            <button class="wf-context-item" @click="onContextRun('node_with_deps')">Run node + dependencies</button>
+            <button class="wf-context-item" @click="onContextRun('node_isolated')">Run node in isolation</button>
+            <button class="wf-context-item" @click="onContextRun('from_node')">Run from node downstream</button>
+            <button
+              class="wf-context-item"
+              :disabled="!isFailedNode(contextMenu.nodeId)"
+              @click="onContextRun('retry_failed')"
+            >Retry failed node</button>
+            <button
+              class="wf-context-item"
+              :disabled="!isFailedNode(contextMenu.nodeId)"
+              @click="onContextRun('retry_failed_desc')"
+            >Retry failed + downstream</button>
+            <template v-if="!store.isStubType(store.nodeById(contextMenu.nodeId)?.type)">
+              <button class="wf-context-item" @click="onAttachSampleInputs">Attach sample inputs</button>
+              <button class="wf-context-item" @click="onAttachResultViewer">Attach result viewer</button>
+            </template>
           </div>
         </template>
       </main>

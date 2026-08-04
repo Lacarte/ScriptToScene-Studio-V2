@@ -10,6 +10,7 @@ from studio.workflows.scheduler import (
     ProjectLock,
     ProjectLockedError,
     WorkflowScheduler,
+    calculate_scope,
     dependency_maps,
     deterministic_order,
 )
@@ -97,6 +98,44 @@ def test_multi_input_and_diamond_join_wait_for_every_predecessor(tmp_path):
     assert result.status == "succeeded"
     assert calls[-1] == ("join", {"script": "script-value", "settings": {"tone": "test"}})
     assert result.order == ["source", "left", "right", "join"]
+
+
+def test_partial_run_scopes_on_branch_and_diamond_graph():
+    #       root
+    #      /    \
+    #   left   right
+    #      \    /
+    #       join -> tail
+    workflow = _workflow(
+        [_node("root"), _node("left"), _node("right"), _node("join"), _node("tail")],
+        [
+            _edge("e1", "root", "control", "left", "trigger"),
+            _edge("e2", "root", "control", "right", "trigger"),
+            _edge("e3", "left", "control", "join", "trigger"),
+            _edge("e4", "right", "control", "join", "trigger"),
+            _edge("e5", "join", "control", "tail", "trigger"),
+        ],
+    )
+    assert calculate_scope(workflow, "selected", ["left", "right"]) == ["root", "left", "right"]
+    assert calculate_scope(workflow, "from_node", ["left"]) == ["left", "join", "tail"]
+    assert calculate_scope(workflow, "retry_failed", ["join"]) == ["join"]
+    assert calculate_scope(workflow, "retry_failed_desc", ["left"]) == ["left", "join", "tail"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "targets", "message"),
+    [
+        ("selected", [], "at least one"),
+        ("selected", ["root", "root"], "duplicates"),
+        ("from_node", ["missing"], "Unknown target"),
+        ("retry_failed", ["root", "left"], "exactly one"),
+        ("not_a_mode", [], "Unsupported"),
+    ],
+)
+def test_partial_run_scope_rejects_invalid_requests(mode, targets, message):
+    workflow = _workflow([_node("root"), _node("left")], [])
+    with pytest.raises(ValueError, match=message):
+        calculate_scope(workflow, mode, targets)
 
 
 def test_disabled_node_and_its_dependent_are_skipped_but_other_branch_runs(tmp_path):
