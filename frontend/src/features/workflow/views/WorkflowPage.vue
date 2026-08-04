@@ -1,19 +1,110 @@
 <script setup>
-import { ref } from 'vue'
-import { VueFlow } from '@vue-flow/core'
+import { computed, markRaw } from 'vue'
+import { VueFlow, useVueFlow, MarkerType } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import NodeLibrary from '../components/NodeLibrary.vue'
+import dagre from '@dagrejs/dagre'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
+import { useWorkflowStore } from '../stores/workflow.js'
+import { DRAG_MIME } from '../constants.js'
+import NodeLibrary from '../components/NodeLibrary.vue'
+import NodeCard from '../components/NodeCard.vue'
 
-// Step 1.1 shell: empty canvas + the five layout regions.
-// Nodes/edges arrive in 1.3–1.5; execution wiring in Phase 3.
-const nodes = ref([])
-const edges = ref([])
+const store = useWorkflowStore()
+const { screenToFlowCoordinate, fitView } = useVueFlow()
+
+const nodeTypes = { sts: markRaw(NodeCard) }
+
+// Store (persisted shape) → Vue Flow elements. Vue Flow runtime props stay here.
+const flowNodes = computed(() =>
+  store.nodes.map((n) => ({
+    id: n.id,
+    type: 'sts',
+    position: { ...n.position },
+    data: { nodeType: n.type, label: n.name, disabled: n.disabled },
+  })),
+)
+
+const flowEdges = computed(() =>
+  store.edges.map((e) => ({
+    id: e.id,
+    source: e.source_node,
+    target: e.target_node,
+    sourceHandle: e.source_port,
+    targetHandle: e.target_port,
+    markerEnd: MarkerType.ArrowClosed,
+    class: e.edge_type === 'control' ? 'wf-edge-control' : 'wf-edge-data',
+  })),
+)
+
+// ── Palette drop → add node at canvas position ─────────────────────────
+function onDragOver(event) {
+  if (event.dataTransfer?.types?.includes(DRAG_MIME)) {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onDrop(event) {
+  const typeKey = event.dataTransfer?.getData(DRAG_MIME)
+  if (!typeKey) return
+  const position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
+  store.addNode(typeKey, position)
+}
+
+// ── Sync Vue Flow interactions back into the store ─────────────────────
+function onNodeDragStop({ node }) {
+  store.moveNode(node.id, { x: node.position.x, y: node.position.y })
+}
+
+function onNodesChange(changes) {
+  const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id)
+  if (removed.length) store.removeNodes(removed)
+}
+
+function onEdgesChange(changes) {
+  const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id)
+  if (removed.length) store.removeEdges(removed)
+}
+
+function onViewportChangeEnd(vp) {
+  store.setViewport(vp)
+}
+
+// ── Minimap colored by category ────────────────────────────────────────
+function minimapColor(node) {
+  const def = store.nodeTypes[node.data?.nodeType]
+  return store.categories[def?.category]?.color || '#4b5563'
+}
+
+// ── Dagre tidy-up ──────────────────────────────────────────────────────
+function tidyUp() {
+  if (!store.nodes.length) return
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 90 })
+  g.setDefaultEdgeLabel(() => ({}))
+  for (const node of store.nodes) {
+    g.setNode(node.id, { width: 200, height: 60 })
+  }
+  for (const edge of store.edges) {
+    g.setEdge(edge.source_node, edge.target_node)
+  }
+  dagre.layout(g)
+  for (const node of store.nodes) {
+    const pos = g.node(node.id)
+    if (pos) {
+      store.moveNode(node.id, {
+        x: Math.round((pos.x - 100) / 20) * 20,
+        y: Math.round((pos.y - 30) / 20) * 20,
+      })
+    }
+  }
+  requestAnimationFrame(() => fitView({ padding: 0.15 }))
+}
 </script>
 
 <template>
@@ -21,11 +112,17 @@ const edges = ref([])
     <!-- Top — toolbar -->
     <header class="wf-toolbar">
       <div class="wf-toolbar-group">
-        <span class="wf-title">Workflow</span>
+        <span class="wf-title">{{ store.workflowName }}</span>
+        <span v-if="store.dirty" class="wf-dirty" title="Unsaved changes">●</span>
         <span class="wf-badge">MVP</span>
       </div>
       <div class="wf-toolbar-group wf-toolbar-actions">
-        <!-- New / Open / Save / Validate / Run land in steps 1.6+ -->
+        <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">
+          Tidy up
+        </button>
+        <button class="wf-btn" :disabled="!store.nodeCount" title="Fit view" @click="fitView({ padding: 0.15 })">
+          Fit
+        </button>
       </div>
     </header>
 
@@ -37,19 +134,30 @@ const edges = ref([])
       </aside>
 
       <!-- Center — canvas -->
-      <main class="wf-canvas">
+      <main class="wf-canvas" @dragover="onDragOver" @drop="onDrop">
         <VueFlow
-          v-model:nodes="nodes"
-          v-model:edges="edges"
+          :nodes="flowNodes"
+          :edges="flowEdges"
+          :node-types="nodeTypes"
           :min-zoom="0.1"
           :max-zoom="1.5"
           :snap-to-grid="true"
           :snap-grid="[20, 20]"
+          :delete-key-code="'Delete'"
+          :multi-selection-key-code="'Control'"
+          :selection-key-code="'Shift'"
           fit-view-on-init
+          @node-drag-stop="onNodeDragStop"
+          @nodes-change="onNodesChange"
+          @edges-change="onEdgesChange"
+          @viewport-change-end="onViewportChangeEnd"
         >
           <Background pattern-color="rgba(255,255,255,0.12)" :gap="20" />
           <Controls position="bottom-left" />
-          <MiniMap position="bottom-right" pannable zoomable />
+          <MiniMap position="bottom-right" pannable zoomable :node-color="minimapColor" />
+          <div v-if="!store.nodeCount" class="wf-canvas-hint">
+            Drag a node from the library to start building
+          </div>
         </VueFlow>
       </main>
 
@@ -100,6 +208,12 @@ const edges = ref([])
   letter-spacing: -0.02em;
 }
 
+.wf-dirty {
+  color: var(--accent-warning, #ffb347);
+  font-size: 14px;
+  line-height: 1;
+}
+
 .wf-badge {
   font-size: 9px;
   font-weight: 700;
@@ -109,6 +223,28 @@ const edges = ref([])
   border: 1px solid rgba(78, 205, 196, 0.4);
   border-radius: 6px;
   padding: 2px 6px;
+}
+
+.wf-btn {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.wf-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.wf-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .wf-body {
@@ -141,6 +277,17 @@ const edges = ref([])
   position: relative;
 }
 
+.wf-canvas-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--text-muted);
+  font-size: 13px;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
 .wf-bottom {
   height: 140px;
   min-height: 140px;
@@ -161,6 +308,11 @@ const edges = ref([])
   font-size: 12px;
   color: var(--text-muted);
   padding: 8px 14px;
+  opacity: 0.7;
+}
+
+:deep(.wf-edge-control .vue-flow__edge-path) {
+  stroke-dasharray: 5 4;
   opacity: 0.7;
 }
 </style>
