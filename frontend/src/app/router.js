@@ -12,6 +12,12 @@ const routes = [
     meta: { title: 'Pipeline', icon: 'rocket' },
   },
   {
+    path: '/workflow',
+    name: 'workflow',
+    component: () => import('@/features/workflow/views/WorkflowPage.vue'),
+    meta: { title: 'Workflow Builder', icon: 'workflow' },
+  },
+  {
     path: '/tts',
     name: 'tts',
     component: () => import('@/features/tts/views/TtsPage.vue'),

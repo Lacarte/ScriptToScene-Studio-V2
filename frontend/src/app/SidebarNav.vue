@@ -83,6 +83,11 @@ function toggleAudio() {
         <span v-show="!collapsed" class="nav-label">PIPELINE</span>
       </router-link>
 
+      <router-link to="/workflow" class="nav-item" :class="{ active: isActive('/workflow') }" title="Workflow Builder">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="7" height="7" rx="1.5"/><rect x="15" y="15" width="7" height="7" rx="1.5"/><rect x="15" y="2" width="7" height="7" rx="1.5"/><path d="M9 5.5h6M18.5 9v6M5.5 9v4a2 2 0 002 2H15"/></svg>
+        <span v-show="!collapsed" class="nav-label">WORKFLOW</span>
+      </router-link>
+
       <div class="nav-divider" />
 
       <!-- Group 2: Audio Processing -->
