@@ -4,6 +4,7 @@ import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
+import NodeLibrary from '../components/NodeLibrary.vue'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
@@ -32,7 +33,7 @@ const edges = ref([])
       <!-- Left — node library -->
       <aside class="wf-library">
         <div class="wf-panel-header">Nodes</div>
-        <div class="wf-panel-empty">Node library arrives in step 1.3</div>
+        <NodeLibrary />
       </aside>
 
       <!-- Center — canvas -->
