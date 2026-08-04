@@ -11,10 +11,13 @@ import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
 import { useWorkflowStore } from '../stores/workflow.js'
 import { DRAG_MIME } from '../constants.js'
+import { validateConnection } from '../validation.js'
+import { useToast } from '@/shared/composables/useToast.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import NodeCard from '../components/NodeCard.vue'
 
 const store = useWorkflowStore()
+const toast = useToast()
 const { screenToFlowCoordinate, fitView } = useVueFlow()
 
 const nodeTypes = { sts: markRaw(NodeCard) }
@@ -73,6 +76,30 @@ function onEdgesChange(changes) {
 
 function onViewportChangeEnd(vp) {
   store.setViewport(vp)
+}
+
+// ── Connections (validated, contracts §3) ──────────────────────────────
+function toConnectionShape(params) {
+  return {
+    sourceNode: params.source,
+    sourcePort: params.sourceHandle,
+    targetNode: params.target,
+    targetPort: params.targetHandle,
+  }
+}
+
+function onConnect(params) {
+  const verdict = store.connectNodes(toConnectionShape(params))
+  if (!verdict.ok) toast.error(verdict.reason)
+}
+
+// Live feedback while dragging a connection: valid targets highlight,
+// invalid ones show the not-allowed cursor.
+function isValidConnection(params) {
+  return validateConnection(
+    { nodes: store.nodes, edges: store.edges, nodeTypes: store.nodeTypes },
+    toConnectionShape(params),
+  ).ok
 }
 
 // ── Minimap colored by category ────────────────────────────────────────
@@ -146,7 +173,9 @@ function tidyUp() {
           :delete-key-code="'Delete'"
           :multi-selection-key-code="'Control'"
           :selection-key-code="'Shift'"
+          :is-valid-connection="isValidConnection"
           fit-view-on-init
+          @connect="onConnect"
           @node-drag-stop="onNodeDragStop"
           @nodes-change="onNodesChange"
           @edges-change="onEdgesChange"

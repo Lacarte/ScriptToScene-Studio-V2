@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/shared/api/client.js'
+import { validateConnection } from '../validation.js'
 
 /**
  * Workflow builder store — the domain model behind the canvas.
@@ -109,6 +110,39 @@ export const useWorkflowStore = defineStore('workflow', () => {
     dirty.value = true
   }
 
+  let edgeCounter = 0
+  function nextEdgeId() {
+    edgeCounter += 1
+    let candidate = `e_${edgeCounter}`
+    while (edges.value.some((e) => e.id === candidate)) {
+      edgeCounter += 1
+      candidate = `e_${edgeCounter}`
+    }
+    return candidate
+  }
+
+  /**
+   * Validate + create a connection. Returns the validation result;
+   * on success the edge is appended in the persisted shape.
+   */
+  function connectNodes({ sourceNode, sourcePort, targetNode, targetPort }) {
+    const verdict = validateConnection(
+      { nodes: nodes.value, edges: edges.value, nodeTypes: nodeTypes.value },
+      { sourceNode, sourcePort, targetNode, targetPort },
+    )
+    if (!verdict.ok) return verdict
+    edges.value.push({
+      id: nextEdgeId(),
+      source_node: sourceNode,
+      source_port: sourcePort,
+      target_node: targetNode,
+      target_port: targetPort,
+      edge_type: verdict.edgeType,
+    })
+    dirty.value = true
+    return verdict
+  }
+
   function removeEdges(edgeIds) {
     const doomed = new Set(edgeIds)
     if (!doomed.size) return
@@ -132,7 +166,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     registryLoading, registryError, loadNodeTypes,
     // document
     workflowId, workflowName, nodes, edges, viewport, dirty, nodeCount,
-    addNode, moveNode, renameNode, removeNodes, removeEdges,
+    addNode, moveNode, renameNode, removeNodes, removeEdges, connectNodes,
     setViewport, nodeById, defaultsFor,
   }
 })
