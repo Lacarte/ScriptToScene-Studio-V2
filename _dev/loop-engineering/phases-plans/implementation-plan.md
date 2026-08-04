@@ -212,6 +212,12 @@ Per-node `on_error`: stop / bounded retry with delay/backoff / continue via expl
 Bottom panel full version: execution list (`GET /api/workflow/executions?workflow_id=`), node timeline, per-node resolved inputs/outputs/logs/errors/attempts, cache decisions and stale reasons. Summaries by default, explicit expansion for large values.
 **Done when (Phase 4 gate):** a failed run can be diagnosed and retried from the UI without rerunning successful nodes.
 
+#### Step 4.4 review status — 2026-08-04
+
+- **Complete.** The bottom panel loads newest-first persisted history for the active workflow, opens full execution records, and presents a duration-scaled node timeline with status, attempts, sample-data state, and per-node selection.
+- Deep inspection shows bounded input/output/artifact summaries with explicit JSON expansion, structured current and per-attempt errors, recovery suggestions, logs, cache hit/miss decisions, and cache/stale reasons. Failed nodes expose retry-failed and retry-failed-plus-descendants actions; these use partial-run scope and preserve unaffected successful work.
+- Automated verification: 121 backend tests plus 38 subtests and 84 frontend tests pass; the production frontend build succeeds. The in-app browser surface was unavailable, so the final interactive layout smoke check remains to be performed when that surface is available.
+
 ---
 
 ## Phase 5 — Power UX, utilities, expressions

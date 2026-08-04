@@ -66,6 +66,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const currentExecution = ref(null)
   const executionLoading = ref(false)
   const executionError = ref('')
+  const executionHistory = ref([])
+  const executionHistoryTotal = ref(0)
+  const executionHistoryLoading = ref(false)
+  const executionHistoryError = ref('')
   const selectedExecutionNodeId = ref(null)
   const staleNodeIds = ref([])
   let executionStream = null
@@ -86,8 +90,33 @@ export const useWorkflowStore = defineStore('workflow', () => {
       outputs_summary: {},
       artifact_refs: [],
       logs: [],
+      attempt_errors: [],
       error: null,
     }
+  }
+
+  function executionSummary(execution) {
+    return {
+      execution_id: execution.execution_id,
+      workflow_id: execution.workflow_id,
+      project_id: execution.project_id,
+      run_mode: execution.run_mode,
+      status: execution.status,
+      started_at: execution.started_at,
+      finished_at: execution.finished_at,
+    }
+  }
+
+  function upsertExecutionHistory(execution) {
+    if (!execution?.execution_id || !execution?.workflow_id) return
+    const summary = executionSummary(execution)
+    const remaining = executionHistory.value.filter(
+      (item) => item.execution_id !== summary.execution_id,
+    )
+    executionHistory.value = [summary, ...remaining].sort((left, right) =>
+      String(right.started_at || '').localeCompare(String(left.started_at || '')),
+    )
+    executionHistoryTotal.value = Math.max(executionHistoryTotal.value, executionHistory.value.length)
   }
 
   function nodeExecution(nodeId) {
@@ -129,9 +158,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
     staleNodeIds.value = []
   }
 
+  function clearExecutionHistory() {
+    executionHistory.value = []
+    executionHistoryTotal.value = 0
+    executionHistoryError.value = ''
+  }
+
   function applyExecutionSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return
     currentExecution.value = plain(snapshot)
+    upsertExecutionHistory(snapshot)
     if (
       selectedExecutionNodeId.value
       && !currentExecution.value.nodes?.[selectedExecutionNodeId.value]
@@ -148,6 +184,40 @@ export const useWorkflowStore = defineStore('workflow', () => {
       executionError.value = err?.message || 'Failed to refresh execution'
       throw err
     }
+  }
+
+  async function refreshExecutionHistory(id = workflowId.value, { limit = 100 } = {}) {
+    if (!id) {
+      clearExecutionHistory()
+      return []
+    }
+    executionHistoryLoading.value = true
+    executionHistoryError.value = ''
+    try {
+      const data = await api.get('/api/workflow/executions', {
+        params: { workflow_id: id, limit },
+      })
+      executionHistory.value = plain(data.executions || [])
+      executionHistoryTotal.value = Number.isInteger(data.total)
+        ? data.total
+        : executionHistory.value.length
+      return executionHistory.value
+    } catch (err) {
+      executionHistoryError.value = err?.message || 'Failed to load run history'
+      throw err
+    } finally {
+      executionHistoryLoading.value = false
+    }
+  }
+
+  async function inspectExecution(executionId) {
+    if (!executionId) return null
+    if (executionActive.value && executionId !== currentExecution.value?.execution_id) {
+      throw new Error('Wait for the current run to finish before inspecting another run')
+    }
+    selectedExecutionNodeId.value = null
+    executionError.value = ''
+    return refreshExecution(executionId)
   }
 
   function applyExecutionEvent(event) {
@@ -177,7 +247,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
       closeExecutionStream()
       // The terminal record contains output summaries/artifact refs that are
       // intentionally not repeated in every SSE event.
-      void refreshExecution(execution.execution_id).catch(() => {})
+      void refreshExecution(execution.execution_id)
+        .then(() => refreshExecutionHistory(execution.workflow_id))
+        .catch(() => {})
     }
   }
 
@@ -239,6 +311,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
           ),
         ])),
       }
+      upsertExecutionHistory(currentExecution.value)
       watchExecution(data.execution_id, { EventSourceImpl })
       return data
     } catch (err) {
@@ -707,7 +780,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
     preserveSelection = false,
     preserveExecution = false,
   } = {}) {
-    if (!preserveExecution) clearExecution()
+    if (!preserveExecution) {
+      clearExecution()
+      clearExecutionHistory()
+    }
     workflowId.value = document.workflow_id || null
     workflowName.value = document.name || 'Untitled workflow'
     workflowDescription.value = document.description || ''
@@ -965,9 +1041,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     canUndoStubDetach, undoStubDetach,
     // live execution (step 3.6)
     currentExecution, executionLoading, executionError, executionActive,
+    executionHistory, executionHistoryTotal, executionHistoryLoading, executionHistoryError,
     staleNodeIds, markNodesStale,
     selectedExecutionNodeId, selectedExecutionNode, editorProjectId,
     nodeExecution, runWorkflow, stopExecution, refreshExecution,
+    refreshExecutionHistory, inspectExecution, clearExecutionHistory,
     applyExecutionEvent, watchExecution, closeExecutionStream, clearExecution,
     selectExecutionNode,
   }

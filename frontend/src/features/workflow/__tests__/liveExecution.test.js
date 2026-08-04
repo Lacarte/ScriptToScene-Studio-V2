@@ -115,4 +115,39 @@ describe('live workflow execution state', () => {
       scope_node_ids: targetNodeIds,
     })
   })
+
+  it('loads newest-first history and inspects a persisted execution', async () => {
+    const store = seeded()
+    store.workflowId = 'wf_ABC123'
+    const summaries = [{
+      execution_id: 'ex_OLD001', workflow_id: 'wf_ABC123', project_id: 'pm_ABC123',
+      run_mode: 'full', status: 'failed', started_at: '2026-08-04T12:00:00Z', finished_at: '2026-08-04T12:00:01Z',
+    }]
+    const detail = {
+      ...summaries[0], workflow_snapshot: store.toDocument(),
+      nodes: { [store.nodes[0].id]: { status: 'failed', attempts: 2, attempt_errors: [{ attempt: 1 }] } },
+    }
+    vi.spyOn(api, 'get').mockImplementation((path, options) => {
+      if (path === '/api/workflow/executions') {
+        expect(options).toEqual({ params: { workflow_id: 'wf_ABC123', limit: 100 } })
+        return Promise.resolve({ executions: summaries, total: 1 })
+      }
+      return Promise.resolve({ execution: detail })
+    })
+
+    await store.refreshExecutionHistory()
+    expect(store.executionHistory).toEqual(summaries)
+    expect(store.executionHistoryTotal).toBe(1)
+    await store.inspectExecution('ex_OLD001')
+    expect(store.currentExecution.execution_id).toBe('ex_OLD001')
+    expect(store.currentExecution.nodes[store.nodes[0].id].attempt_errors).toHaveLength(1)
+  })
+
+  it('does not replace an active run with a historical execution', async () => {
+    const store = seeded()
+    store.currentExecution = { execution_id: 'ex_LIVE01', status: 'running', nodes: {} }
+    await expect(store.inspectExecution('ex_OLD001')).rejects.toThrow(
+      'Wait for the current run to finish',
+    )
+  })
 })
