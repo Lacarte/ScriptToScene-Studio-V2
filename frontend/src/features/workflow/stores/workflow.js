@@ -10,6 +10,13 @@ import { nodeIssues } from '../schema.js'
  * WorkflowPage maps them to Vue Flow elements. Vue Flow runtime props never
  * enter this store.
  */
+
+// Draft autosave (step 2.4). Drafts live in localStorage — not the backend —
+// so a synchronous flush during beforeunload/visibilitychange can never be
+// lost to an in-flight network call, and the frozen API surface stays intact.
+export const DRAFT_STORAGE_KEY = 'sts-workflow-draft'
+export const DRAFT_DEBOUNCE_MS = 1000
+
 export const useWorkflowStore = defineStore('workflow', () => {
   // ── Registry (served by the backend, loaded once) ─────────────────────
   const registryVersion = ref(null)
@@ -49,6 +56,90 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const createdAt = ref(null)
   const updatedAt = ref(null)
   const dirty = ref(false)
+  const draftSavedAt = ref(null)
+
+  // ── Draft autosave (step 2.4) ─────────────────────────────────────────
+  let draftTimer = null
+
+  function cancelDraftAutosave() {
+    if (draftTimer !== null) {
+      clearTimeout(draftTimer)
+      draftTimer = null
+    }
+  }
+
+  function scheduleDraftAutosave() {
+    cancelDraftAutosave()
+    draftTimer = setTimeout(() => {
+      draftTimer = null
+      flushDraft()
+    }, DRAFT_DEBOUNCE_MS)
+  }
+
+  /** Every mutation that makes the document diverge from disk funnels here. */
+  function markDocumentDirty() {
+    dirty.value = true
+    scheduleDraftAutosave()
+  }
+
+  /** Write the draft immediately (no-op when there is nothing unsaved). */
+  function flushDraft() {
+    cancelDraftAutosave()
+    if (!dirty.value) return false
+    try {
+      const payload = {
+        version: 1,
+        saved_at: new Date().toISOString(),
+        document: toDocument(),
+      }
+      globalThis.localStorage?.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload))
+      draftSavedAt.value = payload.saved_at
+      return true
+    } catch {
+      // Quota exceeded / storage disabled: autosave is best-effort, the
+      // explicit Save path and dirty indicator still protect the user.
+      return false
+    }
+  }
+
+  /** Read the stored draft without applying it. Corrupt drafts are dropped. */
+  function peekDraft() {
+    let raw = null
+    try {
+      raw = globalThis.localStorage?.getItem(DRAFT_STORAGE_KEY)
+    } catch {
+      return null
+    }
+    if (!raw) return null
+    try {
+      const draft = JSON.parse(raw)
+      if (!draft || typeof draft !== 'object') throw new Error('not an object')
+      if (!draft.document || typeof draft.document !== 'object') throw new Error('no document')
+      return draft
+    } catch {
+      clearDraft()
+      return null
+    }
+  }
+
+  function clearDraft() {
+    cancelDraftAutosave()
+    draftSavedAt.value = null
+    try {
+      globalThis.localStorage?.removeItem(DRAFT_STORAGE_KEY)
+    } catch {
+      /* storage unavailable — nothing to clear */
+    }
+  }
+
+  /** Apply the stored draft as the (still unsaved) working document. */
+  function recoverDraft() {
+    const draft = peekDraft()
+    if (!draft) return false
+    applyDocument(draft.document, { markDirty: true })
+    draftSavedAt.value = draft.saved_at || null
+    return true
+  }
 
   const workflowList = ref([])
   const templates = ref([])
@@ -94,7 +185,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       disabled: false,
     }
     nodes.value.push(node)
-    dirty.value = true
+    markDocumentDirty()
     return node
   }
 
@@ -102,14 +193,14 @@ export const useWorkflowStore = defineStore('workflow', () => {
     const node = nodes.value.find((n) => n.id === nodeId)
     if (!node) return
     node.position = { x: position.x, y: position.y }
-    dirty.value = true
+    markDocumentDirty()
   }
 
   function renameNode(nodeId, name) {
     const node = nodes.value.find((n) => n.id === nodeId)
     if (!node) return
     node.name = name
-    dirty.value = true
+    markDocumentDirty()
   }
 
   function removeNodes(nodeIds) {
@@ -120,7 +211,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       (e) => !doomed.has(e.source_node) && !doomed.has(e.target_node),
     )
     if (doomed.has(selectedNodeId.value)) selectedNodeId.value = null
-    dirty.value = true
+    markDocumentDirty()
   }
 
   let edgeCounter = 0
@@ -152,7 +243,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       target_port: targetPort,
       edge_type: verdict.edgeType,
     })
-    dirty.value = true
+    markDocumentDirty()
     return verdict
   }
 
@@ -160,7 +251,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     const doomed = new Set(edgeIds)
     if (!doomed.size) return
     edges.value = edges.value.filter((e) => !doomed.has(e.id))
-    dirty.value = true
+    markDocumentDirty()
   }
 
   function setViewport(vp) {
@@ -210,7 +301,15 @@ export const useWorkflowStore = defineStore('workflow', () => {
     updatedAt.value = document.updated_at || null
     resetCounters()
     if (!preserveSelection || !nodeById(selectedNodeId.value)) selectedNodeId.value = null
-    dirty.value = markDirty
+    if (markDirty) {
+      // Unsaved content (template/import-as-draft, draft recovery): keep the
+      // autosave loop armed so the new document is protected too.
+      markDocumentDirty()
+    } else {
+      // A clean document from disk supersedes any stored draft.
+      dirty.value = false
+      clearDraft()
+    }
   }
 
   function newWorkflow(name = 'Untitled workflow') {
@@ -353,14 +452,14 @@ export const useWorkflowStore = defineStore('workflow', () => {
     const node = nodeById(nodeId)
     if (!node) return
     node.configuration[name] = value
-    dirty.value = true
+    markDocumentDirty()
   }
 
   function setNodeDisabled(nodeId, disabled) {
     const node = nodeById(nodeId)
     if (!node) return
     node.disabled = Boolean(disabled)
-    dirty.value = true
+    markDocumentDirty()
   }
 
   function duplicateNode(nodeId) {
@@ -382,7 +481,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       ...(source.extensions ? { extensions: plain(source.extensions) } : {}),
     }
     nodes.value.push(copy)
-    dirty.value = true
+    markDocumentDirty()
     selectedNodeId.value = copy.id
     return copy
   }
@@ -399,6 +498,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     setViewport, nodeById, defaultsFor, toDocument, applyDocument, newWorkflow,
     refreshWorkflowList, loadTemplates, openWorkflow, saveWorkflow, saveAs,
     importDocument, applyTemplate,
+    // draft autosave (step 2.4)
+    draftSavedAt, markDocumentDirty, flushDraft, peekDraft, clearDraft, recoverDraft,
     // selection + inspector
     selectedNodeId, selectedNode, selectNode, clearSelection,
     updateNodeConfig, setNodeDisabled, duplicateNode,

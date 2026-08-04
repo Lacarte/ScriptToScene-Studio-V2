@@ -1,5 +1,6 @@
 <script setup>
-import { computed, markRaw, onMounted, ref } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { VueFlow, useVueFlow, MarkerType } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -33,6 +34,55 @@ onMounted(async () => {
   } catch (err) {
     toast.error(err?.message || 'Failed to load workflow data')
   }
+  await maybeRecoverDraft()
+  window.addEventListener('beforeunload', onBeforeUnload)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  // The component is going away (in-app navigation): persist any pending
+  // debounced edits so nothing is lost while the user is elsewhere.
+  store.flushDraft()
+})
+
+// ── Draft autosave protection (step 2.4) ───────────────────────────────
+async function maybeRecoverDraft() {
+  const draft = store.peekDraft()
+  if (!draft) return
+  const name = draft.document?.name || 'Untitled workflow'
+  const when = draft.saved_at ? ` (autosaved ${new Date(draft.saved_at).toLocaleString()})` : ''
+  if (window.confirm(`Recover unsaved draft "${name}"${when}?`)) {
+    store.recoverDraft()
+    // Deliberately not restoreViewport(): the recovered document is unsaved
+    // and must stay dirty until the user explicitly saves it.
+    await setFlowViewport(store.viewport)
+    toast.info('Draft recovered — save to keep it')
+  } else {
+    store.clearDraft()
+  }
+}
+
+function onBeforeUnload(event) {
+  // Synchronous flush: this is what makes a killed tab lose nothing.
+  store.flushDraft()
+  if (store.dirty) {
+    event.preventDefault()
+    event.returnValue = ''
+  }
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'hidden') store.flushDraft()
+}
+
+onBeforeRouteLeave(() => {
+  if (!store.dirty) return true
+  store.flushDraft()
+  return window.confirm(
+    'You have unsaved workflow changes. A draft has been kept — leave the workflow builder?',
+  )
 })
 
 const nodeTypes = { sts: markRaw(NodeCard) }
@@ -288,6 +338,13 @@ function onExport() {
       <div class="wf-toolbar-group">
         <span class="wf-title">{{ store.workflowName }}</span>
         <span v-if="store.dirty" class="wf-dirty" title="Unsaved changes">●</span>
+        <span
+          v-if="store.dirty && store.draftSavedAt"
+          class="wf-draft-hint"
+          :title="`Draft autosaved ${new Date(store.draftSavedAt).toLocaleTimeString()}`"
+        >
+          draft saved
+        </span>
         <span class="wf-badge">MVP</span>
       </div>
       <div class="wf-toolbar-group wf-toolbar-actions">
@@ -425,6 +482,13 @@ function onExport() {
   color: var(--accent-warning, #ffb347);
   font-size: 14px;
   line-height: 1;
+}
+
+.wf-draft-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  opacity: 0.8;
 }
 
 .wf-badge {
