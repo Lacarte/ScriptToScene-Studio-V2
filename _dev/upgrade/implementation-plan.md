@@ -103,8 +103,18 @@ Drop → project screen→canvas coords → insert with registry defaults. One g
 **Done when:** save → reload → reopen round-trips losslessly; pytest covers round-trip, path-traversal rejection, soft delete, unknown-type/version rejection with useful errors.
 
 ### 1.7 Import/export + fixed-pipeline template
-`POST /api/workflows/import` (validate size/schema/ids/counts before saving) and `GET /api/workflows/<id>/export`. Ship the **Full Video** template representing the current 7-step pipeline; template picker in the library panel.
+`POST /api/workflows/import` (validate size/schema/ids/counts before saving), `GET /api/workflows/<id>/export`, and `GET /api/workflow/templates`. Ship the **Full Video** template representing the current pipeline; template picker in the workflow toolbar/library surface.
 **Done when:** exported file re-imports cleanly; template opens as a correctly connected, valid graph. **Phase 1 gate:** full test + build + manual smoke pass.
+
+### Phase 1 review status — 2026-08-04
+
+- **1.1–1.5: reviewed and strengthened.** Vue Flow route/canvas, backend-owned registry, generic cards, store, and typed client validation are present. Dynamic ports now reject unsupported types, and capability flags no longer advertise cancellation paths the existing providers do not expose.
+- **1.6: complete.** Workflow CRUD uses strict IDs, `safe_join`, atomic JSON writes/backups, optimistic timestamps, server-side schema/port/cardinality/cycle validation, bounded requests, soft deletion, and persisted-shape-only frontend serialization.
+- **1.7: complete.** Import/export and the server-validated Full Video template are wired into the toolbar with New, Open, Save, Save As, Duplicate, Import, Export, template selection, dirty-state prompts, and viewport restoration.
+- Automated gate: backend and frontend suites plus the production build pass; a live Flask create/load/update/delete and template API round trip passes.
+- Manual visual gate: pending because the in-app browser surface was unavailable during this review. Verify drag/drop, toolbar overflow at the target window size, minimap, connection feedback, save/reopen, and template fit-to-view once in the running app before beginning Phase 2.
+
+**Phase 1 is implementation-complete but awaits the documented manual visual smoke check.**
 
 ---
 

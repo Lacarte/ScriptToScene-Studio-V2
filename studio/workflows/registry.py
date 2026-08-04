@@ -7,6 +7,8 @@ the execution engine (Phase 3) dispatches through the internal ``executor``
 field, which is never serialized.
 """
 
+from copy import deepcopy
+
 REGISTRY_VERSION = 1
 
 # contracts.md §3 — frozen v1 port vocabulary.
@@ -227,7 +229,7 @@ _NODE_TYPES = {
             {"name": "auto_type", "label": "Auto-type prompts", "type": "boolean", "default": True,
              "display_options": {"show": {"provider": ["gemini_ws"]}}},
         ],
-        "capabilities": {"retry": True, "cancel": True},
+        "capabilities": {"retry": True, "cancel": False},
         "executor": "studio.workflows.adapters.storyboard:generate",
     },
     "animator.generate": {
@@ -256,7 +258,7 @@ _NODE_TYPES = {
             {"name": "auto_type", "label": "Auto-type prompts", "type": "boolean", "default": True,
              "display_options": {"show": {"provider": ["grok_automa"]}}},
         ],
-        "capabilities": {"retry": True, "cancel": True},
+        "capabilities": {"retry": True, "cancel": False},
         "executor": "studio.workflows.adapters.animator:generate",
     },
     "captions.generate": {
@@ -274,7 +276,7 @@ _NODE_TYPES = {
              "default": 3, "min": 1, "max": 10, "step": 1},
             {"name": "enabled", "label": "Enabled", "type": "boolean", "default": True},
         ],
-        "capabilities": {"retry": False, "cancel": True},
+        "capabilities": {"retry": False, "cancel": False},
         "executor": "studio.workflows.adapters.captions:generate",
     },
     "music.select": {
@@ -407,11 +409,12 @@ _INTERNAL_FIELDS = ("executor",)
 
 def get_node_type(type_key):
     """Return the full internal definition for a node type, or None."""
-    return _NODE_TYPES.get(type_key)
+    node = _NODE_TYPES.get(type_key)
+    return deepcopy(node) if node is not None else None
 
 
 def all_node_types():
-    return dict(_NODE_TYPES)
+    return deepcopy(_NODE_TYPES)
 
 
 def is_supported(type_key, type_version):
@@ -423,12 +426,12 @@ def serialize_registry():
     """Presentation-safe registry payload for GET /api/workflow/node-types."""
     node_types = {}
     for key, definition in _NODE_TYPES.items():
-        public = {k: v for k, v in definition.items() if k not in _INTERNAL_FIELDS}
+        public = deepcopy({k: v for k, v in definition.items() if k not in _INTERNAL_FIELDS})
         public["type"] = key
         node_types[key] = public
     return {
         "registry_version": REGISTRY_VERSION,
         "port_types": list(PORT_TYPES),
-        "categories": CATEGORIES,
+        "categories": deepcopy(CATEGORIES),
         "node_types": node_types,
     }

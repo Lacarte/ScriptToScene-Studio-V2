@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useWorkflowStore } from '../stores/workflow.js'
+import { api } from '@/shared/api/client.js'
 
 const FAKE_TYPES = {
   'script.input': {
@@ -33,6 +34,7 @@ function seededStore() {
 
 describe('workflow store', () => {
   beforeEach(() => setActivePinia(createPinia()))
+  afterEach(() => vi.restoreAllMocks())
 
   it('adds a node with registry defaults and snapped position', () => {
     const store = seededStore()
@@ -103,5 +105,75 @@ describe('workflow store', () => {
     )
     store.removeEdges(['e_1'])
     expect(store.edges.map((e) => e.id)).toEqual(['e_2'])
+  })
+
+  it('round-trips only the persisted document shape', () => {
+    const store = seededStore()
+    const node = store.addNode('script.input', { x: 10, y: 20 })
+    const document = store.toDocument()
+    expect(document).toMatchObject({
+      schema_version: 1,
+      name: 'Untitled workflow',
+      variables: {},
+      settings: { on_error: 'stop' },
+    })
+    expect(document.nodes[0].id).toBe(node.id)
+    expect(document.nodes[0]).not.toHaveProperty('data')
+    expect(document.nodes[0]).not.toHaveProperty('selected')
+
+    store.applyDocument({
+      ...document,
+      workflow_id: 'wf_ABC123',
+      name: 'Reloaded',
+      created_at: '2026-08-04T00:00:00Z',
+      updated_at: '2026-08-04T00:00:00Z',
+    })
+    expect(store.workflowId).toBe('wf_ABC123')
+    expect(store.workflowName).toBe('Reloaded')
+    expect(store.dirty).toBe(false)
+  })
+
+  it('creates then updates using optimistic timestamps', async () => {
+    const store = seededStore()
+    store.addNode('script.input', { x: 0, y: 0 })
+    const created = {
+      ...store.toDocument(),
+      workflow_id: 'wf_ABC123',
+      created_at: 'created',
+      updated_at: 'v1',
+    }
+    vi.spyOn(api, 'post').mockResolvedValue({ workflow: created })
+    vi.spyOn(api, 'get').mockResolvedValue({ workflows: [], total: 0 })
+    await store.saveWorkflow()
+    expect(api.post).toHaveBeenCalledWith('/api/workflows', expect.objectContaining({ body: expect.any(Object) }))
+    expect(store.workflowId).toBe('wf_ABC123')
+
+    store.renameNode(store.nodes[0].id, 'Renamed')
+    const updated = { ...store.toDocument(), updated_at: 'v2' }
+    vi.spyOn(api, 'put').mockResolvedValue({ workflow: updated })
+    await store.saveWorkflow()
+    expect(api.put).toHaveBeenCalledWith('/api/workflows/wf_ABC123', {
+      body: expect.objectContaining({ expected_updated_at: 'v1' }),
+    })
+    expect(store.updatedAt).toBe('v2')
+    expect(store.dirty).toBe(false)
+  })
+
+  it('loads the built-in template as a dirty unsaved workflow', () => {
+    const store = seededStore()
+    store.templates = [{
+      template_id: 'full_video',
+      workflow: {
+        schema_version: 1,
+        name: 'Full Video',
+        nodes: [], edges: [], variables: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+        settings: { on_error: 'stop' }, extensions: {},
+      },
+    }]
+    expect(store.applyTemplate('full_video')).toBe(true)
+    expect(store.workflowId).toBeNull()
+    expect(store.workflowName).toBe('Full Video')
+    expect(store.dirty).toBe(true)
   })
 })

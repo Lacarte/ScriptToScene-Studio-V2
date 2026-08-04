@@ -291,6 +291,7 @@ arrays. Errors use one envelope everywhere:
 | `POST /api/workflows/import` | `{workflow, on_conflict:"reject"|"new_id"}` | `201 {workflow, imported_from_id?}`; default `new_id` |
 | `GET /api/workflows/<id>/export` | — | `200 application/json` definition with attachment filename; no execution data/secrets |
 | `GET /api/workflow/node-types` | — | `200 {registry_version, node_types, port_types}` with no executor/callable internals |
+| `GET /api/workflow/templates` | — | `200 {templates:[{template_id, workflow}]}`; every bundled graph passes server validation |
 | `POST /api/workflow/validate` | `{workflow}` | `200 {valid, problems, warnings}` for a well-formed request, even when graph-invalid; malformed transport is `400` |
 | `POST /api/workflow/run` | `{workflow_id xor workflow, run_mode, target_node_ids:[], force:false, project_id?}` | `202 {execution_id, project_id, status:"queued"}` |
 | `POST /api/workflow/executions/<id>/stop` | `{}` | `202 {execution_id, status:"cancelling"}`; `409` if already terminal |

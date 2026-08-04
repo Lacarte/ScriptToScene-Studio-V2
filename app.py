@@ -19,7 +19,7 @@ from config import (
     N8N_ASSET_WEBHOOK_URL, N8N_STORY_WEBHOOK_URL, OUTPUT_DIR,
     SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR, STORYBOARD_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
-    EXPORT_DIR, APP_CONFIG_PATH, APP_ASSETS_DIR, TMP_DIR,
+    EXPORT_DIR, APP_CONFIG_PATH, APP_ASSETS_DIR, TMP_DIR, WORKFLOWS_DIR, BRANDING_DIR,
 )
 from studio.security import is_loopback_remote
 
@@ -322,11 +322,14 @@ _CLEAR_MODULES = [
     {"page": "Exports", "module": "Export Library", "dir": EXPORT_DIR},
     {"page": "Stories", "module": "Story Generator", "dir": STORIES_DIR},
     {"page": "Pipeline", "module": "Pipeline Data", "dir": PIPELINE_DIR},
+    {"page": "Workflows", "module": "Workflow Definitions", "dir": WORKFLOWS_DIR},
+    {"page": "Branding", "module": "Workflow Branding", "dir": BRANDING_DIR},
 ]
 _PROJECT_DIRS = [
     ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR, STORYBOARD_DIR,
     SEGMENTER_DIR, CAPTIONS_DIR, MUSIC_DIR, TTS_DIR, PROJECTS_DIR,
     EXPORT_DIR,
+    WORKFLOWS_DIR, BRANDING_DIR,
 ]
 
 

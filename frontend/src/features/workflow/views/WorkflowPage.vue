@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw } from 'vue'
+import { computed, markRaw, onMounted, ref } from 'vue'
 import { VueFlow, useVueFlow, MarkerType } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -18,7 +18,20 @@ import NodeCard from '../components/NodeCard.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
-const { screenToFlowCoordinate, fitView } = useVueFlow()
+const { screenToFlowCoordinate, fitView, setViewport: setFlowViewport } = useVueFlow()
+const importInput = ref(null)
+
+onMounted(async () => {
+  try {
+    await Promise.all([
+      store.loadNodeTypes(),
+      store.refreshWorkflowList(),
+      store.loadTemplates(),
+    ])
+  } catch (err) {
+    toast.error(err?.message || 'Failed to load workflow data')
+  }
+})
 
 const nodeTypes = { sts: markRaw(NodeCard) }
 
@@ -97,7 +110,7 @@ function onConnect(params) {
 // invalid ones show the not-allowed cursor.
 function isValidConnection(params) {
   return validateConnection(
-    { nodes: store.nodes, edges: store.edges, nodeTypes: store.nodeTypes },
+    { nodes: store.nodes, edges: store.edges, nodeTypes: store.nodeTypes, portTypes: store.portTypes },
     toConnectionShape(params),
   ).ok
 }
@@ -132,6 +145,107 @@ function tidyUp() {
   }
   requestAnimationFrame(() => fitView({ padding: 0.15 }))
 }
+
+function confirmDiscard() {
+  return !store.dirty || window.confirm('Discard unsaved workflow changes?')
+}
+
+async function restoreViewport() {
+  await setFlowViewport(store.viewport)
+  store.dirty = false
+}
+
+async function onNew() {
+  if (!confirmDiscard()) return
+  store.newWorkflow()
+  await restoreViewport()
+}
+
+async function onOpen(event) {
+  const id = event.target.value
+  event.target.value = ''
+  if (!id || !confirmDiscard()) return
+  try {
+    await store.openWorkflow(id)
+    await restoreViewport()
+    toast.success(`Opened ${store.workflowName}`)
+  } catch (err) {
+    toast.error(store.persistenceError || err.message)
+  }
+}
+
+async function onSave() {
+  try {
+    if (!store.workflowId && store.workflowName === 'Untitled workflow') {
+      const name = window.prompt('Workflow name', store.workflowName)
+      if (!name?.trim()) return
+      store.workflowName = name.trim()
+    }
+    await store.saveWorkflow()
+    toast.success('Workflow saved')
+  } catch (err) {
+    toast.error(store.persistenceError || err.message)
+  }
+}
+
+async function onSaveAs() {
+  const name = window.prompt('Save workflow as', `${store.workflowName} copy`)
+  if (!name?.trim()) return
+  try {
+    await store.saveAs(name)
+    toast.success('Workflow copy saved')
+  } catch (err) {
+    toast.error(store.persistenceError || err.message)
+  }
+}
+
+async function onDuplicate() {
+  try {
+    await store.saveAs(`${store.workflowName} copy`)
+    toast.success('Workflow duplicated')
+  } catch (err) {
+    toast.error(store.persistenceError || err.message)
+  }
+}
+
+async function onTemplate(event) {
+  const templateId = event.target.value
+  event.target.value = ''
+  if (!templateId || !confirmDiscard()) return
+  if (store.applyTemplate(templateId)) {
+    requestAnimationFrame(() => fitView({ padding: 0.1 }))
+    toast.info('Template loaded — add your script and save when ready')
+  }
+}
+
+async function onImportFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || !confirmDiscard()) return
+  if (file.size > 2 * 1024 * 1024) {
+    toast.error('Workflow JSON exceeds the 2 MiB limit')
+    return
+  }
+  try {
+    const document = JSON.parse(await file.text())
+    await store.importDocument(document)
+    await restoreViewport()
+    toast.success('Workflow imported')
+  } catch (err) {
+    toast.error(store.persistenceError || err?.message || 'Invalid workflow JSON')
+  }
+}
+
+function onExport() {
+  if (!store.workflowId) {
+    toast.warning('Save the workflow before exporting it')
+    return
+  }
+  const anchor = document.createElement('a')
+  anchor.href = `/api/workflows/${encodeURIComponent(store.workflowId)}/export`
+  anchor.download = `${store.workflowId}.json`
+  anchor.click()
+}
 </script>
 
 <template>
@@ -144,6 +258,27 @@ function tidyUp() {
         <span class="wf-badge">MVP</span>
       </div>
       <div class="wf-toolbar-group wf-toolbar-actions">
+        <button class="wf-btn" :disabled="store.persistenceLoading" @click="onNew">New</button>
+        <select class="wf-select" :disabled="store.persistenceLoading" aria-label="Open workflow" @change="onOpen">
+          <option value="">Open…</option>
+          <option v-for="item in store.workflowList" :key="item.workflow_id" :value="item.workflow_id">
+            {{ item.name }}
+          </option>
+        </select>
+        <select class="wf-select" :disabled="store.persistenceLoading" aria-label="Workflow template" @change="onTemplate">
+          <option value="">Template…</option>
+          <option v-for="item in store.templates" :key="item.template_id" :value="item.template_id">
+            {{ item.workflow.name }}
+          </option>
+        </select>
+        <button class="wf-btn primary" :disabled="store.persistenceLoading || (!!store.workflowId && !store.dirty)" @click="onSave">
+          Save
+        </button>
+        <button class="wf-btn" :disabled="store.persistenceLoading" @click="onSaveAs">Save As</button>
+        <button class="wf-btn" :disabled="store.persistenceLoading" @click="onDuplicate">Duplicate</button>
+        <button class="wf-btn" :disabled="store.persistenceLoading" @click="importInput?.click()">Import</button>
+        <button class="wf-btn" :disabled="!store.workflowId" @click="onExport">Export</button>
+        <input ref="importInput" class="wf-file-input" type="file" accept="application/json,.json" @change="onImportFile" />
         <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">
           Tidy up
         </button>
@@ -230,6 +365,17 @@ function tidyUp() {
   gap: 10px;
 }
 
+.wf-toolbar-actions {
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.wf-toolbar-actions > * {
+  flex: 0 0 auto;
+}
+
 .wf-title {
   font-family: var(--font-display);
   font-size: 15px;
@@ -269,6 +415,26 @@ function tidyUp() {
 .wf-btn:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--accent);
+}
+
+.wf-btn.primary {
+  color: var(--bg-darkest);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wf-select {
+  max-width: 150px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.wf-file-input {
+  display: none;
 }
 
 .wf-btn:disabled {

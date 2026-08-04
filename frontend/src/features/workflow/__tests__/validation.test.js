@@ -118,6 +118,25 @@ describe('validateConnection', () => {
       { sourceNode: 's', sourcePort: 'value', targetNode: 'b', targetPort: 'script' })
     expect(bad.ok).toBe(false)
   })
+
+  it('rejects unsupported dynamic port types even when both ends match', () => {
+    const dynamicOutput = {
+      type_version: 1,
+      inputs: [{ id: 'value', type: 'dynamic', required: true, multiple: false }],
+      outputs: [],
+    }
+    const nodeTypes = { ...NODE_TYPES, 'workflow.output': dynamicOutput }
+    const nodes = [
+      node('s', 'stub.input', { port_type: 'not_a_real_type' }),
+      node('o', 'workflow.output', { port_type: 'not_a_real_type' }),
+    ]
+    const verdict = validateConnection(
+      { nodes, edges: [], nodeTypes, portTypes: ['script', 'generic_json'] },
+      { sourceNode: 's', sourcePort: 'value', targetNode: 'o', targetPort: 'value' },
+    )
+    expect(verdict.ok).toBe(false)
+    expect(verdict.reason).toMatch(/unsupported/i)
+  })
 })
 
 describe('store.connectNodes', () => {

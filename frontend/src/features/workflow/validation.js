@@ -36,7 +36,7 @@ function wouldCreateCycle(edges, sourceNodeId, targetNodeId) {
 /**
  * @returns {{ok: true, edgeType: 'data'|'control'} | {ok: false, reason: string}}
  */
-export function validateConnection({ nodes, edges, nodeTypes }, connection) {
+export function validateConnection({ nodes, edges, nodeTypes, portTypes = [] }, connection) {
   const { sourceNode: sourceId, sourcePort, targetNode: targetId, targetPort } = connection
 
   const sourceNode = nodes.find((n) => n.id === sourceId)
@@ -58,6 +58,15 @@ export function validateConnection({ nodes, edges, nodeTypes }, connection) {
 
   const outType = resolvePortType(sourceNode, outPort)
   const inType = resolvePortType(targetNode, inPort)
+  const knownTypes = new Set(portTypes.length ? portTypes : [
+    'control', 'text', 'script', 'project_id', 'project_settings',
+    'audio_file', 'tts_metadata', 'alignment', 'segments', 'scenes',
+    'image_prompts', 'storyboard_images', 'animation_assets', 'captions',
+    'music_track', 'editor_project', 'export_profile', 'video_file', 'generic_json',
+  ])
+  if (!knownTypes.has(outType) || !knownTypes.has(inType)) {
+    return { ok: false, reason: 'A dynamic port has an unsupported data type.' }
+  }
   if (outType !== inType) {
     return {
       ok: false,

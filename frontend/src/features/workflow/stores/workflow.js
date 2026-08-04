@@ -38,10 +38,21 @@ export const useWorkflowStore = defineStore('workflow', () => {
   // ── Document state (persisted shape only) ─────────────────────────────
   const workflowId = ref(null)
   const workflowName = ref('Untitled workflow')
+  const workflowDescription = ref('')
   const nodes = ref([])   // {id, type, type_version, name, position, configuration, disabled}
   const edges = ref([])   // {id, source_node, source_port, target_node, target_port, edge_type}
   const viewport = ref({ x: 0, y: 0, zoom: 1 })
+  const variables = ref({})
+  const settings = ref({ on_error: 'stop' })
+  const extensions = ref({})
+  const createdAt = ref(null)
+  const updatedAt = ref(null)
   const dirty = ref(false)
+
+  const workflowList = ref([])
+  const templates = ref([])
+  const persistenceLoading = ref(false)
+  const persistenceError = ref('')
 
   let idCounter = 0
   function nextNodeId() {
@@ -127,7 +138,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
    */
   function connectNodes({ sourceNode, sourcePort, targetNode, targetPort }) {
     const verdict = validateConnection(
-      { nodes: nodes.value, edges: edges.value, nodeTypes: nodeTypes.value },
+      { nodes: nodes.value, edges: edges.value, nodeTypes: nodeTypes.value, portTypes: portTypes.value },
       { sourceNode, sourcePort, targetNode, targetPort },
     )
     if (!verdict.ok) return verdict
@@ -152,6 +163,158 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   function setViewport(vp) {
     viewport.value = { x: vp.x, y: vp.y, zoom: vp.zoom }
+    dirty.value = true
+  }
+
+  function plain(value) {
+    return JSON.parse(JSON.stringify(value))
+  }
+
+  function toDocument() {
+    const document = {
+      schema_version: 1,
+      name: workflowName.value.trim() || 'Untitled workflow',
+      description: workflowDescription.value,
+      nodes: plain(nodes.value),
+      edges: plain(edges.value),
+      variables: plain(variables.value),
+      viewport: plain(viewport.value),
+      settings: plain(settings.value),
+      extensions: plain(extensions.value),
+    }
+    if (workflowId.value) document.workflow_id = workflowId.value
+    if (createdAt.value) document.created_at = createdAt.value
+    if (updatedAt.value) document.updated_at = updatedAt.value
+    return document
+  }
+
+  function resetCounters() {
+    idCounter = 0
+    edgeCounter = 0
+  }
+
+  function applyDocument(document, { markDirty = false } = {}) {
+    workflowId.value = document.workflow_id || null
+    workflowName.value = document.name || 'Untitled workflow'
+    workflowDescription.value = document.description || ''
+    nodes.value = plain(document.nodes || [])
+    edges.value = plain(document.edges || [])
+    variables.value = plain(document.variables || {})
+    viewport.value = plain(document.viewport || { x: 0, y: 0, zoom: 1 })
+    settings.value = plain(document.settings || { on_error: 'stop' })
+    extensions.value = plain(document.extensions || {})
+    createdAt.value = document.created_at || null
+    updatedAt.value = document.updated_at || null
+    resetCounters()
+    dirty.value = markDirty
+  }
+
+  function newWorkflow(name = 'Untitled workflow') {
+    applyDocument({
+      schema_version: 1,
+      name,
+      description: '',
+      nodes: [],
+      edges: [],
+      variables: {},
+      viewport: { x: 0, y: 0, zoom: 1 },
+      settings: { on_error: 'stop' },
+      extensions: {},
+    })
+  }
+
+  async function refreshWorkflowList() {
+    const data = await api.get('/api/workflows', { params: { limit: 200 } })
+    workflowList.value = data.workflows || []
+    return workflowList.value
+  }
+
+  async function loadTemplates() {
+    const data = await api.get('/api/workflow/templates')
+    templates.value = data.templates || []
+    return templates.value
+  }
+
+  async function openWorkflow(id) {
+    persistenceLoading.value = true
+    persistenceError.value = ''
+    try {
+      const data = await api.get(`/api/workflows/${encodeURIComponent(id)}`)
+      applyDocument(data.workflow)
+      return data.workflow
+    } catch (err) {
+      persistenceError.value = err?.message || 'Failed to open workflow'
+      throw err
+    } finally {
+      persistenceLoading.value = false
+    }
+  }
+
+  async function saveWorkflow() {
+    persistenceLoading.value = true
+    persistenceError.value = ''
+    try {
+      const document = toDocument()
+      const data = workflowId.value
+        ? await api.put(`/api/workflows/${encodeURIComponent(workflowId.value)}`, {
+          body: { workflow: document, expected_updated_at: updatedAt.value },
+        })
+        : await api.post('/api/workflows', { body: { workflow: document } })
+      applyDocument(data.workflow)
+      await refreshWorkflowList()
+      return data.workflow
+    } catch (err) {
+      persistenceError.value = err?.message || 'Failed to save workflow'
+      throw err
+    } finally {
+      persistenceLoading.value = false
+    }
+  }
+
+  async function saveAs(name) {
+    persistenceLoading.value = true
+    persistenceError.value = ''
+    try {
+      const document = toDocument()
+      delete document.workflow_id
+      delete document.created_at
+      delete document.updated_at
+      document.name = name?.trim() || `${workflowName.value} copy`
+      const data = await api.post('/api/workflows', { body: { workflow: document } })
+      applyDocument(data.workflow)
+      await refreshWorkflowList()
+      return data.workflow
+    } catch (err) {
+      persistenceError.value = err?.message || 'Failed to save workflow copy'
+      throw err
+    } finally {
+      persistenceLoading.value = false
+    }
+  }
+
+  async function importDocument(document) {
+    persistenceLoading.value = true
+    persistenceError.value = ''
+    try {
+      const data = await api.post('/api/workflows/import', {
+        body: { workflow: document, on_conflict: 'new_id' },
+      })
+      applyDocument(data.workflow)
+      await refreshWorkflowList()
+      return data.workflow
+    } catch (err) {
+      persistenceError.value = err?.message || 'Failed to import workflow'
+      throw err
+    } finally {
+      persistenceLoading.value = false
+    }
+  }
+
+  function applyTemplate(templateId) {
+    const template = templates.value.find((item) => item.template_id === templateId)
+    if (!template) return false
+    applyDocument(template.workflow, { markDirty: true })
+    return true
   }
 
   function nodeById(nodeId) {
@@ -165,8 +328,12 @@ export const useWorkflowStore = defineStore('workflow', () => {
     registryVersion, nodeTypes, categories, portTypes,
     registryLoading, registryError, loadNodeTypes,
     // document
-    workflowId, workflowName, nodes, edges, viewport, dirty, nodeCount,
+    workflowId, workflowName, workflowDescription, nodes, edges, viewport,
+    variables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,
+    workflowList, templates, persistenceLoading, persistenceError,
     addNode, moveNode, renameNode, removeNodes, removeEdges, connectNodes,
-    setViewport, nodeById, defaultsFor,
+    setViewport, nodeById, defaultsFor, toDocument, applyDocument, newWorkflow,
+    refreshWorkflowList, loadTemplates, openWorkflow, saveWorkflow, saveAs,
+    importDocument, applyTemplate,
   }
 })
