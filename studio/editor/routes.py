@@ -1448,7 +1448,7 @@ def list_all_projects():
 
 
 @editor_bp.route("/api/projects/<project_id>/assemble", methods=["POST"])
-def assemble_project_for_editor(project_id):
+def assemble_project_for_editor(project_id, *, _direct=False, force=None):
     """Assemble a project from scenes + assets into editor-ready format.
 
     Creates initial.json in the editor directory if it doesn't exist,
@@ -1456,7 +1456,7 @@ def assemble_project_for_editor(project_id):
     """
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
 
-    force = request.args.get("force", "0") == "1"
+    force = (request.args.get("force", "0") == "1") if force is None else bool(force)
 
     # Check if editor save already exists → return it directly (unless force rebuild)
 
@@ -1469,19 +1469,23 @@ def assemble_project_for_editor(project_id):
             _resolve_project_audio(data, safe_id)
             _resolve_project_captions(data, safe_id)
             data["_source"] = "wip" if os.path.isfile(wip) else "initial"
-            return jsonify(data)
+            return data if _direct else jsonify(data)
         except Exception as e:
             logger.warning("Existing editor data corrupt for {}, rebuilding: {}", safe_id, e)
 
     # Build from scenes.json
     scenes_path = os.path.join(SCENES_DIR, safe_id, "scenes.json")
     if not os.path.isfile(scenes_path):
+        if _direct:
+            raise FileNotFoundError("No scenes found for this project")
         return jsonify({"error": "No scenes found for this project"}), 404
 
     try:
         with open(scenes_path, "r", encoding="utf-8") as f:
             scenes_data = json.load(f)
     except Exception as e:
+        if _direct:
+            raise RuntimeError(f"Failed to read scenes: {e}") from e
         return jsonify({"error": f"Failed to read scenes: {e}"}), 500
 
     source_folder = scenes_data.get("source_folder", safe_id)
@@ -1761,7 +1765,7 @@ def assemble_project_for_editor(project_id):
     logger.info("Assembled editor project for {}", safe_id)
 
     editor_data["_source"] = "initial"
-    return jsonify(editor_data)
+    return editor_data if _direct else jsonify(editor_data)
 
 
 @editor_bp.route("/api/editor/reset/<project_id>", methods=["POST"])

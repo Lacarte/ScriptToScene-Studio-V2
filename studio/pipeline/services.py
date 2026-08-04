@@ -735,14 +735,9 @@ def _step_assets(scenes_result, config, project_id, job_id):
 
 def _step_assemble(project_id):
     """Step 6: Assemble project for the editor."""
-    base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
-    resp = http_requests.post(
-        f"{base_url}/api/projects/{project_id}/assemble?force=1",
-        timeout=60)
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("error"):
-        raise RuntimeError(data["error"])
+    # Direct service invocation: never loop back through Flask over HTTP.
+    from studio.editor.routes import assemble_project_for_editor
+    data = assemble_project_for_editor(project_id, _direct=True, force=True)
     logger.success("Pipeline Assemble: {} scenes, {}s duration",
                    data.get("scene_count", 0),
                    data.get("total_duration", 0))

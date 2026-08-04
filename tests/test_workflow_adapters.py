@@ -1,0 +1,117 @@
+import os
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+
+from studio.workflows.adapters import AdapterContext, AdapterError
+from studio.workflows.adapters import animator, captions, editor, export, music, project, scenes, segmenter, storyboard, timing, tts
+
+
+CTX = AdapterContext(project_id="pm_ABC123")
+
+
+def test_project_setup_emits_validated_managed_logo(monkeypatch, tmp_path):
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"png")
+    monkeypatch.setattr(project, "BRANDING_DIR", str(tmp_path))
+    result = project.setup({}, {"logo_enabled": True, "logo": {"ref": "branding/logo.png"}}, CTX)
+    assert result["settings"]["logo"]["path"] == "branding/logo.png"
+    assert result["settings"]["artifact_refs"] == ["branding/logo.png"]
+
+
+def test_tts_adapter_translates_ports_and_inherited_defaults(monkeypatch, tmp_path):
+    wav = tmp_path / "voice.wav"
+    meta = tmp_path / "tts.json"
+    wav.write_bytes(b"wav")
+    meta.write_text("{}")
+    monkeypatch.setattr(tts, "_step_tts", lambda cfg, pid: {
+        "wav_path": str(wav), "filename": "voice.wav", "folder": pid,
+        "duration_seconds": 1.2, "voice": cfg["voice"],
+    })
+    monkeypatch.setattr(tts, "with_artifacts", lambda payload, *paths: {**payload, "artifact_refs": list(paths)})
+    result = tts.generate({"script": "hello", "settings": {"tone": "dramatic"}}, {"engine": "kokoro", "voice": "af_heart"}, CTX)
+    assert result["metadata"]["voice"] == "af_heart"
+    assert result["audio"]["duration_seconds"] == 1.2
+
+
+def test_timing_maps_empty_alignment_to_stable_error(monkeypatch):
+    monkeypatch.setattr(timing, "_step_timing", Mock(side_effect=RuntimeError("empty")))
+    with pytest.raises(AdapterError, match="empty") as raised:
+        timing.align({"audio": {"path": "voice.wav"}, "script": "hello"}, {}, CTX)
+    assert raised.value.code == "ALIGNMENT_EMPTY"
+
+
+def test_segmenter_adapter_uses_service_result(monkeypatch):
+    monkeypatch.setattr(segmenter, "_step_segment", lambda value, cfg, pid: {"output_path": "x", "segments": [], "project_id": pid})
+    monkeypatch.setattr(segmenter, "with_artifacts", lambda payload, *paths: payload)
+    assert segmenter.run({"alignment": {"alignment": []}}, {}, CTX)["segments"]["project_id"] == CTX.project_id
+
+
+def test_scenes_explicit_config_beats_project_settings(monkeypatch):
+    seen = {}
+    def service(value, cfg, pid):
+        seen.update(cfg)
+        return {"scenes": [{"image_prompt": "p"}]}
+    monkeypatch.setattr(scenes, "_step_scenes", service)
+    monkeypatch.setattr(scenes, "with_artifacts", lambda payload, *paths: payload)
+    scenes.blueprint({"segments": {}, "script": "x", "settings": {"style": "inherited", "tone": "dark"}}, {"style": "explicit"}, CTX)
+    assert seen["style"] == "explicit"
+    assert seen["story_tone"] == "dark"
+
+
+@pytest.mark.parametrize("module,method,input_port,output_port", [
+    (storyboard, "_step_storyboard", "scenes", "images"),
+    (animator, "_step_assets", "scenes", "assets"),
+])
+def test_provider_adapters_expose_typed_outputs(monkeypatch, module, method, input_port, output_port):
+    monkeypatch.setattr(module, method, lambda *args: {"total": 1, "ready": 1, "errors": 0})
+    monkeypatch.setattr(module, "with_artifacts", lambda payload, *paths: payload)
+    result = module.generate({input_port: {"scenes": [{"image_prompt": "p"}]}}, {}, CTX)
+    assert result[output_port]["ready"] == 1
+
+
+def test_caption_adapter_writes_fixture_project(monkeypatch, tmp_path):
+    monkeypatch.setattr(captions, "CAPTIONS_DIR", str(tmp_path))
+    monkeypatch.setattr(captions, "with_artifacts", lambda payload, *paths: {**payload, "artifact_refs": list(paths)})
+    result = captions.generate({"alignment": {"folder": "sample", "alignment": [
+        {"word": "hello", "begin": 0.0, "end": 0.4},
+        {"word": "world", "begin": 0.4, "end": 0.8},
+    ]}}, {"preset_id": "bold_popup", "words_per_group": 2}, CTX)
+    assert result["captions"]["captions"][0]["text"] == "hello world"
+    assert (tmp_path / "sample" / "captions.json").is_file()
+
+
+def test_music_specific_rejects_unmanaged_file(tmp_path):
+    track = tmp_path / "track.mp3"
+    track.write_bytes(b"audio")
+    with pytest.raises(AdapterError) as raised:
+        music.select({}, {"mode": "specific", "track_ref": str(track)}, CTX)
+    assert raised.value.code == "ARTIFACT_UNMANAGED"
+
+
+def test_assemble_adapter_calls_service_with_project_only(monkeypatch):
+    service = Mock(return_value={"assembled_data": {}, "scene_count": 0})
+    monkeypatch.setattr(editor, "_step_assemble", service)
+    monkeypatch.setattr(editor, "with_artifacts", lambda payload, *paths: payload)
+    monkeypatch.setattr(editor, "safe_json_write", lambda *args, **kwargs: None)
+    editor.assemble({"assets": {}, "metadata": {}, "scenes": {}}, {}, CTX)
+    service.assert_called_once_with("pm_ABC123")
+
+
+def test_export_adapter_builds_logo_payload_without_http(monkeypatch, tmp_path):
+    captured = {}
+    class Processor:
+        def __init__(self, payload, progress_callback=None):
+            captured.update(payload)
+        def process(self, path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_bytes(b"video")
+    monkeypatch.setattr(export, "VideoProcessor", Processor)
+    monkeypatch.setattr(export, "EXPORT_DIR", str(tmp_path))
+    monkeypatch.setattr(export, "with_artifacts", lambda payload, *paths: payload)
+    project_payload = {"assembled_data": {"scenes": [{"id": 1, "duration": 1, "mediaUrl": "/output/a.png"}], "total_duration": 1}}
+    settings = {"logo_enabled": True, "logo": {"ref": "branding/logo.png"}, "logo_position": "bottom_left", "logo_size": 12}
+    result = export.video({"project": project_payload, "settings": settings}, {"profile": "square"}, CTX)
+    assert result["video"]["resolution"] == "1080x1080"
+    assert captured["logo_overlay"]["position"] == "bottom_left"

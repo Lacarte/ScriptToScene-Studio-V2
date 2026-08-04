@@ -1159,6 +1159,49 @@ class VideoProcessor:
         else:
             logger.info("White-dot grain overlay applied")
 
+    def _apply_logo_overlay(self, input_path, output_path, cfg=None):
+        """Composite a managed branding image at a profile-relative position."""
+        cfg = cfg or {}
+        logo_url = str(cfg.get('path') or cfg.get('url') or '').replace('\\', '/')
+        rel = logo_url.lstrip('/')
+        logo_path = os.path.abspath(os.path.join(self.project_root, rel))
+        branding_root = os.path.abspath(os.path.join(self.project_root, 'output', 'branding'))
+        try:
+            managed = os.path.commonpath([branding_root, logo_path]) == branding_root
+        except ValueError:
+            managed = False
+        if not managed or not os.path.isfile(logo_path):
+            raise ValueError("Logo overlay must reference an existing managed branding asset")
+
+        size = max(2.0, min(40.0, float(cfg.get('size', 10))))
+        opacity = max(0.05, min(1.0, float(cfg.get('opacity', 0.9))))
+        margin = max(0, min(200, int(cfg.get('margin', 32))))
+        position = cfg.get('position', 'top_right')
+        positions = {
+            'top_left': (str(margin), str(margin)),
+            'top_right': (f'W-w-{margin}', str(margin)),
+            'bottom_left': (str(margin), f'H-h-{margin}'),
+            'bottom_right': (f'W-w-{margin}', f'H-h-{margin}'),
+            'center': ('(W-w)/2', '(H-h)/2'),
+        }
+        x, y = positions.get(position, positions['top_right'])
+        logo_width = max(2, int(round(self.width * size / 100.0)))
+        filter_complex = (
+            f"[1:v]scale={logo_width}:-2:flags=lanczos,format=rgba,"
+            f"colorchannelmixer=aa={opacity:.3f}[logo];"
+            f"[0:v][logo]overlay=x={x}:y={y}:format=auto,format={self.pixel_format}[v]"
+        )
+        cmd = [
+            FFMPEG_BIN, '-y', '-i', input_path, '-i', logo_path,
+            '-filter_complex', filter_complex, '-map', '[v]', '-map', '0:a?',
+            '-c:v', self.codec, '-preset', self.preset, '-crf', str(self.crf),
+            '-pix_fmt', self.pixel_format, '-c:a', 'copy', output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
+        if result.returncode != 0:
+            raise RuntimeError(f"Logo overlay failed: {(result.stderr or '')[-700:]}")
+        logger.info("Logo overlay applied: position={} size={} opacity={}", position, size, opacity)
+
     def _create_video_from_image_ffmpeg(self, image_path, output_path, duration):
         """Create video from static image using ffmpeg-python"""
         logger.debug("ffmpeg-python: image->video {}s {}", duration, image_path)
@@ -2737,14 +2780,18 @@ class VideoProcessor:
         grain_cfg = self.export_data.get('grain_overlay') or self.export_data.get('grainOverlay') or {}
         has_grain_cfg = bool(grain_cfg and grain_cfg.get('enabled'))
         has_grain_overlay = has_grain_cfg or any(self._is_white_dot_grain_overlay(ov) for ov in overlay_list)
+        logo_cfg = self.export_data.get('logo_overlay') or self.export_data.get('logoOverlay') or {}
+        has_logo = bool(logo_cfg and logo_cfg.get('enabled') and (logo_cfg.get('path') or logo_cfg.get('url')))
         return {
             'has_captions': has_captions,
             'overlay_list': overlay_list,
             'grain_cfg': grain_cfg,
             'has_grain_cfg': has_grain_cfg,
             'has_grain_overlay': has_grain_overlay,
+            'logo_cfg': logo_cfg,
+            'has_logo': has_logo,
             'has_overlay': bool(overlay_list),
-            'needs_post': has_captions or bool(overlay_list) or has_grain_overlay,
+            'needs_post': has_captions or bool(overlay_list) or has_grain_overlay or has_logo,
         }
 
     def _apply_post_processing(self, concat_output, output_path, temp_dir, post_plan):
@@ -2752,13 +2799,15 @@ class VideoProcessor:
         has_captions = post_plan['has_captions']
         has_grain_overlay = post_plan['has_grain_overlay']
         grain_cfg = post_plan['grain_cfg']
+        has_logo = post_plan['has_logo']
+        logo_cfg = post_plan['logo_cfg']
 
         if post_plan['has_overlay']:
             self._update_progress(85, f"Applying {len(overlay_list)} overlay(s)")
             current_input = concat_output
             for ov_idx, ov_entry in enumerate(overlay_list):
                 is_last_overlay = ov_idx == len(overlay_list) - 1
-                final_post_step = is_last_overlay and not has_captions and not has_grain_overlay
+                final_post_step = is_last_overlay and not has_captions and not has_grain_overlay and not has_logo
                 ov_output = output_path if final_post_step else os.path.join(temp_dir, f'overlay_{ov_idx}.mp4')
                 if self._is_white_dot_grain_overlay(ov_entry):
                     self._apply_white_dot_grain_overlay(current_input, ov_output, grain_cfg)
@@ -2769,9 +2818,15 @@ class VideoProcessor:
 
         if post_plan['has_grain_cfg'] and not any(self._is_white_dot_grain_overlay(ov) for ov in overlay_list):
             self._update_progress(88, "Applying grain overlay")
-            grain_output = os.path.join(temp_dir, 'grain_overlay.mp4') if has_captions else output_path
+            grain_output = os.path.join(temp_dir, 'grain_overlay.mp4') if (has_captions or has_logo) else output_path
             self._apply_white_dot_grain_overlay(concat_output, grain_output, grain_cfg)
             concat_output = grain_output
+
+        if has_logo:
+            self._update_progress(89, "Applying logo overlay")
+            logo_output = os.path.join(temp_dir, 'logo_overlay.mp4') if has_captions else output_path
+            self._apply_logo_overlay(concat_output, logo_output, logo_cfg)
+            concat_output = logo_output
 
         if has_captions:
             logger.info("Starting caption burn-in...")
