@@ -18,9 +18,8 @@ selected phase or step range is complete.
 
 Double-click `run.bat` to run all remaining work phase by phase. The window
 prints the current phase, step, and stage as it runs, and stays open with the
-final exit code when the loop finishes. A second, read-only **Live Activity**
-window opens automatically and shows agent messages, tool calls, errors, and
-new commits while otherwise-silent builder or reviewer processes are working.
+final exit code when the loop finishes. Codex is the default builder and
+reviewer, and its live output plus idle-process heartbeats appear in that window.
 
 ```bat
 _dev\loop-engineering\run.bat --status            &:: where am I? what's next?
@@ -31,7 +30,7 @@ _dev\loop-engineering\run.bat --all               &:: everything, step-level cyc
 _dev\loop-engineering\run.bat --by-phase          &:: everything, PHASE-level cycles
 ```
 
-`--by-phase` is the "one shot" mode: claude builds every step of a phase
+`--by-phase` is the "one shot" mode: Codex builds every step of a phase
 (each still validated individually so failures can't compound), then the
 reviewer audits + smoke-tests the **whole phase's commits** in one pass and
 fixes what it finds — only then does the loop advance to the next phase.
@@ -39,7 +38,7 @@ fixes what it finds — only then does the loop advance to the next phase.
 ## How a step runs
 
 1. **Guard** — dirty working tree is committed first, so every cycle starts clean.
-2. **Execute** — `claude -p --permission-mode acceptEdits` gets the step's full
+2. **Execute** — `codex exec` gets the step's full
    description, its *Done when* criteria, and the working agreements.
 3. **Validate** — the orchestrator itself runs `pytest`, `npm run test`, and
    `npm run build`. Agent claims are never trusted.
@@ -48,6 +47,11 @@ fixes what it finds — only then does the loop advance to the next phase.
 5. **Review** — `codex exec` (or `--reviewer claude`) audits exactly that
    step's commit range, fixes what it finds; the board is re-validated.
 6. **Done** — step recorded in `runtime/state.json`, pushed (unless `--no-push`).
+
+Agent quota/rate-limit messages, nonzero exits, timeouts, silent exits, and
+builder/fixer runs that produce no changes are hard failures. The loop halts
+without marking that work complete. An interrupted phase review is shown as
+`REVIEW INCOMPLETE` and is resumed before later phases on the next phase-mode run.
 
 ## State
 

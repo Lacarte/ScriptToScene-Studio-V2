@@ -17,7 +17,7 @@ Usage (from the repo root, or via run.bat in this folder):
     python _dev/loop-engineering/loop_engineering.py --steps 1
     python _dev/loop-engineering/loop_engineering.py --dry-run --phase 2
     python _dev/loop-engineering/loop_engineering.py --mark-done-through 2.3
-Options: --reviewer codex|claude|none  --no-push  --max-fix-attempts N
+Options: --builder codex|claude  --reviewer codex|claude|none  --no-push
 """
 
 from __future__ import annotations
@@ -25,12 +25,22 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Windows terminals may default to CP-1252, which cannot print the status
+# symbols used throughout this runner. Keep direct Python invocation as robust
+# as run.bat (which also selects UTF-8).
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def say(message: str, *, icon: str = "·") -> None:
@@ -117,7 +127,10 @@ def parse_plan(text: str) -> Plan:
 
 def load_state() -> dict:
     if STATE_PATH.is_file():
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        state.setdefault("done", [])
+        state.setdefault("history", [])
+        return state
     return {"done": [], "history": []}
 
 
@@ -160,7 +173,23 @@ def run_capture(cmd, cwd=ROOT, timeout=120) -> str:
     return (result.stdout or "") + (result.stderr or "")
 
 
-def run_logged(cmd, log_file: Path, cwd=ROOT, timeout=AGENT_TIMEOUT_S) -> int:
+@dataclass
+class LoggedResult:
+    returncode: int
+    output_lines: int
+    blocker: str = ""
+
+
+AGENT_BLOCKERS = (
+    "you've hit your limit",
+    "you have hit your limit",
+    "usage limit reached",
+    "rate limit exceeded",
+    "credit balance is too low",
+)
+
+
+def run_logged(cmd, log_file: Path, cwd=ROOT, timeout=AGENT_TIMEOUT_S) -> LoggedResult:
     """Run a command streaming combined output to console + log file."""
     log_file.parent.mkdir(parents=True, exist_ok=True)
     with log_file.open("a", encoding="utf-8") as log:
@@ -171,16 +200,75 @@ def run_logged(cmd, log_file: Path, cwd=ROOT, timeout=AGENT_TIMEOUT_S) -> int:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
         )
-        try:
+        output_lines = 0
+        blocker = ""
+        output_queue: queue.Queue[str | None] = queue.Queue()
+
+        def read_output() -> None:
             for line in process.stdout:
-                sys.stdout.write(line)
-                log.write(line)
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            log.write("\n!! TIMEOUT — process killed\n")
-            return 124
-        return process.returncode or 0
+                output_queue.put(line)
+            output_queue.put(None)
+
+        threading.Thread(target=read_output, daemon=True).start()
+        deadline = time.monotonic() + timeout
+        last_output = time.monotonic()
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                process.wait()
+                log.write("\n!! TIMEOUT — process killed\n")
+                return LoggedResult(124, output_lines, "agent timed out")
+            try:
+                line = output_queue.get(timeout=min(15, remaining))
+            except queue.Empty:
+                say(f"agent process is still alive — no new console output for {elapsed(last_output)}")
+                continue
+            if line is None:
+                break
+            output_lines += 1
+            last_output = time.monotonic()
+            lowered = line.lower()
+            if not blocker and any(marker in lowered for marker in AGENT_BLOCKERS):
+                blocker = line.strip()
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log.write(line)
+            log.flush()
+        process.wait()
+        return LoggedResult(process.returncode or 0, output_lines, blocker)
+
+
+def agent_run_ok(result: LoggedResult, state: dict, scope: str, stage: str) -> bool:
+    """Never treat a silent, limited, or failed agent invocation as success."""
+    if result.blocker:
+        detail = f"{stage} blocked: {result.blocker}"
+    elif result.returncode != 0:
+        detail = f"{stage} exited with code {result.returncode}"
+    elif result.output_lines == 0:
+        detail = f"{stage} produced no output"
+    else:
+        return True
+    record(state, scope, "halt", detail)
+    say(f"HALT — {detail}. This work remains incomplete and is safe to resume.", icon="✗")
+    return False
+
+
+def unfinished_phase_baselines(state: dict) -> dict[int, str]:
+    """Return phase reviews that started but were never recorded as done."""
+    unfinished: dict[int, str] = {}
+    for event in state.get("history", []):
+        match = re.fullmatch(r"phase-(\d+)", str(event.get("step", "")))
+        if not match:
+            continue
+        phase = int(match.group(1))
+        if event.get("event") == "start":
+            # Preserve the first unmatched baseline so repeated restarts still
+            # review every commit made during the phase.
+            unfinished.setdefault(phase, str(event.get("detail", "")))
+        elif event.get("event") == "done":
+            unfinished.pop(phase, None)
+    return unfinished
 
 
 # ---------------------------------------------------------------------------
@@ -320,14 +408,21 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
     say(f"baseline commit is {baseline}; everything after it belongs to this step")
 
     # 1) EXECUTE
-    say(f"stage 1/4 EXECUTE — launching the builder agent (claude -p) with the "
+    say(f"stage 1/4 EXECUTE — launching the builder agent ({args.builder}) with the "
         f"step description + done-when criteria; it will implement step {step.id}", icon="▶")
     stage = time.monotonic()
-    run_logged(agent_cmd("claude", execute_prompt(step)), log_file)
+    result = run_logged(agent_cmd(args.builder, execute_prompt(step)), log_file)
     say(f"builder agent finished in {elapsed(stage)}")
+    if not agent_run_ok(result, state, step.id, "builder agent"):
+        return False
     if working_tree_dirty():
         say("builder left uncommitted changes — committing them on its behalf")
         commit_all(f"feat(workflow): step {step.id} - {step.title} (loop auto-commit)")
+    if head_commit() == baseline:
+        detail = "builder agent completed without producing any code or commit changes"
+        record(state, step.id, "halt", detail)
+        say(f"HALT — {detail}. Step {step.id} remains incomplete.", icon="✗")
+        return False
 
     # 2) VALIDATE + CORRECT loop
     say("stage 2/4 VALIDATE — running pytest, vitest, and the production build "
@@ -341,10 +436,18 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
             f"launching a fixer agent with the failure output", icon="✗")
         record(state, step.id, "validation_red", detail)
         stage = time.monotonic()
-        run_logged(agent_cmd("claude", fix_prompt(step, detail)), log_file)
+        fix_baseline = head_commit()
+        result = run_logged(agent_cmd(args.builder, fix_prompt(step, detail)), log_file)
         say(f"fixer finished in {elapsed(stage)} — re-validating")
+        if not agent_run_ok(result, state, step.id, "validation fixer"):
+            return False
         if working_tree_dirty():
             commit_all(f"fix: step {step.id} validation (loop auto-commit)")
+        if head_commit() == fix_baseline:
+            detail = "validation fixer completed without producing any changes"
+            record(state, step.id, "halt", detail)
+            say(f"HALT — {detail}. Step {step.id} remains incomplete.", icon="✗")
+            return False
     else:
         record(state, step.id, "halt", "validation still red after max fix attempts")
         say(f"HALT — still red after {args.max_fix_attempts} fix attempts. "
@@ -358,8 +461,10 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
         say(f"stage 3/4 REVIEW — {args.reviewer} audits commits {baseline}..{head_commit()} "
             f"for real bugs and fixes what it finds", icon="▶")
         stage = time.monotonic()
-        run_logged(agent_cmd(args.reviewer, review_prompt(step, baseline, head_commit())), log_file)
+        result = run_logged(agent_cmd(args.reviewer, review_prompt(step, baseline, head_commit())), log_file)
         say(f"reviewer finished in {elapsed(stage)}")
+        if not agent_run_ok(result, state, step.id, "reviewer agent"):
+            return False
         if working_tree_dirty():
             say("reviewer left uncommitted fixes — committing them")
             commit_all(f"fix(review): step {step.id} (loop auto-commit)")
@@ -368,7 +473,9 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
         if not ok:
             say("reviewer broke the board — one repair pass", icon="✗")
             record(state, step.id, "review_red", detail)
-            run_logged(agent_cmd("claude", fix_prompt(step, detail)), log_file)
+            result = run_logged(agent_cmd(args.builder, fix_prompt(step, detail)), log_file)
+            if not agent_run_ok(result, state, step.id, "post-review fixer"):
+                return False
             if working_tree_dirty():
                 commit_all(f"fix: step {step.id} post-review (loop auto-commit)")
             ok, detail = validate(log_file)
@@ -396,7 +503,8 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
     return True
 
 
-def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args) -> bool:
+def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args,
+              *, resume_baseline: str | None = None) -> bool:
     """Phase-level cycle: build every step (validated individually), then one
     adversarial review + smoke test over the whole phase before moving on."""
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -406,11 +514,15 @@ def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args) -> b
 
     print("\n" + "#" * 72)
     say(f"PHASE {phase} — {title}: {len(steps)} step(s) to build "
-        f"({', '.join(s.id for s in steps)})", icon="▶")
-    baseline = head_commit()
-    record(state, f"phase-{phase}", "start", baseline)
+        f"({', '.join(s.id for s in steps) or 'review resume only'})", icon="▶")
+    baseline = resume_baseline or head_commit()
+    if resume_baseline:
+        say(f"resuming unfinished Phase {phase} from baseline {baseline}; "
+            "the phase will not be complete until its review passes", icon="!")
+    else:
+        record(state, f"phase-{phase}", "start", baseline)
 
-    say(f"part 1/2 BUILD — claude implements each step in order; every step is "
+    say(f"part 1/2 BUILD — {args.builder} implements each step in order; every step is "
         f"validated (pytest/vitest/build) before the next one starts")
     for step in steps:
         if not run_step(step, state, args, review=False, push=False):
@@ -421,10 +533,14 @@ def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args) -> b
         say(f"part 2/2 PHASE REVIEW — {args.reviewer} audits ALL phase commits "
             f"{baseline}..{head_commit()}, smoke-tests the app, and fixes bugs", icon="▶")
         stage = time.monotonic()
-        run_logged(agent_cmd(args.reviewer,
-                             phase_review_prompt(phase, title, steps, baseline, head_commit())),
-                   log_file)
+        review_steps = steps or plan.phase_steps(phase)
+        result = run_logged(agent_cmd(args.reviewer,
+                                      phase_review_prompt(phase, title, review_steps,
+                                                          baseline, head_commit())),
+                            log_file)
         say(f"phase reviewer finished in {elapsed(stage)}")
+        if not agent_run_ok(result, state, f"phase-{phase}", "phase reviewer"):
+            return False
         if working_tree_dirty():
             say("reviewer left uncommitted fixes — committing them")
             commit_all(f"fix(review): phase {phase} (loop auto-commit)")
@@ -433,7 +549,10 @@ def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args) -> b
         if not ok:
             say("phase review left the board RED — one repair pass", icon="✗")
             record(state, f"phase-{phase}", "review_red", detail)
-            run_logged(agent_cmd("claude", fix_prompt(steps[-1], detail)), log_file)
+            repair_step = (steps or plan.phase_steps(phase))[-1]
+            result = run_logged(agent_cmd(args.builder, fix_prompt(repair_step, detail)), log_file)
+            if not agent_run_ok(result, state, f"phase-{phase}", "phase repair agent"):
+                return False
             if working_tree_dirty():
                 commit_all(f"fix: phase {phase} post-review (loop auto-commit)")
             ok, detail = validate(log_file)
@@ -468,12 +587,15 @@ def pick_targets(plan: Plan, state: dict, args) -> list[Step]:
 
 def print_status(plan: Plan, state: dict) -> None:
     done = set(state["done"])
+    unfinished_reviews = unfinished_phase_baselines(state)
     print(f"Plan: {PLAN_PATH.name} — {len(plan.steps)} steps in {len(plan.phases)} phases\n")
     for phase, title in sorted(plan.phases.items()):
         steps = plan.phase_steps(phase)
         completed = sum(1 for s in steps if s.id in done)
-        marker = "✔" if completed == len(steps) and steps else " "
-        print(f" [{marker}] Phase {phase} — {title}  ({completed}/{len(steps)})")
+        review_pending = phase in unfinished_reviews
+        marker = "✔" if completed == len(steps) and steps and not review_pending else "!" if review_pending else " "
+        suffix = " — REVIEW INCOMPLETE" if review_pending else ""
+        print(f" [{marker}] Phase {phase} — {title}  ({completed}/{len(steps)}){suffix}")
         for step in steps:
             flag = "✔" if step.id in done else "·"
             print(f"      {flag} {step.id}  {step.title}")
@@ -492,6 +614,8 @@ def main() -> None:
     ap.add_argument("--until", help="run through this step id (e.g. 2.5)")
     ap.add_argument("--steps", type=int, help="run at most N steps")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
+    ap.add_argument("--builder", choices=["codex", "claude"], default="codex",
+                    help="agent used to implement and repair steps (default: codex)")
     ap.add_argument("--reviewer", choices=["codex", "claude", "none"], default="codex")
     ap.add_argument("--max-fix-attempts", type=int, default=3)
     ap.add_argument("--no-push", action="store_true")
@@ -526,15 +650,28 @@ def main() -> None:
         return
 
     targets = pick_targets(plan, state, args)
-    if not targets:
+    unfinished_reviews = unfinished_phase_baselines(state) if args.by_phase else {}
+    target_phases = {s.phase for s in targets}
+    if args.all:
+        resume_phases = set(unfinished_reviews)
+    elif args.phase is not None:
+        resume_phases = {args.phase} & set(unfinished_reviews)
+    elif args.until:
+        until_step = plan.step(args.until)
+        resume_phases = {p for p in unfinished_reviews if until_step and p <= until_step.phase}
+    else:
+        resume_phases = target_phases & set(unfinished_reviews)
+    phase_numbers = sorted(target_phases | resume_phases)
+
+    if not targets and not phase_numbers:
         print("Nothing to do — selected scope is already complete.")
         return
 
     if args.dry_run:
         if args.by_phase:
             print("Would run, phase by phase (build all steps, then one phase review):")
-            for phase in sorted({s.phase for s in targets}):
-                ids = ", ".join(s.id for s in targets if s.phase == phase)
+            for phase in phase_numbers:
+                ids = ", ".join(s.id for s in targets if s.phase == phase) or "review resume only"
                 print(f"  Phase {phase}: {ids}  → then {args.reviewer} phase review + smoke test")
         else:
             print("Would run, in order:")
@@ -545,16 +682,19 @@ def main() -> None:
     run_started = time.monotonic()
     print("=" * 72)
     say(f"LOOP START — plan: {PLAN_PATH.relative_to(ROOT)}", icon="▶")
-    say(f"scope: {len(targets)} step(s) → {', '.join(s.id for s in targets)}")
+    scope = ", ".join(s.id for s in targets) or "unfinished phase review only"
+    say(f"scope: {len(targets)} step(s) → {scope}")
     say(f"mode: {'phase-level cycles (build phase → review phase → advance)' if args.by_phase else 'step-level cycles'} · "
-        f"reviewer: {args.reviewer} · max fix attempts: {args.max_fix_attempts} · "
+        f"builder: {args.builder} · reviewer: {args.reviewer} · "
+        f"max fix attempts: {args.max_fix_attempts} · "
         f"push: {'off' if args.no_push else 'on'}")
 
     completed = []
     if args.by_phase:
-        for phase in sorted({s.phase for s in targets}):
+        for phase in phase_numbers:
             phase_steps = [s for s in targets if s.phase == phase]
-            if not run_phase(phase, phase_steps, plan, state, args):
+            if not run_phase(phase, phase_steps, plan, state, args,
+                             resume_baseline=unfinished_reviews.get(phase)):
                 say(f"LOOP STOPPED in phase {phase} after {elapsed(run_started)} — "
                     f"completed before the halt: {', '.join(completed) or 'none'}", icon="✗")
                 sys.exit(1)
