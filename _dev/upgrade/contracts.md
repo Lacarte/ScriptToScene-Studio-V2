@@ -1,9 +1,14 @@
-# Workflow Builder — Machine Contracts (Phase 0 deliverable)
+# Workflow Builder — Machine Contracts (Phase 0 frozen)
 
 > Produced by the Phase 0 audit (steps 0.1 + 0.2 of [implementation-plan.md](implementation-plan.md)).
 > Grounded in code as of commit `4aca8cb` (2026-08-04). Line numbers refer to that state.
 > Rule inherited from the spec: discrepancies between the spec and the code are resolved
 > **in favor of preserving working behavior** — every such resolution is recorded here.
+
+> **Status:** Phase 0.4 review passed on 2026-08-04. Named ports/control semantics, strict
+> ID rules, HTTP envelopes, SSE replay, security limits, and the test baseline are frozen.
+> Deterministic fixture files are scheduled as the first prerequisite of step 2.5, before
+> stubs consume them.
 
 ---
 
@@ -17,6 +22,7 @@
 | D4 | Storyboard and/or Animator feed Assemble | **Mutually exclusive.** `_pick_scene_asset` (`editor/routes.py:72`) reads ONLY `output/animator/`. Storyboard images are reference inputs to the animator (base64 side channel, `animation_routes.py:243-256`); no code path puts them on the timeline | Assemble's asset input port type is `animation_assets` only. Storyboard output port connects to Animator (reference) or Workflow Output — never Assemble. Storyboard→timeline is a possible future adapter feature, out of scope v1 |
 | D5 | Resume can reload any step | `_load_prior_results` has **no `assets` branch** (`routes.py:793`) — assets are never reloadable in the legacy pipeline | Workflow engine's own `run_data` + fingerprint cache supersedes `_load_prior_results`; adapters must not depend on it |
 | D6 | — | `storyboard_provider`, `image_model`, `arguments` are declared in `PipelineRunRequest` but never copied into the job config (`routes.py:283-318`) — silently dead in the legacy pipeline | Workflow node configs bypass the legacy config dict entirely; adapters receive node configuration directly |
+| D7 | Project identity can be inferred from every edge payload | Legacy artifacts sometimes use a `source_folder` different from the editor `project_id`; several steps reconstruct paths from one or the other | Every execution has one immutable project context. New runs allocate `pm_XXXXXX`; `project.existing` selects an existing ID before side-effecting nodes start. Artifact outputs carry safe relative refs plus `project_id` and `source_folder` where relevant. Adapters consume those fields instead of guessing paths. Conflicting existing-project inputs or request/project-node mismatches fail validation. |
 
 ## 2. Node contract table (core production nodes)
 
@@ -32,6 +38,11 @@ Legend: **cfg** = node configuration keys; **in/out** = typed ports; **artifacts
 ### `script.input` (Script Input)
 - in: — · out: `script` (str, 1–10,000 chars)
 - cfg: `text` (textarea). Later: Story Generator node (`studio/story`) can feed the same port type.
+
+### `trigger.manual`, `project.existing` (entry nodes)
+- `trigger.manual`: no config or artifacts; emits one `control` token when included in the selected execution scope. It is optional because the toolbar/API already initiates runs.
+- `project.existing`: cfg `project_id`; validates strict project ID syntax and existence, then resolves WIP before `initial.json` using the same preference as `editor_load_project` (`editor/routes.py:1211`). It emits `project_id` and an `editor_project` artifact reference without copying or rewriting the project.
+- Execution validation permits at most one enabled `project.existing` node in a selected side-effecting subgraph. Its ID must agree with any `project_id` supplied to `/api/workflow/run`.
 
 ### `tts.generate` (Text to Speech)
 - in: `script` (required) · optional `project_settings` · out: `audio_file`, `tts_metadata`
@@ -91,6 +102,25 @@ Legend: **cfg** = node configuration keys; **in/out** = typed ports; **artifacts
 - **Not interruptible; no stop check. Music/SFX selection is random (bounded by 10-entry history) → non-deterministic; excluded from fingerprint, and pinning the output is the determinism lever.**
 - `editor_project` payload: `{scene_count, total_duration, has_audio, has_captions, assembled_data}`.
 
+### `captions.generate` (Caption Generator)
+- in: `alignment` (required) · out: `captions`
+- cfg: `preset_id` (approved preset id), `words_per_group` (1–10, default 3), `enabled` (default true)
+- service: `studio.captions.routes._group_words_into_captions(alignment, words_per_group)` ✅ and preset lookup via `CAPTION_PRESETS` / `_get_default_caption_preset_id` ✅. Extraction to a service module in 3.1 avoids importing a route module from the adapter.
+- artifacts: `output/captions/{source_folder}/captions.json`, written atomically. Payload matches existing editor support: `{project_id, source_folder, preset, captions:[{text,start,end,words}]}`.
+- deterministic and synchronously cancellable at the node boundary; no retry needed. Invalid word timings fail validation instead of being silently reordered.
+
+### `music.select` (Background Music)
+- in: optional `project_settings`, optional `project_id` · out: `music_track`
+- cfg: `mode` (`tone|random|specific`), `story_tone`, managed `track_ref`, `volume` (0–1), `fade_in`, `fade_out`, `loop`, `ducking_enabled`, `ducking_level`
+- service: `studio.music.selector.{select_music,select_random_music,recall_last_music}` ✅ plus existing history helpers. The adapter converts approved absolute library selections into managed `/assets/sounds/music/...` references before emitting output; arbitrary browser paths are rejected.
+- artifacts: no standalone node artifact in v1; selection/history is persisted in the execution record and later editor project. If a project ID is present, history mutation is deferred until Assemble succeeds so a failed exploratory run does not consume a random pick.
+- selection is non-deterministic unless `specific` or pinned. Its fingerprint includes the resolved managed track reference; cache lookup happens before a fresh random choice.
+
+### `timeline.project`, `workflow.output` (output helpers)
+- `timeline.project`: takes `editor_project`, verifies its managed artifact, and atomically writes/updates the editor project through the extracted editor save service. It emits the same `editor_project` reference plus `project_id`. It must not overwrite `work@in@progress.json` unless the workflow explicitly targets the existing project and the run request authorizes replacement.
+- `workflow.output`: cfg `port_type`, `label`; accepts one dynamically typed value, records a redacted summary and safe artifact refs in the execution result, and has no filesystem side effect of its own.
+- `stub.input` and `stub.output` remain testing nodes described below; they never allocate a project or convert sample-derived artifacts into a normal project without an explicit non-sample rebuild.
+
 ### `export.video` (Video Export)
 - in: `editor_project` (required) · optional `project_settings` (logo block, aspect ratio) · out: `video_file`
 - cfg: `profile` (yt_shorts|tiktok|reels|yt_landscape|square), `captions` (bool), `grain` (bool) — v1 sourced from node config, NOT app-config (deliberate divergence: node config beats `app-config.json`; recorded as workflow behavior)
@@ -110,9 +140,88 @@ Types (v1): `control, text, script, project_id, project_settings, audio_file, tt
 
 Compatibility rule: **exact type match only.** No wildcard: `generic_json` connects only to `generic_json`. `stub.input`/`stub.output` resolve their dynamic type from configuration at validation time and then obey exact-match. Additional rules: no in→in / out→out; single-value inputs reject a second edge; DAG only (cycle rejection); control edges distinct from data edges. Every payload that references files carries `{artifact_refs: [relpaths]}` alongside inline JSON; integrity check = existence + nonzero size.
 
+### 3.1 Stable port IDs and control readiness
+
+Type names alone are not port IDs. Registry entries and persisted edges use the following
+stable IDs; renaming a display label never changes them.
+
+| node type | inputs (`id:type`, `?` optional) | outputs (`id:type`) |
+|---|---|---|
+| `trigger.manual` | — | `control:control` |
+| `project.setup` | `trigger:control?` | `control:control`, `settings:project_settings` |
+| `script.input` | `trigger:control?` | `control:control`, `script:script` |
+| `project.existing` | `trigger:control?` | `control:control`, `project_id:project_id`, `project:editor_project` |
+| `tts.generate` | `trigger:control?`, `script:script`, `settings:project_settings?` | `control:control`, `audio:audio_file`, `metadata:tts_metadata` |
+| `timing.align` | `trigger:control?`, `audio:audio_file`, `script:script` | `control:control`, `alignment:alignment` |
+| `segment.run` | `trigger:control?`, `alignment:alignment` | `control:control`, `segments:segments` |
+| `scenes.blueprint` | `trigger:control?`, `segments:segments`, `script:script`, `settings:project_settings?` | `control:control`, `scenes:scenes`, `image_prompts:image_prompts` |
+| `storyboard.generate` | `trigger:control?`, `scenes:scenes`, `settings:project_settings?` | `control:control`, `images:storyboard_images` |
+| `animator.generate` | `trigger:control?`, `scenes:scenes`, `storyboard:storyboard_images?`, `settings:project_settings?` | `control:control`, `assets:animation_assets` |
+| `captions.generate` | `trigger:control?`, `alignment:alignment` | `control:control`, `captions:captions` |
+| `music.select` | `trigger:control?`, `settings:project_settings?`, `project_id:project_id?` | `control:control`, `track:music_track` |
+| `assemble.project` | `trigger:control?`, `assets:animation_assets`, `metadata:tts_metadata`, `scenes:scenes`, `captions:captions?`, `music:music_track?`, `settings:project_settings?` | `control:control`, `project:editor_project` |
+| `timeline.project` | `trigger:control?`, `project:editor_project` | `control:control`, `project:editor_project`, `project_id:project_id` |
+| `export.video` | `trigger:control?`, `project:editor_project`, `settings:project_settings?` | `control:control`, `video:video_file` |
+| `workflow.output` | `trigger:control?`, `value:<dynamic>` | — |
+| `stub.input` | — | `value:<dynamic>` |
+| `stub.output` | `value:<dynamic>` | `value:<dynamic>` |
+
+Required data inputs are shown without `?`; registry fields still encode this as
+`required` and `multiple`. All inputs above are single-value in v1. Outputs may fan out.
+`workflow.output` and both stubs resolve `<dynamic>` from validated `configuration.port_type`.
+
+Data edges establish both a dependency and a typed value. Control edges establish only a
+dependency and never satisfy a required data input. A node with a connected `trigger` waits
+for that control predecessor as well as all required data. An unconnected optional `trigger`
+does not block a node. A node emits `control` only after successful completion; skipped,
+failed, and cancelled propagation is handled explicitly by scheduler policy rather than by
+fabricating a success token. These rules make Manual Trigger useful without making it
+mandatory for partial or isolated execution.
+
 ## 4. Workflow JSON schema (frozen)
 
-As specified in [proposition-final.md](proposition-final.md) §Persistence — `schema_version: 1`, nodes `{id, type, type_version, name, position, configuration, disabled}`, edges `{id, source_node, source_port, target_node, target_port, edge_type}`, reserved `variables: {}`, `viewport`, `settings: {on_error}`, ISO timestamps. Persisted under `output/workflows/{workflow_id}.json` via `safe_json_write`; ids through `sanitize_project_id`; soft-delete to `output/TRASH`. `output/workflows/` and `output/branding/` must be added to `app.py` `_PROJECT_DIRS`/clear-all handling.
+As specified in [proposition-final.md](proposition-final.md) §Persistence — `schema_version: 1`, nodes `{id, type, type_version, name, position, configuration, disabled}`, edges `{id, source_node, source_port, target_node, target_port, edge_type}`, reserved `variables: {}`, `viewport`, `settings: {on_error}`, ISO timestamps. Persisted under `output/workflows/{workflow_id}.json` via `safe_json_write`; soft-delete to `output/TRASH/workflows/`. `output/workflows/` and `output/branding/` must be added to clear-all handling.
+
+`sanitize_project_id` is a normalizer, not sufficient request validation: it silently removes
+invalid characters and can alias two user inputs. API IDs must first match the entire strict
+pattern `^wf_[A-Z0-9]{6}$` or `^ex_[A-Z0-9]{6}$` as applicable, then be resolved with
+`safe_join`. Imported node/edge IDs use a documented bounded safe pattern and must also be
+unique within the document. Reject altered, empty, overlong, wrong-prefix, and duplicate IDs;
+never normalize them into acceptance.
+
+### 4.1 Field-level validation policy
+
+The implementation may use Pydantic or equivalent explicit validators, but these constraints
+are transport-independent:
+
+| field | rule |
+|---|---|
+| document | JSON object, UTF-8, maximum 2 MiB after encoding, maximum nesting depth 20 |
+| `schema_version` | required integer, exactly `1` |
+| `workflow_id` | server-generated on create; otherwise required `^wf_[A-Z0-9]{6}$` |
+| `name` | required trimmed string, 1–120 characters |
+| `description` | string, 0–2,000 characters |
+| `nodes` | required array, 0–200 unique nodes |
+| `edges` | required array, 0–500 unique edges |
+| node `id` | `^[A-Za-z][A-Za-z0-9_-]{0,63}$`, unique |
+| node `type` | required registry key, maximum 80 characters |
+| node `type_version` | required positive integer supported by the registry |
+| node `name` | trimmed string, 1–120 characters |
+| node `position.x/y` | finite number in `[-1000000, 1000000]` |
+| node `configuration` | JSON object, maximum 256 KiB per node, schema-validated |
+| node `disabled` | required boolean |
+| edge `id` | `^[A-Za-z][A-Za-z0-9_-]{0,63}$`, unique |
+| edge endpoints/ports | existing node IDs and registry port IDs; maximum 64 characters each |
+| edge `edge_type` | `data` or `control`, and must match the source/target port types |
+| `variables` | JSON object, maximum 64 KiB; persisted but empty until Phase 5 |
+| `viewport` | finite `x/y`; `zoom` in `[0.1, 1.5]` |
+| `settings.on_error` | `stop` in v1; later values enabled only with Phase 4 capability support |
+| timestamps | RFC 3339 strings written by the server; clients cannot override them on update |
+
+V1 rejects unknown fields at the document, node, and edge levels. Forward-compatible metadata
+must live under a bounded `extensions` object (reserved now, optional, ignored by execution,
+round-tripped). This avoids silently trusting misspelled contract fields while leaving an
+explicit extension path. JSON numbers must be finite; `NaN` and infinities are rejected.
 
 ## 5. Execution record schema (frozen)
 
@@ -144,9 +253,56 @@ As specified in [proposition-final.md](proposition-final.md) §Persistence — `
 ```
 Persisted per run at `output/workflows/executions/{execution_id}.json` (atomic, redacted). Large payloads stay as artifact refs — never inlined.
 
+Execution records are server-owned and never accepted back as workflow definitions. Node map
+keys must equal node IDs in the stored snapshot. `attempts` is a non-negative integer;
+`duration_ms` is null until terminal and otherwise non-negative; `artifact_refs` are normalized
+relative paths beneath approved output roots; logs are capped by count and bytes; and all
+free-text/log/error fields pass through redaction before persistence and SSE emission. Overall
+and node status transitions are monotonic according to the scheduler state machine; terminal
+states cannot transition back to running.
+
 ## 6. API surface & SSE event shape (frozen)
 
-Routes exactly as the spec lists (`/api/workflows` CRUD+import/export; `/api/workflow/node-types|validate|run|executions/*`). New blueprint `workflows_bp`, name `"workflows"`, **no url_prefix** (matches all 14 existing blueprints), registered in `app.py` after the provider registries.
+Routes exactly as the spec lists (`/api/workflows` CRUD+import/export; `/api/workflow/node-types|validate|run|executions/*`). New blueprint `workflows_bp`, name `"workflows"`, **no url_prefix** (matches all 14 existing blueprints), imported and registered with the other blueprints in `app.py`. Provider-backed option resolution occurs at request time after startup initialization; blueprint registration itself must not assume populated provider registries.
+
+All endpoints are local-app endpoints and enforce `is_loopback_remote`; mutation endpoints also
+require JSON content types where applicable. Success payloads are JSON objects rather than bare
+arrays. Errors use one envelope everywhere:
+
+```json
+{
+  "error": {
+    "code": "WORKFLOW_INVALID",
+    "message": "Workflow has validation errors",
+    "details": { "problems": [] }
+  }
+}
+```
+
+`details` is optional and redacted. Expected endpoint contracts:
+
+| endpoint | request | success |
+|---|---|---|
+| `GET /api/workflows` | optional `limit` 1–200 (default 100) | `200 {workflows:[summary], total:n}` sorted by `updated_at` descending then ID; no pagination until the 200-item cap is insufficient |
+| `POST /api/workflows` | `{workflow:<definition without server id/timestamps>}` | `201 {workflow}` + `Location`; server allocates ID/timestamps |
+| `GET /api/workflows/<id>` | — | `200 {workflow}`; `404` if absent |
+| `PUT /api/workflows/<id>` | `{workflow, expected_updated_at}` | `200 {workflow}`; `409 WORKFLOW_CONFLICT` on stale update |
+| `DELETE /api/workflows/<id>` | `{expected_updated_at?}` | `200 {deleted:true, workflow_id}` after atomic move to trash; `409` on stale update |
+| `POST /api/workflows/import` | `{workflow, on_conflict:"reject"|"new_id"}` | `201 {workflow, imported_from_id?}`; default `new_id` |
+| `GET /api/workflows/<id>/export` | — | `200 application/json` definition with attachment filename; no execution data/secrets |
+| `GET /api/workflow/node-types` | — | `200 {registry_version, node_types, port_types}` with no executor/callable internals |
+| `POST /api/workflow/validate` | `{workflow}` | `200 {valid, problems, warnings}` for a well-formed request, even when graph-invalid; malformed transport is `400` |
+| `POST /api/workflow/run` | `{workflow_id xor workflow, run_mode, target_node_ids:[], force:false, project_id?}` | `202 {execution_id, project_id, status:"queued"}` |
+| `POST /api/workflow/executions/<id>/stop` | `{}` | `202 {execution_id, status:"cancelling"}`; `409` if already terminal |
+| `GET /api/workflow/executions/<id>` | — | `200 {execution}`; `404` if absent |
+| `GET /api/workflow/executions/<id>/events` | standard `Last-Event-ID` on reconnect | `200 text/event-stream`; `404` if absent |
+| `GET /api/workflow/executions` | required `workflow_id`, optional `limit` 1–200 | `200 {executions:[summary], total:n}` sorted newest first |
+
+Create/import/save return `422 WORKFLOW_INVALID` when the JSON transport is valid but violates
+workflow rules. Use `400` for malformed JSON/request shape, `403` for non-loopback access,
+`404` for missing resources, `409` for conflicts/locks/terminal stop, `413` for size limits,
+and `500` only for unexpected redacted server failures. Add `WORKFLOW_CONFLICT` to the stable
+error-code set.
 
 SSE (own emitter in `studio/workflows/events.py` — do NOT reuse pipeline `_emit`, which is private and closes over `_jobs`; see blocker B6):
 
@@ -157,11 +313,11 @@ SSE (own emitter in `studio/workflows/events.py` — do NOT reuse pipeline `_emi
   "progress": {"ready": 3, "total": 10},      // optional, poll-driven nodes
   "from_sample_data": false }                  // present when stub-fed
 ```
-Monotonic `sequence` per execution; stream ends on terminal event `{node_id: null, status: "succeeded|failed|cancelled"}`. Reconnect: client sends `Last-Sequence` — server replays from buffer (bounded ring, 1000 events).
+Monotonic `sequence` per execution; each SSE frame includes `id: <sequence>` and a JSON `data:` payload. The stream ends on terminal event `{node_id: null, status: "succeeded|failed|cancelled"}`. On automatic reconnect, browser `EventSource` sends the standard `Last-Event-ID` header; the server replays events with greater sequence values from a bounded ring (1000 events). If the requested ID predates the retained buffer, emit a snapshot/reset event before live events. The client also deduplicates by `sequence`.
 
 ## 7. Error codes (stable)
 
-`WORKFLOW_INVALID, UNKNOWN_NODE_TYPE, UNSUPPORTED_NODE_VERSION, PORT_TYPE_MISMATCH, MISSING_REQUIRED_INPUT, CYCLE_DETECTED, PROJECT_LOCKED, NODE_EXECUTION_FAILED, ALIGNMENT_EMPTY, WEBHOOK_FAILED, PROVIDER_UNAVAILABLE, EXTENSION_NOT_CONNECTED, POLL_TIMEOUT, EXPORT_FAILED, CANCELLED, ARTIFACT_MISSING, CACHE_INTEGRITY, STUB_PAYLOAD_INVALID, SAMPLE_FIXTURE_MISSING`.
+`WORKFLOW_INVALID, WORKFLOW_CONFLICT, UNKNOWN_NODE_TYPE, UNSUPPORTED_NODE_VERSION, PORT_TYPE_MISMATCH, MISSING_REQUIRED_INPUT, CYCLE_DETECTED, PROJECT_LOCKED, NODE_EXECUTION_FAILED, ALIGNMENT_EMPTY, WEBHOOK_FAILED, PROVIDER_UNAVAILABLE, EXTENSION_NOT_CONNECTED, POLL_TIMEOUT, EXPORT_FAILED, CANCELLED, ARTIFACT_MISSING, CACHE_INTEGRITY, STUB_PAYLOAD_INVALID, SAMPLE_FIXTURE_MISSING`.
 Failure payload: `{code, node_id, node_name, message, details_redacted, attempt, timestamp, recovery_suggestion}`.
 
 ## 8. Extraction blockers & known defects (input to step 3.1)
@@ -203,7 +359,22 @@ Known defects (preserve during extraction; fix only as explicit follow-ups): exp
 | `project_settings` | `project_settings.json` | defaults + sample logo png |
 | `captions` / `music_track` | `captions.json` / ref to a resources track | |
 
-Generation procedure: run the fixed pipeline once on the tiny script with the cheapest providers, copy artifacts in, strip timestamps/absolute paths, commit. (Fixtures not yet captured — first task of Phase 1 once a full run is possible in this environment; requires n8n webhook + a media provider.)
+Fixture validation is type-specific, not just "JSON parses": script is non-empty and bounded;
+audio is a decodable WAV with positive duration; alignment words have finite ordered times;
+segments are ordered, non-overlapping, and reference the canonical script; scenes have stable
+indices and prompts; all media references are relative and contained beneath the fixture root;
+storyboard/animator counts match their listed statuses; editor-project URLs resolve only to
+fixture assets; and caption/music timings fit the canonical audio duration. A manifest records
+SHA-256, byte size, media metadata, port types, and fixture schema version for every file.
+
+Generation procedure: use a tiny canonical script; derive JSON shapes from audited real
+artifacts; strip timestamps, secrets, provider payloads, and absolute paths; generate tiny
+WAV/image/video media deterministically with local tools; validate all cross-references; and
+commit the result. Live n8n/provider access must not be required to reproduce the fixture set.
+
+**Current status: fixtures are not captured.** They are required before step 2.5, where stubs
+first consume them, rather than being silently deferred to Phase 1. Until the files and their
+validation checks exist, this section is an inventory, not a frozen fixture contract.
 
 ## 11. Security / threat notes
 
@@ -211,7 +382,14 @@ Redaction points: node configuration echoes (provider options may hold keys), ex
 
 ## 12. Phase 0 verification record (2026-08-04)
 
-- Backend: `venv` was broken (base interpreter from another project, missing). Rebuilt on Python 3.10.0; requirements + pytest installed. `pytest tests/ -q`: **13 passed, 1 failed** — `test_remove_watermark_skips_clean_glow_without_rewriting` (detector scored 0.769 on a clean synthetic image; env-sensitive external `py-gemini-watermark-remover`/opencv versions; unrelated to workflow feature). Recorded as the known baseline exception.
+- Backend: `venv` was broken (base interpreter from another project, missing). Rebuilt on Python 3.10.0; requirements + pytest installed. Initial run exposed a real false positive in the watermark confidence gate: the clean radial-glow regression had brightness difference 8.82, while the weakest real watermark fixture was about 17. Raising `_BRIGHTNESS_DIFF_MIN` from 8 to 10 preserves the real fixtures and fixes the false positive. Current `pytest tests/ -q`: **14 passed, 2 subtests passed**.
 - Frontend: Vitest + @vue/test-utils + jsdom added (`npm run test`): **1 passed**. `test` block lives in `vite.config.js` (alias inherited).
-- No `conftest.py`/pytest config exists; tests are `unittest`-style, run from repo root. pytest added to the venv (not requirements.txt — decide in Phase 1 whether to add `requirements-dev.txt`).
+- No `conftest.py`/pytest config exists; tests are `unittest`-style and run from repo root. Development dependencies are declared in `requirements-dev.txt` so pytest installation is reproducible without adding it to runtime requirements.
+- Verified toolchain: Python 3.10.0; Node 24.14.0; npm 11.11.0. Vite 8 requires Node `^20.19.0 || >=22.12.0`, which is the frontend minimum. The Python source uses 3.10 union syntax, so Python 3.10+ is the backend minimum.
 - Leftover empty `tests/test_*_<hash>/` dirs from an old run: ignorable noise.
+
+### Tracked follow-through after the Phase 0 gate
+
+1. Capture/generate and validate the fixture inventory before step 2.5.
+2. Convert the field-level contracts into executable validators/tests as their owning modules
+   land in Phases 1–3; until then, this document is the normative source.

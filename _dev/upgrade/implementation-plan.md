@@ -6,12 +6,12 @@
 > "done when" criteria, and leaves the app working.
 >
 > Grounded in the actual codebase (verified 2026-08-04):
-> - `app.py` registers 14 blueprints at lines 71–84 — `workflows_bp` is a one-line addition.
+> - `app.py` imports and registers 14 blueprints at lines 71–84 — `workflows_bp` follows the same startup pattern.
 > - `frontend/src/app/router.js` lazy-loads feature pages — `/workflow` follows the pattern.
 > - `studio/pipeline/routes.py` is ~2,400 lines with `_step_*` functions embedded (lines 1242–2371)
 >   — service extraction (step 3.1) is the highest-risk step in the plan.
-> - Backend tests exist (`tests/test_*.py`, pytest). Frontend has NO test runner
->   (`frontend/package.json` has only vite scripts) — Vitest is added deliberately in step 0.3.
+> - Backend tests exist (`tests/test_*.py`, pytest). Vitest, Vue Test Utils, jsdom,
+>   and an initial frontend smoke test were added during step 0.3.
 > - Existing modules to wrap: `studio/{tts, timing, segmenter, build_scene_blueprints,
 >   storyboard, animator, captions, music, editor}` + assemble/export steps in pipeline routes.
 
@@ -20,26 +20,59 @@
 - One step = one commit (or a small stack). Never mix service extraction with behavior change.
 - After each **phase**: run `pytest`, run frontend tests, run `npm run build` in `frontend/`, smoke-test in the running app (`start-dev.bat`), and record results before starting the next phase.
 - `/pipeline`, module pages, timeline editor, and export library must work after every single step.
-- New backend code goes in `studio/workflows/`; new frontend code in `frontend/src/features/workflow/`. Nothing else moves except the deliberate extraction in 3.1.
-- Follow existing conventions: feature folders, composables, Pinia stores, `safe_json_write` (`studio/io_utils.py`), `security.py` sanitization for all workflow/execution ids.
+- New backend runtime code goes in `studio/workflows/`; new frontend runtime code in `frontend/src/features/workflow/`. Nothing else moves except deliberate integration points and the extraction in 3.1.
+- Follow existing conventions: feature folders, composables, Pinia stores, `safe_json_write` (`studio/io_utils.py`), and `safe_join` (`studio/security.py`). Workflow and execution IDs require strict prefix/format validation; do not silently accept the altered result of `sanitize_project_id`.
 
 ---
 
-## Phase 0 — Audit & contracts (no implementation code)
+## Phase 0 — Audit, contracts, and test infrastructure
+
+No workflow runtime or UI feature code belongs in this phase. Development-only test
+configuration and small deterministic fixture assets are allowed.
 
 ### 0.1 Artifact & step audit → node contract table
-Read `studio/pipeline/routes.py` step functions (`_step_tts` … `_step_export`, `_load_prior_results`, `_emit`) and each wrapped module. For every planned node, document: exact input artifacts (file + dict shape), output artifacts, config keys actually consumed, and side effects on `output/{project_id}/`.
+Read `studio/pipeline/routes.py` step functions (`_step_tts` … `_step_export`, `_load_prior_results`, `_emit`) and each wrapped module. For every planned node, document: stable input/output **port IDs**, port types, required/optional and cardinality rules, exact input artifacts (file + dict shape), output artifacts, config keys actually consumed, cancellation/retry support, determinism, and side effects on `output/{project_id}/`.
 Resolve the open question: how Assemble treats storyboard images vs animation assets (audit `_step_assemble` at line 1919 and `_step_assets` at 1813) — encode the answer in the Assemble adapter contract.
 **Deliverable:** `_dev/upgrade/contracts.md` with the input/output contract table.
-**Done when:** every node in the catalog maps to a real function + real artifacts, with discrepancies vs the spec documented and resolved in favor of working behavior.
+**Done when:** every node in the catalog maps to a real function + real artifacts; every edge in every built-in template names real ports; project/source-folder identity propagation is explicit; and discrepancies vs the spec are documented and resolved in favor of working behavior.
 
 ### 0.2 Freeze the machine contracts
-In the same doc, freeze: workflow JSON schema (with `schema_version`, `type_version`, reserved `variables`), execution record schema, the served node-type shape, the full API route list, SSE event shape (with `sequence`), port-type compatibility matrix (including how `stub.input`/`stub.output` dynamic `port_type` resolution participates in it), and error codes. While auditing in 0.1, also **capture sample fixtures**: run the real pipeline once on a tiny script and freeze one small artifact per port type (script, tts_metadata + audio, alignment, segments, scenes, …) into `studio/workflows/fixtures/`; record the fixture ↔ port-type map in the contract. Include the security/threat notes (redaction points, import validation limits, approved async option sources).
-**Done when:** the contracts are internally consistent and later phases can code against them without redesign.
+In the same doc, freeze: workflow JSON schema (with `schema_version`, `type_version`, reserved `variables`), execution record schema, the served node-type shape, exact HTTP request/response envelopes and status codes, the full API route list, SSE event shape (with `sequence` and standard SSE `id`/`Last-Event-ID` replay), port-type compatibility matrix, control-edge readiness semantics, dynamic-port resolution for `stub.input`, `stub.output`, and `workflow.output`, and stable error codes. Include security/threat notes: strict ID validation, `safe_join`, redaction points, import limits, endpoint authorization/loopback policy, approved async option sources, and managed-media rules.
+
+Define the fixture inventory and validation schema in this step. Capture or generate the actual sanitized fixtures before step 2.5, when they are first consumed. Prefer deterministic local media generation and provider-mocked JSON; a Phase 0 gate must not depend on live n8n/provider availability.
+
+**Done when:** the contracts are internally consistent; every persistent and served field has a type, required/optional status, limits, and unknown-field policy; templates validate against named ports; and later phases can code against them without redesign.
 
 ### 0.3 Test infrastructure
-Confirm `pytest` runs green on the existing suite. Add **Vitest + @vue/test-utils + jsdom** to `frontend/` with an `npm run test` script and one trivial smoke test (mount a component).
-**Done when:** `pytest` and `npm run test` both pass locally; CI/dev docs note the commands.
+Establish and record the backend baseline. Add **Vitest + @vue/test-utils + jsdom** to `frontend/` with an `npm run test` script and one trivial smoke test that mounts a component. Add a reproducible development dependency declaration for pytest instead of relying on packages installed only inside one local venv.
+
+**Done when:** `npm run test` and `npm run build` pass; the backend suite is green, or a pre-existing environment-sensitive failure has a tracked resolution (dependency pin, corrected test/code, or explicit quarantine with owner approval). Merely recording a failure is not a green Phase 0 gate. CI/dev docs note exact commands and supported Node/Python versions.
+
+### 0.4 Phase 0 consistency review and gate
+Validate `contracts.md` against `proposition-final.md` and the repository one final time. Check every built-in template edge, node port, artifact filename, API route, status enum, and ID/path rule. Record completed, deferred, and blocked items with evidence; do not label draft prose as a frozen machine contract.
+
+**Done when:** there are no unresolved contradictions; fixture capture has an owner and deadline before 2.5; test results are current; and Phase 1 can begin without inventing contract semantics.
+
+### Phase 0 review status — 2026-08-04
+
+- **0.1: complete.** The module/artifact audit, named port contracts, control readiness, source artifacts, and Storyboard/Animator/Assemble discrepancy are documented.
+- **0.2: complete for Phase 0.** Field constraints, HTTP envelopes/status codes, strict IDs, SSE `Last-Event-ID` replay, security limits, and fixture validation rules are frozen. The actual deterministic fixture files are an explicit prerequisite of step 2.5, where they are first used.
+- **0.3: complete.** `requirements-dev.txt` tracks pytest; backend is 14 passed plus 2 subtests; Vitest is 1 passed; the production frontend build succeeds; supported runtimes are recorded in `contracts.md`.
+- **0.4: complete.** The corrected contracts and plan are internally consistent and Phase 1 can begin without inventing graph, persistence, API, or replay semantics.
+
+**Phase 0 is gated complete.** The next implementation step is 1.1. Fixture files remain a
+tracked prerequisite of 2.5, not a hidden Phase 0 dependency.
+
+Phase 0 verification commands:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest tests -q
+Set-Location frontend
+npm ci
+npm test
+npm run build
+```
 
 ---
 
@@ -66,7 +99,7 @@ Drop → project screen→canvas coords → insert with registry defaults. One g
 **Done when:** every rule has a Vitest case; invalid connections are impossible on canvas.
 
 ### 1.6 Workflow persistence (backend + save/load)
-`studio/workflows/{models.py, validation.py, persistence.py}`: full CRUD at `/api/workflows` (list/create/get/update/soft-delete→TRASH), sanitized ids, atomic writes, minimal serialized shape (strip Vue Flow runtime props). Server-side re-validation of types/ports/cycles on save. Toolbar: New, Open, Save, Save As, Duplicate.
+`studio/workflows/{models.py, validation.py, persistence.py}`: full CRUD at `/api/workflows` (list/create/get/update/soft-delete→TRASH), strict `wf_` ID validation plus `safe_join`, atomic writes, minimal serialized shape (strip Vue Flow runtime props). Server-side re-validation of types/ports/cycles on save. Toolbar: New, Open, Save, Save As, Duplicate.
 **Done when:** save → reload → reopen round-trips losslessly; pytest covers round-trip, path-traversal rejection, soft delete, unknown-type/version rejection with useful errors.
 
 ### 1.7 Import/export + fixed-pipeline template
@@ -94,7 +127,7 @@ Debounced draft autosave (separate from explicit save), unsaved-change indicator
 **Done when:** killing the tab mid-edit loses nothing; explicit save clears dirty state.
 
 ### 2.5 Sample-data stubs — node types + auto-attach UX (no execution yet)
-Add `stub.input` (Sample Input) and `stub.output` (Result Viewer) to the registry with dynamic `port_type` resolution in the compatibility matrix. Frontend: dropping a node with no connections auto-spawns one pre-connected Sample Input stub per required input (pre-filled from the 0.2 fixtures) and one Result Viewer on the principal output; half-height dashed rendering with "sample" badge; connecting a real edge to a stubbed input removes that stub (undoably); auto-attach toggle in workflow settings; manual attach via library "Testing" category and node context menu. Stub payloads editable in the inspector with per-port-type validation; file-backed types reference bundled fixtures only (never browser-supplied paths).
+Capture/generate and validate the fixture inventory defined in 0.2 before building the UI; fixtures must be deterministic, sanitized, small, and independent of live providers. Add `stub.input` (Sample Input) and `stub.output` (Result Viewer) to the registry with dynamic `port_type` resolution in the compatibility matrix. Frontend: dropping a node with no connections auto-spawns one pre-connected Sample Input stub per required input and one Result Viewer on the principal output; half-height dashed rendering with "sample" badge; connecting a real edge to a stubbed input removes that stub (undoably); auto-attach toggle in workflow settings; manual attach via library "Testing" category and node context menu. Stub payloads editable in the inspector with per-port-type validation; file-backed types reference bundled fixtures only (never browser-supplied paths).
 **Done when:** dropping a lone Segmenter shows editable stubs wired up; Vitest covers auto-attach, auto-detach-on-real-edge, undo, and payload validation; server-side validation accepts stub graphs. **Phase 2 gate.**
 
 ---
@@ -118,8 +151,8 @@ Extract the `_step_*` bodies from `studio/pipeline/routes.py` into importable se
 **Done when:** a run produces a complete record; a redaction test seeds a fake API key through config/logs/errors and proves it never appears in any persisted or emitted byte.
 
 ### 3.5 Run + stop endpoints, sequenced SSE
-`POST /api/workflow/run` (id or validated snapshot; full-workflow, node+deps, and **node-in-isolation** modes first), `POST /api/workflow/executions/<id>/stop` (cooperative, reuses existing stop mechanisms), `GET .../events` streaming monotonically sequenced events via the `_emit` pattern. Isolated mode: `stub.input` executes instantly returning its payload as a typed output; every downstream result produced from stub data is flagged `from_sample_data` in events and the persisted execution record.
-**Done when:** pytest covers run→events→terminal-state, stop mid-run (a cancelled run never later reports success), and an isolated run of a single node fed only by stubs; SSE reconnect dedupes by `sequence`.
+`POST /api/workflow/run` (id or validated snapshot; full-workflow, node+deps, and **node-in-isolation** modes first), `POST /api/workflow/executions/<id>/stop` (cooperative, reuses existing stop mechanisms), `GET .../events` streaming monotonically sequenced events via the `_emit` pattern. Each SSE message uses `id: <sequence>`; reconnect reads the standard `Last-Event-ID` header and replays later buffered events. Isolated mode: `stub.input` executes instantly returning its payload as a typed output; every downstream result produced from stub data is flagged `from_sample_data` in events and the persisted execution record.
+**Done when:** pytest covers run→events→terminal-state, stop mid-run (a cancelled run never later reports success), isolated stub-fed execution, ordered replay after `Last-Event-ID`, and reset behavior when the requested event is older than the retained buffer; the client deduplicates by `sequence`.
 
 ### 3.6 Live canvas states + minimal bottom panel
 Wire SSE to the store: status colors (idle/queued/running/waiting/succeeded/failed/cancelled/skipped/stale), animated running edges, post-run edge summaries, "from sample data" markers on stub-fed results, Stop button. Result Viewer stubs display their captured output summary (read-only at this phase). Bottom panel v1: current run's node list with status/duration/error; click a finished node → its output JSON. "Open in Timeline Editor" when an `editor_project` exists.
@@ -179,11 +212,11 @@ Walk the 14-point Definition of Done checklist in [proposition-final.md](proposi
 
 | Phase | Steps | Parallelizable? |
 |---|---|---|
-| 0 — Audit & contracts | 0.1–0.3 (3) | 0.3 anytime |
+| 0 — Audit & contracts | 0.1–0.4 (4) | 0.3 can run alongside 0.1/0.2 |
 | 1 — Canvas & persistence MVP | 1.1–1.7 (7) | 1.2 alongside 1.1/1.3 |
 | 2 — Config & validation | 2.1–2.5 (5) | sequential; 2.5 after 2.1 |
 | 3 — Execution | 3.1–3.6 (6) | 3.1 must land alone; 3.3/3.4 parallel after 3.2 |
 | 4 — Partial runs & resilience | 4.1–4.4 (4) | 4.3 parallel with 4.2 |
 | 5 — Power UX & expressions | 5.1–5.5 (5) | 5.1–5.3 parallelizable |
 
-30 steps total. The critical path is 0.1 → 0.2 → 1.2 → 1.6 → 3.1 → 3.2 → 3.3 → 3.5 → 3.6; everything else hangs off it. The two steps to treat with the most care are **3.1** (extracting step functions from the 2,400-line `routes.py` without behavior change) and **4.2** (cache correctness — wrong reuse silently corrupts projects).
+31 steps total. The critical path is 0.1 → 0.2 → 0.4 → 1.2 → 1.6 → 3.1 → 3.2 → 3.3 → 3.5 → 3.6; everything else hangs off it. The two steps to treat with the most care are **3.1** (extracting step functions from the 2,400-line `routes.py` without behavior change) and **4.2** (cache correctness — wrong reuse silently corrupts projects).

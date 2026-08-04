@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Development and verification only.
+pytest>=9.1,<10
