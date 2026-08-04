@@ -407,6 +407,7 @@ def print_status(plan: Plan, state: dict) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--status", action="store_true", help="show plan progress and exit")
+    ap.add_argument("--all", action="store_true", help="run every remaining step, phase by phase, to the end of the plan")
     ap.add_argument("--phase", type=int, help="run until this phase is complete")
     ap.add_argument("--until", help="run through this step id (e.g. 2.5)")
     ap.add_argument("--steps", type=int, help="run at most N steps")
@@ -437,7 +438,7 @@ def main() -> None:
         save_state(state)
         print(f"Marked done through {limit.id}.")
 
-    if args.status or not (args.phase is not None or args.until or args.steps):
+    if args.status or not (args.all or args.phase is not None or args.until or args.steps):
         print_status(plan, state)
         return
 
