@@ -1,5 +1,8 @@
 venv/
 venv_broken_py312/
+
+# Loop-engineering orchestrator state + agent logs (machine-local)
+_dev/loop/
 python312/
 __pycache__/
 *.pyc
