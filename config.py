@@ -24,6 +24,7 @@ LOG_DIR = os.path.join(ROOT_DIR, "logs")
 OUTPUT_DIR = os.path.join(ROOT_DIR, "output")
 TRASH_DIR = os.path.join(OUTPUT_DIR, "TRASH")
 WORKFLOWS_DIR = os.path.join(OUTPUT_DIR, "workflows")
+WORKFLOW_EXECUTIONS_DIR = os.path.join(WORKFLOWS_DIR, "executions")
 BRANDING_DIR = os.path.join(OUTPUT_DIR, "branding")
 ALIGN_DIR = os.path.join(OUTPUT_DIR, "alignments")
 SCENES_DIR = os.path.join(OUTPUT_DIR, "scenes")
@@ -56,7 +57,7 @@ MUSIC_DIR = os.path.join(OUTPUT_DIR, "musics")
 # ---------------------------------------------------------------------------
 # Ensure output directories exist
 # ---------------------------------------------------------------------------
-for _d in (LOG_DIR, TRASH_DIR, WORKFLOWS_DIR, BRANDING_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR,
+for _d in (LOG_DIR, TRASH_DIR, WORKFLOWS_DIR, WORKFLOW_EXECUTIONS_DIR, BRANDING_DIR, ALIGN_DIR, SCENES_DIR, STORIES_DIR, PIPELINE_DIR, ANIMATOR_DIR,
            STORYBOARD_DIR, SEGMENTER_DIR, CAPTIONS_DIR, TTS_DIR, MODELS_DIR,
            EXPORT_DIR, PROJECTS_DIR, THUMBNAILS_DIR, TTS_CACHE_DIR, MUSIC_DIR):
     os.makedirs(_d, exist_ok=True)

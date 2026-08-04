@@ -14,16 +14,21 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from config import OUTPUT_DIR
+from studio.io_utils import now_iso
 from studio.security import safe_join
 
 from .adapters import AdapterContext, AdapterError
 from .adapters.common import PROJECT_ID_RE
 from .registry import get_node_type
+from .models import ExecutionLog, ExecutionRecord, NodeExecutionRecord
+from .persistence import generate_execution_id, save_execution
+from .redaction import Redactor
 from .validation import validate_workflow, validation_errors
 
 
@@ -168,6 +173,44 @@ class ScheduleResult:
     node_statuses: dict[str, str]
     outputs: dict[str, dict[str, Any]]
     errors: dict[str, dict[str, Any]] = field(default_factory=dict)
+    execution_record: dict[str, Any] | None = None
+
+
+def _summarize(value: Any, *, depth: int = 0) -> Any:
+    """Create a bounded diagnostic summary instead of persisting payload bodies."""
+    if depth >= 4:
+        return {"type": type(value).__name__}
+    if isinstance(value, str):
+        return {"chars": len(value)}
+    if isinstance(value, bytes):
+        return {"bytes": len(value)}
+    if isinstance(value, Mapping):
+        summary = {str(key): _summarize(child, depth=depth + 1) for key, child in list(value.items())[:30]}
+        if len(value) > 30:
+            summary["_truncated_keys"] = len(value) - 30
+        return summary
+    if isinstance(value, (list, tuple)):
+        result = {"count": len(value)}
+        if value:
+            result["items"] = [_summarize(child, depth=depth + 1) for child in value[:3]]
+        return result
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return {"type": type(value).__name__}
+
+
+def _artifact_refs(value: Any) -> list[str]:
+    refs: list[str] = []
+    if isinstance(value, Mapping):
+        candidates = value.get("artifact_refs")
+        if isinstance(candidates, list):
+            refs.extend(item for item in candidates if isinstance(item, str))
+        for child in value.values():
+            refs.extend(_artifact_refs(child))
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            refs.extend(_artifact_refs(child))
+    return list(dict.fromkeys(refs))
 
 
 @dataclass(frozen=True)
@@ -248,6 +291,9 @@ class WorkflowScheduler:
         lock_root: str | None = None,
         output_dir: str = OUTPUT_DIR,
         on_status: Callable[[str, str], None] | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+        run_mode: str = "full",
+        scope_node_ids: list[str] | None = None,
     ):
         problems = validation_errors(validate_workflow(dict(workflow), require_complete=True))
         if problems:
@@ -256,11 +302,27 @@ class WorkflowScheduler:
             raise SchedulerError("PROJECT_ID_INVALID", "A strict pp_/pm_ project ID is required")
         self.workflow = dict(workflow)
         self.project_id = project_id
-        self.execution_id = execution_id
+        execution_root = os.path.join(output_dir, "workflows", "executions")
+        self.execution_id = execution_id or generate_execution_id(root=execution_root)
         self.executor_resolver = executor_resolver
         self.lock_root = lock_root
         self.output_dir = output_dir
         self.on_status = on_status
+        self.on_event = on_event
+        self.run_mode = run_mode
+        self.scope_node_ids = list(scope_node_ids or [node["id"] for node in workflow.get("nodes", [])])
+        self.execution_root = execution_root
+        self.redactor = Redactor(workflow)
+        self.record = ExecutionRecord(
+            execution_id=self.execution_id,
+            workflow_id=str(workflow.get("workflow_id", "")),
+            workflow_snapshot=self.redactor(workflow),
+            project_id=project_id,
+            run_mode=run_mode,
+            scope_node_ids=self.scope_node_ids,
+            started_at=now_iso(),
+            nodes={node["id"]: NodeExecutionRecord() for node in workflow.get("nodes", [])},
+        )
 
     def run(self) -> ScheduleResult:
         graph = build_graph(self.workflow)
@@ -269,6 +331,7 @@ class WorkflowScheduler:
         node_outputs: dict[str, dict[str, Any]] = {}
         errors: dict[str, dict[str, Any]] = {}
         executed: list[str] = []
+        self._persist()
 
         with ProjectLock(self.project_id, lock_root=self.lock_root, execution_id=self.execution_id):
             stopped = False
@@ -276,12 +339,17 @@ class WorkflowScheduler:
                 node = graph.nodes[node_id]
                 predecessor_statuses = [statuses[edge["source_node"]] for edge in graph.incoming[node_id]]
                 if stopped or node.get("disabled") or any(status != "succeeded" for status in predecessor_statuses):
+                    self.record.nodes[node_id].duration_ms = 0
                     self._status(statuses, node_id, "skipped")
                     executed.append(node_id)
                     continue
 
                 inputs = self._resolve_inputs(node_id, graph, node_outputs)
+                node_record = self.record.nodes[node_id]
+                node_record.resolved_inputs_summary = self.redactor(_summarize(inputs))
+                node_record.attempts += 1
                 self._status(statuses, node_id, "running")
+                started = time.perf_counter()
                 promoter = ArtifactPromoter(output_dir=self.output_dir, execution_id=self.execution_id or node_id)
                 context = AdapterContext(
                     project_id=self.project_id,
@@ -297,14 +365,35 @@ class WorkflowScheduler:
                     self._validate_outputs(node, result)
                     promoter.promote()
                     node_outputs[node_id] = result
+                    node_record.outputs_summary = self.redactor(_summarize(result))
+                    node_record.artifact_refs = self.redactor(_artifact_refs(result))
+                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
                     self._status(statuses, node_id, "succeeded")
                 except (AdapterError, SchedulerError) as exc:
                     code = getattr(exc, "code", "NODE_EXECUTION_FAILED")
-                    errors[node_id] = {"code": code, "message": str(exc), "details": getattr(exc, "details", None)}
+                    errors[node_id] = self.redactor(
+                        {"code": code, "message": str(exc), "details": getattr(exc, "details", None)}
+                    )
+                    node_record.error = errors[node_id]
+                    node_record.logs.append(self.redactor(ExecutionLog(
+                        ts=now_iso(), level="error", message=str(exc)
+                    ).__dict__))
+                    self._emit({"type": "node_error", "execution_id": self.execution_id,
+                                "node_id": node_id, "error": errors[node_id]})
+                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
                     self._status(statuses, node_id, "failed")
                     stopped = True
                 except Exception as exc:  # adapters are a plugin boundary
-                    errors[node_id] = {"code": "NODE_EXECUTION_FAILED", "message": str(exc), "details": None}
+                    errors[node_id] = self.redactor(
+                        {"code": "NODE_EXECUTION_FAILED", "message": str(exc), "details": None}
+                    )
+                    node_record.error = errors[node_id]
+                    node_record.logs.append(self.redactor(ExecutionLog(
+                        ts=now_iso(), level="error", message=str(exc)
+                    ).__dict__))
+                    self._emit({"type": "node_error", "execution_id": self.execution_id,
+                                "node_id": node_id, "error": errors[node_id]})
+                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
                     self._status(statuses, node_id, "failed")
                     stopped = True
                 finally:
@@ -312,12 +401,31 @@ class WorkflowScheduler:
                 executed.append(node_id)
 
         overall = "failed" if errors else "succeeded"
-        return ScheduleResult(overall, executed, statuses, node_outputs, errors)
+        self.record.status = overall
+        self.record.finished_at = now_iso()
+        persisted = self._persist()
+        self._emit({"type": "execution_finished", "execution_id": self.execution_id, "status": overall})
+        return ScheduleResult(overall, executed, statuses, node_outputs, errors, persisted)
 
     def _status(self, statuses: dict[str, str], node_id: str, status: str) -> None:
         statuses[node_id] = status
+        node_record = self.record.nodes[node_id]
+        node_record.status = status
+        node_record.logs.append(self.redactor(ExecutionLog(
+            ts=now_iso(), level="info", message=f"Node status changed to {status}"
+        ).__dict__))
+        self._persist()
         if self.on_status:
             self.on_status(node_id, status)
+        self._emit({"type": "node_status", "execution_id": self.execution_id,
+                    "node_id": node_id, "status": status})
+
+    def _persist(self) -> dict[str, Any]:
+        return save_execution(self.record, root=self.execution_root, secrets=self.redactor.secrets)
+
+    def _emit(self, event: dict[str, Any]) -> None:
+        if self.on_event:
+            self.on_event(self.redactor(event))
 
     @staticmethod
     def _configuration(node: Mapping[str, Any]) -> dict[str, Any]:

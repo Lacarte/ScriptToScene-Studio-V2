@@ -1,8 +1,50 @@
-"""Small constructors for the persisted workflow document shape."""
+"""Persisted workflow and execution record models."""
 
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+
+@dataclass
+class ExecutionLog:
+    ts: str
+    level: str
+    message: str
+
+
+@dataclass
+class NodeExecutionRecord:
+    status: str = "idle"
+    attempts: int = 0
+    duration_ms: int | None = None
+    fingerprint: str | None = None
+    cache: dict[str, Any] | None = None
+    from_sample_data: bool = False
+    resolved_inputs_summary: dict[str, Any] = field(default_factory=dict)
+    outputs_summary: dict[str, Any] = field(default_factory=dict)
+    artifact_refs: list[str] = field(default_factory=list)
+    logs: list[dict[str, Any]] = field(default_factory=list)
+    error: dict[str, Any] | None = None
+
+
+@dataclass
+class ExecutionRecord:
+    execution_id: str
+    workflow_id: str
+    workflow_snapshot: dict[str, Any]
+    project_id: str
+    run_mode: str = "full"
+    scope_node_ids: list[str] = field(default_factory=list)
+    status: str = "running"
+    started_at: str = ""
+    finished_at: str | None = None
+    nodes: dict[str, NodeExecutionRecord] = field(default_factory=dict)
+    schema_version: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def workflow_draft(*, name: str = "Untitled workflow", description: str = "") -> dict:
