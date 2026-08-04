@@ -18,6 +18,7 @@ import { useToast } from '@/shared/composables/useToast.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import NodeCard from '../components/NodeCard.vue'
 import NodeInspector from '../components/NodeInspector.vue'
+import ExecutionPanel from '../components/ExecutionPanel.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
@@ -115,16 +116,40 @@ const flowNodes = computed(() =>
 )
 
 const flowEdges = computed(() =>
-  store.edges.map((e) => ({
-    id: e.id,
-    source: e.source_node,
-    target: e.target_node,
-    sourceHandle: e.source_port,
-    targetHandle: e.target_port,
-    markerEnd: MarkerType.ArrowClosed,
-    class: e.edge_type === 'control' ? 'wf-edge-control' : 'wf-edge-data',
-  })),
+  store.edges.map((e) => {
+    const sourceExecution = store.nodeExecution(e.source_node)
+    const summary = sourceExecution.status === 'succeeded'
+      ? sourceExecution.outputs_summary?.[e.source_port]
+      : undefined
+    return {
+      id: e.id,
+      source: e.source_node,
+      target: e.target_node,
+      sourceHandle: e.source_port,
+      targetHandle: e.target_port,
+      markerEnd: MarkerType.ArrowClosed,
+      animated: sourceExecution.status === 'running',
+      label: summary === undefined ? '' : edgeSummary(summary),
+      class: [
+        e.edge_type === 'control' ? 'wf-edge-control' : 'wf-edge-data',
+        `wf-edge-${sourceExecution.status}`,
+        sourceExecution.from_sample_data ? 'wf-edge-sample' : '',
+      ].filter(Boolean).join(' '),
+    }
+  }),
 )
+
+function edgeSummary(value) {
+  let text
+  if (typeof value === 'string') text = value
+  else if (value === null) text = 'null'
+  else if (Array.isArray(value)) text = `${value.length} items`
+  else if (typeof value === 'object') {
+    const keys = Object.keys(value)
+    text = keys.length ? keys.slice(0, 3).join(', ') : '{}'
+  } else text = String(value)
+  return text.length > 42 ? `${text.slice(0, 39)}…` : text
+}
 
 // ── Palette drop → add node at canvas position ─────────────────────────
 function onDragOver(event) {
@@ -382,6 +407,24 @@ function onExport() {
   anchor.download = `${store.workflowId}.json`
   anchor.click()
 }
+
+async function onRun() {
+  try {
+    await store.runWorkflow()
+    toast.success('Workflow run started')
+  } catch (err) {
+    toast.error(store.executionError || err?.message || 'Failed to run workflow')
+  }
+}
+
+async function onStop() {
+  try {
+    await store.stopExecution()
+    toast.info('Stopping workflow…')
+  } catch (err) {
+    toast.error(store.executionError || err?.message || 'Failed to stop workflow')
+  }
+}
 </script>
 
 <template>
@@ -425,6 +468,20 @@ function onExport() {
         <button class="wf-btn" :disabled="!store.nodeCount || validating" title="Validate workflow on the server" @click="onValidate">
           Validate
         </button>
+        <button
+          v-if="!store.executionActive"
+          class="wf-btn run"
+          :disabled="!store.nodeCount || store.executionLoading"
+          title="Run the full workflow"
+          @click="onRun"
+        >Run</button>
+        <button
+          v-else
+          class="wf-btn stop"
+          :disabled="store.currentExecution?.status === 'cancelling'"
+          title="Cooperatively stop the current run"
+          @click="onStop"
+        >{{ store.currentExecution?.status === 'cancelling' ? 'Stopping…' : 'Stop' }}</button>
         <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">
           Tidy up
         </button>
@@ -498,10 +555,8 @@ function onExport() {
       </aside>
     </div>
 
-    <!-- Bottom — execution inspector -->
-    <footer class="wf-bottom">
-      <div class="wf-panel-header">Executions</div>
-    </footer>
+    <!-- Bottom — live execution inspector (step 3.6) -->
+    <ExecutionPanel />
   </div>
 </template>
 
@@ -595,6 +650,9 @@ function onExport() {
   background: var(--accent);
   border-color: var(--accent);
 }
+
+.wf-btn.run { color: #a7f3d0; border-color: rgba(52,211,153,.45); background: rgba(52,211,153,.09); }
+.wf-btn.stop { color: #fda4af; border-color: rgba(251,113,133,.5); background: rgba(251,113,133,.09); }
 
 .wf-select {
   max-width: 150px;
@@ -707,13 +765,6 @@ function onExport() {
   opacity: 0.6;
 }
 
-.wf-bottom {
-  height: 140px;
-  min-height: 140px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-darkest);
-}
-
 .wf-panel-header {
   font-size: 10px;
   font-weight: 700;
@@ -734,4 +785,12 @@ function onExport() {
   stroke-dasharray: 5 4;
   opacity: 0.7;
 }
+
+:deep(.wf-edge-running .vue-flow__edge-path) { stroke: #38bdf8; }
+:deep(.wf-edge-succeeded .vue-flow__edge-path) { stroke: rgba(52,211,153,.8); }
+:deep(.wf-edge-failed .vue-flow__edge-path) { stroke: #fb7185; }
+:deep(.wf-edge-cancelled .vue-flow__edge-path) { stroke: #f59e0b; }
+:deep(.wf-edge-sample .vue-flow__edge-path) { stroke-dasharray: 3 4; }
+:deep(.vue-flow__edge-text) { fill: var(--text-secondary); font-size: 9px; }
+:deep(.vue-flow__edge-textbg) { fill: var(--bg-darkest); fill-opacity: .88; }
 </style>

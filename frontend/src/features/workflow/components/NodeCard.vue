@@ -28,6 +28,15 @@ const issues = computed(() => store.issuesByNode[props.id] || [])
 // badge; dynamic handles take the colour of their configured port type.
 const isStub = computed(() => def.value.category === 'testing')
 const node = computed(() => store.nodeById(props.id))
+const execution = computed(() => store.nodeExecution(props.id))
+const status = computed(() => execution.value.status || 'idle')
+const resultSummary = computed(() => {
+  if (node.value?.type !== 'stub.output' || status.value !== 'succeeded') return ''
+  const value = execution.value.outputs_summary?.value
+  if (value === undefined) return ''
+  const text = typeof value === 'string' ? value : JSON.stringify(value)
+  return text.length > 72 ? `${text.slice(0, 69)}…` : text
+})
 
 function resolvedType(port) {
   if (port.type !== 'dynamic') return port.type
@@ -52,7 +61,7 @@ function handleTitle(port, required) {
 </script>
 
 <template>
-  <div class="node-card" :class="{ selected, disabled: data.disabled, stub: isStub }">
+  <div class="node-card" :class="[{ selected, disabled: data.disabled, stub: isStub }, `status-${status}`]">
     <span class="node-strip" :style="{ background: color }" />
 
     <Handle
@@ -75,12 +84,15 @@ function handleTitle(port, required) {
         <span v-if="!isStub" class="node-type">{{ def.display_name }}</span>
       </div>
       <span v-if="isStub" class="stub-badge" :title="def.display_name">sample</span>
+      <span v-if="execution.from_sample_data && status === 'succeeded'" class="sample-result" title="Result came from sample data">S</span>
+      <span class="status-dot" :title="status" />
       <span
         v-if="issues.length"
         class="node-badge"
         :title="issues.map((i) => i.message).join('\n')"
       >{{ issues.length }}</span>
     </div>
+    <div v-if="resultSummary" class="result-summary" :title="resultSummary">{{ resultSummary }}</div>
 
     <Handle
       v-for="(port, i) in outputs"
@@ -106,7 +118,16 @@ function handleTitle(port, required) {
   color: var(--text, #e5e7eb);
   font-size: 12px;
   transition: border-color 0.15s, box-shadow 0.15s;
+  --status-color: #64748b;
 }
+
+.node-card.status-running { --status-color: #38bdf8; border-color: rgba(56,189,248,.65); box-shadow: 0 0 15px rgba(56,189,248,.16); }
+.node-card.status-waiting { --status-color: #a78bfa; }
+.node-card.status-succeeded { --status-color: #34d399; border-color: rgba(52,211,153,.45); }
+.node-card.status-failed { --status-color: #fb7185; border-color: rgba(251,113,133,.7); }
+.node-card.status-cancelled { --status-color: #f59e0b; }
+.node-card.status-skipped { --status-color: #94a3b8; }
+.node-card.status-stale { --status-color: #fb923c; }
 
 .node-card.selected {
   border-color: var(--accent, #4ecdc4);
@@ -226,4 +247,10 @@ function handleTitle(port, required) {
   justify-content: center;
   padding: 0 4px;
 }
+
+.status-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--status-color); box-shadow: 0 0 0 2px rgba(255,255,255,.05); }
+.status-running .status-dot { animation: status-pulse 1.1s ease-in-out infinite; }
+.sample-result { flex: 0 0 auto; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(167,139,250,.18); color: #c4b5fd; font-size: 8px; font-weight: 800; }
+.result-summary { border-top: 1px dashed rgba(148,163,184,.22); padding: 4px 12px 5px; color: var(--text-muted); font: 9px/1.35 var(--font-mono, monospace); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes status-pulse { 50% { opacity: .35; transform: scale(.75); } }
 </style>

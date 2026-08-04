@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { api } from '@/shared/api/client.js'
 import { validateConnection } from '../validation.js'
 import { nodeIssues } from '../schema.js'
+import { createExecutionEventStream } from '../composables/useExecutionEvents.js'
 
 /**
  * Workflow builder store — the domain model behind the canvas.
@@ -59,6 +60,192 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const updatedAt = ref(null)
   const dirty = ref(false)
   const draftSavedAt = ref(null)
+
+  // Live execution state (step 3.6). This is deliberately separate from the
+  // persisted workflow document, so status updates never make a graph dirty.
+  const currentExecution = ref(null)
+  const executionLoading = ref(false)
+  const executionError = ref('')
+  const selectedExecutionNodeId = ref(null)
+  let executionStream = null
+
+  const executionActive = computed(() =>
+    ['queued', 'running', 'cancelling'].includes(currentExecution.value?.status),
+  )
+
+  function emptyNodeExecution(status = 'idle') {
+    return {
+      status,
+      attempts: 0,
+      duration_ms: null,
+      from_sample_data: false,
+      resolved_inputs_summary: {},
+      outputs_summary: {},
+      artifact_refs: [],
+      logs: [],
+      error: null,
+    }
+  }
+
+  function nodeExecution(nodeId) {
+    return currentExecution.value?.nodes?.[nodeId] || emptyNodeExecution()
+  }
+
+  function closeExecutionStream() {
+    executionStream?.close()
+    executionStream = null
+  }
+
+  function clearExecution() {
+    closeExecutionStream()
+    currentExecution.value = null
+    selectedExecutionNodeId.value = null
+    executionError.value = ''
+  }
+
+  function applyExecutionSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return
+    currentExecution.value = plain(snapshot)
+    if (
+      selectedExecutionNodeId.value
+      && !currentExecution.value.nodes?.[selectedExecutionNodeId.value]
+    ) selectedExecutionNodeId.value = null
+  }
+
+  async function refreshExecution(executionId = currentExecution.value?.execution_id) {
+    if (!executionId) return null
+    try {
+      const data = await api.get(`/api/workflow/executions/${encodeURIComponent(executionId)}`)
+      applyExecutionSnapshot(data.execution)
+      return data.execution
+    } catch (err) {
+      executionError.value = err?.message || 'Failed to refresh execution'
+      throw err
+    }
+  }
+
+  function applyExecutionEvent(event) {
+    if (!event || typeof event !== 'object') return
+    if (event.snapshot) applyExecutionSnapshot(event.snapshot)
+    const execution = currentExecution.value
+    if (!execution) return
+
+    if (event.node_id) {
+      execution.nodes ||= {}
+      const record = execution.nodes[event.node_id] ||= emptyNodeExecution('queued')
+      if (event.status) record.status = event.status
+      if (Number.isFinite(event.attempt)) record.attempts = event.attempt
+      if (Number.isFinite(event.duration_ms)) record.duration_ms = event.duration_ms
+      if (typeof event.from_sample_data === 'boolean') {
+        record.from_sample_data = event.from_sample_data
+      }
+      if (event.error) record.error = plain(event.error)
+    } else if (event.status && event.status !== 'reset') {
+      execution.status = event.status
+    }
+
+    if (['succeeded', 'failed', 'cancelled'].includes(event.status) && !event.node_id) {
+      closeExecutionStream()
+      // The terminal record contains output summaries/artifact refs that are
+      // intentionally not repeated in every SSE event.
+      void refreshExecution(execution.execution_id).catch(() => {})
+    }
+  }
+
+  function watchExecution(executionId, { EventSourceImpl } = {}) {
+    closeExecutionStream()
+    executionStream = createExecutionEventStream(executionId, {
+      onEvent: applyExecutionEvent,
+      onError: (err) => {
+        // EventSource reports transient reconnects through onerror too. Keep
+        // the current state visible and expose a small, non-destructive hint.
+        executionError.value = err?.message || 'Execution event stream interrupted'
+      },
+      ...(EventSourceImpl ? { EventSourceImpl } : {}),
+    })
+    return executionStream
+  }
+
+  async function runWorkflow({ EventSourceImpl } = {}) {
+    executionLoading.value = true
+    executionError.value = ''
+    selectedExecutionNodeId.value = null
+    closeExecutionStream()
+    try {
+      const payload = workflowId.value && !dirty.value
+        ? { workflow_id: workflowId.value }
+        : { workflow: toDocument() }
+      const data = await api.post('/api/workflow/run', {
+        body: { ...payload, run_mode: 'full', target_node_ids: [], force: false },
+      })
+      currentExecution.value = {
+        schema_version: 1,
+        execution_id: data.execution_id,
+        workflow_id: workflowId.value || '',
+        workflow_snapshot: plain(toDocument()),
+        project_id: data.project_id,
+        run_mode: 'full',
+        scope_node_ids: nodes.value.map((node) => node.id),
+        status: data.status || 'queued',
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        nodes: Object.fromEntries(nodes.value.map((node) => [node.id, emptyNodeExecution('queued')])),
+      }
+      watchExecution(data.execution_id, { EventSourceImpl })
+      return data
+    } catch (err) {
+      executionError.value = err?.message || 'Failed to start workflow'
+      throw err
+    } finally {
+      executionLoading.value = false
+    }
+  }
+
+  async function stopExecution() {
+    const executionId = currentExecution.value?.execution_id
+    if (!executionId || !executionActive.value) return null
+    executionError.value = ''
+    try {
+      const data = await api.post(
+        `/api/workflow/executions/${encodeURIComponent(executionId)}/stop`,
+        { body: {} },
+      )
+      currentExecution.value.status = data.status || 'cancelling'
+      return data
+    } catch (err) {
+      executionError.value = err?.message || 'Failed to stop execution'
+      throw err
+    }
+  }
+
+  function selectExecutionNode(nodeId) {
+    const record = currentExecution.value?.nodes?.[nodeId]
+    selectedExecutionNodeId.value = record && ['succeeded', 'failed', 'cancelled', 'skipped'].includes(record.status)
+      ? nodeId
+      : null
+  }
+
+  const selectedExecutionNode = computed(() =>
+    selectedExecutionNodeId.value
+      ? currentExecution.value?.nodes?.[selectedExecutionNodeId.value] || null
+      : null,
+  )
+
+  const editorProjectId = computed(() => {
+    const execution = currentExecution.value
+    if (!execution) return null
+    for (const node of execution.workflow_snapshot?.nodes || nodes.value) {
+      const def = nodeTypes.value[node.type]
+      const editorPorts = (def?.outputs || []).filter((port) => port.type === 'editor_project')
+      const outputs = execution.nodes?.[node.id]?.outputs_summary || {}
+      for (const port of editorPorts) {
+        // String values are intentionally reduced to {chars:n} in persisted
+        // summaries. The exact, validated project ID lives at record level.
+        if (outputs[port.id] !== undefined && execution.project_id) return execution.project_id
+      }
+    }
+    return null
+  })
 
   // ── Draft autosave (step 2.4) ─────────────────────────────────────────
   let draftTimer = null
@@ -459,7 +646,12 @@ export const useWorkflowStore = defineStore('workflow', () => {
     edgeCounter = 0
   }
 
-  function applyDocument(document, { markDirty = false, preserveSelection = false } = {}) {
+  function applyDocument(document, {
+    markDirty = false,
+    preserveSelection = false,
+    preserveExecution = false,
+  } = {}) {
+    if (!preserveExecution) clearExecution()
     workflowId.value = document.workflow_id || null
     workflowName.value = document.name || 'Untitled workflow'
     workflowDescription.value = document.description || ''
@@ -536,7 +728,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
           body: { workflow: document, expected_updated_at: updatedAt.value },
         })
         : await api.post('/api/workflows', { body: { workflow: document } })
-      applyDocument(data.workflow, { preserveSelection: true })
+      applyDocument(data.workflow, { preserveSelection: true, preserveExecution: true })
       await refreshWorkflowList()
       return data.workflow
     } catch (err) {
@@ -705,5 +897,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
     autoAttachStubs, setAutoAttachStubs, isStubType, samplePayloadFor,
     addNodeWithStubs, attachSampleInputs, attachResultViewer,
     canUndoStubDetach, undoStubDetach,
+    // live execution (step 3.6)
+    currentExecution, executionLoading, executionError, executionActive,
+    selectedExecutionNodeId, selectedExecutionNode, editorProjectId,
+    nodeExecution, runWorkflow, stopExecution, refreshExecution,
+    applyExecutionEvent, watchExecution, closeExecutionStream, clearExecution,
+    selectExecutionNode,
   }
 })
