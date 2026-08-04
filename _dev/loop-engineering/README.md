@@ -16,6 +16,10 @@ selected phase or step range is complete.
 
 ## Quick start
 
+Double-click `run.bat` to run all remaining work phase by phase. The window
+prints the current phase, step, and stage as it runs, and stays open with the
+final exit code when the loop finishes.
+
 ```bat
 _dev\loop-engineering\run.bat --status            &:: where am I? what's next?
 _dev\loop-engineering\run.bat --dry-run --phase 2 &:: what would run

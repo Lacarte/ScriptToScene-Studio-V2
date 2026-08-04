@@ -1,13 +1,16 @@
 @echo off
 setlocal
+chcp 65001 >nul
+set "PYTHONIOENCODING=utf-8"
 :: Launcher for the loop-engineering orchestrator.
-:: Double-click       -> shows the plan status and keeps the window open.
+:: Double-click       -> runs all remaining work phase by phase.
 :: From a terminal:
 ::   run.bat --status
 ::   run.bat --phase 2
 ::   run.bat --until 3.3 --reviewer claude
 ::   run.bat --steps 1 --no-push
 cd /d "%~dp0..\.."
+title ScriptToScene Studio - Loop Engineering
 
 if not exist "venv\Scripts\python.exe" (
     echo [run.bat] venv\Scripts\python.exe not found - run setup.bat first.
@@ -16,13 +19,14 @@ if not exist "venv\Scripts\python.exe" (
 
 set EXITCODE=0
 if "%~1"=="" (
-    echo [run.bat] No arguments given - showing plan status.
-    echo [run.bat] To execute steps, run from a terminal, e.g.:
-    echo [run.bat]     _dev\loop-engineering\run.bat --phase 2
+    echo ========================================================================
+    echo [run.bat] LOOP STARTING - running all remaining work phase by phase.
+    echo [run.bat] Progress will appear below. Press Ctrl+C if you need to stop.
+    echo ========================================================================
     echo.
-    venv\Scripts\python.exe "_dev\loop-engineering\loop_engineering.py" --status
+    venv\Scripts\python.exe -u "_dev\loop-engineering\loop_engineering.py" --by-phase
 ) else (
-    venv\Scripts\python.exe "_dev\loop-engineering\loop_engineering.py" %*
+    venv\Scripts\python.exe -u "_dev\loop-engineering\loop_engineering.py" %*
 )
 set EXITCODE=%errorlevel%
 
@@ -31,6 +35,8 @@ set EXITCODE=%errorlevel%
 :: (cmdcmdline then contains this script's full path; in a real terminal it doesn't).
 echo %cmdcmdline% | find /i "%~f0" >nul && (
     echo.
-    pause
+    echo [run.bat] Run finished with exit code %EXITCODE%.
+    echo [run.bat] Press any key to close this window.
+    pause >nul
 )
 endlocal & exit /b %EXITCODE%
