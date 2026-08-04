@@ -49,6 +49,11 @@ class ProjectLockedError(SchedulerError):
         )
 
 
+class CancellationRequested(SchedulerError):
+    def __init__(self):
+        super().__init__("CANCELLED", "Execution was cancelled")
+
+
 class ProjectLock(AbstractContextManager):
     """Non-blocking in-process and cross-process lock for one project."""
 
@@ -294,6 +299,7 @@ class WorkflowScheduler:
         on_event: Callable[[dict[str, Any]], None] | None = None,
         run_mode: str = "full",
         scope_node_ids: list[str] | None = None,
+        stop_requested: Callable[[], bool] | None = None,
     ):
         problems = validation_errors(validate_workflow(dict(workflow), require_complete=True))
         if problems:
@@ -311,6 +317,7 @@ class WorkflowScheduler:
         self.on_event = on_event
         self.run_mode = run_mode
         self.scope_node_ids = list(scope_node_ids or [node["id"] for node in workflow.get("nodes", [])])
+        self.stop_requested = stop_requested or (lambda: False)
         self.execution_root = execution_root
         self.redactor = Redactor(workflow)
         self.record = ExecutionRecord(
@@ -325,19 +332,37 @@ class WorkflowScheduler:
         )
 
     def run(self) -> ScheduleResult:
-        graph = build_graph(self.workflow)
-        order = deterministic_order(self.workflow)
+        scope = set(self.scope_node_ids)
+        scoped_workflow = {
+            **self.workflow,
+            "nodes": [node for node in self.workflow.get("nodes", []) if node["id"] in scope],
+            "edges": [
+                edge for edge in self.workflow.get("edges", [])
+                if edge["source_node"] in scope and edge["target_node"] in scope
+            ],
+        }
+        graph = build_graph(scoped_workflow)
+        order = deterministic_order(scoped_workflow)
         statuses = {node_id: "idle" for node_id in graph.nodes}
         node_outputs: dict[str, dict[str, Any]] = {}
         errors: dict[str, dict[str, Any]] = {}
         executed: list[str] = []
         self._persist()
+        self._emit({"type": "execution_status", "node_id": None, "status": "running"})
 
         with ProjectLock(self.project_id, lock_root=self.lock_root, execution_id=self.execution_id):
             stopped = False
+            cancelled = False
             for node_id in order:
                 node = graph.nodes[node_id]
+                if self.stop_requested():
+                    cancelled = True
                 predecessor_statuses = [statuses[edge["source_node"]] for edge in graph.incoming[node_id]]
+                if cancelled:
+                    self.record.nodes[node_id].duration_ms = 0
+                    self._status(statuses, node_id, "cancelled")
+                    executed.append(node_id)
+                    continue
                 if stopped or node.get("disabled") or any(status != "succeeded" for status in predecessor_statuses):
                     self.record.nodes[node_id].duration_ms = 0
                     self._status(statuses, node_id, "skipped")
@@ -346,6 +371,13 @@ class WorkflowScheduler:
 
                 inputs = self._resolve_inputs(node_id, graph, node_outputs)
                 node_record = self.record.nodes[node_id]
+                node_record.from_sample_data = (
+                    node.get("type") == "stub.input"
+                    or any(
+                        self.record.nodes[edge["source_node"]].from_sample_data
+                        for edge in graph.incoming[node_id]
+                    )
+                )
                 node_record.resolved_inputs_summary = self.redactor(_summarize(inputs))
                 node_record.attempts += 1
                 self._status(statuses, node_id, "running")
@@ -356,9 +388,12 @@ class WorkflowScheduler:
                     execution_id=self.execution_id,
                     node_id=node_id,
                     stage_artifact=promoter.stage_path,
+                    stop_requested=self.stop_requested,
                 )
                 try:
                     result = self.executor_resolver(node)(inputs, self._configuration(node), context)
+                    if self.stop_requested():
+                        raise CancellationRequested()
                     if not isinstance(result, Mapping):
                         raise SchedulerError("NODE_OUTPUT_INVALID", f"Node {node_id} returned a non-object output")
                     result = dict(result)
@@ -369,8 +404,20 @@ class WorkflowScheduler:
                     node_record.artifact_refs = self.redactor(_artifact_refs(result))
                     node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
                     self._status(statuses, node_id, "succeeded")
+                except CancellationRequested:
+                    cancelled = True
+                    node_record.error = {"code": "CANCELLED", "message": "Execution was cancelled"}
+                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+                    self._status(statuses, node_id, "cancelled")
                 except (AdapterError, SchedulerError) as exc:
                     code = getattr(exc, "code", "NODE_EXECUTION_FAILED")
+                    if code == "CANCELLED":
+                        cancelled = True
+                        node_record.error = {"code": "CANCELLED", "message": "Execution was cancelled"}
+                        node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+                        self._status(statuses, node_id, "cancelled")
+                        executed.append(node_id)
+                        continue
                     errors[node_id] = self.redactor(
                         {"code": code, "message": str(exc), "details": getattr(exc, "details", None)}
                     )
@@ -400,11 +447,11 @@ class WorkflowScheduler:
                     promoter.cleanup()
                 executed.append(node_id)
 
-        overall = "failed" if errors else "succeeded"
+        overall = "cancelled" if cancelled or self.stop_requested() else ("failed" if errors else "succeeded")
         self.record.status = overall
         self.record.finished_at = now_iso()
         persisted = self._persist()
-        self._emit({"type": "execution_finished", "execution_id": self.execution_id, "status": overall})
+        self._emit({"type": "execution_finished", "node_id": None, "status": overall})
         return ScheduleResult(overall, executed, statuses, node_outputs, errors, persisted)
 
     def _status(self, statuses: dict[str, str], node_id: str, status: str) -> None:
@@ -417,8 +464,15 @@ class WorkflowScheduler:
         self._persist()
         if self.on_status:
             self.on_status(node_id, status)
-        self._emit({"type": "node_status", "execution_id": self.execution_id,
-                    "node_id": node_id, "status": status})
+        self._emit({
+            "type": "node_status",
+            "execution_id": self.execution_id,
+            "node_id": node_id,
+            "status": status,
+            "attempt": node_record.attempts,
+            "duration_ms": node_record.duration_ms or 0,
+            "from_sample_data": node_record.from_sample_data,
+        })
 
     def _persist(self) -> dict[str, Any]:
         return save_execution(self.record, root=self.execution_root, secrets=self.redactor.secrets)

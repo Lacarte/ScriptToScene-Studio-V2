@@ -5,11 +5,13 @@ import json
 import os
 import uuid
 
-from flask import Blueprint, Response, jsonify, request, send_from_directory
+from flask import Blueprint, Response, jsonify, request, send_from_directory, stream_with_context
 
 from config import BRANDING_DIR
 from studio.security import is_loopback_remote, sanitize_folder_name
 from .models import copy_draft
+from .events import TERMINAL_STATUSES, sse_frame
+from .execution import ExecutionRequestError, execution_manager
 from .persistence import (
     WorkflowConflict,
     WorkflowNotFound,
@@ -17,6 +19,8 @@ from .persistence import (
     create_workflow,
     delete_workflow,
     import_workflow,
+    list_executions,
+    load_execution,
     list_workflows,
     load_workflow,
     update_workflow,
@@ -313,4 +317,143 @@ def workflows_export(workflow_id):
         payload,
         mimetype="application/json",
         headers={"Content-Disposition": f'attachment; filename="{workflow_id}.json"'},
+    )
+
+
+@workflows_bp.route("/api/workflow/run", methods=["POST"])
+def workflow_run():
+    denied = _require_loopback()
+    if denied:
+        return denied
+    body, failure = _json_body()
+    if failure:
+        return failure
+    has_id = "workflow_id" in body
+    has_snapshot = "workflow" in body
+    if has_id == has_snapshot:
+        return _error("BAD_REQUEST", "Provide exactly one of workflow_id or workflow", 400)
+    targets = body.get("target_node_ids", [])
+    if not isinstance(targets, list) or any(not isinstance(item, str) for item in targets):
+        return _error("BAD_REQUEST", "target_node_ids must be an array of node IDs", 400)
+    if not isinstance(body.get("force", False), bool):
+        return _error("BAD_REQUEST", "force must be a boolean", 400)
+    try:
+        if has_id:
+            workflow = load_workflow(body.get("workflow_id"))
+        elif isinstance(body.get("workflow"), dict):
+            workflow = body["workflow"]
+        else:
+            return _error("BAD_REQUEST", "workflow must be an object", 400)
+        execution_id, project_id = execution_manager.start(
+            workflow,
+            run_mode=body.get("run_mode", "full"),
+            target_node_ids=targets,
+            project_id=body.get("project_id"),
+        )
+    except WorkflowNotFound:
+        return _error("NOT_FOUND", "Workflow not found", 404)
+    except ExecutionRequestError as exc:
+        status = 422 if exc.code in {"WORKFLOW_INVALID", "MISSING_REQUIRED_INPUT"} else 400
+        return _error(exc.code, str(exc), status, exc.details)
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    return jsonify({
+        "execution_id": execution_id,
+        "project_id": project_id,
+        "status": "queued",
+    }), 202
+
+
+@workflows_bp.route("/api/workflow/executions/<execution_id>/stop", methods=["POST"])
+def workflow_execution_stop(execution_id):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    body, failure = _json_body()
+    if failure:
+        return failure
+    if body:
+        return _error("BAD_REQUEST", "Stop request body must be empty", 400)
+    try:
+        status = execution_manager.stop(execution_id)
+    except FileNotFoundError:
+        return _error("NOT_FOUND", "Execution not found", 404)
+    except ExecutionRequestError as exc:
+        return _error(exc.code, str(exc), 409, exc.details)
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    return jsonify({"execution_id": execution_id, "status": status}), 202
+
+
+@workflows_bp.route("/api/workflow/executions/<execution_id>", methods=["GET"])
+def workflow_execution_get(execution_id):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    try:
+        return jsonify({"execution": load_execution(execution_id)})
+    except FileNotFoundError:
+        return _error("NOT_FOUND", "Execution not found", 404)
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+
+
+@workflows_bp.route("/api/workflow/executions", methods=["GET"])
+def workflow_executions_list():
+    denied = _require_loopback()
+    if denied:
+        return denied
+    workflow_id = request.args.get("workflow_id", "")
+    try:
+        limit = int(request.args.get("limit", 100))
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        executions, total = list_executions(workflow_id, limit=limit)
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    return jsonify({"executions": executions, "total": total})
+
+
+@workflows_bp.route("/api/workflow/executions/<execution_id>/events", methods=["GET"])
+def workflow_execution_events(execution_id):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    try:
+        record = load_execution(execution_id)
+    except FileNotFoundError:
+        return _error("NOT_FOUND", "Execution not found", 404)
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    raw_last = request.headers.get("Last-Event-ID", "0")
+    try:
+        last_sequence = int(raw_last)
+        if last_sequence < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _error("BAD_REQUEST", "Last-Event-ID must be a non-negative integer", 400)
+
+    stream = execution_manager.events.get(execution_id)
+    if stream is None:
+        stream = execution_manager.events.create(execution_id)
+        if record.get("status") in TERMINAL_STATUSES:
+            stream.emit({
+                "type": "execution_snapshot",
+                "node_id": None,
+                "status": record["status"],
+                "snapshot": record,
+            })
+
+    def generate():
+        snapshot = lambda: load_execution(execution_id)
+        for event in stream.subscribe(last_sequence, snapshot=snapshot):
+            yield ": keep-alive\n\n" if event is None else sse_frame(event)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
     )
