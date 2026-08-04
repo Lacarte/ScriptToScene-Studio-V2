@@ -147,4 +147,49 @@ describe('NodeInspector', () => {
     expect(store.nodeById(node.id)).toBeNull()
     expect(store.selectedNodeId).toBeNull()
   })
+
+  it('clears stale selection when a node is removed or a document is replaced', () => {
+    const { store, node } = seeded()
+    store.removeNodes([node.id])
+    expect(store.selectedNodeId).toBeNull()
+
+    const replacement = store.addNode('tts.generate', { x: 0, y: 0 })
+    store.selectNode(replacement.id)
+    store.applyDocument({
+      schema_version: 1,
+      name: 'Replacement',
+      nodes: [{ ...replacement, name: 'Same ID, different document' }],
+      edges: [],
+      variables: {},
+      viewport: { x: 0, y: 0, zoom: 1 },
+      settings: { on_error: 'stop' },
+      extensions: {},
+    })
+    expect(store.selectedNodeId).toBeNull()
+  })
+
+  it('preserves selection only when reapplying the same saved graph', () => {
+    const { store, node } = seeded()
+    const saved = store.toDocument()
+    store.applyDocument(saved, { preserveSelection: true })
+    expect(store.selectedNodeId).toBe(node.id)
+
+    saved.nodes = []
+    store.applyDocument(saved, { preserveSelection: true })
+    expect(store.selectedNodeId).toBeNull()
+  })
+
+  it('duplicates bounded node data without dropping extensions', () => {
+    const { store, node } = seeded()
+    node.name = 'N'.repeat(120)
+    node.position = { x: 999_990, y: 999_990 }
+    node.extensions = { plugin: { value: 1 } }
+
+    const copy = store.duplicateNode(node.id)
+    expect(copy.name).toHaveLength(120)
+    expect(copy.name.endsWith(' copy')).toBe(true)
+    expect(copy.position).toEqual({ x: 1_000_000, y: 1_000_000 })
+    expect(copy.extensions).toEqual(node.extensions)
+    expect(copy.extensions).not.toBe(node.extensions)
+  })
 })

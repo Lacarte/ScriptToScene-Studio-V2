@@ -19,7 +19,7 @@ from .persistence import (
 )
 from .registry import serialize_registry
 from .templates import serialize_templates
-from .validation import MAX_DOCUMENT_BYTES
+from .validation import MAX_DOCUMENT_BYTES, validate_workflow
 
 workflows_bp = Blueprint("workflows", __name__)
 
@@ -77,6 +77,27 @@ def workflow_templates():
     if denied:
         return denied
     return jsonify({"templates": serialize_templates()})
+
+
+@workflows_bp.route("/api/workflow/validate", methods=["POST"])
+def workflow_validate():
+    """Structured validation for a draft document (contracts §6).
+
+    Always 200 for a well-formed request — graph problems are data, not
+    transport errors. `problems` = severity error, `warnings` = severity
+    warning (e.g. required inputs still missing on an incomplete draft).
+    """
+    denied = _require_loopback()
+    if denied:
+        return denied
+    body, failure = _json_body()
+    if failure:
+        return failure
+    document = body.get("workflow")
+    findings = validate_workflow(document, require_identity=False, require_complete=False)
+    problems = [p for p in findings if p.get("severity") != "warning"]
+    warnings = [p for p in findings if p.get("severity") == "warning"]
+    return jsonify({"valid": not problems, "problems": problems, "warnings": warnings})
 
 
 @workflows_bp.route("/api/workflows", methods=["GET"])

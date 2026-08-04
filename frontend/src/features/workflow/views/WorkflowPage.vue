@@ -9,6 +9,7 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
+import { api } from '@/shared/api/client.js'
 import { useWorkflowStore } from '../stores/workflow.js'
 import { DRAG_MIME } from '../constants.js'
 import { validateConnection } from '../validation.js'
@@ -147,6 +148,29 @@ function tidyUp() {
   requestAnimationFrame(() => fitView({ padding: 0.15 }))
 }
 
+const validating = ref(false)
+
+async function onValidate() {
+  validating.value = true
+  try {
+    const data = await api.post('/api/workflow/validate', {
+      body: { workflow: store.toDocument() },
+    })
+    if (data.valid && !data.warnings.length) {
+      toast.success('Workflow is valid')
+    } else if (data.valid) {
+      toast.warning(`Valid, with ${data.warnings.length} warning(s): ${data.warnings[0]?.message}`)
+    } else {
+      const first = data.problems[0]?.message || 'see node badges'
+      toast.error(`${data.problems.length} problem(s) — ${first}`)
+    }
+  } catch (err) {
+    toast.error(err?.message || 'Validation request failed')
+  } finally {
+    validating.value = false
+  }
+}
+
 function confirmDiscard() {
   return !store.dirty || window.confirm('Discard unsaved workflow changes?')
 }
@@ -280,6 +304,9 @@ function onExport() {
         <button class="wf-btn" :disabled="store.persistenceLoading" @click="importInput?.click()">Import</button>
         <button class="wf-btn" :disabled="!store.workflowId" @click="onExport">Export</button>
         <input ref="importInput" class="wf-file-input" type="file" accept="application/json,.json" @change="onImportFile" />
+        <button class="wf-btn" :disabled="!store.nodeCount || validating" title="Validate workflow on the server" @click="onValidate">
+          Validate
+        </button>
         <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">
           Tidy up
         </button>

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useWorkflowStore } from '../stores/workflow.js'
+import { shouldDisplayField } from '../schema.js'
 import ConfigField from './ConfigField.vue'
 import NodeIcon from './NodeIcon.vue'
 
@@ -9,6 +10,15 @@ const store = useWorkflowStore()
 const node = computed(() => store.selectedNode)
 const def = computed(() => (node.value ? store.nodeTypes[node.value.type] : null))
 const category = computed(() => store.categories[def.value?.category] || {})
+
+// display_options re-evaluated on every config change (n8n NDV pattern).
+const visibleFields = computed(() =>
+  (def.value?.config_schema || []).filter((field) =>
+    shouldDisplayField(field, node.value?.configuration),
+  ),
+)
+
+const issues = computed(() => store.issuesByNode[node.value?.id] || [])
 
 function onUpdate(name, value) {
   store.updateNodeConfig(node.value.id, name, value)
@@ -47,20 +57,24 @@ function onDelete() {
           :title="node.disabled ? 'Enable node' : 'Disable node'"
           @click="store.setNodeDisabled(node.id, !node.disabled)"
         >{{ node.disabled ? 'Enable' : 'Disable' }}</button>
-        <button class="ins-btn" title="Duplicate node (Ctrl+D)" @click="store.duplicateNode(node.id)">Duplicate</button>
+        <button class="ins-btn" title="Duplicate node" @click="store.duplicateNode(node.id)">Duplicate</button>
         <button class="ins-btn danger" title="Delete node" @click="onDelete">Delete</button>
       </span>
     </div>
 
     <p v-if="def.description" class="inspector-desc">{{ def.description }}</p>
 
-    <div v-if="!def.config_schema.length" class="wf-panel-empty">
+    <ul v-if="issues.length" class="inspector-issues">
+      <li v-for="issue in issues" :key="issue.kind + issue.name">{{ issue.message }}</li>
+    </ul>
+
+    <div v-if="!visibleFields.length" class="wf-panel-empty">
       This node has no settings.
     </div>
 
     <div v-else class="inspector-fields">
       <ConfigField
-        v-for="field in def.config_schema"
+        v-for="field in visibleFields"
         :key="field.name"
         :field="field"
         :value="node.configuration[field.name]"
@@ -164,6 +178,17 @@ function onDelete() {
   color: var(--text-muted);
   line-height: 1.4;
   padding: 6px 14px 2px;
+}
+
+.inspector-issues {
+  margin: 6px 14px 0;
+  padding: 8px 10px 8px 24px;
+  border: 1px solid rgba(255, 179, 71, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.07);
+  font-size: 11px;
+  color: var(--accent-warning, #ffb347);
+  line-height: 1.5;
 }
 
 .inspector-fields {

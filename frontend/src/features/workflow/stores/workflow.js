@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/shared/api/client.js'
 import { validateConnection } from '../validation.js'
+import { nodeIssues } from '../schema.js'
 
 /**
  * Workflow builder store — the domain model behind the canvas.
@@ -118,6 +119,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     edges.value = edges.value.filter(
       (e) => !doomed.has(e.source_node) && !doomed.has(e.target_node),
     )
+    if (doomed.has(selectedNodeId.value)) selectedNodeId.value = null
     dirty.value = true
   }
 
@@ -193,7 +195,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     edgeCounter = 0
   }
 
-  function applyDocument(document, { markDirty = false } = {}) {
+  function applyDocument(document, { markDirty = false, preserveSelection = false } = {}) {
     workflowId.value = document.workflow_id || null
     workflowName.value = document.name || 'Untitled workflow'
     workflowDescription.value = document.description || ''
@@ -206,6 +208,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     createdAt.value = document.created_at || null
     updatedAt.value = document.updated_at || null
     resetCounters()
+    if (!preserveSelection || !nodeById(selectedNodeId.value)) selectedNodeId.value = null
     dirty.value = markDirty
   }
 
@@ -260,7 +263,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
           body: { workflow: document, expected_updated_at: updatedAt.value },
         })
         : await api.post('/api/workflows', { body: { workflow: document } })
-      applyDocument(data.workflow)
+      applyDocument(data.workflow, { preserveSelection: true })
       await refreshWorkflowList()
       return data.workflow
     } catch (err) {
@@ -281,7 +284,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       delete document.updated_at
       document.name = name?.trim() || `${workflowName.value} copy`
       const data = await api.post('/api/workflows', { body: { workflow: document } })
-      applyDocument(data.workflow)
+      applyDocument(data.workflow, { preserveSelection: true })
       await refreshWorkflowList()
       return data.workflow
     } catch (err) {
@@ -323,12 +326,22 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   const nodeCount = computed(() => nodes.value.length)
 
+  // Per-node editing issues (step 2.2) — recomputed on every graph change.
+  const issuesByNode = computed(() => {
+    const map = {}
+    for (const node of nodes.value) {
+      const issues = nodeIssues(node, nodeTypes.value[node.type], edges.value)
+      if (issues.length) map[node.id] = issues
+    }
+    return map
+  })
+
   // ── Selection + inspector editing (step 2.1) ──────────────────────────
   const selectedNodeId = ref(null)
   const selectedNode = computed(() => nodeById(selectedNodeId.value))
 
   function selectNode(nodeId) {
-    selectedNodeId.value = nodeId
+    selectedNodeId.value = nodeById(nodeId) ? nodeId : null
   }
 
   function clearSelection() {
@@ -352,14 +365,20 @@ export const useWorkflowStore = defineStore('workflow', () => {
   function duplicateNode(nodeId) {
     const source = nodeById(nodeId)
     if (!source) return null
+    const suffix = ' copy'
+    const copyName = `${source.name.slice(0, 120 - suffix.length).trimEnd()}${suffix}`
     const copy = {
       id: nextNodeId(),
       type: source.type,
       type_version: source.type_version,
-      name: `${source.name} copy`,
-      position: { x: source.position.x + 40, y: source.position.y + 40 },
+      name: copyName,
+      position: {
+        x: Math.min(1_000_000, source.position.x + 40),
+        y: Math.min(1_000_000, source.position.y + 40),
+      },
       configuration: plain(source.configuration),
       disabled: source.disabled,
+      ...(source.extensions ? { extensions: plain(source.extensions) } : {}),
     }
     nodes.value.push(copy)
     dirty.value = true
@@ -382,5 +401,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // selection + inspector
     selectedNodeId, selectedNode, selectNode, clearSelection,
     updateNodeConfig, setNodeDisabled, duplicateNode,
+    // validation (step 2.2)
+    issuesByNode,
   }
 })

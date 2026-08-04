@@ -22,6 +22,8 @@ const color = computed(() => category.value.color || '#9CA3AF')
 const inputs = computed(() => def.value.inputs || [])
 const outputs = computed(() => def.value.outputs || [])
 
+const issues = computed(() => store.issuesByNode[props.id] || [])
+
 function portColor(port) {
   return PORT_COLORS[port.type] || PORT_COLORS.generic_json
 }
@@ -58,6 +60,11 @@ function handleStyle(port, index, total) {
         <span class="node-name">{{ data.label }}</span>
         <span class="node-type">{{ def.display_name }}</span>
       </div>
+      <span
+        v-if="issues.length"
+        class="node-badge"
+        :title="issues.map((i) => i.message).join('\n')"
+      >{{ issues.length }}</span>
     </div>
 
     <Handle
@@ -145,5 +152,21 @@ function handleStyle(port, index, total) {
 .node-handle {
   width: 10px;
   height: 10px;
+}
+
+.node-badge {
+  margin-left: auto;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.18);
+  border: 1px solid rgba(255, 179, 71, 0.5);
+  color: var(--accent-warning, #ffb347);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
 }
 </style>
