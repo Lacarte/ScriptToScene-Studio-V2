@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from datetime import datetime
 from typing import Any
 
 from .registry import DYNAMIC_PORT_TYPES, get_node_type, is_supported
@@ -16,9 +17,15 @@ from .registry import DYNAMIC_PORT_TYPES, get_node_type, is_supported
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 MAX_NODES = 200
 MAX_EDGES = 500
+MAX_NESTING_DEPTH = 20
+MAX_VARIABLES_BYTES = 64 * 1024
+MAX_EXTENSIONS_BYTES = 64 * 1024
 
 WORKFLOW_ID_RE = re.compile(r"^wf_[A-Z0-9]{6}$")
 ELEMENT_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+RFC3339_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 _TOP_FIELDS = {
     "schema_version", "workflow_id", "name", "description", "nodes", "edges",
@@ -42,7 +49,60 @@ def _problem(code: str, message: str, path: str = "", *, severity: str = "error"
 
 
 def _json_size(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    return len(json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8"))
+
+
+def _json_shape_error(value: Any) -> str | None:
+    """Return the first transport-independent JSON shape violation."""
+    stack = [(value, 1)]
+    seen: set[int] = set()
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, bool) or item is None or isinstance(item, str):
+            continue
+        if isinstance(item, (int, float)):
+            if isinstance(item, float) and not math.isfinite(item):
+                return "JSON numbers must be finite"
+            continue
+        if not isinstance(item, (dict, list)):
+            return "Workflow contains a value that is not valid JSON"
+        if depth > MAX_NESTING_DEPTH:
+            return f"JSON nesting depth exceeds {MAX_NESTING_DEPTH}"
+        identity = id(item)
+        if identity in seen:
+            return "Workflow contains a recursive JSON value"
+        seen.add(identity)
+        if isinstance(item, dict):
+            if any(not isinstance(key, str) for key in item):
+                return "JSON object keys must be strings"
+            stack.extend((child, depth + 1) for child in item.values())
+        else:
+            stack.extend((child, depth + 1) for child in item)
+    return None
+
+
+def _valid_server_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not RFC3339_RE.fullmatch(value):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def _validate_extensions(value: Any, path: str, problems: list[dict]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        problems.append(_problem("WORKFLOW_INVALID", "extensions must be an object", path))
+    elif _json_size(value) > MAX_EXTENSIONS_BYTES:
+        problems.append(_problem("WORKFLOW_INVALID", "extensions exceeds 64 KiB", path))
 
 
 def _finite_number(value: Any) -> bool:
@@ -53,6 +113,17 @@ def _port_type(node: dict, port: dict) -> str:
     if port.get("type") != "dynamic":
         return port.get("type", "")
     return (node.get("configuration") or {}).get("port_type", "")
+
+
+def _field_is_visible(field: dict, configuration: dict) -> bool:
+    display = field.get("display_options") or {}
+    for reference, values in (display.get("show") or {}).items():
+        if configuration.get(reference) not in values:
+            return False
+    for reference, values in (display.get("hide") or {}).items():
+        if configuration.get(reference) in values:
+            return False
+    return True
 
 
 def _validate_config(
@@ -78,7 +149,9 @@ def _validate_config(
     for name, field in fields.items():
         value = config.get(name, field.get("default"))
         field_path = f"{path}.configuration.{name}"
-        if field.get("required") and (value is None or value == ""):
+        if field.get("required") and _field_is_visible(field, config) and (
+            value is None or value == ""
+        ):
             problems.append(_problem(
                 "WORKFLOW_INVALID",
                 f"{field.get('label', name)} is required",
@@ -123,6 +196,9 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
     problems: list[dict] = []
     if not isinstance(document, dict):
         return [_problem("WORKFLOW_INVALID", "Workflow must be a JSON object")]
+    shape_error = _json_shape_error(document)
+    if shape_error:
+        return [_problem("WORKFLOW_INVALID", shape_error)]
     try:
         if _json_size(document) > MAX_DOCUMENT_BYTES:
             return [_problem("WORKFLOW_INVALID", "Workflow exceeds the 2 MiB limit")]
@@ -134,8 +210,14 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
     if document.get("schema_version") != 1:
         problems.append(_problem("WORKFLOW_INVALID", "schema_version must be 1", "schema_version"))
     workflow_id = document.get("workflow_id")
-    if require_identity and (not isinstance(workflow_id, str) or not WORKFLOW_ID_RE.fullmatch(workflow_id)):
+    if (require_identity or workflow_id is not None) and (
+        not isinstance(workflow_id, str) or not WORKFLOW_ID_RE.fullmatch(workflow_id)
+    ):
         problems.append(_problem("WORKFLOW_INVALID", "workflow_id must match wf_XXXXXX", "workflow_id"))
+    for field in ("created_at", "updated_at"):
+        value = document.get(field)
+        if (require_identity or value is not None) and not _valid_server_timestamp(value):
+            problems.append(_problem("WORKFLOW_INVALID", f"{field} must be an RFC 3339 timestamp", field))
     name = document.get("name")
     if not isinstance(name, str) or not (1 <= len(name.strip()) <= 120):
         problems.append(_problem("WORKFLOW_INVALID", "name must contain 1–120 characters", "name"))
@@ -188,6 +270,7 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
             problems.append(_problem("WORKFLOW_INVALID", "position must contain finite x/y coordinates", f"{path}.position"))
         if not isinstance(node.get("disabled"), bool):
             problems.append(_problem("WORKFLOW_INVALID", "disabled must be a boolean", f"{path}.disabled"))
+        _validate_extensions(node.get("extensions"), f"{path}.extensions", problems)
         _validate_config(node, definition, path, problems, require_complete=require_complete)
         node_map[node_id] = (node, definition)
 
@@ -210,6 +293,7 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
             problems.append(_problem("WORKFLOW_INVALID", f"Duplicate edge id: {edge_id}", f"{path}.id"))
         else:
             edge_ids.add(edge_id)
+        _validate_extensions(edge.get("extensions"), f"{path}.extensions", problems)
         source_id, target_id = edge.get("source_node"), edge.get("target_node")
         if source_id not in node_map or target_id not in node_map:
             problems.append(_problem("WORKFLOW_INVALID", "edge endpoint does not exist", path))
@@ -274,8 +358,14 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
     viewport = document.get("viewport", {"x": 0, "y": 0, "zoom": 1})
     if not isinstance(viewport, dict) or not all(_finite_number(viewport.get(k)) for k in ("x", "y", "zoom")) or not 0.1 <= viewport.get("zoom", 0) <= 1.5:
         problems.append(_problem("WORKFLOW_INVALID", "viewport is invalid", "viewport"))
-    if not isinstance(document.get("variables", {}), dict):
+    variables = document.get("variables", {})
+    if not isinstance(variables, dict):
         problems.append(_problem("WORKFLOW_INVALID", "variables must be an object", "variables"))
+    elif _json_size(variables) > MAX_VARIABLES_BYTES:
+        problems.append(_problem("WORKFLOW_INVALID", "variables exceeds 64 KiB", "variables"))
+    elif variables:
+        problems.append(_problem("WORKFLOW_INVALID", "variables must remain empty until Phase 5", "variables"))
+    _validate_extensions(document.get("extensions"), "extensions", problems)
     settings = document.get("settings", {"on_error": "stop"})
     if not isinstance(settings, dict) or settings.get("on_error", "stop") != "stop":
         problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))

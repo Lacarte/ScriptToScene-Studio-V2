@@ -72,6 +72,12 @@ class ValidateEndpointTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.get_json()["error"]["code"], "BAD_REQUEST")
 
+        for body in ({}, {"workflow": []}, {"workflow": None}):
+            with self.subTest(body=body):
+                resp = self._post(body)
+                self.assertEqual(resp.status_code, 400)
+                self.assertEqual(resp.get_json()["error"]["code"], "BAD_REQUEST")
+
     def test_non_loopback_is_403(self):
         resp = self.client.post(
             "/api/workflow/validate",

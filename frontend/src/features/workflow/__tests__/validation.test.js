@@ -108,6 +108,21 @@ describe('validateConnection', () => {
     expect(cycle.reason).toMatch(/loop/i)
   })
 
+  it('re-validating an existing edge by its own id passes (canvas render path)', () => {
+    // Vue Flow re-runs isValidConnection over every edge on setEdges; the
+    // edge must not collide with itself in duplicate/occupied/cycle checks.
+    const nodes = [node('a', 'script.input'), node('b', 'tts.generate')]
+    const edges = [{
+      id: 'e_1', source_node: 'a', source_port: 'script',
+      target_node: 'b', target_port: 'script', edge_type: 'data',
+    }]
+    const self = validateConnection(ctx(nodes, edges), { ...SCRIPT_TO_TTS, edgeId: 'e_1' })
+    expect(self).toEqual({ ok: true, edgeType: 'data' })
+    // A different edge to the same occupied port must still be rejected.
+    const other = validateConnection(ctx(nodes, edges), { ...SCRIPT_TO_TTS, edgeId: 'e_999' })
+    expect(other.ok).toBe(false)
+  })
+
   it('resolves dynamic ports from configuration', () => {
     const nodes = [node('s', 'stub.input', { port_type: 'script' }), node('b', 'tts.generate')]
     const good = validateConnection(ctx(nodes),

@@ -164,8 +164,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   function setViewport(vp) {
+    // Viewport is cosmetic state: remember it for the next save, but merely
+    // panning/zooming must not flag unsaved changes or arm discard prompts.
     viewport.value = { x: vp.x, y: vp.y, zoom: vp.zoom }
-    dirty.value = true
   }
 
   function plain(value) {

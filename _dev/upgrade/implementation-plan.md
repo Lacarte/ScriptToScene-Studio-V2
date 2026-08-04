@@ -109,9 +109,9 @@ Drop → project screen→canvas coords → insert with registry defaults. One g
 ### Phase 1 review status — 2026-08-04
 
 - **1.1–1.5: reviewed and strengthened.** Vue Flow route/canvas, backend-owned registry, generic cards, store, and typed client validation are present. Dynamic ports now reject unsupported types, and capability flags no longer advertise cancellation paths the existing providers do not expose.
-- **1.6: complete.** Workflow CRUD uses strict IDs, `safe_join`, atomic JSON writes/backups, optimistic timestamps, server-side schema/port/cardinality/cycle validation, bounded requests, soft deletion, and persisted-shape-only frontend serialization.
+- **1.6: complete.** Workflow CRUD uses strict IDs, `safe_join`, atomic JSON writes/backups, optimistic timestamps, server-side schema/port/cardinality/cycle validation, bounded requests and extension data, finite-number and maximum-depth enforcement, RFC 3339 identity timestamps, soft deletion, and persisted-shape-only frontend serialization.
 - **1.7: complete.** Import/export and the server-validated Full Video template are wired into the toolbar with New, Open, Save, Save As, Duplicate, Import, Export, template selection, dirty-state prompts, and viewport restoration.
-- Automated gate: backend and frontend suites plus the production build pass; a live Flask create/load/update/delete and template API round trip passes.
+- Automated gate: 40 backend tests plus 2 subtests and 21 frontend tests pass; the production build and a live Flask create/load/update/delete and template API round trip pass.
 - Manual visual gate: pending because the in-app browser surface was unavailable during this review. Verify drag/drop, toolbar overflow at the target window size, minimap, connection feedback, save/reopen, and template fit-to-view once in the running app before beginning Phase 2.
 
 **Phase 1 is implementation-complete but awaits the documented manual visual smoke check.**
@@ -124,9 +124,19 @@ Drop → project screen→canvas coords → insert with registry defaults. One g
 Right panel renders forms generically from `config_schema`: string, textarea, number (constraints), boolean, options, JSON editor with validation. Defaults, descriptions, rename/disable/duplicate/delete actions.
 **Done when:** every core node is configurable with zero per-node UI code; Vitest covers widget rendering per schema type.
 
+#### Step 2.1 review status — 2026-08-04
+
+- **Complete and strengthened.** The generic inspector covers every Phase 2.1 widget and node action without per-node UI code. Selection is document-scoped and cleared on removal; save/save-as preserve valid selection; duplication retains extension metadata while respecting persisted name and coordinate bounds.
+- Automated gate: inspector/store coverage is included in the frontend suite and the production build passes. Manual visual verification remains part of the Phase 2 gate.
+
 ### 2.2 Conditional fields + validation badges + server validate
 `display_options.show/hide` re-evaluated on every change (e.g. TTS `blend` only for kokoro). Missing-required and invalid-config badges on node cards and in the inspector. `POST /api/workflow/validate` returns structured problems; Validate toolbar button surfaces them.
 **Done when:** client and server agree on validity for seeded good/bad workflows (pytest + Vitest).
+
+#### Step 2.2 review status — 2026-08-04
+
+- **Complete and strengthened.** Conditional visibility and required-field semantics now match on both sides. Client badges cover unsupported versions, malformed or unknown configuration fields, type/range/pattern/option/JSON/media violations, and required inputs; malformed validation envelopes correctly return HTTP 400 while graph-invalid drafts remain structured HTTP 200 results.
+- Automated gate: backend and frontend validation regressions pass with the full suites and production build. Manual badge and conditional-field verification remains part of the Phase 2 visual gate.
 
 ### 2.3 Approved async option sources + media_asset widget
 `options_source` identifiers resolved through a backend allowlist (e.g. `tts_voices` → existing voices endpoint; `story_tones`, `style_templates`; provider lists via existing provider registries). No schema-provided URLs are ever fetched. Add the `media_asset` inspector widget for Project Setup's logo: upload endpoint into `output/branding/` with type/size validation, thumbnail preview, and an upload-new / pick-existing chooser; never accept raw filesystem paths from the browser.

@@ -34,10 +34,18 @@ function wouldCreateCycle(edges, sourceNodeId, targetNodeId) {
 }
 
 /**
+ * `connection.edgeId` identifies an EXISTING edge being re-validated
+ * (Vue Flow re-runs isValidConnection over every edge whenever the edge
+ * array is set). That edge must be excluded from the duplicate/occupied/
+ * cycle checks or it invalidates itself and vanishes from the canvas.
+ *
  * @returns {{ok: true, edgeType: 'data'|'control'} | {ok: false, reason: string}}
  */
 export function validateConnection({ nodes, edges, nodeTypes, portTypes = [] }, connection) {
-  const { sourceNode: sourceId, sourcePort, targetNode: targetId, targetPort } = connection
+  const { sourceNode: sourceId, sourcePort, targetNode: targetId, targetPort, edgeId } = connection
+  if (edgeId) {
+    edges = edges.filter((e) => e.id !== edgeId)
+  }
 
   const sourceNode = nodes.find((n) => n.id === sourceId)
   const targetNode = nodes.find((n) => n.id === targetId)

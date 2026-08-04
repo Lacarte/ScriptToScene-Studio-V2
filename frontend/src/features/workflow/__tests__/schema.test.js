@@ -69,6 +69,42 @@ describe('nodeIssues', () => {
     const issues = nodeIssues(node({}), undefined, [])
     expect(issues[0].message).toMatch(/Unknown node type/)
   })
+
+  it('reports graph issues even when the configuration container is invalid', () => {
+    const issues = nodeIssues(node([]), DEF, [])
+    expect(issues.map((issue) => issue.name)).toEqual(expect.arrayContaining([
+      'configuration', 'text', 'script',
+    ]))
+  })
+
+  it('mirrors server config constraints and unknown-field rejection', () => {
+    const constrained = {
+      ...DEF,
+      type_version: 1,
+      config_schema: [
+        { name: 'name', label: 'Name', type: 'string', default: '', min_length: 2, max_length: 5 },
+        { name: 'count', label: 'Count', type: 'number', default: 2, min: 1, max: 3 },
+        { name: 'mode', label: 'Mode', type: 'options', default: 'a', options: ['a', 'b'] },
+        { name: 'enabled', label: 'Enabled', type: 'boolean', default: false },
+        { name: 'data', label: 'Data', type: 'json', default: {} },
+      ],
+      inputs: [],
+    }
+    const invalid = node({
+      name: 'x', count: 9, mode: 'c', enabled: 'yes', data: { value: Infinity }, surprise: true,
+    })
+    invalid.type_version = 2
+    const messages = nodeIssues(invalid, constrained, []).map((issue) => issue.message)
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.stringMatching(/Unsupported version/),
+      expect.stringMatching(/Unknown configuration field/),
+      expect.stringMatching(/invalid length/),
+      expect.stringMatching(/allowed range/),
+      expect.stringMatching(/allowed option/),
+      expect.stringMatching(/boolean/),
+      expect.stringMatching(/finite JSON/),
+    ]))
+  })
 })
 
 describe('inspector conditional rendering + issue badges', () => {

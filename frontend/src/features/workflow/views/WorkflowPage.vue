@@ -75,8 +75,13 @@ function onDrop(event) {
 }
 
 // ── Sync Vue Flow interactions back into the store ─────────────────────
-function onNodeDragStop({ node }) {
-  store.moveNode(node.id, { x: node.position.x, y: node.position.y })
+function onNodeDragStop({ node, nodes: draggedNodes }) {
+  // Multi-select/box drags carry every moved node in `nodes`; persisting
+  // only the grab target would snap the rest back on the next re-render.
+  const moved = draggedNodes?.length ? draggedNodes : [node]
+  for (const dragged of moved) {
+    store.moveNode(dragged.id, { x: dragged.position.x, y: dragged.position.y })
+  }
 }
 
 function onNodesChange(changes) {
@@ -100,6 +105,9 @@ function toConnectionShape(params) {
     sourcePort: params.sourceHandle,
     targetNode: params.target,
     targetPort: params.targetHandle,
+    // Present only when Vue Flow re-validates an existing edge; interactive
+    // connection params carry no id.
+    edgeId: params.id,
   }
 }
 

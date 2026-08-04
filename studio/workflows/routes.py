@@ -94,6 +94,8 @@ def workflow_validate():
     if failure:
         return failure
     document = body.get("workflow")
+    if not isinstance(document, dict):
+        return _error("BAD_REQUEST", "workflow must be an object", 400)
     findings = validate_workflow(document, require_identity=False, require_complete=False)
     problems = [p for p in findings if p.get("severity") != "warning"]
     warnings = [p for p in findings if p.get("severity") == "warning"]

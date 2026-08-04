@@ -1,5 +1,6 @@
 """Phase 1.6/1.7 workflow validation, persistence, routes, and templates."""
 
+import math
 import os
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from studio.workflows import persistence
 from studio.workflows.persistence import WorkflowConflict, WorkflowValidationError
 from studio.workflows.templates import serialize_templates
 from studio.workflows.validation import validate_workflow, validation_errors
+from studio.workflows.validation import _field_is_visible
 
 
 def script_node(node_id="n_script"):
@@ -48,6 +50,14 @@ class WorkflowTestBase(unittest.TestCase):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_conditional_field_visibility_matches_inspector_rules(self):
+        field = {"display_options": {"show": {"enabled": [True]}}}
+        self.assertFalse(_field_is_visible(field, {"enabled": False}))
+        self.assertTrue(_field_is_visible(field, {"enabled": True}))
+        hidden = {"display_options": {"hide": {"mode": ["auto"]}}}
+        self.assertFalse(_field_is_visible(hidden, {"mode": "auto"}))
+        self.assertTrue(_field_is_visible(hidden, {"mode": "manual"}))
+
     def test_valid_draft_has_only_missing_input_warnings_when_incomplete(self):
         document = draft()
         problems = validate_workflow(document, require_identity=False)
@@ -79,6 +89,48 @@ class ValidationTests(unittest.TestCase):
         )
         self.assertEqual(validation_errors(problems), [])
         self.assertTrue(any(problem["severity"] == "warning" for problem in problems))
+
+    def test_rejects_non_finite_numbers_and_excessive_nesting(self):
+        non_finite = draft()
+        non_finite["viewport"]["x"] = math.nan
+        problems = validation_errors(validate_workflow(non_finite, require_identity=False))
+        self.assertIn("finite", problems[0]["message"])
+
+        nested = draft()
+        value = {}
+        nested["extensions"] = value
+        for _ in range(20):
+            value["child"] = {}
+            value = value["child"]
+        problems = validation_errors(validate_workflow(nested, require_identity=False))
+        self.assertIn("nesting depth", problems[0]["message"])
+
+    def test_rejects_oversized_reserved_data_and_bad_extensions(self):
+        oversized = draft()
+        oversized["variables"] = {"value": "x" * (64 * 1024)}
+        problems = validation_errors(validate_workflow(oversized, require_identity=False))
+        self.assertTrue(any(problem.get("path") == "variables" for problem in problems))
+
+        reserved = draft()
+        reserved["variables"] = {"future": True}
+        problems = validation_errors(validate_workflow(reserved, require_identity=False))
+        self.assertTrue(any("Phase 5" in problem["message"] for problem in problems))
+
+        bad_extensions = draft()
+        bad_extensions["extensions"] = []
+        problems = validation_errors(validate_workflow(bad_extensions, require_identity=False))
+        self.assertTrue(any(problem.get("path") == "extensions" for problem in problems))
+
+    def test_persisted_identity_requires_timezone_aware_timestamps(self):
+        document = draft()
+        document.update({
+            "workflow_id": "wf_ABC123",
+            "created_at": "2026-08-04T12:00:00",
+            "updated_at": "not-a-timestamp",
+        })
+        problems = validation_errors(validate_workflow(document))
+        timestamp_paths = {problem.get("path") for problem in problems}
+        self.assertEqual(timestamp_paths & {"created_at", "updated_at"}, {"created_at", "updated_at"})
 
 
 class PersistenceTests(WorkflowTestBase):
