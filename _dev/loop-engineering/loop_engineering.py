@@ -28,8 +28,19 @@ import json
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def say(message: str, *, icon: str = "·") -> None:
+    """Narrated console output: every action the loop takes, timestamped."""
+    print(f"[{dt.datetime.now():%H:%M:%S}] {icon} {message}", flush=True)
+
+
+def elapsed(since: float) -> str:
+    seconds = int(time.monotonic() - since)
+    return f"{seconds // 60}m{seconds % 60:02d}s"
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN_PATH = ROOT / "_dev" / "loop-engineering" / "phases-plans" / "implementation-plan.md"
@@ -183,7 +194,8 @@ def validate(log_file: Path) -> tuple[bool, str]:
         ("build", "npm run build", ROOT / "frontend"),
     ]
     for name, cmd, cwd in checks:
-        print(f"  [validate] {name} ...", flush=True)
+        started = time.monotonic()
+        say(f"validate: running {name} ({'backend test suite' if name == 'pytest' else 'frontend test suite' if name == 'vitest' else 'production build'})")
         try:
             output = run_capture(cmd, cwd=cwd, timeout=VALIDATE_TIMEOUT_S)
         except subprocess.TimeoutExpired:
@@ -198,8 +210,9 @@ def validate(log_file: Path) -> tuple[bool, str]:
         )
         if failed:
             tail = "\n".join(output.strip().splitlines()[-25:])
+            say(f"validate: {name} is RED after {elapsed(started)}", icon="✗")
             return False, f"{name} FAILED:\n{tail}"
-        print(f"  [validate] {name} OK")
+        say(f"validate: {name} green in {elapsed(started)}", icon="✓")
     return True, "all green"
 
 
@@ -272,45 +285,68 @@ def agent_cmd(agent: str, prompt: str) -> str:
 def run_step(step: Step, state: dict, args) -> bool:
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = LOG_DIR / f"{stamp}_step_{step.id.replace('.', '-')}.log"
-    print(f"\n======== STEP {step.id} — {step.title} ========")
+    step_started = time.monotonic()
+
+    print("\n" + "=" * 72)
+    say(f"STEP {step.id} — {step.title}", icon="▶")
+    say(f"goal: {step.done_when[:160] or '(no explicit done-when)'}")
+    say(f"full agent output is streaming to {log_file.relative_to(ROOT)}")
     record(state, step.id, "start")
 
     if working_tree_dirty():
-        print("  [guard] working tree dirty — committing leftovers first")
+        say("guard: working tree has uncommitted changes — committing them so "
+            "this step starts from a clean baseline", icon="!")
         commit_all(f"chore(loop): absorb uncommitted changes before step {step.id}")
 
     baseline = head_commit()
+    say(f"baseline commit is {baseline}; everything after it belongs to this step")
 
     # 1) EXECUTE
-    print("  [execute] launching builder agent")
+    say(f"stage 1/4 EXECUTE — launching the builder agent (claude -p) with the "
+        f"step description + done-when criteria; it will implement step {step.id}", icon="▶")
+    stage = time.monotonic()
     run_logged(agent_cmd("claude", execute_prompt(step)), log_file)
+    say(f"builder agent finished in {elapsed(stage)}")
     if working_tree_dirty():
+        say("builder left uncommitted changes — committing them on its behalf")
         commit_all(f"feat(workflow): step {step.id} - {step.title} (loop auto-commit)")
 
     # 2) VALIDATE + CORRECT loop
+    say("stage 2/4 VALIDATE — running pytest, vitest, and the production build "
+        "myself (agent claims are never trusted)", icon="▶")
     for attempt in range(1, args.max_fix_attempts + 1):
         ok, detail = validate(log_file)
         if ok:
+            say("board is green — validation passed", icon="✓")
             break
-        print(f"  [correct] validation red (attempt {attempt}): relaunching fixer")
+        say(f"board is RED (fix attempt {attempt}/{args.max_fix_attempts}) — "
+            f"launching a fixer agent with the failure output", icon="✗")
         record(state, step.id, "validation_red", detail)
+        stage = time.monotonic()
         run_logged(agent_cmd("claude", fix_prompt(step, detail)), log_file)
+        say(f"fixer finished in {elapsed(stage)} — re-validating")
         if working_tree_dirty():
             commit_all(f"fix: step {step.id} validation (loop auto-commit)")
     else:
         record(state, step.id, "halt", "validation still red after max fix attempts")
-        print(f"  [halt] step {step.id}: validation still red — human needed. Log: {log_file}")
+        say(f"HALT — still red after {args.max_fix_attempts} fix attempts. "
+            f"A human needs to look. Full log: {log_file}", icon="✗")
         return False
 
     # 3) REVIEW (adversarial pass) + re-validate
     if args.reviewer != "none":
-        print(f"  [review] launching {args.reviewer} reviewer")
+        say(f"stage 3/4 REVIEW — {args.reviewer} audits commits {baseline}..{head_commit()} "
+            f"for real bugs and fixes what it finds", icon="▶")
+        stage = time.monotonic()
         run_logged(agent_cmd(args.reviewer, review_prompt(step, baseline, head_commit())), log_file)
+        say(f"reviewer finished in {elapsed(stage)}")
         if working_tree_dirty():
+            say("reviewer left uncommitted fixes — committing them")
             commit_all(f"fix(review): step {step.id} (loop auto-commit)")
+        say("re-validating after review (a reviewer can break the board too)")
         ok, detail = validate(log_file)
         if not ok:
-            print("  [correct] reviewer broke the board — one repair pass")
+            say("reviewer broke the board — one repair pass", icon="✗")
             record(state, step.id, "review_red", detail)
             run_logged(agent_cmd("claude", fix_prompt(step, detail)), log_file)
             if working_tree_dirty():
@@ -318,17 +354,23 @@ def run_step(step: Step, state: dict, args) -> bool:
             ok, detail = validate(log_file)
             if not ok:
                 record(state, step.id, "halt", "red after review repair")
-                print(f"  [halt] step {step.id} red after review repair. Log: {log_file}")
+                say(f"HALT — red after review repair. Full log: {log_file}", icon="✗")
                 return False
+        say("board still green after review", icon="✓")
+    else:
+        say("stage 3/4 REVIEW — skipped (--reviewer none)")
 
     # 4) DONE
+    say("stage 4/4 DONE — recording the step in runtime/state.json", icon="▶")
     if step.id not in state["done"]:
         state["done"].append(step.id)
     record(state, step.id, "done", head_commit())
     if not args.no_push:
-        print("  [push] pushing to origin")
+        say("pushing commits to origin")
         run_capture(["git", "push"], timeout=600)
-    print(f"  [done] step {step.id} complete at {head_commit()}")
+    else:
+        say("push skipped (--no-push) — commits are local only")
+    say(f"step {step.id} COMPLETE at {head_commit()} (total {elapsed(step_started)})", icon="✓")
     return True
 
 
@@ -410,11 +452,28 @@ def main() -> None:
             print(f"  {step.id}  {step.title}")
         return
 
+    run_started = time.monotonic()
+    print("=" * 72)
+    say(f"LOOP START — plan: {PLAN_PATH.relative_to(ROOT)}", icon="▶")
+    say(f"scope: {len(targets)} step(s) → {', '.join(s.id for s in targets)}")
+    say(f"reviewer: {args.reviewer} · max fix attempts: {args.max_fix_attempts} · "
+        f"push: {'off' if args.no_push else 'on'}")
+    say("each step runs: EXECUTE (builder agent) → VALIDATE (pytest/vitest/build) "
+        "→ CORRECT while red → REVIEW (adversarial audit) → commit + record")
+
+    completed = []
     for step in targets:
         if not run_step(step, state, args):
+            say(f"LOOP STOPPED at step {step.id} after {elapsed(run_started)} — "
+                f"{len(completed)} step(s) completed before the halt: "
+                f"{', '.join(completed) or 'none'}", icon="✗")
             sys.exit(1)
+        completed.append(step.id)
 
-    print("\nScope complete.")
+    print("\n" + "=" * 72)
+    say(f"LOOP COMPLETE — {len(completed)} step(s) in {elapsed(run_started)}: "
+        f"{', '.join(completed)}", icon="✓")
+    say("last commits:")
     print(run_capture(["git", "log", "--oneline", "-8"]))
 
 
