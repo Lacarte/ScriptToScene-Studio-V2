@@ -56,6 +56,8 @@ const FAKE_TYPES = {
     outputs: [{ id: 'value', type: 'dynamic' }],
     config_schema: [
       { name: 'port_type', type: 'options', default: 'generic_json', required: true },
+      { name: 'pinned', type: 'boolean', default: false },
+      { name: 'payload', type: 'json', default: {}, display_options: { show: { pinned: [true] } } },
     ],
   },
 }
@@ -288,5 +290,47 @@ describe('per-port-type payload validation', () => {
     }
     const issues = nodeIssues(node, FAKE_TYPES['stub.input'], [])
     expect(issues.some((issue) => issue.name === 'payload')).toBe(true)
+  })
+})
+
+describe('cache staleness and Result Viewer pinning', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('marks a changed node and all descendants stale, but not unrelated nodes', () => {
+    const store = seededStore()
+    const seg = store.addNodeWithStubs('segment.run', { x: 400, y: 0 })
+    const stubIn = store.nodes.find((node) => node.type === 'stub.input')
+    const viewer = store.nodes.find((node) => node.type === 'stub.output')
+    const unrelated = store.addNode('timing.align', { x: 0, y: 300 })
+    store.currentExecution = {
+      status: 'succeeded',
+      nodes: Object.fromEntries(store.nodes.map((node) => [node.id, { status: 'succeeded' }])),
+    }
+
+    store.updateNodeConfig(stubIn.id, 'payload', { transcript: 'changed', alignment: [
+      { word: 'changed', begin: 0, end: 1 },
+    ] })
+
+    expect(store.nodeExecution(stubIn.id).status).toBe('stale')
+    expect(store.nodeExecution(seg.id).status).toBe('stale')
+    expect(store.nodeExecution(viewer.id).status).toBe('stale')
+    expect(store.nodeExecution(unrelated.id).status).toBe('succeeded')
+  })
+
+  it('persists pin state and validates an edited viewer payload by port type', () => {
+    const store = seededStore()
+    const viewer = store.addNode('stub.output', { x: 0, y: 0 })
+    store.updateNodeConfig(viewer.id, 'port_type', 'segments')
+    store.updateNodeConfig(viewer.id, 'pinned', true)
+    store.updateNodeConfig(viewer.id, 'payload', {
+      segments: [{ start: 0, end: 1, words: 'edited', index: 0 }],
+    })
+    expect(store.toDocument().nodes[0].configuration).toMatchObject({
+      port_type: 'segments', pinned: true,
+    })
+    expect(store.issuesByNode[viewer.id].some((issue) => issue.name === 'payload')).toBe(false)
+
+    store.updateNodeConfig(viewer.id, 'payload', { segments: [{ start: 2, end: 1, words: 'bad' }] })
+    expect(store.issuesByNode[viewer.id].some((issue) => issue.name === 'payload')).toBe(true)
   })
 })

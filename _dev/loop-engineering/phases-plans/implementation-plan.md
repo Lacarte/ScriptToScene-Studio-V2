@@ -191,6 +191,13 @@ Selected-nodes+deps, from-node-through-descendants, retry-failed, retry-failed+d
 **Done when:** re-running an unchanged workflow re-executes zero nodes; changing one upstream config re-executes exactly the affected subgraph (pytest-proven).
 Also in this step: **Result Viewer pinning** — an edited viewer payload becomes a winning cache entry (validated against the port type) that feeds downstream nodes until unpinned, and editing it marks descendants stale; pinned state is visible on the stub card.
 
+#### Step 4.2 review status — 2026-08-04
+
+- **Complete.** Canonical node fingerprints include resolved defaults, typed inputs, topology-qualified upstream output/artifact fingerprints, type version, and adapter cache schema version. Persistent cache entries are workflow/project/node scoped, atomic, and contain only component hashes plus reusable outputs.
+- Reuse fails closed for forced regeneration, prior failure/absence, configuration/input/upstream/schema changes, malformed entries, missing/empty/modified artifacts, non-JSON outputs, and sensitive outputs. Every decision is persisted on the node execution record, and cache misses caused by a prior result surface a transient stale state before execution.
+- Frontend graph/config edits mark the affected node and descendants stale without treating cosmetic rename/move changes as computation changes. Result Viewers support typed, validated pinned payloads; the pin wins independently of upstream changes, feeds downstream nodes, persists in workflow JSON, and is visible on the card.
+- Automated verification: 115 backend tests plus 38 subtests and 80 frontend tests pass; the production frontend build succeeds.
+
 ### 4.3 Retry policies + explicit error outputs
 Per-node `on_error`: stop / bounded retry with delay/backoff / continue via explicit error output (control path) / skip-optional — only where capability flags permit. Structured failure payloads (stable code, user message, redacted details, attempt, recovery suggestion).
 **Done when:** pytest covers each policy including backoff timing and error-branch routing.

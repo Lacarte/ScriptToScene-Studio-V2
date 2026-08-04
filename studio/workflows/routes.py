@@ -349,6 +349,7 @@ def workflow_run():
             run_mode=body.get("run_mode", "full"),
             target_node_ids=targets,
             project_id=body.get("project_id"),
+            force=body.get("force", False),
         )
     except WorkflowNotFound:
         return _error("NOT_FOUND", "Workflow not found", 404)

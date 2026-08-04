@@ -194,7 +194,9 @@ def _validate_config(
     # Sample Input payloads are typed data, not free-form JSON: enforce the
     # per-port-type stub contract, including fixture-only file references
     # (contracts.md §2 "Utility/testing nodes", step 2.5).
-    if node.get("type") == "stub.input":
+    if node.get("type") == "stub.input" or (
+        node.get("type") == "stub.output" and config.get("pinned") is True
+    ):
         port_type = config.get("port_type", "generic_json")
         if port_type in DYNAMIC_PORT_TYPES:
             payload = config.get("payload", fields.get("payload", {}).get("default"))

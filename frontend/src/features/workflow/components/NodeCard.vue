@@ -30,9 +30,12 @@ const isStub = computed(() => def.value.category === 'testing')
 const node = computed(() => store.nodeById(props.id))
 const execution = computed(() => store.nodeExecution(props.id))
 const status = computed(() => execution.value.status || 'idle')
+const isPinned = computed(() => node.value?.type === 'stub.output' && node.value.configuration?.pinned === true)
 const resultSummary = computed(() => {
-  if (node.value?.type !== 'stub.output' || status.value !== 'succeeded') return ''
-  const value = execution.value.outputs_summary?.value
+  if (node.value?.type !== 'stub.output') return ''
+  const value = isPinned.value
+    ? node.value.configuration?.payload
+    : (status.value === 'succeeded' ? execution.value.outputs_summary?.value : undefined)
   if (value === undefined) return ''
   const text = typeof value === 'string' ? value : JSON.stringify(value)
   return text.length > 72 ? `${text.slice(0, 69)}…` : text
@@ -83,7 +86,8 @@ function handleTitle(port, required) {
         <span class="node-name">{{ data.label }}</span>
         <span v-if="!isStub" class="node-type">{{ def.display_name }}</span>
       </div>
-      <span v-if="isStub" class="stub-badge" :title="def.display_name">sample</span>
+      <span v-if="isPinned" class="pin-badge" title="Pinned result overrides upstream data">pinned</span>
+      <span v-else-if="isStub" class="stub-badge" :title="def.display_name">sample</span>
       <span v-if="execution.from_sample_data && status === 'succeeded'" class="sample-result" title="Result came from sample data">S</span>
       <span class="status-dot" :title="status" />
       <span
@@ -172,6 +176,18 @@ function handleTitle(port, required) {
   text-transform: uppercase;
   color: #a8a29e;
   border: 1px dashed rgba(168, 162, 158, 0.6);
+  border-radius: 5px;
+  padding: 1px 4px;
+}
+
+.pin-badge {
+  margin-left: auto;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #fdba74;
+  border: 1px solid rgba(251, 146, 60, 0.65);
   border-radius: 5px;
   padding: 1px 4px;
 }

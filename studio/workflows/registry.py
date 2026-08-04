@@ -397,6 +397,9 @@ _NODE_TYPES = {
         "config_schema": [
             {"name": "port_type", "label": "Data type", "type": "options",
              "options": DYNAMIC_PORT_TYPES, "default": "generic_json", "required": True},
+            {"name": "pinned", "label": "Pin edited result", "type": "boolean", "default": False},
+            {"name": "payload", "label": "Pinned payload", "type": "json", "default": {},
+             "display_options": {"show": {"pinned": [True]}}},
         ],
         "capabilities": {"retry": False, "cancel": False},
         "executor": "studio.workflows.adapters.stubs:result_viewer",

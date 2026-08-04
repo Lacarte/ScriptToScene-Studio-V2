@@ -67,6 +67,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const executionLoading = ref(false)
   const executionError = ref('')
   const selectedExecutionNodeId = ref(null)
+  const staleNodeIds = ref([])
   let executionStream = null
 
   const executionActive = computed(() =>
@@ -79,6 +80,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
       attempts: 0,
       duration_ms: null,
       from_sample_data: false,
+      fingerprint: null,
+      cache: null,
       resolved_inputs_summary: {},
       outputs_summary: {},
       artifact_refs: [],
@@ -88,7 +91,29 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   function nodeExecution(nodeId) {
-    return currentExecution.value?.nodes?.[nodeId] || emptyNodeExecution()
+    const record = currentExecution.value?.nodes?.[nodeId] || emptyNodeExecution()
+    return staleNodeIds.value.includes(nodeId) ? { ...record, status: 'stale' } : record
+  }
+
+  function descendantsOf(seedIds, sourceEdges = edges.value) {
+    const pending = [...seedIds]
+    const found = new Set(seedIds)
+    while (pending.length) {
+      const source = pending.pop()
+      for (const edge of sourceEdges) {
+        if (edge.source_node !== source || found.has(edge.target_node)) continue
+        found.add(edge.target_node)
+        pending.push(edge.target_node)
+      }
+    }
+    return found
+  }
+
+  function markNodesStale(seedIds, sourceEdges = edges.value) {
+    if (!currentExecution.value) return
+    const stale = new Set(staleNodeIds.value)
+    for (const nodeId of descendantsOf(seedIds, sourceEdges)) stale.add(nodeId)
+    staleNodeIds.value = [...stale]
   }
 
   function closeExecutionStream() {
@@ -101,6 +126,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     currentExecution.value = null
     selectedExecutionNodeId.value = null
     executionError.value = ''
+    staleNodeIds.value = []
   }
 
   function applyExecutionSnapshot(snapshot) {
@@ -140,6 +166,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
         record.from_sample_data = event.from_sample_data
       }
       if (event.error) record.error = plain(event.error)
+      if (['queued', 'running', 'succeeded', 'failed', 'cancelled', 'skipped'].includes(event.status)) {
+        staleNodeIds.value = staleNodeIds.value.filter((id) => id !== event.node_id)
+      }
     } else if (event.status && event.status !== 'reset') {
       execution.status = event.status
     }
@@ -414,6 +443,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
   function removeNodes(nodeIds) {
     const doomed = new Set(nodeIds)
     if (!doomed.size) return
+    const oldEdges = [...edges.value]
+    const affected = oldEdges.filter((e) => doomed.has(e.source_node)).map((e) => e.target_node)
+    markNodesStale(affected, oldEdges)
     nodes.value = nodes.value.filter((n) => !doomed.has(n.id))
     edges.value = edges.value.filter(
       (e) => !doomed.has(e.source_node) && !doomed.has(e.target_node),
@@ -486,6 +518,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       edge_type: verdict.edgeType,
     }
     edges.value.push(edge)
+    markNodesStale([targetNode])
     if (undoEntry) {
       undoEntry.realEdgeId = edge.id
       stubDetachUndo.value.push(undoEntry)
@@ -497,6 +530,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
   function removeEdges(edgeIds) {
     const doomed = new Set(edgeIds)
     if (!doomed.size) return
+    const oldEdges = [...edges.value]
+    const affected = oldEdges.filter((e) => doomed.has(e.id)).map((e) => e.target_node)
+    markNodesStale(affected, oldEdges)
     edges.value = edges.value.filter((e) => !doomed.has(e.id))
     markDocumentDirty()
   }
@@ -837,6 +873,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     if (!node) return
     const previous = node.configuration[name]
     node.configuration[name] = value
+    if (JSON.stringify(previous) !== JSON.stringify(value)) markNodesStale([nodeId])
     // Retyping a stub retargets its dynamic port: reseed the editable sample
     // payload and drop edges that no longer type-match (contracts §3 —
     // dynamic ports obey exact-match once resolved).
@@ -866,6 +903,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     const node = nodeById(nodeId)
     if (!node) return
     node.disabled = Boolean(disabled)
+    markNodesStale([nodeId])
     markDocumentDirty()
   }
 
@@ -918,6 +956,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     canUndoStubDetach, undoStubDetach,
     // live execution (step 3.6)
     currentExecution, executionLoading, executionError, executionActive,
+    staleNodeIds, markNodesStale,
     selectedExecutionNodeId, selectedExecutionNode, editorProjectId,
     nodeExecution, runWorkflow, stopExecution, refreshExecution,
     applyExecutionEvent, watchExecution, closeExecutionStream, clearExecution,

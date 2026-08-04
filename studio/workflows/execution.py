@@ -123,6 +123,7 @@ class ExecutionManager:
         run_mode: str,
         target_node_ids: list[str],
         project_id: str | None = None,
+        force: bool = False,
     ) -> tuple[str, str]:
         snapshot = prepare_snapshot(workflow)
         scope = resolve_scope(snapshot, run_mode, target_node_ids)
@@ -140,6 +141,7 @@ class ExecutionManager:
             stop_requested=stop_event.is_set,
             on_event=stream.emit,
             executor_resolver=self.executor_resolver,
+            force=force,
         )
         save_execution(scheduler.record, root=self.execution_root, secrets=scheduler.redactor.secrets)
         stream.emit({"type": "execution_status", "node_id": None, "status": "queued"})

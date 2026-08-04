@@ -25,6 +25,7 @@ from studio.security import safe_join
 
 from .adapters import AdapterContext, AdapterError
 from .adapters.common import PROJECT_ID_RE
+from .cache import CacheLookup, NodeCache, canonical_fingerprint, fingerprint_components, output_fingerprint
 from .registry import get_node_type
 from .models import ExecutionLog, ExecutionRecord, NodeExecutionRecord
 from .persistence import generate_execution_id, save_execution
@@ -370,6 +371,7 @@ class WorkflowScheduler:
         run_mode: str = "full",
         scope_node_ids: list[str] | None = None,
         stop_requested: Callable[[], bool] | None = None,
+        force: bool = False,
     ):
         problems = validation_errors(validate_workflow(dict(workflow), require_complete=True))
         if problems:
@@ -388,7 +390,12 @@ class WorkflowScheduler:
         self.run_mode = run_mode
         self.scope_node_ids = list(scope_node_ids or [node["id"] for node in workflow.get("nodes", [])])
         self.stop_requested = stop_requested or (lambda: False)
+        self.force = force
         self.execution_root = execution_root
+        self.cache = NodeCache(
+            root=os.path.join(output_dir, "workflows", "cache"),
+            output_dir=output_dir,
+        )
         self.redactor = Redactor(workflow)
         self.record = ExecutionRecord(
             execution_id=self.execution_id,
@@ -415,6 +422,7 @@ class WorkflowScheduler:
         order = deterministic_order(scoped_workflow)
         statuses = {node_id: "idle" for node_id in graph.nodes}
         node_outputs: dict[str, dict[str, Any]] = {}
+        node_output_fingerprints: dict[str, str] = {}
         errors: dict[str, dict[str, Any]] = {}
         executed: list[str] = []
         self._persist()
@@ -449,6 +457,67 @@ class WorkflowScheduler:
                     )
                 )
                 node_record.resolved_inputs_summary = self.redactor(_summarize(inputs))
+                configuration = self._configuration(node)
+                incoming_fingerprints = {
+                    ":".join((
+                        edge["id"], edge["source_node"], edge["source_port"], edge["target_port"],
+                    )): node_output_fingerprints[edge["source_node"]]
+                    for edge in graph.incoming[node_id]
+                }
+                pinned = node.get("type") == "stub.output" and configuration.get("pinned") is True
+                fingerprint_inputs = {} if pinned else inputs
+                fingerprint_upstream = {} if pinned else incoming_fingerprints
+                components = fingerprint_components(
+                    node,
+                    configuration,
+                    fingerprint_inputs,
+                    fingerprint_upstream,
+                    adapter_schema_version=int(get_node_type(node["type"]).get("cache_schema_version", 1)),
+                )
+                fingerprint = canonical_fingerprint(components)
+                node_record.fingerprint = fingerprint
+
+                if pinned:
+                    result = {"value": configuration.get("payload")}
+                    self._validate_outputs(node, result)
+                    node_outputs[node_id] = result
+                    output_fp = output_fingerprint(result, {})
+                    node_output_fingerprints[node_id] = output_fp
+                    node_record.outputs_summary = self.redactor(_summarize(result))
+                    node_record.cache = {"hit": True, "reason": "pinned_payload"}
+                    node_record.duration_ms = 0
+                    self._status(statuses, node_id, "succeeded")
+                    executed.append(node_id)
+                    continue
+
+                lookup = self.cache.lookup(
+                    workflow_id=str(self.workflow.get("workflow_id", "")),
+                    project_id=self.project_id,
+                    node_id=node_id,
+                    fingerprint=fingerprint,
+                    components=components,
+                    force=self.force,
+                )
+                node_record.cache = {"hit": lookup.hit, "reason": lookup.reason}
+                if lookup.hit:
+                    result = dict(lookup.outputs or {})
+                    try:
+                        self._validate_outputs(node, result)
+                    except SchedulerError:
+                        lookup = CacheLookup(False, "cache_corrupt")
+                        node_record.cache = {"hit": False, "reason": lookup.reason}
+                    else:
+                        node_outputs[node_id] = result
+                        node_output_fingerprints[node_id] = lookup.output_fingerprint or output_fingerprint(result, {})
+                        node_record.outputs_summary = self.redactor(_summarize(result))
+                        node_record.artifact_refs = self.redactor(_artifact_refs(result))
+                        node_record.duration_ms = 0
+                        self._status(statuses, node_id, "succeeded")
+                        executed.append(node_id)
+                        continue
+
+                if lookup.reason not in {"no_prior_success", "forced_regeneration"}:
+                    self._status(statuses, node_id, "stale")
                 node_record.attempts += 1
                 self._status(statuses, node_id, "running")
                 started = time.perf_counter()
@@ -461,7 +530,7 @@ class WorkflowScheduler:
                     stop_requested=self.stop_requested,
                 )
                 try:
-                    result = self.executor_resolver(node)(inputs, self._configuration(node), context)
+                    result = self.executor_resolver(node)(inputs, configuration, context)
                     if self.stop_requested():
                         raise CancellationRequested()
                     if not isinstance(result, Mapping):
@@ -472,6 +541,24 @@ class WorkflowScheduler:
                     node_outputs[node_id] = result
                     node_record.outputs_summary = self.redactor(_summarize(result))
                     node_record.artifact_refs = self.redactor(_artifact_refs(result))
+                    if self.redactor(result) != result:
+                        output_fp, cache_failure = None, "sensitive_output"
+                    else:
+                        output_fp, cache_failure = self.cache.store(
+                            workflow_id=str(self.workflow.get("workflow_id", "")),
+                            project_id=self.project_id,
+                            node_id=node_id,
+                            fingerprint=fingerprint,
+                            components=components,
+                            outputs=result,
+                            artifact_refs=_artifact_refs(result),
+                        )
+                    if output_fp is None:
+                        # Execution remains successful; the reason explains why
+                        # this result cannot safely be reused.
+                        node_record.cache = {"hit": False, "reason": cache_failure}
+                        output_fp = output_fingerprint(result, {})
+                    node_output_fingerprints[node_id] = output_fp
                     node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
                     self._status(statuses, node_id, "succeeded")
                 except CancellationRequested:

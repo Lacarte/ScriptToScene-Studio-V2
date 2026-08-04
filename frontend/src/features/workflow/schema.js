@@ -112,7 +112,9 @@ export function nodeIssues(node, def, edges) {
 
   // Sample Input payloads are typed sample data (step 2.5) — validate them
   // against the selected port type, not just "is JSON".
-  if (node.type === 'stub.input') {
+  if (node.type === 'stub.input' || (
+    node.type === 'stub.output' && configuration.pinned === true
+  )) {
     const portType = configuration.port_type ?? 'generic_json'
     const payload = Object.hasOwn(configuration, 'payload') ? configuration.payload : {}
     for (const message of validateStubPayload(portType, payload)) {
