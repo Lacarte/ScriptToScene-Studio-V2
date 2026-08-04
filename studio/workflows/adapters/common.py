@@ -29,6 +29,10 @@ class AdapterContext:
     progress: Callable[[str], None] | None = None
     stop_requested: Callable[[], bool] | None = None
     authorize_existing_replace: bool = False
+    # Adapters which create a new artifact may ask the scheduler for a path
+    # that is invisible to readers until the node succeeds.  Existing
+    # adapters remain compatible while they are migrated to staged writes.
+    stage_artifact: Callable[[str], str] | None = None
 
 
 def context_value(context: AdapterContext | Mapping[str, Any], name: str, default=None):

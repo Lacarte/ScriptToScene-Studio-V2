@@ -1,0 +1,359 @@
+"""Deterministic, sequential workflow scheduling and project serialization.
+
+The scheduler deliberately contains no Flask state.  It consumes a validated
+workflow snapshot and invokes registry adapters directly, which makes ordering
+and readiness independently testable.
+"""
+
+from __future__ import annotations
+
+import heapq
+import importlib
+import json
+import os
+import shutil
+import tempfile
+import threading
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
+from typing import Any, Callable, Mapping
+
+from config import OUTPUT_DIR
+from studio.security import safe_join
+
+from .adapters import AdapterContext, AdapterError
+from .adapters.common import PROJECT_ID_RE
+from .registry import get_node_type
+from .validation import validate_workflow, validation_errors
+
+
+class SchedulerError(RuntimeError):
+    def __init__(self, code: str, message: str, *, details: Any = None):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.details = details
+
+
+class ProjectLockedError(SchedulerError):
+    def __init__(self, project_id: str):
+        super().__init__(
+            "PROJECT_LOCKED",
+            f"Project {project_id} already has an active execution",
+            details={"project_id": project_id},
+        )
+
+
+class ProjectLock(AbstractContextManager):
+    """Non-blocking in-process and cross-process lock for one project."""
+
+    _guard = threading.Lock()
+    _held: set[str] = set()
+
+    def __init__(self, project_id: str, *, lock_root: str | None = None, execution_id: str = ""):
+        if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
+            raise SchedulerError("PROJECT_ID_INVALID", "A strict pp_/pm_ project ID is required")
+        self.project_id = project_id
+        self.execution_id = execution_id
+        self.lock_root = lock_root or os.path.join(OUTPUT_DIR, "workflows", "locks")
+        self.path = safe_join(self.lock_root, f"{project_id}.lock")
+        self._lock_key = os.path.normcase(os.path.abspath(self.path))
+        self._acquired = False
+
+    def acquire(self) -> "ProjectLock":
+        os.makedirs(self.lock_root, exist_ok=True)
+        with self._guard:
+            if self._lock_key in self._held:
+                raise ProjectLockedError(self.project_id)
+            self._held.add(self._lock_key)
+        try:
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            fd = os.open(self.path, flags, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "project_id": self.project_id,
+                    "execution_id": self.execution_id,
+                    "pid": os.getpid(),
+                }, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except FileExistsError as exc:
+            with self._guard:
+                self._held.discard(self._lock_key)
+            raise ProjectLockedError(self.project_id) from exc
+        except BaseException:
+            with self._guard:
+                self._held.discard(self._lock_key)
+            raise
+        self._acquired = True
+        return self
+
+    def release(self) -> None:
+        if not self._acquired:
+            return
+        try:
+            os.unlink(self.path)
+        except FileNotFoundError:
+            pass
+        finally:
+            with self._guard:
+                self._held.discard(self._lock_key)
+            self._acquired = False
+
+    def __enter__(self) -> "ProjectLock":
+        return self.acquire()
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        self.release()
+        return False
+
+
+class ArtifactPromoter:
+    """Give adapters staged paths and atomically publish them after success."""
+
+    def __init__(self, *, output_dir: str = OUTPUT_DIR, execution_id: str = "execution"):
+        self.output_dir = os.path.abspath(output_dir)
+        staging_root = os.path.join(self.output_dir, "workflows", ".staging")
+        os.makedirs(staging_root, exist_ok=True)
+        self.staging_dir = tempfile.mkdtemp(prefix=f"{execution_id}_", dir=staging_root)
+        self._pending: list[tuple[str, str]] = []
+
+    def stage_path(self, destination: str) -> str:
+        destination = self._destination(destination)
+        suffix = os.path.splitext(destination)[1]
+        fd, staged = tempfile.mkstemp(prefix="artifact_", suffix=suffix, dir=self.staging_dir)
+        os.close(fd)
+        os.unlink(staged)  # callers commonly require a path which does not exist
+        self._pending.append((staged, destination))
+        return staged
+
+    def _destination(self, destination: str) -> str:
+        candidate = destination if os.path.isabs(destination) else safe_join(self.output_dir, destination)
+        candidate = os.path.abspath(candidate)
+        try:
+            inside = os.path.commonpath([self.output_dir, candidate]) == self.output_dir
+        except ValueError:
+            inside = False
+        if not inside:
+            raise SchedulerError("ARTIFACT_UNMANAGED", "Artifact destination is outside the managed output directory")
+        return candidate
+
+    def promote(self) -> None:
+        for staged, destination in self._pending:
+            if not os.path.isfile(staged):
+                raise SchedulerError("ARTIFACT_MISSING", f"Staged artifact was not created: {staged}")
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            # Copy into the destination directory first.  os.replace then
+            # publishes on the destination filesystem in one atomic step.
+            fd, local_stage = tempfile.mkstemp(prefix=".promote_", dir=os.path.dirname(destination))
+            os.close(fd)
+            try:
+                shutil.copy2(staged, local_stage)
+                os.replace(local_stage, destination)
+            finally:
+                try:
+                    os.unlink(local_stage)
+                except FileNotFoundError:
+                    pass
+        self._pending.clear()
+
+    def cleanup(self) -> None:
+        shutil.rmtree(self.staging_dir, ignore_errors=True)
+
+
+@dataclass
+class ScheduleResult:
+    status: str
+    order: list[str]
+    node_statuses: dict[str, str]
+    outputs: dict[str, dict[str, Any]]
+    errors: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class WorkflowGraph:
+    nodes: dict[str, dict]
+    incoming: dict[str, list[dict]]
+    dependents: dict[str, list[str]]
+    saved_order: dict[str, int]
+
+
+def build_graph(workflow: Mapping[str, Any]) -> WorkflowGraph:
+    nodes = {node["id"]: node for node in workflow.get("nodes", [])}
+    incoming = {node_id: [] for node_id in nodes}
+    dependents = {node_id: [] for node_id in nodes}
+    for edge in workflow.get("edges", []):
+        incoming[edge["target_node"]].append(edge)
+        dependents[edge["source_node"]].append(edge["target_node"])
+    return WorkflowGraph(
+        nodes=nodes,
+        incoming=incoming,
+        dependents=dependents,
+        saved_order={node["id"]: index for index, node in enumerate(workflow.get("nodes", []))},
+    )
+
+
+def deterministic_order(workflow: Mapping[str, Any]) -> list[str]:
+    """Return stable topological order (saved node order, then node ID)."""
+    graph = build_graph(workflow)
+    remaining = {node_id: len(edges) for node_id, edges in graph.incoming.items()}
+    ready = [(graph.saved_order[node_id], node_id) for node_id, count in remaining.items() if count == 0]
+    heapq.heapify(ready)
+    order: list[str] = []
+    while ready:
+        _, node_id = heapq.heappop(ready)
+        order.append(node_id)
+        for target in graph.dependents[node_id]:
+            remaining[target] -= 1
+            if remaining[target] == 0:
+                heapq.heappush(ready, (graph.saved_order[target], target))
+    if len(order) != len(graph.nodes):
+        raise SchedulerError("CYCLE_DETECTED", "Workflow connections must form a DAG")
+    return order
+
+
+def dependency_maps(workflow: Mapping[str, Any]) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Return predecessor and reverse/dependent maps for scope calculations."""
+    graph = build_graph(workflow)
+    dependencies = {
+        node_id: {edge["source_node"] for edge in edges}
+        for node_id, edges in graph.incoming.items()
+    }
+    reverse_dependencies = {
+        node_id: set(targets) for node_id, targets in graph.dependents.items()
+    }
+    return dependencies, reverse_dependencies
+
+
+def resolve_executor(node: Mapping[str, Any]) -> Callable:
+    definition = get_node_type(node.get("type"))
+    spec = definition.get("executor") if definition else None
+    if not spec or ":" not in spec:
+        raise SchedulerError("NODE_EXECUTOR_MISSING", f"No executor is registered for {node.get('type')}")
+    module_name, function_name = spec.split(":", 1)
+    function = getattr(importlib.import_module(module_name), function_name, None)
+    if not callable(function):
+        raise SchedulerError("NODE_EXECUTOR_MISSING", f"Executor {spec} is not callable")
+    return function
+
+
+class WorkflowScheduler:
+    def __init__(
+        self,
+        workflow: Mapping[str, Any],
+        *,
+        project_id: str,
+        execution_id: str = "",
+        executor_resolver: Callable[[Mapping[str, Any]], Callable] = resolve_executor,
+        lock_root: str | None = None,
+        output_dir: str = OUTPUT_DIR,
+        on_status: Callable[[str, str], None] | None = None,
+    ):
+        problems = validation_errors(validate_workflow(dict(workflow), require_complete=True))
+        if problems:
+            raise SchedulerError("WORKFLOW_INVALID", "Workflow has validation errors", details={"problems": problems})
+        if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
+            raise SchedulerError("PROJECT_ID_INVALID", "A strict pp_/pm_ project ID is required")
+        self.workflow = dict(workflow)
+        self.project_id = project_id
+        self.execution_id = execution_id
+        self.executor_resolver = executor_resolver
+        self.lock_root = lock_root
+        self.output_dir = output_dir
+        self.on_status = on_status
+
+    def run(self) -> ScheduleResult:
+        graph = build_graph(self.workflow)
+        order = deterministic_order(self.workflow)
+        statuses = {node_id: "idle" for node_id in graph.nodes}
+        node_outputs: dict[str, dict[str, Any]] = {}
+        errors: dict[str, dict[str, Any]] = {}
+        executed: list[str] = []
+
+        with ProjectLock(self.project_id, lock_root=self.lock_root, execution_id=self.execution_id):
+            stopped = False
+            for node_id in order:
+                node = graph.nodes[node_id]
+                predecessor_statuses = [statuses[edge["source_node"]] for edge in graph.incoming[node_id]]
+                if stopped or node.get("disabled") or any(status != "succeeded" for status in predecessor_statuses):
+                    self._status(statuses, node_id, "skipped")
+                    executed.append(node_id)
+                    continue
+
+                inputs = self._resolve_inputs(node_id, graph, node_outputs)
+                self._status(statuses, node_id, "running")
+                promoter = ArtifactPromoter(output_dir=self.output_dir, execution_id=self.execution_id or node_id)
+                context = AdapterContext(
+                    project_id=self.project_id,
+                    execution_id=self.execution_id,
+                    node_id=node_id,
+                    stage_artifact=promoter.stage_path,
+                )
+                try:
+                    result = self.executor_resolver(node)(inputs, self._configuration(node), context)
+                    if not isinstance(result, Mapping):
+                        raise SchedulerError("NODE_OUTPUT_INVALID", f"Node {node_id} returned a non-object output")
+                    result = dict(result)
+                    self._validate_outputs(node, result)
+                    promoter.promote()
+                    node_outputs[node_id] = result
+                    self._status(statuses, node_id, "succeeded")
+                except (AdapterError, SchedulerError) as exc:
+                    code = getattr(exc, "code", "NODE_EXECUTION_FAILED")
+                    errors[node_id] = {"code": code, "message": str(exc), "details": getattr(exc, "details", None)}
+                    self._status(statuses, node_id, "failed")
+                    stopped = True
+                except Exception as exc:  # adapters are a plugin boundary
+                    errors[node_id] = {"code": "NODE_EXECUTION_FAILED", "message": str(exc), "details": None}
+                    self._status(statuses, node_id, "failed")
+                    stopped = True
+                finally:
+                    promoter.cleanup()
+                executed.append(node_id)
+
+        overall = "failed" if errors else "succeeded"
+        return ScheduleResult(overall, executed, statuses, node_outputs, errors)
+
+    def _status(self, statuses: dict[str, str], node_id: str, status: str) -> None:
+        statuses[node_id] = status
+        if self.on_status:
+            self.on_status(node_id, status)
+
+    @staticmethod
+    def _configuration(node: Mapping[str, Any]) -> dict[str, Any]:
+        definition = get_node_type(node["type"])
+        config = {
+            field["name"]: field["default"]
+            for field in definition.get("config_schema", [])
+            if "default" in field
+        }
+        config.update(node.get("configuration") or {})
+        return config
+
+    @staticmethod
+    def _resolve_inputs(node_id: str, graph: WorkflowGraph, outputs: Mapping[str, Mapping[str, Any]]) -> dict:
+        resolved: dict[str, Any] = {}
+        for edge in graph.incoming[node_id]:
+            value = outputs[edge["source_node"]][edge["source_port"]]
+            target_port = edge["target_port"]
+            definition = get_node_type(graph.nodes[node_id]["type"])
+            port = next(item for item in definition["inputs"] if item["id"] == target_port)
+            if port.get("multiple"):
+                resolved.setdefault(target_port, []).append(value)
+            else:
+                resolved[target_port] = value
+        return resolved
+
+    @staticmethod
+    def _validate_outputs(node: Mapping[str, Any], outputs: Mapping[str, Any]) -> None:
+        definition = get_node_type(node["type"])
+        for port in definition.get("outputs", []):
+            if port["id"] not in outputs:
+                raise SchedulerError(
+                    "NODE_OUTPUT_MISSING",
+                    f"Node {node['id']} did not produce output port {port['id']}",
+                )
+
+
+# Short alias for callers which prefer the plan's noun.
+Scheduler = WorkflowScheduler
