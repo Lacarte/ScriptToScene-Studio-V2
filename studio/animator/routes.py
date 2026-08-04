@@ -304,6 +304,7 @@ def _handle_ws_message(msg):
         with _pending_grabber_lock:
             _pending_grabber = None
         logger.success("Grok ← JOB_COMPLETE {} ({}/{} typed, {} failed)", pid, typed, total, failed)
+        _finalize_animator_job(pid, failed)
     elif msg_type == "ASSET_UPLOAD":
         pid = msg.get("projectId", "?")
         scene = msg.get("scene", "?")
@@ -395,6 +396,24 @@ def _handle_progress(msg):
         if scene:
             scene["status"] = "processing"
             scene["percentage"] = percentage
+
+
+def _finalize_animator_job(project_id, failed_count):
+    """Sweep non-ready scenes to 'error' and mark the job done on JOB_COMPLETE."""
+    from studio.animator.animation_routes import _get_job, _save_job, _mark_job_done
+    job = _get_job(project_id)
+    if not job:
+        return
+    swept = 0
+    for key, scene in job.get("scene_statuses", {}).items():
+        if scene.get("status") not in ("ready", "error", "downloaded"):
+            scene["status"] = "error"
+            scene["error"] = "Generation failed (reported by extension)"
+            swept += 1
+    _mark_job_done(job)
+    _save_job(job)
+    if swept:
+        logger.warning("JOB_COMPLETE {}: swept {} non-ready scene(s) to error", project_id, swept)
 
 
 def _handle_asset_upload_ws(msg):
