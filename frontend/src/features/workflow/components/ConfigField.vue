@@ -1,16 +1,25 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useOptionSource } from '../composables/useOptionSources.js'
+import MediaAssetField from './MediaAssetField.vue'
 
 /**
  * One schema field → one widget (n8n ParameterInput pattern).
  * Widget chosen by `field.type`: string, textarea, number, boolean,
- * options, json, media_asset. Emits `update` with the new value.
+ * options (static or allowlisted async source), json, media_asset.
+ * Emits `update` with the new value.
  */
 const props = defineProps({
   field: { type: Object, required: true },
-  value: { required: true },
+  value: { required: false, default: undefined },
 })
 const emit = defineEmits(['update'])
+
+// Async sources resolve through the backend allowlist; the composable
+// caches one fetch per source for the whole session.
+const asyncOptions = props.field.type === 'options' && props.field.options_source
+  ? useOptionSource(props.field.options_source)
+  : null
 
 const jsonText = ref('')
 const jsonError = ref('')
@@ -49,10 +58,21 @@ function onNumberInput(event) {
   emit('update', clamped)
 }
 
-const staticOptions = computed(() => props.field.options || [])
-const isAsyncOptions = computed(
-  () => props.field.type === 'options' && !props.field.options && props.field.options_source,
-)
+const selectOptions = computed(() => {
+  const listed = asyncOptions
+    ? asyncOptions.value.options
+    : (props.field.options || []).map((opt) => ({ value: opt, label: opt === '' ? '—' : String(opt) }))
+  const current = props.value ?? props.field.default ?? ''
+  // Keep a stored value visible even when it isn't offered any more
+  // (older document, renamed provider) instead of silently showing option 0.
+  if (current !== '' && !listed.some((opt) => opt.value === current)) {
+    return [{ value: current, label: `${current} (unavailable)` }, ...listed]
+  }
+  return listed
+})
+
+const optionsLoading = computed(() => Boolean(asyncOptions?.value.loading))
+const optionsError = computed(() => asyncOptions?.value.error || '')
 </script>
 
 <template>
@@ -117,22 +137,22 @@ const isAsyncOptions = computed(
       <span class="cfg-toggle-hint">{{ value ? 'On' : 'Off' }}</span>
     </span>
 
-    <!-- options (static now; async sources resolve in step 2.3) -->
-    <select
-      v-else-if="field.type === 'options'"
-      class="cfg-input cfg-select"
-      :value="value ?? field.default ?? ''"
-      :disabled="isAsyncOptions"
-      :title="isAsyncOptions ? `Options load from ${field.options_source} (step 2.3)` : ''"
-      @change="emit('update', $event.target.value)"
-    >
-      <option v-if="isAsyncOptions" :value="value ?? field.default ?? ''">
-        {{ value || field.default || '—' }}
-      </option>
-      <option v-for="opt in staticOptions" :key="String(opt)" :value="opt">
-        {{ opt === '' ? '—' : opt }}
-      </option>
-    </select>
+    <!-- options (static, or resolved through the backend allowlist) -->
+    <span v-else-if="field.type === 'options'" class="cfg-json">
+      <select
+        class="cfg-input cfg-select"
+        :value="value ?? field.default ?? ''"
+        :disabled="optionsLoading"
+        :title="optionsLoading ? 'Loading options…' : ''"
+        @change="emit('update', $event.target.value)"
+      >
+        <option v-if="optionsLoading" :value="value ?? field.default ?? ''">Loading…</option>
+        <option v-for="opt in selectOptions" :key="String(opt.value)" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
+      <span v-if="optionsError" class="cfg-error">{{ optionsError }}</span>
+    </span>
 
     <!-- json -->
     <span v-else-if="field.type === 'json'" class="cfg-json">
@@ -146,10 +166,13 @@ const isAsyncOptions = computed(
       <span v-if="jsonError" class="cfg-error">{{ jsonError }}</span>
     </span>
 
-    <!-- media_asset (managed upload widget lands in step 2.3) -->
-    <span v-else-if="field.type === 'media_asset'" class="cfg-note">
-      Managed media picker arrives in step 2.3
-    </span>
+    <!-- media_asset: managed reference into output/branding/ -->
+    <MediaAssetField
+      v-else-if="field.type === 'media_asset'"
+      :field="field"
+      :value="value"
+      @update="(asset) => emit('update', asset)"
+    />
 
     <span v-else class="cfg-note">Unsupported field type: {{ field.type }}</span>
 

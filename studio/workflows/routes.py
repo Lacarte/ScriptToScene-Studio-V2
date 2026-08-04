@@ -1,10 +1,14 @@
 """Flask blueprint for workflow registry and definition persistence."""
 
+import io
 import json
+import os
+import uuid
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request, send_from_directory
 
-from studio.security import is_loopback_remote
+from config import BRANDING_DIR
+from studio.security import is_loopback_remote, sanitize_folder_name
 from .models import copy_draft
 from .persistence import (
     WorkflowConflict,
@@ -17,9 +21,13 @@ from .persistence import (
     load_workflow,
     update_workflow,
 )
+from .options import resolve_options
 from .registry import serialize_registry
 from .templates import serialize_templates
 from .validation import MAX_DOCUMENT_BYTES, validate_workflow
+
+BRANDING_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
+MAX_BRANDING_BYTES = 5 * 1024 * 1024
 
 workflows_bp = Blueprint("workflows", __name__)
 
@@ -77,6 +85,89 @@ def workflow_templates():
     if denied:
         return denied
     return jsonify({"templates": serialize_templates()})
+
+
+@workflows_bp.route("/api/workflow/options/<source>", methods=["GET"])
+def workflow_options(source):
+    """Resolve an allowlisted async option source (contracts §11)."""
+    denied = _require_loopback()
+    if denied:
+        return denied
+    try:
+        options = resolve_options(source)
+    except RuntimeError as exc:
+        return _error("PROVIDER_UNAVAILABLE", str(exc), 503)
+    if options is None:
+        return _error("NOT_FOUND", f"Unknown option source: {source[:80]}", 404)
+    return jsonify({"source": source, "options": options})
+
+
+def _branding_asset(filename):
+    path = os.path.join(BRANDING_DIR, filename)
+    return {
+        "ref": f"branding/{filename}",
+        "filename": filename,
+        "size": os.path.getsize(path),
+        "url": f"/output/branding/{filename}",
+    }
+
+
+@workflows_bp.route("/api/workflow/branding", methods=["GET"])
+def branding_list():
+    denied = _require_loopback()
+    if denied:
+        return denied
+    os.makedirs(BRANDING_DIR, exist_ok=True)
+    assets = []
+    for name in sorted(os.listdir(BRANDING_DIR)):
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext in BRANDING_EXTENSIONS:
+            assets.append(_branding_asset(name))
+    return jsonify({"assets": assets})
+
+
+@workflows_bp.route("/api/workflow/branding", methods=["POST"])
+def branding_upload():
+    """Managed logo upload (contracts §11): extension + MIME + size + decode
+    validation into output/branding/ — never raw filesystem paths."""
+    denied = _require_loopback()
+    if denied:
+        return denied
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return _error("BAD_REQUEST", "Multipart field 'file' is required", 400)
+
+    original = upload.filename
+    ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
+    if ext not in BRANDING_EXTENSIONS:
+        return _error("BAD_REQUEST", "Only png, jpg, jpeg, or webp logos are allowed", 400)
+    if not (upload.mimetype or "").startswith("image/"):
+        return _error("BAD_REQUEST", "Upload must be an image", 400)
+
+    data = upload.read(MAX_BRANDING_BYTES + 1)
+    if len(data) > MAX_BRANDING_BYTES:
+        return _error("REQUEST_TOO_LARGE", "Logo exceeds the 5 MB limit", 413)
+    if not data:
+        return _error("BAD_REQUEST", "Uploaded file is empty", 400)
+
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as image:
+            image.verify()
+    except Exception:
+        return _error("BAD_REQUEST", "File is not a decodable image", 400)
+
+    stem = sanitize_folder_name(original.rsplit(".", 1)[0], max_len=40) or "logo"
+    filename = f"{stem}_{uuid.uuid4().hex[:8]}.{ext}"
+    os.makedirs(BRANDING_DIR, exist_ok=True)
+    with open(os.path.join(BRANDING_DIR, filename), "wb") as handle:
+        handle.write(data)
+    return jsonify({"asset": _branding_asset(filename)}), 201
+
+
+@workflows_bp.route("/output/branding/<path:filename>")
+def serve_branding(filename):
+    return send_from_directory(BRANDING_DIR, filename)
 
 
 @workflows_bp.route("/api/workflow/validate", methods=["POST"])

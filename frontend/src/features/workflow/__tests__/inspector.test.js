@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import ConfigField from '../components/ConfigField.vue'
 import NodeInspector from '../components/NodeInspector.vue'
 import { useWorkflowStore } from '../stores/workflow.js'
+import { clearOptionSourceCache } from '../composables/useOptionSources.js'
+import { api } from '@/shared/api/client.js'
 
 function mountField(field, value) {
   return mount(ConfigField, { props: { field, value } })
@@ -54,14 +56,58 @@ describe('ConfigField widgets', () => {
     expect(wrapper.emitted('update').at(-1)).toEqual(['image'])
   })
 
-  it('disables async options until step 2.3 without losing the value', () => {
+  it('loads async options through the backend allowlist', async () => {
+    clearOptionSourceCache()
+    vi.spyOn(api, 'get').mockResolvedValue({
+      source: 'tts_voices',
+      options: [
+        { value: 'af_heart', label: 'af_heart' },
+        { value: 'bm_fable', label: 'bm_fable' },
+      ],
+    })
     const wrapper = mountField(
       { name: 'voice', label: 'Voice', type: 'options', options_source: 'tts_voices', default: 'af_heart' },
       'af_heart',
     )
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith('/api/workflow/options/tts_voices')
     const select = wrapper.get('select')
-    expect(select.element.disabled).toBe(true)
-    expect(select.element.value).toBe('af_heart')
+    expect(select.element.disabled).toBe(false)
+    const values = wrapper.findAll('option').map((o) => o.element.value)
+    expect(values).toEqual(['af_heart', 'bm_fable'])
+    await select.setValue('bm_fable')
+    expect(wrapper.emitted('update').at(-1)).toEqual(['bm_fable'])
+    vi.restoreAllMocks()
+  })
+
+  it('keeps an unavailable stored value visible instead of showing option 0', async () => {
+    clearOptionSourceCache()
+    vi.spyOn(api, 'get').mockResolvedValue({
+      source: 'tts_voices',
+      options: [{ value: 'af_heart', label: 'af_heart' }],
+    })
+    const wrapper = mountField(
+      { name: 'voice', label: 'Voice', type: 'options', options_source: 'tts_voices', default: 'af_heart' },
+      'retired_voice',
+    )
+    await flushPromises()
+    const labels = wrapper.findAll('option').map((o) => o.text())
+    expect(labels[0]).toContain('retired_voice (unavailable)')
+    expect(wrapper.get('select').element.value).toBe('retired_voice')
+    vi.restoreAllMocks()
+  })
+
+  it('media_asset renders the managed picker and emits removal', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ assets: [] })
+    const wrapper = mountField(
+      { name: 'logo', label: 'Logo', type: 'media_asset', accept: ['png'], default: null },
+      { ref: 'branding/logo_ab12.png', filename: 'logo.png', url: '/output/branding/logo_ab12.png' },
+    )
+    await flushPromises()
+    expect(wrapper.get('img').attributes('src')).toBe('/output/branding/logo_ab12.png')
+    await wrapper.get('.media-btn.danger').trigger('click')
+    expect(wrapper.emitted('update').at(-1)).toEqual([null])
+    vi.restoreAllMocks()
   })
 
   it('json widget validates before emitting', async () => {
