@@ -323,6 +323,50 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   const nodeCount = computed(() => nodes.value.length)
 
+  // ── Selection + inspector editing (step 2.1) ──────────────────────────
+  const selectedNodeId = ref(null)
+  const selectedNode = computed(() => nodeById(selectedNodeId.value))
+
+  function selectNode(nodeId) {
+    selectedNodeId.value = nodeId
+  }
+
+  function clearSelection() {
+    selectedNodeId.value = null
+  }
+
+  function updateNodeConfig(nodeId, name, value) {
+    const node = nodeById(nodeId)
+    if (!node) return
+    node.configuration[name] = value
+    dirty.value = true
+  }
+
+  function setNodeDisabled(nodeId, disabled) {
+    const node = nodeById(nodeId)
+    if (!node) return
+    node.disabled = Boolean(disabled)
+    dirty.value = true
+  }
+
+  function duplicateNode(nodeId) {
+    const source = nodeById(nodeId)
+    if (!source) return null
+    const copy = {
+      id: nextNodeId(),
+      type: source.type,
+      type_version: source.type_version,
+      name: `${source.name} copy`,
+      position: { x: source.position.x + 40, y: source.position.y + 40 },
+      configuration: plain(source.configuration),
+      disabled: source.disabled,
+    }
+    nodes.value.push(copy)
+    dirty.value = true
+    selectedNodeId.value = copy.id
+    return copy
+  }
+
   return {
     // registry
     registryVersion, nodeTypes, categories, portTypes,
@@ -335,5 +379,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     setViewport, nodeById, defaultsFor, toDocument, applyDocument, newWorkflow,
     refreshWorkflowList, loadTemplates, openWorkflow, saveWorkflow, saveAs,
     importDocument, applyTemplate,
+    // selection + inspector
+    selectedNodeId, selectedNode, selectNode, clearSelection,
+    updateNodeConfig, setNodeDisabled, duplicateNode,
   }
 })

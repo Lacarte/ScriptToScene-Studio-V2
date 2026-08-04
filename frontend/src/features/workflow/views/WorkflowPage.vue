@@ -15,6 +15,7 @@ import { validateConnection } from '../validation.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import NodeCard from '../components/NodeCard.vue'
+import NodeInspector from '../components/NodeInspector.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
@@ -311,6 +312,8 @@ function onExport() {
           :is-valid-connection="isValidConnection"
           fit-view-on-init
           @connect="onConnect"
+          @node-click="({ node }) => store.selectNode(node.id)"
+          @pane-click="store.clearSelection"
           @node-drag-stop="onNodeDragStop"
           @nodes-change="onNodesChange"
           @edges-change="onEdgesChange"
@@ -328,7 +331,7 @@ function onExport() {
       <!-- Right — node inspector -->
       <aside class="wf-inspector">
         <div class="wf-panel-header">Inspector</div>
-        <div class="wf-panel-empty">Select a node to configure it (step 2.1)</div>
+        <NodeInspector />
       </aside>
     </div>
 
