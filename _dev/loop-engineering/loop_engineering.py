@@ -1,9 +1,10 @@
 """Loop-engineering orchestrator for the workflow-builder upgrade.
 
-Parses _dev/upgrade/implementation-plan.md into phases/steps (the markdown
-stays the single source of truth), tracks progress in _dev/loop/state.json,
-and drives an execute -> validate -> correct -> review -> commit cycle per
-step until the requested phase (or step) is complete.
+Parses _dev/loop-engineering/phases-plans/implementation-plan.md into
+phases/steps (the markdown stays the single source of truth), tracks
+progress in _dev/loop-engineering/runtime/state.json, and drives an
+execute -> validate -> correct -> review -> commit cycle per step until
+the requested phase (or step) is complete.
 
 The orchestrator NEVER trusts an agent's claim of success: after every agent
 invocation it runs pytest, vitest, and the production build itself, and only
@@ -31,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PLAN_PATH = ROOT / "_dev" / "upgrade" / "implementation-plan.md"
+PLAN_PATH = ROOT / "_dev" / "loop-engineering" / "phases-plans" / "implementation-plan.md"
 LOOP_DIR = ROOT / "_dev" / "loop-engineering" / "runtime"
 STATE_PATH = LOOP_DIR / "state.json"
 LOG_DIR = LOOP_DIR / "logs"
@@ -221,7 +222,7 @@ def head_commit() -> str:
 
 AGREEMENTS = (
     "Working agreements: implement ONLY this step (do not start other steps); "
-    "follow existing conventions and _dev/upgrade/contracts.md; run pytest, "
+    "follow existing conventions and _dev/loop-engineering/phases-plans/contracts.md; run pytest, "
     "'npm run test' and 'npm run build' (frontend/) and get them green BEFORE "
     "committing; finish with exactly one commit whose subject contains "
     "'step {step_id}'. Do not push."
@@ -231,7 +232,7 @@ AGREEMENTS = (
 def execute_prompt(step: Step) -> str:
     return (
         f"You are executing step {step.id} of the workflow-builder plan "
-        f"(_dev/upgrade/implementation-plan.md). Step {step.id}: {step.title}.\n\n"
+        f"(_dev/loop-engineering/phases-plans/implementation-plan.md). Step {step.id}: {step.title}.\n\n"
         f"Step description:\n{step.body}\n\n"
         f"Done when: {step.done_when}\n\n" + AGREEMENTS.format(step_id=step.id)
     )
@@ -249,8 +250,8 @@ def fix_prompt(step: Step, failure: str) -> str:
 def review_prompt(step: Step, before: str, after: str) -> str:
     return (
         f"Review the commits {before}..{after} implementing step {step.id} "
-        f"({step.title}) of _dev/upgrade/implementation-plan.md. Hunt for real "
-        f"bugs: correctness, contract violations vs _dev/upgrade/contracts.md, "
+        f"({step.title}) of _dev/loop-engineering/phases-plans/implementation-plan.md. Hunt for real "
+        f"bugs: correctness, contract violations vs _dev/loop-engineering/phases-plans/contracts.md, "
         f"security, edge cases. Fix what you find, run pytest and the frontend "
         f"suites until green, then commit fixes with subject "
         f"'fix(review): step {step.id}'. If nothing needs fixing, change nothing."

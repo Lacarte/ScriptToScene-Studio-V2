@@ -33,7 +33,7 @@ configuration and small deterministic fixture assets are allowed.
 ### 0.1 Artifact & step audit → node contract table
 Read `studio/pipeline/routes.py` step functions (`_step_tts` … `_step_export`, `_load_prior_results`, `_emit`) and each wrapped module. For every planned node, document: stable input/output **port IDs**, port types, required/optional and cardinality rules, exact input artifacts (file + dict shape), output artifacts, config keys actually consumed, cancellation/retry support, determinism, and side effects on `output/{project_id}/`.
 Resolve the open question: how Assemble treats storyboard images vs animation assets (audit `_step_assemble` at line 1919 and `_step_assets` at 1813) — encode the answer in the Assemble adapter contract.
-**Deliverable:** `_dev/upgrade/contracts.md` with the input/output contract table.
+**Deliverable:** `_dev/loop-engineering/phases-plans/contracts.md` with the input/output contract table.
 **Done when:** every node in the catalog maps to a real function + real artifacts; every edge in every built-in template names real ports; project/source-folder identity propagation is explicit; and discrepancies vs the spec are documented and resolved in favor of working behavior.
 
 ### 0.2 Freeze the machine contracts

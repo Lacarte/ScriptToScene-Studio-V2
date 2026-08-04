@@ -1,7 +1,7 @@
 # Loop Engineering
 
 Plan-aware orchestrator that executes the workflow-builder upgrade
-([../upgrade/implementation-plan.md](../upgrade/implementation-plan.md))
+([phases-plans/implementation-plan.md](phases-plans/implementation-plan.md))
 step by step: **execute → validate → correct → review → commit**, until the
 selected phase or step range is complete.
 
