@@ -9,13 +9,13 @@ The orchestrator NEVER trusts an agent's claim of success: after every agent
 invocation it runs pytest, vitest, and the production build itself, and only
 a green board lets a step be marked done.
 
-Usage (from the repo root):
-    python _dev/loop_engineering.py --status            # plan + progress
-    python _dev/loop_engineering.py --phase 2           # run until phase 2 done
-    python _dev/loop_engineering.py --until 2.5         # run through step 2.5
-    python _dev/loop_engineering.py --steps 1           # run exactly one step
-    python _dev/loop_engineering.py --dry-run --phase 2 # show what would run
-    python _dev/loop_engineering.py --mark-done-through 2.3
+Usage (from the repo root, or via run.bat in this folder):
+    python _dev/loop-engineering/loop_engineering.py --status
+    python _dev/loop-engineering/loop_engineering.py --phase 2
+    python _dev/loop-engineering/loop_engineering.py --until 2.5
+    python _dev/loop-engineering/loop_engineering.py --steps 1
+    python _dev/loop-engineering/loop_engineering.py --dry-run --phase 2
+    python _dev/loop-engineering/loop_engineering.py --mark-done-through 2.3
 Options: --reviewer codex|claude|none  --no-push  --max-fix-attempts N
 """
 
@@ -30,9 +30,9 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PLAN_PATH = ROOT / "_dev" / "upgrade" / "implementation-plan.md"
-LOOP_DIR = ROOT / "_dev" / "loop"
+LOOP_DIR = ROOT / "_dev" / "loop-engineering" / "runtime"
 STATE_PATH = LOOP_DIR / "state.json"
 LOG_DIR = LOOP_DIR / "logs"
 
