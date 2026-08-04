@@ -1,0 +1,5 @@
+# Sample fixtures are a frozen, manifest-hashed byte set (contracts.md §10).
+# Never convert their line endings — CRLF rewriting would break the SHA-256
+# manifest recorded by studio/workflows/fixtures/generate.py.
+studio/workflows/fixtures/** -text
+studio/workflows/fixtures/generate.py text eol=lf

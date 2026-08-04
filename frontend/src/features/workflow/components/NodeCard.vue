@@ -24,8 +24,18 @@ const outputs = computed(() => def.value.outputs || [])
 
 const issues = computed(() => store.issuesByNode[props.id] || [])
 
+// Sample-data stubs (step 2.5): half-height dashed cards with a "sample"
+// badge; dynamic handles take the colour of their configured port type.
+const isStub = computed(() => def.value.category === 'testing')
+const node = computed(() => store.nodeById(props.id))
+
+function resolvedType(port) {
+  if (port.type !== 'dynamic') return port.type
+  return node.value?.configuration?.port_type || 'generic_json'
+}
+
 function portColor(port) {
-  return PORT_COLORS[port.type] || PORT_COLORS.generic_json
+  return PORT_COLORS[resolvedType(port)] || PORT_COLORS.generic_json
 }
 
 function handleStyle(port, index, total) {
@@ -35,10 +45,14 @@ function handleStyle(port, index, total) {
     border: port.type === 'control' ? '1.5px dashed rgba(255,255,255,0.6)' : '1.5px solid rgba(0,0,0,0.45)',
   }
 }
+
+function handleTitle(port, required) {
+  return `${port.id} (${resolvedType(port)})${required ? ' — required' : ''}`
+}
 </script>
 
 <template>
-  <div class="node-card" :class="{ selected, disabled: data.disabled }">
+  <div class="node-card" :class="{ selected, disabled: data.disabled, stub: isStub }">
     <span class="node-strip" :style="{ background: color }" />
 
     <Handle
@@ -49,7 +63,7 @@ function handleStyle(port, index, total) {
       :position="Position.Left"
       class="node-handle"
       :style="handleStyle(port, i, inputs.length)"
-      :title="`${port.id} (${port.type})${port.required ? ' — required' : ''}`"
+      :title="handleTitle(port, port.required)"
     />
 
     <div class="node-body">
@@ -58,8 +72,9 @@ function handleStyle(port, index, total) {
       </span>
       <div class="node-text">
         <span class="node-name">{{ data.label }}</span>
-        <span class="node-type">{{ def.display_name }}</span>
+        <span v-if="!isStub" class="node-type">{{ def.display_name }}</span>
       </div>
+      <span v-if="isStub" class="stub-badge" :title="def.display_name">sample</span>
       <span
         v-if="issues.length"
         class="node-badge"
@@ -75,7 +90,7 @@ function handleStyle(port, index, total) {
       :position="Position.Right"
       class="node-handle"
       :style="handleStyle(port, i, outputs.length)"
-      :title="`${port.id} (${port.type})`"
+      :title="handleTitle(port, false)"
     />
   </div>
 </template>
@@ -100,6 +115,48 @@ function handleStyle(port, index, total) {
 
 .node-card.disabled {
   opacity: 0.45;
+}
+
+/* Sample-data stubs: half-height, dashed, visually secondary (step 2.5). */
+.node-card.stub {
+  min-width: 140px;
+  max-width: 190px;
+  border-style: dashed;
+  border-color: rgba(120, 113, 108, 0.9);
+  background: rgba(16, 20, 24, 0.75);
+}
+
+.node-card.stub .node-body {
+  padding: 4px 12px;
+  gap: 7px;
+}
+
+.node-card.stub .node-icon {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+}
+
+.node-card.stub .node-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary, #b5bcc4);
+}
+
+.stub-badge {
+  margin-left: auto;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a8a29e;
+  border: 1px dashed rgba(168, 162, 158, 0.6);
+  border-radius: 5px;
+  padding: 1px 4px;
+}
+
+.node-card.stub .node-badge {
+  margin-left: 4px;
 }
 
 .node-strip {

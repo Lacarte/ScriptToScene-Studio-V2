@@ -23,6 +23,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const nodeTypes = ref({})
   const categories = ref({})
   const portTypes = ref([])
+  const samplePayloads = ref({})
   const registryLoading = ref(false)
   const registryError = ref('')
 
@@ -36,6 +37,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       nodeTypes.value = data.node_types || {}
       categories.value = data.categories || {}
       portTypes.value = data.port_types || []
+      samplePayloads.value = data.sample_payloads || {}
     } catch (err) {
       registryError.value = err?.message || 'Failed to load node types'
     } finally {
@@ -228,23 +230,62 @@ export const useWorkflowStore = defineStore('workflow', () => {
   /**
    * Validate + create a connection. Returns the validation result;
    * on success the edge is appended in the persisted shape.
+   *
+   * Step 2.5: when a REAL edge lands on an input currently fed by a Sample
+   * Input stub, the stub edge (and the stub itself, unless it still feeds
+   * other inputs) is removed first — undoably via undoStubDetach().
    */
   function connectNodes({ sourceNode, sourcePort, targetNode, targetPort }) {
+    const sourceIsStub = nodeById(sourceNode)?.type === 'stub.input'
+    const stubEdge = sourceIsStub
+      ? null
+      : edges.value.find(
+        (e) => e.target_node === targetNode && e.target_port === targetPort
+          && nodeById(e.source_node)?.type === 'stub.input',
+      )
+    // Validate against the graph as it would look after the stub detaches,
+    // so replacing sample data with a real edge is never "input occupied".
+    const candidateEdges = stubEdge
+      ? edges.value.filter((e) => e.id !== stubEdge.id)
+      : edges.value
     const verdict = validateConnection(
-      { nodes: nodes.value, edges: edges.value, nodeTypes: nodeTypes.value, portTypes: portTypes.value },
+      { nodes: nodes.value, edges: candidateEdges, nodeTypes: nodeTypes.value, portTypes: portTypes.value },
       { sourceNode, sourcePort, targetNode, targetPort },
     )
     if (!verdict.ok) return verdict
-    edges.value.push({
+
+    let undoEntry = null
+    if (stubEdge) {
+      const stubNode = nodeById(stubEdge.source_node)
+      const stillFeedsOthers = edges.value.some(
+        (e) => e.source_node === stubNode.id && e.id !== stubEdge.id,
+      )
+      undoEntry = {
+        stubNode: stillFeedsOthers ? null : plain(stubNode),
+        stubEdge: plain(stubEdge),
+      }
+      edges.value = edges.value.filter((e) => e.id !== stubEdge.id)
+      if (!stillFeedsOthers) {
+        nodes.value = nodes.value.filter((n) => n.id !== stubNode.id)
+        if (selectedNodeId.value === stubNode.id) selectedNodeId.value = null
+      }
+    }
+
+    const edge = {
       id: nextEdgeId(),
       source_node: sourceNode,
       source_port: sourcePort,
       target_node: targetNode,
       target_port: targetPort,
       edge_type: verdict.edgeType,
-    })
+    }
+    edges.value.push(edge)
+    if (undoEntry) {
+      undoEntry.realEdgeId = edge.id
+      stubDetachUndo.value.push(undoEntry)
+    }
     markDocumentDirty()
-    return verdict
+    return { ...verdict, detachedStub: Boolean(undoEntry) }
   }
 
   function removeEdges(edgeIds) {
@@ -252,6 +293,137 @@ export const useWorkflowStore = defineStore('workflow', () => {
     if (!doomed.size) return
     edges.value = edges.value.filter((e) => !doomed.has(e.id))
     markDocumentDirty()
+  }
+
+  // ── Sample-data stubs (step 2.5) ──────────────────────────────────────
+  // {stubNode|null, stubEdge, realEdgeId} entries, newest last. Replaced by
+  // the full command stack in Phase 5.1.
+  const stubDetachUndo = ref([])
+  const canUndoStubDetach = computed(() => stubDetachUndo.value.length > 0)
+
+  const autoAttachStubs = computed(() => settings.value.auto_attach_stubs !== false)
+
+  function setAutoAttachStubs(enabled) {
+    settings.value = { ...settings.value, auto_attach_stubs: Boolean(enabled) }
+    markDocumentDirty()
+  }
+
+  function isStubType(typeKey) {
+    return nodeTypes.value[typeKey]?.category === 'testing'
+  }
+
+  function samplePayloadFor(portType) {
+    const sample = samplePayloads.value[portType]
+    return sample === undefined ? {} : plain(sample)
+  }
+
+  /** Resolve one endpoint's port type, honouring dynamic stub ports. */
+  function endpointPortType(node, kind, portId) {
+    const port = (nodeTypes.value[node?.type]?.[kind] || []).find((p) => p.id === portId)
+    if (!port) return null
+    if (port.type !== 'dynamic') return port.type
+    return node.configuration?.port_type || 'generic_json'
+  }
+
+  /**
+   * Spawn one pre-connected Sample Input per still-unconnected required
+   * data input of `nodeId`. Returns the created stub nodes.
+   */
+  function attachSampleInputs(nodeId) {
+    const node = nodeById(nodeId)
+    const def = nodeTypes.value[node?.type]
+    if (!node || !def || !nodeTypes.value['stub.input']) return []
+    const created = []
+    let slot = 0
+    for (const port of def.inputs || []) {
+      if (!port.required || port.type === 'control') continue
+      const connected = edges.value.some(
+        (e) => e.target_node === nodeId && e.target_port === port.id,
+      )
+      if (connected) continue
+      const stub = addNode('stub.input', {
+        x: node.position.x - 260,
+        y: node.position.y + slot * 80,
+      })
+      stub.name = `Sample ${port.id}`
+      stub.configuration.port_type = port.type
+      stub.configuration.payload = samplePayloadFor(port.type)
+      edges.value.push({
+        id: nextEdgeId(),
+        source_node: stub.id,
+        source_port: 'value',
+        target_node: nodeId,
+        target_port: port.id,
+        edge_type: 'data',
+      })
+      created.push(stub)
+      slot += 1
+    }
+    if (created.length) markDocumentDirty()
+    return created
+  }
+
+  /** Attach a Result Viewer to the node's principal (first data) output. */
+  function attachResultViewer(nodeId) {
+    const node = nodeById(nodeId)
+    const def = nodeTypes.value[node?.type]
+    if (!node || !def || !nodeTypes.value['stub.output']) return null
+    const port = (def.outputs || []).find((p) => p.type !== 'control')
+    if (!port) return null
+    const stub = addNode('stub.output', {
+      x: node.position.x + 260,
+      y: node.position.y,
+    })
+    stub.name = `View ${port.id}`
+    stub.configuration.port_type = port.type
+    edges.value.push({
+      id: nextEdgeId(),
+      source_node: nodeId,
+      source_port: port.id,
+      target_node: stub.id,
+      target_port: 'value',
+      edge_type: 'data',
+    })
+    markDocumentDirty()
+    return stub
+  }
+
+  /**
+   * Palette-drop entry point: add the node and — when the workflow-level
+   * auto-attach setting is on and the node is not itself a testing stub —
+   * wire up sample inputs and a result viewer.
+   */
+  function addNodeWithStubs(typeKey, position) {
+    const node = addNode(typeKey, position)
+    if (!node) return null
+    if (autoAttachStubs.value && !isStubType(typeKey)) {
+      attachSampleInputs(node.id)
+      attachResultViewer(node.id)
+    }
+    return node
+  }
+
+  /** Undo the most recent stub detach: drop the real edge, restore the stub. */
+  function undoStubDetach() {
+    const entry = stubDetachUndo.value.pop()
+    if (!entry) return false
+    edges.value = edges.value.filter((e) => e.id !== entry.realEdgeId)
+    if (entry.stubNode && !nodeById(entry.stubNode.id)) {
+      const restored = plain(entry.stubNode)
+      if (nodes.value.some((n) => n.id === restored.id)) restored.id = nextNodeId()
+      nodes.value.push(restored)
+      entry.stubEdge.source_node = restored.id
+    }
+    const stubEdge = plain(entry.stubEdge)
+    const occupied = edges.value.some(
+      (e) => e.target_node === stubEdge.target_node && e.target_port === stubEdge.target_port,
+    )
+    if (!occupied && nodeById(stubEdge.source_node) && nodeById(stubEdge.target_node)) {
+      if (edges.value.some((e) => e.id === stubEdge.id)) stubEdge.id = nextEdgeId()
+      edges.value.push(stubEdge)
+    }
+    markDocumentDirty()
+    return true
   }
 
   function setViewport(vp) {
@@ -300,6 +472,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     createdAt.value = document.created_at || null
     updatedAt.value = document.updated_at || null
     resetCounters()
+    stubDetachUndo.value = []
     if (!preserveSelection || !nodeById(selectedNodeId.value)) selectedNodeId.value = null
     if (markDirty) {
       // Unsaved content (template/import-as-draft, draft recovery): keep the
@@ -451,7 +624,30 @@ export const useWorkflowStore = defineStore('workflow', () => {
   function updateNodeConfig(nodeId, name, value) {
     const node = nodeById(nodeId)
     if (!node) return
+    const previous = node.configuration[name]
     node.configuration[name] = value
+    // Retyping a stub retargets its dynamic port: reseed the editable sample
+    // payload and drop edges that no longer type-match (contracts §3 —
+    // dynamic ports obey exact-match once resolved).
+    if (
+      name === 'port_type' && value !== previous
+      && (node.type === 'stub.input' || node.type === 'stub.output')
+    ) {
+      if (node.type === 'stub.input') {
+        node.configuration.payload = samplePayloadFor(value)
+      }
+      edges.value = edges.value.filter((e) => {
+        if (e.source_node === nodeId && e.source_port === 'value') {
+          const target = nodeById(e.target_node)
+          return endpointPortType(target, 'inputs', e.target_port) === value
+        }
+        if (e.target_node === nodeId && e.target_port === 'value') {
+          const source = nodeById(e.source_node)
+          return endpointPortType(source, 'outputs', e.source_port) === value
+        }
+        return true
+      })
+    }
     markDocumentDirty()
   }
 
@@ -488,7 +684,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   return {
     // registry
-    registryVersion, nodeTypes, categories, portTypes,
+    registryVersion, nodeTypes, categories, portTypes, samplePayloads,
     registryLoading, registryError, loadNodeTypes,
     // document
     workflowId, workflowName, workflowDescription, nodes, edges, viewport,
@@ -505,5 +701,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     updateNodeConfig, setNodeDisabled, duplicateNode,
     // validation (step 2.2)
     issuesByNode,
+    // sample-data stubs (step 2.5)
+    autoAttachStubs, setAutoAttachStubs, isStubType, samplePayloadFor,
+    addNodeWithStubs, attachSampleInputs, attachResultViewer,
+    canUndoStubDetach, undoStubDetach,
   }
 })

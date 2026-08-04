@@ -4,6 +4,8 @@
  * checks that matter while editing; the server stays authoritative.
  */
 
+import { validateStubPayload } from './stubPayloads.js'
+
 /** n8n-style display_options: {show: {field: [values]}, hide: {...}}. */
 export function shouldDisplayField(field, configuration) {
   const display = field.display_options
@@ -106,6 +108,16 @@ export function nodeIssues(node, def, edges) {
     }
     const message = validateField(field, value)
     if (message) issues.push(configIssue(field.name, message))
+  }
+
+  // Sample Input payloads are typed sample data (step 2.5) — validate them
+  // against the selected port type, not just "is JSON".
+  if (node.type === 'stub.input') {
+    const portType = configuration.port_type ?? 'generic_json'
+    const payload = Object.hasOwn(configuration, 'payload') ? configuration.payload : {}
+    for (const message of validateStubPayload(portType, payload)) {
+      issues.push(configIssue('payload', message))
+    }
   }
 
   for (const port of def.inputs || []) {

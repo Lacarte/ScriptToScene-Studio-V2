@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from .registry import DYNAMIC_PORT_TYPES, get_node_type, is_supported
+from .sample_data import validate_stub_payload
 
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 MAX_NODES = 200
@@ -189,6 +190,20 @@ def _validate_config(
                 problems.append(_problem("WORKFLOW_INVALID", "must be JSON-serializable", field_path))
         elif widget == "media_asset" and value is not None and not isinstance(value, dict):
             problems.append(_problem("WORKFLOW_INVALID", "must be a managed media reference", field_path))
+
+    # Sample Input payloads are typed data, not free-form JSON: enforce the
+    # per-port-type stub contract, including fixture-only file references
+    # (contracts.md §2 "Utility/testing nodes", step 2.5).
+    if node.get("type") == "stub.input":
+        port_type = config.get("port_type", "generic_json")
+        if port_type in DYNAMIC_PORT_TYPES:
+            payload = config.get("payload", fields.get("payload", {}).get("default"))
+            for stub_problem in validate_stub_payload(port_type, payload):
+                problems.append(_problem(
+                    stub_problem["code"],
+                    stub_problem["message"],
+                    f"{path}.configuration.payload",
+                ))
 
 
 def validate_workflow(document: Any, *, require_identity: bool = True, require_complete: bool = False) -> list[dict]:
@@ -367,8 +382,15 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
         problems.append(_problem("WORKFLOW_INVALID", "variables must remain empty until Phase 5", "variables"))
     _validate_extensions(document.get("extensions"), "extensions", problems)
     settings = document.get("settings", {"on_error": "stop"})
-    if not isinstance(settings, dict) or settings.get("on_error", "stop") != "stop":
-        problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))
+    if not isinstance(settings, dict):
+        problems.append(_problem("WORKFLOW_INVALID", "settings must be an object", "settings"))
+    else:
+        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs"}):
+            problems.append(_problem("WORKFLOW_INVALID", f"Unknown settings field: {unknown}", f"settings.{unknown}"))
+        if settings.get("on_error", "stop") != "stop":
+            problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))
+        if not isinstance(settings.get("auto_attach_stubs", True), bool):
+            problems.append(_problem("WORKFLOW_INVALID", "settings.auto_attach_stubs must be a boolean", "settings.auto_attach_stubs"))
     return problems
 
 

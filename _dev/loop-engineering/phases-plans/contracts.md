@@ -373,9 +373,16 @@ artifacts; strip timestamps, secrets, provider payloads, and absolute paths; gen
 WAV/image/video media deterministically with local tools; validate all cross-references; and
 commit the result. Live n8n/provider access must not be required to reproduce the fixture set.
 
-**Current status: fixtures are not captured.** They are required before step 2.5, where stubs
-first consume them, rather than being silently deferred to Phase 1. Until the files and their
-validation checks exist, this section is an inventory, not a frozen fixture contract.
+**Current status: captured and frozen (step 2.5, 2026-08-04).** The fixture set lives in
+`studio/workflows/fixtures/` (~188 KiB total) with `manifest.json` recording SHA-256, byte
+size, media metadata, port types, and `fixture_schema_version: 1` for every file. Media is
+generated locally (stdlib `wave`, Pillow, ffmpeg in bitexact mode) by
+`studio/workflows/fixtures/generate.py`, which is byte-for-byte reproducible and requires no
+provider access. `studio/workflows/sample_data.py` enforces the type-specific validation rules
+above (`validate_fixtures()`, exercised by `tests/test_workflow_fixtures.py`) and serves the
+per-port-type sample payloads consumed by stub nodes. One deliberate divergence from the
+inventory table: the `music_track` fixture references a bundled `media/music.wav` instead of a
+resources-library track so the set stays self-contained under the fixture root.
 
 ## 11. Security / threat notes
 

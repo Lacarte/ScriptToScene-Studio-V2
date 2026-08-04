@@ -37,15 +37,32 @@ onMounted(async () => {
   await maybeRecoverDraft()
   window.addEventListener('beforeunload', onBeforeUnload)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('keydown', onKeydown)
   // The component is going away (in-app navigation): persist any pending
   // debounced edits so nothing is lost while the user is elsewhere.
   store.flushDraft()
 })
+
+// Ctrl+Z restores the most recently auto-detached sample stub (step 2.5;
+// the full undo/redo command stack arrives in Phase 5.1).
+function onKeydown(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
+  const target = event.target
+  if (target instanceof HTMLElement
+    && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) {
+    return
+  }
+  if (store.canUndoStubDetach && store.undoStubDetach()) {
+    event.preventDefault()
+    toast.info('Sample input restored')
+  }
+}
 
 // ── Draft autosave protection (step 2.4) ───────────────────────────────
 async function maybeRecoverDraft() {
@@ -121,7 +138,8 @@ function onDrop(event) {
   const typeKey = event.dataTransfer?.getData(DRAG_MIME)
   if (!typeKey) return
   const position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
-  store.addNode(typeKey, position)
+  // Auto-spawns pre-connected sample stubs when the workflow setting is on.
+  store.addNodeWithStubs(typeKey, position)
 }
 
 // ── Sync Vue Flow interactions back into the store ─────────────────────
@@ -163,7 +181,42 @@ function toConnectionShape(params) {
 
 function onConnect(params) {
   const verdict = store.connectNodes(toConnectionShape(params))
-  if (!verdict.ok) toast.error(verdict.reason)
+  if (!verdict.ok) {
+    toast.error(verdict.reason)
+  } else if (verdict.detachedStub) {
+    toast.info('Sample input replaced by the real connection — Ctrl+Z restores it')
+  }
+}
+
+// ── Node context menu: manual stub attachment (step 2.5) ───────────────
+const contextMenu = ref(null) // {nodeId, x, y}
+
+function onNodeContextMenu({ event, node }) {
+  event.preventDefault()
+  if (store.isStubType(store.nodeById(node.id)?.type)) {
+    contextMenu.value = null
+    return
+  }
+  // Fixed positioning: viewport coordinates work regardless of panel layout.
+  contextMenu.value = { nodeId: node.id, x: event.clientX, y: event.clientY }
+}
+
+function closeContextMenu() {
+  contextMenu.value = null
+}
+
+function onAttachSampleInputs() {
+  const created = store.attachSampleInputs(contextMenu.value.nodeId)
+  closeContextMenu()
+  toast.info(created.length
+    ? `Attached ${created.length} sample input${created.length > 1 ? 's' : ''}`
+    : 'Every required input is already connected')
+}
+
+function onAttachResultViewer() {
+  const stub = store.attachResultViewer(contextMenu.value.nodeId)
+  closeContextMenu()
+  toast.info(stub ? 'Result viewer attached' : 'This node has no data output to view')
 }
 
 // Live feedback while dragging a connection: valid targets highlight,
@@ -378,6 +431,14 @@ function onExport() {
         <button class="wf-btn" :disabled="!store.nodeCount" title="Fit view" @click="fitView({ padding: 0.15 })">
           Fit
         </button>
+        <label class="wf-toggle" title="Auto-attach editable sample stubs when dropping unconnected nodes">
+          <input
+            type="checkbox"
+            :checked="store.autoAttachStubs"
+            @change="store.setAutoAttachStubs($event.target.checked)"
+          />
+          Auto-stubs
+        </label>
       </div>
     </header>
 
@@ -405,7 +466,8 @@ function onExport() {
           fit-view-on-init
           @connect="onConnect"
           @node-click="({ node }) => store.selectNode(node.id)"
-          @pane-click="store.clearSelection"
+          @node-context-menu="onNodeContextMenu"
+          @pane-click="store.clearSelection(); closeContextMenu()"
           @node-drag-stop="onNodeDragStop"
           @nodes-change="onNodesChange"
           @edges-change="onEdgesChange"
@@ -418,6 +480,15 @@ function onExport() {
             Drag a node from the library to start building
           </div>
         </VueFlow>
+
+        <!-- Node context menu: manual stub attachment (step 2.5) -->
+        <template v-if="contextMenu">
+          <div class="wf-context-backdrop" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu" />
+          <div class="wf-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }">
+            <button class="wf-context-item" @click="onAttachSampleInputs">Attach sample inputs</button>
+            <button class="wf-context-item" @click="onAttachResultViewer">Attach result viewer</button>
+          </div>
+        </template>
       </main>
 
       <!-- Right — node inspector -->
@@ -572,6 +643,57 @@ function onExport() {
   flex: 1;
   min-width: 0;
   position: relative;
+}
+
+.wf-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.wf-toggle input {
+  accent-color: var(--accent);
+}
+
+.wf-context-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.wf-context-menu {
+  position: fixed;
+  z-index: 41;
+  min-width: 180px;
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.wf-context-item {
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.wf-context-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
 }
 
 .wf-canvas-hint {

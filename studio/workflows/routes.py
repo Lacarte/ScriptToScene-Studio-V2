@@ -23,6 +23,7 @@ from .persistence import (
 )
 from .options import resolve_options
 from .registry import serialize_registry
+from .sample_data import all_sample_payloads
 from .templates import serialize_templates
 from .validation import MAX_DOCUMENT_BYTES, validate_workflow
 
@@ -76,7 +77,11 @@ def node_types():
     denied = _require_loopback()
     if denied:
         return denied
-    return jsonify(serialize_registry())
+    payload = serialize_registry()
+    # Default stub payloads per dynamic port type (step 2.5). Fixture-derived,
+    # presentation-safe: fixture-relative refs only, no executor internals.
+    payload["sample_payloads"] = all_sample_payloads()
+    return jsonify(payload)
 
 
 @workflows_bp.route("/api/workflow/templates", methods=["GET"])
