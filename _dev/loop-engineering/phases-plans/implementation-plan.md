@@ -457,6 +457,24 @@ modes, and draft recovery), plus a node reference generated from the backend reg
 cannot drift from the code.
 **Done when:** a newcomer can build and run the pipeline template using only the docs, and the node reference is generated, not hand-written.
 
+#### Step 6.6 review status — 2026-08-05
+
+- **Complete.** `docs/workflow-guide.md` provides a newcomer path from setup through the
+  built-in Full Video template, node configuration, server validation, saving, full and
+  partial run modes, sample-data stubs, cache/staleness diagnostics, retries, import/export,
+  and browser draft recovery. The root README links directly to both workflow documents and
+  its Windows quick start now names the existing `start-prod.bat` launcher.
+- `studio.workflows.docs` generates `docs/workflow-nodes.md` from the presentation-safe
+  backend registry and validated built-in templates. The reference covers every registry
+  port type, category, node type/version, capability, input/output port, configuration field,
+  constraint, default, and template; its generated-file header documents the regeneration
+  command and source of truth.
+- Automated drift protection compares the committed reference byte-for-byte with fresh
+  generator output, exercises `--check`, checks registry coverage and internal-field
+  redaction, verifies the required guide topics, and keeps the README entry point covered.
+  Verification: 9 documentation tests passed (23 subtests); the full project suite passed
+  with 169 tests and 61 subtests (10 live-provider tests skipped).
+
 ---
 
 ## Phase 7 — Triggers & automation

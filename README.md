@@ -4,6 +4,16 @@ Turn a script into a fully produced short-form video — TTS narration, AI scene
 
 ---
 
+## Workflow Builder
+
+The workflow builder is the default interface for assembling and running
+production pipelines. Start with the [Workflow Builder user guide](docs/workflow-guide.md)
+to create, validate, save, and run the built-in Full Video template. For every
+available node, port, setting, and built-in template, see the generated
+[Workflow Node Reference](docs/workflow-nodes.md).
+
+---
+
 ## How It Works — A Real Scenario
 
 Imagine you have a 200-word script about a psychological phenomenon. Here's what happens when you paste it into ScriptToScene Studio and hit **Run Pipeline**:
@@ -499,7 +509,7 @@ copy .env.example .env
 :: Edit .env with your API keys
 
 :: 5. Start the app
-runner.bat
+start-prod.bat
 ```
 
 ### Manual setup

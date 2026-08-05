@@ -63,6 +63,12 @@ class UserGuideTests(unittest.TestCase):
         for topic in ("Full Video", "Validate", "Run", "Sample Input", "run mode", "draft"):
             self.assertIn(topic.lower(), text.lower())
 
+    def test_readme_links_workflow_onboarding(self):
+        readme = DOCS_DIR.parent / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        self.assertIn("docs/workflow-guide.md", text)
+        self.assertIn("docs/workflow-nodes.md", text)
+
 
 if __name__ == "__main__":
     unittest.main()

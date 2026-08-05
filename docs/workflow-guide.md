@@ -10,6 +10,15 @@ Companion reference: [workflow-nodes.md](workflow-nodes.md) — every node's
 ports, configuration fields, defaults, and capabilities, generated directly
 from the backend registry (`python -m studio.workflows.docs`).
 
+## Before you begin
+
+Complete the repository [prerequisites and installation](../README.md#prerequisites)
+once before following this guide. For day-to-day development, run
+`start-dev.bat`; for the production build, run `start-prod.bat`. The Full Video
+template invokes the configured scene, storyboard, and animator providers, so
+configure their URLs or credentials in **Settings** (and `.env` where
+applicable) before the first real run.
+
 ---
 
 ## 1. Quick start — run the Full Video template
