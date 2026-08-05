@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import re
 import shutil
 import string
+import threading
+from contextlib import contextmanager
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config import TRASH_DIR, WORKFLOWS_DIR, WORKFLOW_EXECUTIONS_DIR
 from studio.io_utils import now_iso, safe_json_read, safe_json_write
@@ -17,6 +20,11 @@ from studio.security import safe_join
 from .models import summary
 from .redaction import redact
 from .validation import WORKFLOW_ID_RE, validate_workflow, validation_errors
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 class WorkflowNotFound(FileNotFoundError):
@@ -41,6 +49,74 @@ def _strict_id(workflow_id: str) -> str:
     if not isinstance(workflow_id, str) or not WORKFLOW_ID_RE.fullmatch(workflow_id):
         raise ValueError("workflow_id must match wf_XXXXXX")
     return workflow_id
+
+
+# ---------------------------------------------------------------------------
+# Single-writer locking (step 6.2)
+#
+# Read-modify-write cycles (update, delete) must be serialized per workflow so
+# two interleaved writers can never both pass the optimistic ``updated_at``
+# check: the loser must observe the winner's write and raise WorkflowConflict.
+# An in-process per-path threading.Lock serializes app threads; an exclusive
+# OS lock on a ``.json.lock`` sidecar file serializes across processes.
+# ---------------------------------------------------------------------------
+
+_LOCKS_GUARD = threading.Lock()
+_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _thread_lock(key: str) -> threading.Lock:
+    with _LOCKS_GUARD:
+        lock = _LOCKS.get(key)
+        if lock is None:
+            lock = _LOCKS[key] = threading.Lock()
+        return lock
+
+
+def _lock_fd(fd: int) -> None:
+    if os.name == "nt":
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # Blocking with bounded retries.
+    else:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+
+def _unlock_fd(fd: int) -> None:
+    if os.name == "nt":
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+@contextmanager
+def _workflow_write_lock(workflow_id: str):
+    """Hold the single-writer lock for one workflow's read-modify-write cycle."""
+    lock_path = _path(workflow_id) + ".lock"
+    key = os.path.normcase(os.path.abspath(lock_path))
+    with _thread_lock(key):
+        os.makedirs(WORKFLOWS_DIR, exist_ok=True)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            _lock_fd(fd)
+            try:
+                yield lock_path
+            finally:
+                _unlock_fd(fd)
+        finally:
+            os.close(fd)
+
+
+def _monotonic_timestamp(previous: str | None) -> str:
+    """Return now, but strictly after ``previous`` so optimistic concurrency
+    tokens can never alias even when the clock has not advanced."""
+    stamp = now_iso()
+    if previous:
+        try:
+            previous_dt = datetime.fromisoformat(previous)
+            if datetime.fromisoformat(stamp) <= previous_dt:
+                stamp = (previous_dt + timedelta(microseconds=1)).isoformat()
+        except (TypeError, ValueError):
+            pass
+    return stamp
 
 
 def _path(workflow_id: str) -> str:
@@ -110,32 +186,77 @@ def list_workflows(*, limit: int = 100) -> tuple[list[dict], int]:
 
 
 def update_workflow(workflow_id: str, draft: dict, *, expected_updated_at: str) -> dict:
-    current = load_workflow(workflow_id)
-    if not expected_updated_at or current.get("updated_at") != expected_updated_at:
-        raise WorkflowConflict(workflow_id)
-    document = deepcopy(draft)
-    document["workflow_id"] = workflow_id
-    document["created_at"] = current["created_at"]
-    document["updated_at"] = now_iso()
-    document = redact(document)
-    _validate_or_raise(document)
-    safe_json_write(_path(workflow_id), document, indent=2)
-    return document
+    workflow_id = _strict_id(workflow_id)
+    with _workflow_write_lock(workflow_id):
+        current = load_workflow(workflow_id)
+        if not expected_updated_at or current.get("updated_at") != expected_updated_at:
+            raise WorkflowConflict(workflow_id)
+        document = deepcopy(draft)
+        document["workflow_id"] = workflow_id
+        document["created_at"] = current["created_at"]
+        document["updated_at"] = _monotonic_timestamp(current.get("updated_at"))
+        document = redact(document)
+        _validate_or_raise(document)
+        safe_json_write(_path(workflow_id), document, indent=2)
+        return document
+
+
+def _stored_updated_at(path: str) -> str | None:
+    """Best-effort ``updated_at`` read directly from the primary file.
+
+    Never falls back to (or restores) the ``.bak`` copy: the delete path must
+    not resurrect a workflow it is about to trash, and a file that no longer
+    parses simply yields ``None`` so it can still be deleted.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            document = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    value = document.get("updated_at") if isinstance(document, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _move_into_trash(source: str, destination: str) -> None:
+    try:
+        os.replace(source, destination)  # Atomic on the same volume.
+    except OSError:
+        shutil.move(source, destination)
 
 
 def delete_workflow(workflow_id: str, *, expected_updated_at: str | None = None) -> None:
-    current = load_workflow(workflow_id)
-    if expected_updated_at and current.get("updated_at") != expected_updated_at:
-        raise WorkflowConflict(workflow_id)
+    """Trash a workflow atomically, even when the stored file no longer parses.
+
+    The ``.bak`` copy moves first: if the process dies mid-delete the primary
+    file is still intact, whereas the reverse order would leave a stale
+    ``.bak`` from which ``safe_json_read`` would resurrect the workflow.
+    """
+    workflow_id = _strict_id(workflow_id)
     source = _path(workflow_id)
-    trash_root = safe_join(TRASH_DIR, "workflows")
-    os.makedirs(trash_root, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    destination = safe_join(trash_root, f"{workflow_id}_{stamp}.json")
-    shutil.move(source, destination)
     backup = source + ".bak"
-    if os.path.isfile(backup):
-        shutil.move(backup, destination + ".bak")
+    with _workflow_write_lock(workflow_id) as lock_path:
+        if not os.path.isfile(source) and not os.path.isfile(backup):
+            raise WorkflowNotFound(workflow_id)
+        if expected_updated_at:
+            current = _stored_updated_at(source)
+            if current is not None and current != expected_updated_at:
+                raise WorkflowConflict(workflow_id)
+        trash_root = safe_join(TRASH_DIR, "workflows")
+        os.makedirs(trash_root, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        destination = safe_join(trash_root, f"{workflow_id}_{stamp}.json")
+        counter = 1
+        while os.path.exists(destination) or os.path.exists(destination + ".bak"):
+            counter += 1
+            destination = safe_join(trash_root, f"{workflow_id}_{stamp}_{counter}.json")
+        if os.path.isfile(backup):
+            _move_into_trash(backup, destination + ".bak")
+        if os.path.isfile(source):
+            _move_into_trash(source, destination)
+    try:
+        os.unlink(lock_path)  # Best-effort sidecar cleanup after release.
+    except OSError:
+        pass
 
 
 def import_workflow(document: dict, *, on_conflict: str = "new_id") -> tuple[dict, str | None]:

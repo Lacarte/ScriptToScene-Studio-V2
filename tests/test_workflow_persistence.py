@@ -3,8 +3,11 @@
 import math
 import os
 import tempfile
+import threading
+import time
 import unittest
 from copy import deepcopy
+from datetime import datetime
 
 from flask import Flask
 
@@ -260,6 +263,113 @@ class PersistenceTests(WorkflowTestBase):
         with self.assertRaises(WorkflowValidationError):
             persistence.import_workflow(document)
 
+    def test_interleaved_writers_serialize_and_keep_the_conflict_signal(self):
+        """Step 6.2: two writers holding the same token — one wins, one conflicts."""
+        created = persistence.create_workflow(draft())
+        workflow_id = created["workflow_id"]
+
+        original_load = persistence.load_workflow
+        section_guard = threading.Lock()
+        section = {"active": 0, "max": 0}
+
+        def slow_load(target_id):
+            with section_guard:
+                section["active"] += 1
+                section["max"] = max(section["max"], section["active"])
+            try:
+                document = original_load(target_id)
+                time.sleep(0.2)  # Without locking both writers overlap here.
+                return document
+            finally:
+                with section_guard:
+                    section["active"] -= 1
+
+        outcomes = {}
+
+        def writer(label):
+            changed = dict(created)
+            changed["name"] = f"Writer {label}"
+            try:
+                outcomes[label] = persistence.update_workflow(
+                    workflow_id, changed, expected_updated_at=created["updated_at"]
+                )
+            except WorkflowConflict:
+                outcomes[label] = "conflict"
+
+        persistence.load_workflow = slow_load
+        try:
+            threads = [
+                threading.Thread(target=writer, args=(label,)) for label in ("a", "b")
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+        finally:
+            persistence.load_workflow = original_load
+
+        self.assertEqual(section["max"], 1)  # Single writer in the critical section.
+        winners = [value for value in outcomes.values() if isinstance(value, dict)]
+        self.assertEqual(len(winners), 1)
+        self.assertEqual(list(outcomes.values()).count("conflict"), 1)
+        stored = persistence.load_workflow(workflow_id)  # Parses and validates.
+        self.assertEqual(stored, winners[0])
+
+    def test_updated_at_is_strictly_monotonic_within_the_same_instant(self):
+        frozen = "2026-08-05T12:00:00.000000+00:00"
+        original_now = persistence.now_iso
+        persistence.now_iso = lambda: frozen
+        try:
+            created = persistence.create_workflow(draft())
+            first = persistence.update_workflow(
+                created["workflow_id"], dict(created, name="First"),
+                expected_updated_at=created["updated_at"],
+            )
+            second = persistence.update_workflow(
+                created["workflow_id"], dict(first, name="Second"),
+                expected_updated_at=first["updated_at"],
+            )
+        finally:
+            persistence.now_iso = original_now
+        stamps = [created["updated_at"], first["updated_at"], second["updated_at"]]
+        self.assertEqual(len(set(stamps)), 3)
+        parsed = [datetime.fromisoformat(stamp) for stamp in stamps]
+        self.assertLess(parsed[0], parsed[1])
+        self.assertLess(parsed[1], parsed[2])
+
+    def test_trash_removes_the_backup_resurrection_path(self):
+        created = persistence.create_workflow(draft())
+        updated = persistence.update_workflow(
+            created["workflow_id"], dict(created, name="Renamed"),
+            expected_updated_at=created["updated_at"],
+        )
+        backup = os.path.join(
+            persistence.WORKFLOWS_DIR, f"{created['workflow_id']}.json.bak"
+        )
+        self.assertTrue(os.path.isfile(backup))
+        persistence.delete_workflow(
+            created["workflow_id"], expected_updated_at=updated["updated_at"]
+        )
+        remnants = [
+            name for name in os.listdir(persistence.WORKFLOWS_DIR)
+            if name.startswith(created["workflow_id"])
+        ]
+        self.assertEqual(remnants, [])  # No .bak left to resurrect from.
+        with self.assertRaises(persistence.WorkflowNotFound):
+            persistence.load_workflow(created["workflow_id"])
+        with self.assertRaises(persistence.WorkflowNotFound):
+            persistence.delete_workflow(created["workflow_id"])
+
+    def test_delete_works_on_a_workflow_that_no_longer_parses(self):
+        created = persistence.create_workflow(draft())
+        path = os.path.join(persistence.WORKFLOWS_DIR, f"{created['workflow_id']}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("{ this is not json")
+        persistence.delete_workflow(created["workflow_id"], expected_updated_at="anything")
+        self.assertFalse(os.path.exists(path))
+        trash = os.path.join(persistence.TRASH_DIR, "workflows")
+        self.assertEqual(len(os.listdir(trash)), 1)
+
 
 class RouteTests(WorkflowTestBase):
     def setUp(self):
@@ -297,6 +407,31 @@ class RouteTests(WorkflowTestBase):
             "expected_updated_at": workflow["updated_at"],
         })
         self.assertEqual(deleted.status_code, 200)
+
+    def test_hand_corrupted_workflow_can_be_trashed_via_the_api(self):
+        response = self.client.post("/api/workflows", json={"workflow": draft()})
+        workflow = response.get_json()["workflow"]
+        workflow_id = workflow["workflow_id"]
+        workflow["name"] = "Updated"
+        updated = self.client.put(f"/api/workflows/{workflow_id}", json={
+            "workflow": workflow,
+            "expected_updated_at": workflow["updated_at"],
+        })
+        self.assertEqual(updated.status_code, 200)  # Rotates a .bak alongside.
+
+        path = os.path.join(persistence.WORKFLOWS_DIR, f"{workflow_id}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("{ hand-corrupted, no longer parses")
+
+        deleted = self.client.delete(f"/api/workflows/{workflow_id}", json={})
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(deleted.get_json()["deleted"])
+
+        # Neither the primary nor the .bak survives to resurrect the workflow.
+        gone = self.client.get(f"/api/workflows/{workflow_id}")
+        self.assertEqual(gone.status_code, 404)
+        trash = os.path.join(persistence.TRASH_DIR, "workflows")
+        self.assertEqual(len(os.listdir(trash)), 2)  # Corrupt JSON + its .bak.
 
     def test_validation_conflict_and_loopback_errors_use_envelope(self):
         bad = draft()

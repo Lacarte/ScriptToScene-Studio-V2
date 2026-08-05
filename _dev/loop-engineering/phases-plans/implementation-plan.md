@@ -341,6 +341,29 @@ within the same millisecond, and a delete path that works on a stored workflow t
 parses or validates.
 **Done when:** a concurrency test with two interleaved writers corrupts nothing and loses neither write's conflict signal, and a hand-corrupted workflow file can be trashed via the API.
 
+#### Step 6.2 review status — 2026-08-05
+
+- **Complete.** `persistence.py` now serializes every read-modify-write cycle (update, delete)
+  behind a per-workflow single-writer lock: an in-process per-path `threading.Lock` for app
+  threads plus a blocking exclusive OS lock (`msvcrt.locking`/`fcntl.flock`) on a `.json.lock`
+  sidecar for cross-process safety. An instrumented two-writer test proves the critical section
+  never overlaps, exactly one writer wins, the loser receives `WorkflowConflict`, and the stored
+  document still parses and validates.
+- `updated_at` is strictly monotonic: when the clock has not advanced past the stored value, the
+  new stamp is the previous timestamp plus one microsecond, so optimistic-concurrency tokens can
+  never alias within the same instant (frozen-clock test covers two same-instant updates).
+- The trash move is resurrection-proof: the `.bak` rotates into trash **before** the primary
+  (an interruption leaves the primary intact instead of a resurrecting backup), moves use
+  atomic `os.replace` with a cross-volume fallback, destination names are collision-guarded,
+  and no `{id}.json*` remnant stays in `output/workflows/` after deletion.
+- Delete no longer routes through `load_workflow`: the conflict check reads `updated_at`
+  directly from the primary file without the `.bak` restore side effect and is skipped when the
+  file no longer parses, so a hand-corrupted workflow (and its backup) can be trashed via
+  `DELETE /api/workflows/<id>` — verified end-to-end through the Flask test client, including
+  the post-delete 404 that proves no backup resurrection.
+- Automated verification: 148 backend tests plus 38 subtests pass (10 gated live tests skipped);
+  no frontend code changed in this step.
+
 ### 6.3 Request hardening
 Enforce body-size limits that chunked transfer encoding cannot bypass; validate submitted
 `options_source` values server-side against the allowlisted resolvers; cap branding upload size
