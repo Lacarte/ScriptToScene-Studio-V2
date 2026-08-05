@@ -257,6 +257,20 @@ Sticky notes; recently-used section in the library; ship **Narration Only**, **S
 Merge, Condition, Set Value, Wait — define ports, skip/join behavior, and scheduler semantics in `contracts.md` first, then implement with pytest coverage. Story Generator node wrapping `studio/story`.
 **Done when:** a branched workflow (Condition → two paths → Merge) executes correctly, including skip propagation.
 
+#### Step 5.4 review status — 2026-08-04
+
+- **Complete.** Utility ports and runtime semantics are frozen in `contracts.md`. Condition
+  emits exactly one value branch, ordinary inactive descendants propagate `skipped`, and Merge
+  is the explicit skip-tolerant join that consumes active inputs in saved-edge order after all
+  predecessors resolve. Set Value, cooperative/cancellable Wait, and array/first/object Merge
+  modes are registered and executable through the generic workflow UI.
+- Story Generator wraps an importable `studio.story` service, reusing its prompts, webhook,
+  parser, artifact persistence, and diversity history while emitting the existing `script` type.
+- Automated verification: 129 backend tests plus 38 subtests and 102 frontend tests pass; the
+  production frontend build succeeds. Focused tests execute both Condition outcomes through two
+  paths into Merge and verify skip propagation, utility edge cases, integer timing validation,
+  cancellation, and the Story Generator adapter boundary.
+
 ### 5.5 Expressions & data mapping (deferred scope, last)
 `expressions.py`: deliberately small parser for `{{ nodes.x.outputs.y }}`, `{{ workflow.project_id }}`, `{{ variables.* }}` — no eval, upstream-only references, typed value preservation, sandbox tests (no env/secrets/attribute/filesystem access). Visual upstream-output picker in the inspector; pre-execution expression validation.
 **Done when:** expression-driven config runs correctly and the sandbox test suite passes.

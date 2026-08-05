@@ -105,6 +105,19 @@ describe('nodeIssues', () => {
       expect.stringMatching(/finite JSON/),
     ]))
   })
+
+  it('rejects fractional values for integer number fields', () => {
+    const definition = {
+      ...DEF,
+      type_version: 1,
+      inputs: [],
+      config_schema: [
+        { name: 'delay', label: 'Delay', type: 'number', default: 0, min: 0, max: 100, integer: true },
+      ],
+    }
+    const messages = nodeIssues(node({ delay: 1.5 }), definition, []).map((issue) => issue.message)
+    expect(messages).toContain('Delay must be an integer')
+  })
 })
 
 describe('inspector conditional rendering + issue badges', () => {

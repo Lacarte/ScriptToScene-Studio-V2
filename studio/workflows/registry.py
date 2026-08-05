@@ -9,7 +9,7 @@ field, which is never serialized.
 
 from copy import deepcopy
 
-REGISTRY_VERSION = 2
+REGISTRY_VERSION = 3
 
 # contracts.md §3 — frozen v1 port vocabulary.
 PORT_TYPES = [
@@ -126,6 +126,35 @@ _NODE_TYPES = {
         ],
         "capabilities": {"retry": False, "cancel": False},
         "executor": "studio.workflows.adapters.project:script_input",
+    },
+    "story.generate": {
+        "type_version": 1,
+        "display_name": "Story Generator",
+        "description": "Generate a structured narration script with the existing story service.",
+        "category": "ai",
+        "icon": "sparkles",
+        "inputs": [_TRIGGER_IN, _in("settings", "project_settings")],
+        "outputs": [_CONTROL_OUT, _out("script", "script")],
+        "config_schema": [
+            {"name": "preset_style", "label": "Visual style", "type": "options",
+             "options_source": "style_templates", "default": "cinematic"},
+            {"name": "story_category", "label": "Story category", "type": "string",
+             "default": "motivation", "required": True, "max_length": 80},
+            {"name": "duration", "label": "Target duration (seconds)", "type": "number",
+             "default": 45, "min": 15, "max": 180, "step": 1, "integer": True},
+            {"name": "language", "label": "Language", "type": "options",
+             "options": ["english", "french", "spanish"], "default": "english"},
+            {"name": "language_level", "label": "Language level", "type": "options",
+             "options": ["", "beginner", "intermediate", "advanced", "native"], "default": ""},
+            {"name": "story_tone", "label": "Story tone", "type": "options",
+             "options_source": "story_tones", "default": ""},
+            {"name": "idea", "label": "Idea or prompt", "type": "textarea",
+             "default": "", "max_length": 4000},
+            {"name": "webhook_url", "label": "Webhook URL", "type": "string",
+             "default": "", "max_length": 2048},
+        ],
+        "capabilities": {"retry": True, "cancel": False},
+        "executor": "studio.workflows.adapters.story:generate",
     },
     "project.existing": {
         "type_version": 1,
@@ -353,6 +382,70 @@ _NODE_TYPES = {
         ],
         "capabilities": {"retry": True, "cancel": True},
         "executor": "studio.workflows.adapters.export:video",
+    },
+    "utility.set_value": {
+        "type_version": 1,
+        "display_name": "Set Value",
+        "description": "Emit a configured JSON value, optionally sequenced by an incoming value.",
+        "category": "utility",
+        "icon": "edit-3",
+        "inputs": [_TRIGGER_IN, _in("value", "generic_json")],
+        "outputs": [_CONTROL_OUT, _out("value", "generic_json")],
+        "config_schema": [
+            {"name": "value", "label": "Value", "type": "json", "default": None},
+        ],
+        "capabilities": {"retry": False, "cancel": False},
+        "executor": "studio.workflows.adapters.utilities:set_value",
+    },
+    "utility.condition": {
+        "type_version": 1,
+        "display_name": "Condition",
+        "description": "Route one JSON value to exactly one of two explicit branches.",
+        "category": "utility",
+        "icon": "git-branch",
+        "inputs": [_TRIGGER_IN, _in("value", "generic_json", required=True)],
+        "outputs": [
+            {**_out("true", "generic_json"), "conditional": True},
+            {**_out("false", "generic_json"), "conditional": True},
+        ],
+        "config_schema": [
+            {"name": "operator", "label": "Operator", "type": "options",
+             "options": ["truthy", "falsy", "equals", "not_equals", "contains"], "default": "truthy"},
+            {"name": "compare_to", "label": "Compare to", "type": "json", "default": None,
+             "display_options": {"show": {"operator": ["equals", "not_equals", "contains"]}}},
+        ],
+        "capabilities": {"retry": False, "cancel": False},
+        "executor": "studio.workflows.adapters.utilities:condition",
+    },
+    "utility.merge": {
+        "type_version": 1,
+        "display_name": "Merge",
+        "description": "Join active branch values after all connected branches resolve.",
+        "category": "utility",
+        "icon": "git-merge",
+        "inputs": [{"id": "values", "type": "generic_json", "required": True, "multiple": True}],
+        "outputs": [_CONTROL_OUT, _out("value", "generic_json")],
+        "config_schema": [
+            {"name": "mode", "label": "Merge mode", "type": "options",
+             "options": ["array", "first", "object"], "default": "array"},
+        ],
+        "capabilities": {"retry": False, "cancel": False},
+        "executor": "studio.workflows.adapters.utilities:merge",
+    },
+    "utility.wait": {
+        "type_version": 1,
+        "display_name": "Wait",
+        "description": "Delay a branch and pass its JSON value through unchanged.",
+        "category": "utility",
+        "icon": "clock",
+        "inputs": [_TRIGGER_IN, _in("value", "generic_json")],
+        "outputs": [_CONTROL_OUT, _out("value", "generic_json")],
+        "config_schema": [
+            {"name": "delay_ms", "label": "Delay (milliseconds)", "type": "number",
+             "default": 1000, "min": 0, "max": 300000, "step": 1, "integer": True},
+        ],
+        "capabilities": {"retry": False, "cancel": True, "cacheable": False},
+        "executor": "studio.workflows.adapters.utilities:wait",
     },
     "workflow.output": {
         "type_version": 1,

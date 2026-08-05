@@ -134,6 +134,49 @@ Legend: **cfg** = node configuration keys; **in/out** = typed ports; **artifacts
 - `stub.output`: in = dynamic; captures + displays; Phase 4 pinning = winning cache entry.
 - `workflow.output`, `trigger.manual`, `project.existing`: declarative, no side effects.
 
+### Phase 5.4 utility nodes (frozen v1 semantics)
+
+- `story.generate` (Story Generator): in `trigger:control?`, `settings:project_settings?`; out
+  `control:control`, `script:script`. Configuration is `preset_style`, `story_category`,
+  `duration` (15-180 seconds), `language`, optional `language_level`, optional `story_tone`,
+  optional `idea`, and optional `webhook_url`. Explicit node configuration wins over incoming
+  `settings.style`/`settings.tone`. It calls the importable `studio.story` prompt, webhook,
+  parser, persistence, and history services directly (never its Flask route), writes
+  `output/stories/{execution_project_id}/story.json`, and emits the parsed `story_text` on the
+  existing `script` port. It is provider-dependent, retryable, and non-deterministic.
+- `utility.set_value` (Set Value): in `trigger:control?`, `value:generic_json?`; out
+  `control:control`, `value:generic_json`. Configuration `value` is any bounded JSON value.
+  The configured value always replaces the optional input; the input exists only to sequence
+  and branch the node. The node is instant, deterministic, and side-effect free.
+- `utility.condition` (Condition): in `trigger:control?`, `value:generic_json`; out
+  `true:generic_json?`, `false:generic_json?`. Configuration `operator` is one of
+  `truthy|falsy|equals|not_equals|contains`; `compare_to` is used by the last three operators.
+  Exactly one output port is present at runtime and carries the input value unchanged. The
+  other output is deliberately inactive, not `null`, not an error, and not a success token.
+  `contains` means membership for arrays/object keys and substring containment for strings;
+  other input types evaluate false. Equality uses normal JSON structural equality. The node
+  is instant, deterministic, and side-effect free.
+- `utility.wait` (Wait): in `trigger:control?`, `value:generic_json?`; out `control:control`,
+  `value:generic_json`. Configuration `delay_ms` is an integer from 0 through 300000. It emits
+  its input unchanged (or JSON `null` when absent) after the delay, checks cancellation in
+  intervals no longer than 50 ms, and creates no artifacts. It is deterministic but is never
+  cache-reused because the delay itself is its intended side effect.
+- `utility.merge` (Merge): in `values:generic_json` with `multiple:true`; out
+  `control:control`, `value:generic_json`. It is the only skip-tolerant join in v1. The
+  scheduler waits until every connected predecessor is terminal, then discards inactive
+  edges caused by Condition/skip propagation and runs Merge when at least one value edge is
+  active. Zero active inputs skips Merge. Active values retain saved edge order. Configuration
+  `mode=array` emits the ordered list, `mode=first` emits its first item, and `mode=object`
+  shallow-merges objects from left to right (later keys win) and fails if an active value is
+  not an object. Merge is instant, deterministic, and side-effect free.
+
+Scheduler rule for conditional branches: a succeeded node activates only output ports actually
+present in its output mapping. A node with any inactive normal predecessor is skipped, and that
+skip propagates through ordinary descendants. This is a normal successful-run state. Merge is
+the explicit convergence boundary: inactive/skipped predecessors count as resolved rather than
+as required active inputs. Failures and cancellations are not converted to inactive branches;
+the existing error policy remains authoritative.
+
 ## 3. Port types & compatibility matrix
 
 Types (v1): `control, text, script, project_id, project_settings, audio_file, tts_metadata, alignment, segments, scenes, image_prompts, storyboard_images, animation_assets, captions, music_track, editor_project, export_profile, video_file, generic_json`.

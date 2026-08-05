@@ -58,6 +58,7 @@ function validateField(field, value) {
     if (value < (field.min ?? -Infinity) || value > (field.max ?? Infinity)) {
       return `${label} is outside the allowed range`
     }
+    if (field.integer && !Number.isInteger(value)) return `${label} must be an integer`
   } else if (field.type === 'boolean') {
     if (typeof value !== 'boolean') return `${label} must be a boolean`
   } else if (field.type === 'options') {

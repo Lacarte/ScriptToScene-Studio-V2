@@ -443,17 +443,30 @@ class WorkflowScheduler:
                     executed.append(node_id)
                     continue
                 incoming_edges = graph.incoming[node_id]
-                incoming_active = all(
-                    self._edge_was_activated(edge, statuses, node_outputs)
-                    for edge in incoming_edges
-                )
+                active_edges = [
+                    edge for edge in incoming_edges
+                    if self._edge_was_activated(edge, statuses, node_outputs)
+                ]
+                if node.get("type") == "utility.merge":
+                    # Merge is the explicit convergence boundary for
+                    # conditional branches.  Skipped predecessors and absent
+                    # ports on successful Condition nodes are resolved but
+                    # inactive; failures remain governed by error policy.
+                    inactive_resolved = all(
+                        edge in active_edges
+                        or statuses.get(edge["source_node"]) in {"succeeded", "skipped"}
+                        for edge in incoming_edges
+                    )
+                    incoming_active = inactive_resolved and bool(active_edges)
+                else:
+                    incoming_active = len(active_edges) == len(incoming_edges)
                 if stopped or node.get("disabled") or not incoming_active:
                     self.record.nodes[node_id].duration_ms = 0
                     self._status(statuses, node_id, "skipped")
                     executed.append(node_id)
                     continue
 
-                inputs = self._resolve_inputs(node_id, graph, node_outputs)
+                inputs = self._resolve_inputs(node_id, graph, node_outputs, active_edges=active_edges)
                 node_record = self.record.nodes[node_id]
                 node_record.from_sample_data = (
                     node.get("type") == "stub.input"
@@ -468,7 +481,7 @@ class WorkflowScheduler:
                     ":".join((
                         edge["id"], edge["source_node"], edge["source_port"], edge["target_port"],
                     )): node_output_fingerprints[edge["source_node"]]
-                    for edge in graph.incoming[node_id]
+                    for edge in active_edges
                 }
                 pinned = node.get("type") == "stub.output" and configuration.get("pinned") is True
                 fingerprint_inputs = {} if pinned else inputs
@@ -496,6 +509,7 @@ class WorkflowScheduler:
                     executed.append(node_id)
                     continue
 
+                cacheable = get_node_type(node["type"]).get("capabilities", {}).get("cacheable", True)
                 lookup = self.cache.lookup(
                     workflow_id=str(self.workflow.get("workflow_id", "")),
                     project_id=self.project_id,
@@ -503,7 +517,7 @@ class WorkflowScheduler:
                     fingerprint=fingerprint,
                     components=components,
                     force=self.force,
-                )
+                ) if cacheable else CacheLookup(False, "cache_disabled")
                 node_record.cache = {"hit": lookup.hit, "reason": lookup.reason}
                 if lookup.hit:
                     result = dict(lookup.outputs or {})
@@ -522,7 +536,7 @@ class WorkflowScheduler:
                         executed.append(node_id)
                         continue
 
-                if lookup.reason not in {"no_prior_success", "forced_regeneration"}:
+                if lookup.reason not in {"no_prior_success", "forced_regeneration", "cache_disabled"}:
                     self._status(statuses, node_id, "stale")
                 started = time.perf_counter()
                 policy = self._error_policy(node)
@@ -553,7 +567,7 @@ class WorkflowScheduler:
                         node_record.artifact_refs = self.redactor(_artifact_refs(result))
                         if self.redactor(result) != result:
                             output_fp, cache_failure = None, "sensitive_output"
-                        else:
+                        elif cacheable:
                             output_fp, cache_failure = self.cache.store(
                                 workflow_id=str(self.workflow.get("workflow_id", "")),
                                 project_id=self.project_id,
@@ -563,6 +577,8 @@ class WorkflowScheduler:
                                 outputs=result,
                                 artifact_refs=_artifact_refs(result),
                             )
+                        else:
+                            output_fp, cache_failure = output_fingerprint(result, {}), "cache_disabled"
                         if output_fp is None:
                             node_record.cache = {"hit": False, "reason": cache_failure}
                             output_fp = output_fingerprint(result, {})
@@ -734,9 +750,16 @@ class WorkflowScheduler:
         return config
 
     @staticmethod
-    def _resolve_inputs(node_id: str, graph: WorkflowGraph, outputs: Mapping[str, Mapping[str, Any]]) -> dict:
+    def _resolve_inputs(
+        node_id: str,
+        graph: WorkflowGraph,
+        outputs: Mapping[str, Mapping[str, Any]],
+        *,
+        active_edges: list[Mapping[str, Any]] | None = None,
+    ) -> dict:
         resolved: dict[str, Any] = {}
-        for edge in graph.incoming[node_id]:
+        edges = graph.incoming[node_id] if active_edges is None else active_edges
+        for edge in edges:
             value = outputs[edge["source_node"]][edge["source_port"]]
             target_port = edge["target_port"]
             definition = get_node_type(graph.nodes[node_id]["type"])
@@ -751,7 +774,7 @@ class WorkflowScheduler:
     def _validate_outputs(node: Mapping[str, Any], outputs: Mapping[str, Any]) -> None:
         definition = get_node_type(node["type"])
         for port in definition.get("outputs", []):
-            if port["id"] == "error":
+            if port["id"] == "error" or port.get("conditional"):
                 continue
             if port["id"] not in outputs:
                 raise SchedulerError(

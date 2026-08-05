@@ -179,6 +179,8 @@ def _validate_config(
                 problems.append(_problem("WORKFLOW_INVALID", "must be a finite number", field_path))
             elif value < field.get("min", -math.inf) or value > field.get("max", math.inf):
                 problems.append(_problem("WORKFLOW_INVALID", "number is outside allowed limits", field_path))
+            elif field.get("integer") and not float(value).is_integer():
+                problems.append(_problem("WORKFLOW_INVALID", "must be an integer", field_path))
         elif widget == "boolean" and not isinstance(value, bool):
             problems.append(_problem("WORKFLOW_INVALID", "must be a boolean", field_path))
         elif widget == "options":

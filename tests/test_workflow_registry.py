@@ -19,10 +19,11 @@ from studio.workflows.registry import (
 )
 
 EXPECTED_TYPES = {
-    "trigger.manual", "project.setup", "script.input", "project.existing",
+    "trigger.manual", "project.setup", "script.input", "story.generate", "project.existing",
     "tts.generate", "timing.align", "segment.run", "scenes.blueprint",
     "storyboard.generate", "animator.generate", "captions.generate",
     "music.select", "assemble.project", "timeline.project", "export.video",
+    "utility.set_value", "utility.condition", "utility.merge", "utility.wait",
     "workflow.output", "stub.input", "stub.output",
 }
 
@@ -85,7 +86,7 @@ class RegistryContractTests(unittest.TestCase):
     def test_control_out_on_every_producing_node(self):
         # Frozen §3.1: every core node except stubs/workflow.output emits control.
         for key, node in all_node_types().items():
-            if key.startswith("stub.") or key == "workflow.output":
+            if key.startswith("stub.") or key in {"workflow.output", "utility.condition"}:
                 continue
             self.assertIn("control", [p["id"] for p in node["outputs"]], key)
 
