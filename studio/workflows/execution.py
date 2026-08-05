@@ -25,6 +25,7 @@ from .persistence import (
     save_queue_record,
 )
 from .registry import get_node_type
+from .sample_data import validate_stub_payload
 from .scheduler import WorkflowScheduler, calculate_scope, resolve_executor
 from .validation import validate_workflow, validation_errors
 
@@ -247,9 +248,13 @@ class ExecutionManager:
             for port_id, value in ports.items():
                 port = known.get(port_id)
                 port_type = port.get("type") if port else None
-                if not port or port_type not in {"text", "script"} or not isinstance(value, str):
+                if port_type == "dynamic":
+                    port_type = (node.get("configuration") or {}).get("port_type")
+                problems = validate_stub_payload(port_type, value) if port else []
+                if not port or port_type == "control" or problems:
                     raise ExecutionRequestError(
-                        "BAD_REQUEST", f"Input override {node_id}.{port_id} must be text or script"
+                        "BAD_REQUEST", f"Input override {node_id}.{port_id} is not valid {port_type or 'data'}",
+                        details={"problems": problems} if problems else None,
                     )
                 result[str(node_id)][str(port_id)] = value
         return result

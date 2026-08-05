@@ -188,6 +188,13 @@ def _validate_watch_folder(value: Any, node_map: dict, problems: list[dict]) -> 
         problems.append(_problem("WORKFLOW_INVALID", "An enabled watch folder needs a Script Input node or configured target port", path))
 
 
+def _validate_webhook(value: Any, node_map: dict, problems: list[dict]) -> None:
+    # Kept behind this small adapter to avoid importing trigger persistence and
+    # token machinery unless a workflow actually declares webhook settings.
+    from .webhook_triggers import validate_webhook_settings
+    validate_webhook_settings(value, node_map, problems)
+
+
 def _finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
@@ -559,7 +566,7 @@ def validate_workflow(
     if not isinstance(settings, dict):
         problems.append(_problem("WORKFLOW_INVALID", "settings must be an object", "settings"))
     else:
-        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs", "schedules", "watch_folder"}):
+        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs", "schedules", "watch_folder", "webhook"}):
             problems.append(_problem("WORKFLOW_INVALID", f"Unknown settings field: {unknown}", f"settings.{unknown}"))
         if settings.get("on_error", "stop") != "stop":
             problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))
@@ -567,6 +574,7 @@ def validate_workflow(
             problems.append(_problem("WORKFLOW_INVALID", "settings.auto_attach_stubs must be a boolean", "settings.auto_attach_stubs"))
         _validate_schedules(settings.get("schedules"), problems)
         _validate_watch_folder(settings.get("watch_folder"), node_map, problems)
+        _validate_webhook(settings.get("webhook"), node_map, problems)
     problems.extend(validate_expressions(document))
     return problems
 

@@ -1,6 +1,7 @@
 """Flask blueprint for workflow registry and definition persistence."""
 
 import io
+import ipaddress
 import json
 import os
 import uuid
@@ -32,6 +33,13 @@ from .sample_data import all_sample_payloads
 from .scheduled_runs import schedule_details
 from .templates import serialize_templates
 from .validation import MAX_DOCUMENT_BYTES, validate_workflow
+from .webhook_triggers import (
+    MAX_WEBHOOK_PAYLOAD_BYTES,
+    WebhookPayloadError,
+    map_webhook_payload,
+    token_matches,
+    webhook_token,
+)
 
 BRANDING_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 MAX_BRANDING_BYTES = 5 * 1024 * 1024
@@ -64,7 +72,7 @@ def _require_loopback():
     return None
 
 
-def _json_body(*, allow_empty=False):
+def _json_body(*, allow_empty=False, max_bytes=MAX_DOCUMENT_BYTES, limit_message="Request exceeds the 2 MiB limit"):
     """Parse a bounded JSON object body.
 
     Reads at most MAX_DOCUMENT_BYTES + 1 bytes from the request stream, so the
@@ -72,11 +80,11 @@ def _json_body(*, allow_empty=False):
     is absent and header checks alone are bypassable (step 6.3).
     """
     declared = request.content_length
-    if declared is not None and declared > MAX_DOCUMENT_BYTES:
-        return None, _error("REQUEST_TOO_LARGE", "Request exceeds the 2 MiB limit", 413)
-    raw = request.stream.read(MAX_DOCUMENT_BYTES + 1)
-    if len(raw) > MAX_DOCUMENT_BYTES:
-        return None, _error("REQUEST_TOO_LARGE", "Request exceeds the 2 MiB limit", 413)
+    if declared is not None and declared > max_bytes:
+        return None, _error("REQUEST_TOO_LARGE", limit_message, 413)
+    raw = request.stream.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        return None, _error("REQUEST_TOO_LARGE", limit_message, 413)
     if not raw:
         if allow_empty:
             return {}, None
@@ -87,7 +95,7 @@ def _json_body(*, allow_empty=False):
         return None, _error("BAD_REQUEST", "Request body must be a JSON object", 400)
     try:
         body = json.loads(raw)
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         return None, _error("BAD_REQUEST", "Request body must be a JSON object", 400)
     if not isinstance(body, dict):
         return None, _error("BAD_REQUEST", "Request body must be a JSON object", 400)
@@ -336,6 +344,93 @@ def workflow_schedules_get(workflow_id):
         return jsonify({"schedules": schedule_details(workflow), "timezone": "UTC"})
     except (ValueError, WorkflowNotFound, WorkflowValidationError) as exc:
         return _persistence_error(exc)
+
+
+@workflows_bp.route("/api/workflows/<workflow_id>/webhook", methods=["GET"])
+def workflow_webhook_get(workflow_id):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    try:
+        workflow = load_workflow(workflow_id)
+        token = webhook_token(workflow_id)
+    except (ValueError, WorkflowNotFound, WorkflowValidationError) as exc:
+        return _persistence_error(exc)
+    settings = (workflow.get("settings") or {}).get("webhook") or {"enabled": False, "mappings": []}
+    response = jsonify({
+        "webhook": settings,
+        "token": token,
+        "path": f"/api/workflow/hooks/{workflow_id}/{token}",
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@workflows_bp.route("/api/workflows/<workflow_id>/webhook/regenerate", methods=["POST"])
+def workflow_webhook_regenerate(workflow_id):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    body, failure = _json_body(allow_empty=True)
+    if failure:
+        return failure
+    if body:
+        return _error("BAD_REQUEST", "Regenerate request body must be empty", 400)
+    try:
+        load_workflow(workflow_id)
+        token = webhook_token(workflow_id, regenerate=True)
+    except (ValueError, WorkflowNotFound, WorkflowValidationError) as exc:
+        return _persistence_error(exc)
+    response = jsonify({"token": token, "path": f"/api/workflow/hooks/{workflow_id}/{token}"})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _loopback_bind_enabled():
+    bind_host = os.environ.get("STS_BIND_HOST", "127.0.0.1").strip().lower()
+    if bind_host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(bind_host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+@workflows_bp.route("/api/workflow/hooks/<workflow_id>/<token>", methods=["POST"])
+def workflow_hook(workflow_id, token):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    if not _loopback_bind_enabled():
+        return _error("FORBIDDEN", "Webhook triggers require a loopback-only server bind", 403)
+    body, failure = _json_body(
+        max_bytes=MAX_WEBHOOK_PAYLOAD_BYTES,
+        limit_message="Webhook payload exceeds the 64 KiB limit",
+    )
+    if failure:
+        return failure
+    try:
+        workflow = load_workflow(workflow_id)
+    except (ValueError, WorkflowNotFound, WorkflowValidationError):
+        return _error("WEBHOOK_NOT_FOUND", "Webhook not found", 404)
+    settings = (workflow.get("settings") or {}).get("webhook") or {}
+    if not settings.get("enabled") or not token_matches(workflow_id, token):
+        return _error("WEBHOOK_NOT_FOUND", "Webhook not found", 404)
+    try:
+        overrides = map_webhook_payload(workflow, body)
+        execution_id, project_id = execution_manager.start(
+            workflow,
+            run_mode="full",
+            target_node_ids=[],
+            source="webhook",
+            input_overrides=overrides,
+        )
+    except WebhookPayloadError as exc:
+        return _error("WEBHOOK_PAYLOAD_INVALID", str(exc), 422, exc.details)
+    except ExecutionRequestError as exc:
+        status = 422 if exc.code in {"WORKFLOW_INVALID", "MISSING_REQUIRED_INPUT"} else 400
+        return _error(exc.code, str(exc), status, exc.details)
+    return jsonify({"execution_id": execution_id, "project_id": project_id, "status": "queued"}), 202
 
 
 @workflows_bp.route("/api/workflows/<workflow_id>", methods=["PUT"])

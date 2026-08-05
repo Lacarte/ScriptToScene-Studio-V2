@@ -358,6 +358,9 @@ arrays. Errors use one envelope everywhere:
 | `GET /api/workflow/executions/<id>` | — | `200 {execution}`; `404` if absent |
 | `GET /api/workflow/executions/<id>/events` | standard `Last-Event-ID` on reconnect | `200 text/event-stream`; `404` if absent |
 | `GET /api/workflow/executions` | required `workflow_id`, optional `limit` 1–200 | `200 {executions:[summary], total:n}` sorted newest first |
+| `GET /api/workflows/<id>/webhook` | — | `200 {webhook, token, path}` with `Cache-Control: no-store`; creates the separately persisted token when absent |
+| `POST /api/workflows/<id>/webhook/regenerate` | `{}` | `200 {token, path}` with `Cache-Control: no-store`; immediately invalidates the prior URL |
+| `POST /api/workflow/hooks/<id>/<token>` | mapped JSON object, max 64 KiB | `202 {execution_id, project_id, status:"queued"}` with queue source `webhook`; available only to loopback clients while the server itself is loopback-bound |
 
 Create/import/save return `422 WORKFLOW_INVALID` when the JSON transport is valid but violates
 workflow rules. Use `400` for malformed JSON/request shape, `403` for non-loopback access,
@@ -378,7 +381,7 @@ Monotonic `sequence` per execution; each SSE frame includes `id: <sequence>` and
 
 ## 7. Error codes (stable)
 
-`WORKFLOW_INVALID, WORKFLOW_CONFLICT, UNKNOWN_NODE_TYPE, UNSUPPORTED_NODE_VERSION, PORT_TYPE_MISMATCH, MISSING_REQUIRED_INPUT, CYCLE_DETECTED, PROJECT_LOCKED, NODE_EXECUTION_FAILED, ALIGNMENT_EMPTY, WEBHOOK_FAILED, PROVIDER_UNAVAILABLE, EXTENSION_NOT_CONNECTED, POLL_TIMEOUT, EXPORT_FAILED, CANCELLED, ARTIFACT_MISSING, CACHE_INTEGRITY, STUB_PAYLOAD_INVALID, SAMPLE_FIXTURE_MISSING`.
+`WORKFLOW_INVALID, WORKFLOW_CONFLICT, UNKNOWN_NODE_TYPE, UNSUPPORTED_NODE_VERSION, PORT_TYPE_MISMATCH, MISSING_REQUIRED_INPUT, CYCLE_DETECTED, PROJECT_LOCKED, NODE_EXECUTION_FAILED, ALIGNMENT_EMPTY, WEBHOOK_FAILED, WEBHOOK_NOT_FOUND, WEBHOOK_PAYLOAD_INVALID, PROVIDER_UNAVAILABLE, EXTENSION_NOT_CONNECTED, POLL_TIMEOUT, EXPORT_FAILED, CANCELLED, ARTIFACT_MISSING, CACHE_INTEGRITY, STUB_PAYLOAD_INVALID, SAMPLE_FIXTURE_MISSING`.
 Failure payload: `{code, node_id, node_name, message, details_redacted, attempt, timestamp, recovery_suggestion}`.
 
 ## 8. Extraction blockers & known defects (input to step 3.1)

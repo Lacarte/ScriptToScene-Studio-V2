@@ -565,6 +565,24 @@ random token, regenerable in the UI; JSON payload validated and mapped to declar
 Invalid token or payload rejected with the standard error envelope.
 **Done when:** a valid POST enqueues a run with the mapped payload, invalid token/payload/oversize are rejected with the envelope, and the endpoint refuses non-loopback binds.
 
+#### Step 7.4 review status — 2026-08-05
+
+- **Complete.** Saved workflows can enable a webhook and declare up to 32 required/optional dotted
+  JSON payload paths mapped to unique, enabled data-input ports. Payload values are validated by
+  their resolved static or dynamic port type before they become scheduler input overrides, and
+  accepted requests enter the Phase 7.1 queue with `source: webhook`.
+- Each workflow gets a cryptographically random URL-safe token under separate private runtime state
+  (`output/workflows/hook-tokens/`), keeping credentials out of workflow exports and execution
+  snapshots. The settings dialog reveals and copies the loopback URL and regenerates its token with
+  immediate invalidation of the previous URL; token responses are marked `Cache-Control: no-store`.
+- The hook accepts JSON objects up to 64 KiB, compares tokens in constant time, uses the standard
+  error envelope for missing/disabled hooks and invalid typed payloads, rejects non-loopback clients,
+  and refuses all requests whenever `STS_BIND_HOST` is not loopback-only.
+- Automated verification: the backend suite passes with 184 tests and 61 subtests (10 live-provider
+  tests skipped); the frontend suite passes with 141 tests across 21 files; the production build
+  succeeds. Dedicated tests cover valid typed mapping and queue source, required/invalid payloads,
+  oversize rejection, token rotation, workflow validation, remote clients, and exposed server binds.
+
 ### 7.5 Run notifications
 Per-workflow notification settings: on completion/failure, emit a Windows toast and append to a
 persisted notification log surfaced in the UI (badge + list). Outbound webhook notification as

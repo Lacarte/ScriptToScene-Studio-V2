@@ -219,7 +219,32 @@ with the project preloaded.
 
 ---
 
-## 7. Legacy pages
+## 7. Automated triggers
+
+Saved workflows can enqueue full runs without clicking Run. Open the toolbar's
+**Trigger** group to configure any of these sources, then save the workflow:
+
+- **Schedule** uses five-field UTC cron expressions. Each schedule can be
+  disabled independently; after the app was closed, only the latest missed
+  fire is caught up.
+- **Folder** watches matching UTF-8 text files, waits until each file is stable,
+  maps its content to Script Input or another text/script input, and moves the
+  claimed file into `processed/`.
+- **Webhook** creates a private loopback URL and maps dotted JSON payload paths
+  (for example `story.text`) to declared typed input ports. Required fields and
+  port-specific values are validated before a run enters the queue. The endpoint
+  accepts at most 64 KiB, rejects non-loopback clients, and is disabled whenever
+  the server is bound to a non-loopback address. **Regenerate** immediately
+  invalidates the previous URL; tokens are stored separately and never included
+  in workflow exports or execution snapshots.
+
+All trigger sources use the Runs & diagnostics queue. Runs for the same project
+execute one at a time, pending runs can be cancelled, and different projects do
+not block each other.
+
+---
+
+## 8. Legacy pages
 
 The step-by-step dashboard remains available: toolbar → **Pipeline**, or the
 sidebar's "Legacy Pipeline Dashboard". Each legacy page links back to the
@@ -229,12 +254,13 @@ polish in the Timeline Editor, then re-export from either surface.
 
 ---
 
-## 8. Where things live
+## 9. Where things live
 
 | What | Where |
 |---|---|
 | Saved workflows | `output/workflows/<wf_id>.json` |
 | Run records | `output/workflows/executions/` |
+| Webhook tokens | `output/workflows/hook-tokens/` (private runtime state) |
 | Project artifacts | `output/<step>/<project_id>/` |
 | Final exports | `output/exports/<project_id>/` |
 | Branding / logos | `output/branding/` |
