@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useOptionSource } from '../composables/useOptionSources.js'
 import MediaAssetField from './MediaAssetField.vue'
 import { isExpressionValue } from '../expressions.js'
@@ -8,14 +8,16 @@ import { isExpressionValue } from '../expressions.js'
  * One schema field → one widget (n8n ParameterInput pattern).
  * Widget chosen by `field.type`: string, textarea, number, boolean,
  * options (static or allowlisted async source), json, media_asset.
- * Emits `update` with the new value.
+ * Emits `update` with the new value, and `invalid` with a message (or null)
+ * whenever the widget holds text that cannot become a value — the parent
+ * registers it so Save can refuse while the edit is unfinished (step 6.4).
  */
 const props = defineProps({
   field: { type: Object, required: true },
   value: { required: false, default: undefined },
   expressionOptions: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['update'])
+const emit = defineEmits(['update', 'invalid'])
 
 // Async sources resolve through the backend allowlist; the composable
 // caches one fetch per source for the whole session.
@@ -26,38 +28,56 @@ const asyncOptions = props.field.type === 'options' && props.field.options_sourc
 const jsonText = ref('')
 const jsonError = ref('')
 
+function setJsonError(message) {
+  if (jsonError.value === message) return
+  jsonError.value = message
+  emit('invalid', message || null)
+}
+
 watch(
   () => props.value,
   (value) => {
     if (props.field.type === 'json') {
       jsonText.value = JSON.stringify(value ?? {}, null, 2)
-      jsonError.value = ''
+      setJsonError('')
     }
   },
   { immediate: true },
 )
 
+// A hidden widget (conditional field, node switch) can no longer hold
+// invalid text — release the Save block it registered.
+onBeforeUnmount(() => {
+  if (jsonError.value) emit('invalid', null)
+})
+
 function onJsonBlur() {
   try {
     const parsed = JSON.parse(jsonText.value || 'null')
-    jsonError.value = ''
+    setJsonError('')
     emit('update', parsed ?? {})
   } catch {
-    jsonError.value = 'Invalid JSON — fix it before it can be saved'
+    setJsonError('Invalid JSON — fix it before it can be saved')
   }
 }
 
 function onNumberInput(event) {
   const raw = event.target.value
-  if (raw === '') return
+  const current = props.value ?? props.field.default ?? 0
   const num = Number(raw)
-  if (!Number.isFinite(num)) return
-  const min = props.field.min
-  const max = props.field.max
-  let clamped = num
-  if (min !== undefined && clamped < min) clamped = min
-  if (max !== undefined && clamped > max) clamped = max
-  emit('update', clamped)
+  let next = current
+  if (raw !== '' && Number.isFinite(num)) {
+    next = num
+    const min = props.field.min
+    const max = props.field.max
+    if (min !== undefined && next < min) next = min
+    if (max !== undefined && next > max) next = max
+  }
+  // Force the DOM to show the value we actually keep. When clamping (or
+  // discarding unparseable input) lands on the unchanged stored value, Vue
+  // skips re-rendering and the input would keep displaying the typed text.
+  event.target.value = String(next)
+  if (next !== current) emit('update', next)
 }
 
 const selectOptions = computed(() => {

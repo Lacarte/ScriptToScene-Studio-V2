@@ -21,6 +21,17 @@ export const DRAFT_DEBOUNCE_MS = 1000
 export const RECENT_NODE_TYPES_KEY = 'sts-workflow-recent-node-types'
 export const RECENT_NODE_TYPES_LIMIT = 5
 
+/**
+ * User-facing text for a failed API call. The api client parses the
+ * standard {error:{code,message}} envelope into `err.message`/`err.code`;
+ * include the stable code so the surfaced reason is diagnosable, and fall
+ * back to the generic text only when there is no real message at all.
+ */
+export function apiErrorText(err, fallback) {
+  const message = err?.message || fallback
+  return err?.code ? `${message} [${err.code}]` : message
+}
+
 export const useWorkflowStore = defineStore('workflow', () => {
   // ── Registry (served by the backend, loaded once) ─────────────────────
   const registryVersion = ref(null)
@@ -43,7 +54,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       portTypes.value = data.port_types || []
       samplePayloads.value = data.sample_payloads || {}
     } catch (err) {
-      registryError.value = err?.message || 'Failed to load node types'
+      registryError.value = apiErrorText(err, 'Failed to load node types')
     } finally {
       registryLoading.value = false
     }
@@ -291,7 +302,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       applyExecutionSnapshot(data.execution)
       return data.execution
     } catch (err) {
-      executionError.value = err?.message || 'Failed to refresh execution'
+      executionError.value = apiErrorText(err, 'Failed to refresh execution')
       throw err
     }
   }
@@ -313,7 +324,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
         : executionHistory.value.length
       return executionHistory.value
     } catch (err) {
-      executionHistoryError.value = err?.message || 'Failed to load run history'
+      executionHistoryError.value = apiErrorText(err, 'Failed to load run history')
       throw err
     } finally {
       executionHistoryLoading.value = false
@@ -425,7 +436,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       watchExecution(data.execution_id, { EventSourceImpl })
       return data
     } catch (err) {
-      executionError.value = err?.message || 'Failed to start workflow'
+      executionError.value = apiErrorText(err, 'Failed to start workflow')
       throw err
     } finally {
       executionLoading.value = false
@@ -444,7 +455,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       currentExecution.value.status = data.status || 'cancelling'
       return data
     } catch (err) {
-      executionError.value = err?.message || 'Failed to stop execution'
+      executionError.value = apiErrorText(err, 'Failed to stop execution')
       throw err
     }
   }
@@ -565,6 +576,41 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const templates = ref([])
   const persistenceLoading = ref(false)
   const persistenceError = ref('')
+
+  // ── Invalid editor fields (step 6.4) ──────────────────────────────────
+  // Invalid text lives only inside mounted widgets (a JSON textarea whose
+  // content does not parse never reaches the document), so saving would
+  // silently persist the last *valid* value while the user believes their
+  // edit was included. Widgets register here so Save can refuse honestly.
+  const invalidConfigFields = ref({}) // key → user-facing reason
+
+  function reportInvalidField(key, reason = '') {
+    if (!key) return
+    if (reason) {
+      invalidConfigFields.value = { ...invalidConfigFields.value, [key]: reason }
+    } else if (Object.hasOwn(invalidConfigFields.value, key)) {
+      const next = { ...invalidConfigFields.value }
+      delete next[key]
+      invalidConfigFields.value = next
+    }
+  }
+
+  function clearInvalidFields(prefix = '') {
+    invalidConfigFields.value = prefix
+      ? Object.fromEntries(
+        Object.entries(invalidConfigFields.value)
+          .filter(([key]) => !key.startsWith(prefix)),
+      )
+      : {}
+  }
+
+  const saveBlockedReason = computed(() => {
+    const reasons = Object.values(invalidConfigFields.value)
+    if (!reasons.length) return ''
+    return reasons.length === 1
+      ? reasons[0]
+      : `${reasons[0]} (and ${reasons.length - 1} more invalid field${reasons.length > 2 ? 's' : ''})`
+  })
 
   let idCounter = 0
   function nextNodeId() {
@@ -999,6 +1045,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     updatedAt.value = document.updated_at || null
     resetCounters()
     clearCommandHistory()
+    // Editor widgets remount against the new document; any invalid text they
+    // held is gone with them.
+    clearInvalidFields()
     if (!preserveSelection || !nodeById(selectedNodeId.value)) selectedNodeId.value = null
     if (markDirty) {
       // Unsaved content (template/import-as-draft, draft recovery): keep the
@@ -1026,15 +1075,25 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   async function refreshWorkflowList() {
-    const data = await api.get('/api/workflows', { params: { limit: 200 } })
-    workflowList.value = data.workflows || []
-    return workflowList.value
+    try {
+      const data = await api.get('/api/workflows', { params: { limit: 200 } })
+      workflowList.value = data.workflows || []
+      return workflowList.value
+    } catch (err) {
+      persistenceError.value = apiErrorText(err, 'Failed to load workflow list')
+      throw err
+    }
   }
 
   async function loadTemplates() {
-    const data = await api.get('/api/workflow/templates')
-    templates.value = data.templates || []
-    return templates.value
+    try {
+      const data = await api.get('/api/workflow/templates')
+      templates.value = data.templates || []
+      return templates.value
+    } catch (err) {
+      persistenceError.value = apiErrorText(err, 'Failed to load workflow templates')
+      throw err
+    }
   }
 
   async function openWorkflow(id) {
@@ -1045,14 +1104,21 @@ export const useWorkflowStore = defineStore('workflow', () => {
       applyDocument(data.workflow)
       return data.workflow
     } catch (err) {
-      persistenceError.value = err?.message || 'Failed to open workflow'
+      persistenceError.value = apiErrorText(err, 'Failed to open workflow')
       throw err
     } finally {
       persistenceLoading.value = false
     }
   }
 
+  function assertSaveNotBlocked() {
+    if (!saveBlockedReason.value) return
+    persistenceError.value = saveBlockedReason.value
+    throw Object.assign(new Error(saveBlockedReason.value), { code: 'INVALID_EDITOR_FIELD' })
+  }
+
   async function saveWorkflow() {
+    assertSaveNotBlocked()
     persistenceLoading.value = true
     persistenceError.value = ''
     try {
@@ -1066,7 +1132,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       await refreshWorkflowList()
       return data.workflow
     } catch (err) {
-      persistenceError.value = err?.message || 'Failed to save workflow'
+      persistenceError.value = apiErrorText(err, 'Failed to save workflow')
       throw err
     } finally {
       persistenceLoading.value = false
@@ -1074,6 +1140,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   async function saveAs(name) {
+    assertSaveNotBlocked()
     persistenceLoading.value = true
     persistenceError.value = ''
     try {
@@ -1087,7 +1154,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       await refreshWorkflowList()
       return data.workflow
     } catch (err) {
-      persistenceError.value = err?.message || 'Failed to save workflow copy'
+      persistenceError.value = apiErrorText(err, 'Failed to save workflow copy')
       throw err
     } finally {
       persistenceLoading.value = false
@@ -1105,7 +1172,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       await refreshWorkflowList()
       return data.workflow
     } catch (err) {
-      persistenceError.value = err?.message || 'Failed to import workflow'
+      persistenceError.value = apiErrorText(err, 'Failed to import workflow')
       throw err
     } finally {
       persistenceLoading.value = false
@@ -1382,6 +1449,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     notes, addNote, updateNote, moveNotes, removeNotes, noteById,
     recentNodeTypes, recordNodeUse,
     workflowList, templates, persistenceLoading, persistenceError,
+    // invalid editor fields (step 6.4)
+    invalidConfigFields, reportInvalidField, clearInvalidFields, saveBlockedReason,
     addNode, moveNode, moveNodes, renameNode, removeNodes, removeEdges, connectNodes,
     replaceNode, replacementPlan, insertNodeAndConnect,
     setViewport, nodeById, defaultsFor, toDocument, applyDocument, newWorkflow,

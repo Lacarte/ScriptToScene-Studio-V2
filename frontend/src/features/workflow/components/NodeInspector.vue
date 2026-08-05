@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useWorkflowStore } from '../stores/workflow.js'
 import { shouldDisplayField } from '../schema.js'
 import ConfigField from './ConfigField.vue'
@@ -34,21 +34,50 @@ const mappingOptions = computed(() => expressionOptions(
   node.value, store.nodes, store.edges, store.nodeTypes, store.variables,
 ))
 const variablesError = ref('')
+const VARIABLES_FIELD_KEY = 'workflow:variables'
 
 function updateVariables(event) {
   try {
     const parsed = JSON.parse(event.target.value || '{}')
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
     variablesError.value = ''
+    store.reportInvalidField(VARIABLES_FIELD_KEY, '')
     store.updateVariables(parsed)
   } catch {
     variablesError.value = 'Variables must be a valid JSON object'
+    store.reportInvalidField(
+      VARIABLES_FIELD_KEY,
+      'Fix the workflow variables JSON before saving',
+    )
   }
 }
 
 function onUpdate(name, value) {
   store.updateNodeConfig(node.value.id, name, value)
 }
+
+// A widget holding unparseable text registers a Save block; the invalid
+// text only exists inside the mounted widget, so switching nodes (or
+// closing the inspector) discards it and must release the block too.
+function onFieldInvalid(field, message) {
+  if (!node.value) return
+  store.reportInvalidField(
+    `${node.value.id}:${field.name}`,
+    message
+      ? `Fix invalid JSON in "${node.value.name}" → "${field.label || field.name}" before saving`
+      : '',
+  )
+}
+
+watch(() => store.selectedNodeId, (_current, previous) => {
+  if (previous) store.clearInvalidFields(`${previous}:`)
+  if (!store.selectedNodeId) {
+    variablesError.value = ''
+    store.clearInvalidFields()
+  }
+})
+
+onBeforeUnmount(() => store.clearInvalidFields())
 
 function onDelete() {
   store.removeNodes([node.value.id])
@@ -155,6 +184,7 @@ function updateErrorPolicy(patch) {
         :value="node.configuration[field.name]"
         :expression-options="mappingOptions"
         @update="(value) => onUpdate(field.name, value)"
+        @invalid="(message) => onFieldInvalid(field, message)"
       />
     </div>
   </div>

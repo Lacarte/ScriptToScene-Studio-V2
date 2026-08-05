@@ -714,7 +714,12 @@ async function onStop() {
           <span class="wf-badge">Workflow</span>
         </div>
         <span
-          v-if="store.dirty && store.draftSavedAt"
+          v-if="store.saveBlockedReason"
+          class="wf-save-blocked"
+          role="alert"
+        >{{ store.saveBlockedReason }}</span>
+        <span
+          v-else-if="store.dirty && store.draftSavedAt"
           class="wf-draft-hint"
           :title="`Draft autosaved ${new Date(store.draftSavedAt).toLocaleTimeString()}`"
         >Draft safely autosaved</span>
@@ -736,14 +741,19 @@ async function onStop() {
               {{ item.workflow.name }}
             </option>
           </select>
-          <button class="wf-btn primary" :disabled="store.persistenceLoading || (!!store.workflowId && !store.dirty)" @click="onSave">
+          <button
+            class="wf-btn primary"
+            :disabled="store.persistenceLoading || !!store.saveBlockedReason || (!!store.workflowId && !store.dirty)"
+            :title="store.saveBlockedReason || ''"
+            @click="onSave"
+          >
             Save
           </button>
           <details class="wf-more-menu">
             <summary class="wf-btn" aria-label="More workflow actions">More <span aria-hidden="true">⌄</span></summary>
             <div class="wf-more-popover">
-              <button :disabled="store.persistenceLoading" @click="onSaveAs">Save as…</button>
-              <button :disabled="store.persistenceLoading" @click="onDuplicate">Duplicate workflow</button>
+              <button :disabled="store.persistenceLoading || !!store.saveBlockedReason" :title="store.saveBlockedReason || ''" @click="onSaveAs">Save as…</button>
+              <button :disabled="store.persistenceLoading || !!store.saveBlockedReason" :title="store.saveBlockedReason || ''" @click="onDuplicate">Duplicate workflow</button>
               <button :disabled="store.persistenceLoading" @click="importInput?.click()">Import JSON…</button>
               <button :disabled="!store.workflowId" @click="onExport">Export JSON</button>
             </div>
@@ -1066,6 +1076,16 @@ async function onStop() {
   font-size: 10px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.wf-save-blocked {
+  font-size: 10px;
+  font-weight: 600;
+  color: #f87171;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
 }
 
 .wf-badge {

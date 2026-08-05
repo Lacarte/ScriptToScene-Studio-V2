@@ -27,7 +27,26 @@ async function request(method, path, { body, params } = {}) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
-    throw new Error(`${method} ${path} → ${res.status}: ${text}`)
+    // The backend answers failures with the standard {error:{code,message}}
+    // envelope (contracts.md §6). Surface that message verbatim and attach
+    // the stable code/status so callers can report the real reason instead
+    // of a raw "METHOD path → status: body" string.
+    let envelope = null
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed?.error && typeof parsed.error.message === 'string' && parsed.error.message) {
+        envelope = parsed.error
+      }
+    } catch {
+      /* non-envelope body (proxy error page, plain text) */
+    }
+    const err = new Error(
+      envelope ? envelope.message : `${method} ${path} → ${res.status}: ${text}`,
+    )
+    err.status = res.status
+    if (envelope && typeof envelope.code === 'string' && envelope.code) err.code = envelope.code
+    if (envelope && envelope.details !== undefined) err.details = envelope.details
+    throw err
   }
 
   const contentType = res.headers.get('content-type') || ''

@@ -399,6 +399,33 @@ Parse the `{error:{code,message}}` envelope on every remaining API call in the w
 invalid text, and fix the number-widget DOM desync so the displayed value always matches state.
 **Done when:** Vitest covers envelope surfacing for each store API path, and Save is disabled with a visible reason while any field is invalid.
 
+#### Step 6.4 review status — 2026-08-05
+
+- **Complete.** The shared API client now parses the standard `{error:{code,message}}`
+  envelope on every non-OK response, throwing errors that carry the backend's message,
+  stable code, HTTP status, and optional details instead of a raw
+  `METHOD path → status: body` string. Every workflow-store API path — node-types, open,
+  save (create and update), save-as, import, workflow list, templates, run, stop,
+  execution refresh, and run history — surfaces that envelope through its store error ref
+  as `message [CODE]`, including the two list paths that previously threw with no
+  handling at all.
+- Save is truthfully blocked while any JSON widget holds unparseable text: JSON config
+  fields and the workflow-variables editor register with a store-level invalid-field
+  registry (`saveBlockedReason`), the toolbar disables Save/Save As/Duplicate with the
+  reason visible as a red toolbar alert naming the node and field, and
+  `saveWorkflow`/`saveAs` themselves refuse (without an API call) so the block holds even
+  outside the button. Blocks release when the text is fixed, the field is hidden or
+  unmounted, the node is deselected, or a new document loads — matching where invalid
+  text can actually live.
+- The number widget's DOM can no longer desync from state: clamped input that lands on
+  the unchanged stored value, cleared input, and unparseable input all force the input
+  element back to the value actually kept, and updates are emitted only when the value
+  really changes.
+- Automated verification: 26 new Vitest cases (client envelope parsing, all 12 store
+  surfacing paths, save gating at store/widget/inspector/page level, number-widget sync)
+  bring the frontend suite to 131 passed across 16 files; the production build succeeds.
+  No backend code changed in this step.
+
 ### 6.5 Legacy UI bridge
 The canvas becomes the default landing surface. Legacy step pages stay reachable behind explicit
 navigation, with cross-links both ways for the same project; routes that no surface links to
