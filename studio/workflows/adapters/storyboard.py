@@ -56,6 +56,15 @@ def generate(inputs, config, context):
     merged = inherited_config(config, inputs.get("settings"))
     merged["storyboard_provider_override"] = merged.get("provider", "wavespeed_webhook")
     result = _step_storyboard(inputs["scenes"], merged, pid, context)
+    # Verified live (step 6.1): provider failures (e.g. a rejected WaveSpeed
+    # key) complete the manifest with only errors — that is a node failure,
+    # not a success with zero images.
+    if not result.get("ready"):
+        raise AdapterError(
+            "STORYBOARD_FAILED",
+            f"All {result.get('total', 0)} storyboard scenes failed",
+            details={"errors": result.get("errors")},
+        )
     result["artifact_refs"] = [
         str(item.get("local_path")).replace("\\", "/").removeprefix("/output/")
         for item in result.get("scene_statuses", {}).values()

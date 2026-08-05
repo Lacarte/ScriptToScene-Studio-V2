@@ -307,6 +307,33 @@ provider quirks as tests marked `@pytest.mark.live`, skipped unless `STS_LIVE=1`
 orchestrator's fixture-based validation stays green and deterministic.
 **Done when:** one full live run from script to playable export succeeds through the workflow runner, and the live-marked tests document each provider's verified behavior.
 
+#### Step 6.1 review status — 2026-08-05
+
+- **Complete (one provider externally blocked).** A full live run — script → Kokoro TTS →
+  stable-whisper alignment → segmenter → scene blueprint (n8n + OpenRouter LLM) → Kie AI
+  assets → captions → music → assemble → timeline → FFmpeg export — succeeded through
+  `ExecutionManager`/`WorkflowScheduler` and produced a playable 1080×1920 mp4 with video and
+  audio streams (ffprobe-verified). `tests/test_live_providers.py` (marker `live`, registered
+  in the new `pytest.ini`, gated on `STS_LIVE=1`) documents each provider's verified behavior:
+  9 passed, 1 documented skip.
+- Live infrastructure findings: the hosted Railway n8n no longer serves the scene-blueprint
+  webhook (workflow inactive, API key revoked) and the OpenRouter balance is negative, which
+  rejects paid models with HTTP 402 while free models still complete. Live verification now
+  self-hosts n8n from the repo's own workflow export with a pinned free model
+  (`_dev/loop-engineering/live-verification/setup_local_n8n.py`; procedure in that folder's
+  README). The WaveSpeed key is rejected upstream on every model (HTTP 401 "Invalid API key"),
+  so the storyboard branch is removed from the live document and its test skips with the
+  reason recorded until a valid key is configured (`STS_LIVE_STORYBOARD=1` restores it);
+  grok_automa remains non-automatable by design (human-driven browser).
+- Product fixes from live breakage, each with a fixture regression in
+  `tests/test_workflow_adapters.py`: empty node-config values no longer mask inherited
+  project settings (`inherited_config` — the template's Project Setup tone was silently
+  discarded by the music/scenes empty schema defaults, failing runs with `MUSIC_NOT_FOUND`);
+  storyboard and animator adapters now fail with `STORYBOARD_FAILED`/`ANIMATOR_FAILED` when
+  every scene errors instead of reporting success with zero assets.
+- Automated verification: 143 backend tests plus 38 subtests pass with the live suite
+  correctly skipped when `STS_LIVE` is unset; no frontend code changed in this step.
+
 ### 6.2 Persistence hardening
 `persistence.py`: atomic trash move with no `.bak` resurrection path, single-writer file locking
 around read-modify-write cycles, monotonic `updated_at` so optimistic concurrency cannot alias

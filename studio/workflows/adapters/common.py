@@ -52,13 +52,22 @@ def project_id(context, inputs: Mapping[str, Any] | None = None) -> str:
 
 
 def inherited_config(config: Mapping[str, Any] | None, settings: Any, aliases=None) -> dict:
-    """Apply incoming settings as defaults; node configuration always wins."""
+    """Apply incoming settings as defaults; explicit node configuration wins.
+
+    Verified live (step 6.1): schema defaults are empty strings, so an unset
+    node field must not mask a configured project setting — empty is not
+    explicit. A config value only overrides a non-empty inherited value when
+    it is itself non-empty.
+    """
     inherited = dict(settings) if isinstance(settings, Mapping) else {}
     aliases = aliases or {}
     for source, target in aliases.items():
         if source in inherited and target not in inherited:
             inherited[target] = inherited[source]
-    inherited.update(dict(config or {}))
+    for key, value in dict(config or {}).items():
+        if value in (None, "") and inherited.get(key) not in (None, ""):
+            continue
+        inherited[key] = value
     return inherited
 
 

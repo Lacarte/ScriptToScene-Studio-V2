@@ -3,6 +3,8 @@ venv_broken_py312/
 
 # Loop-engineering orchestrator state + agent logs (machine-local)
 _dev/loop-engineering/runtime/
+# Step 6.1 live verification — local n8n data dir (bootstrapped, never committed)
+_dev/loop-engineering/live-verification/n8n-data/
 python312/
 __pycache__/
 *.pyc

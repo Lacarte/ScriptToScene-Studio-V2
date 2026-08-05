@@ -71,6 +71,37 @@ def test_provider_adapters_expose_typed_outputs(monkeypatch, module, method, inp
     assert result[output_port]["ready"] == 1
 
 
+@pytest.mark.parametrize("module,method,input_port,code", [
+    (storyboard, "_step_storyboard", "scenes", "STORYBOARD_FAILED"),
+    (animator, "_step_assets", "scenes", "ANIMATOR_FAILED"),
+])
+def test_provider_adapters_fail_when_no_assets_produced(monkeypatch, module, method, input_port, code):
+    # Live finding (step 6.1): a rejected provider key errors every scene but
+    # still completes the manifest; the node must fail, not report success.
+    monkeypatch.setattr(module, method, lambda *args: {"total": 2, "ready": 0, "errors": 2})
+    with pytest.raises(AdapterError) as raised:
+        module.generate({input_port: {"scenes": [{"image_prompt": "p"}]}}, {}, CTX)
+    assert raised.value.code == code
+
+
+def test_empty_node_config_does_not_mask_inherited_settings(monkeypatch):
+    # Live finding (step 6.1): music.select carries story_tone="" as its schema
+    # default, which silently discarded the tone configured in Project Setup.
+    seen = {}
+    def service(value, cfg, pid):
+        seen.update(cfg)
+        return {"scenes": [{"image_prompt": "p"}]}
+    monkeypatch.setattr(scenes, "_step_scenes", service)
+    monkeypatch.setattr(scenes, "with_artifacts", lambda payload, *paths: payload)
+    scenes.blueprint(
+        {"segments": {}, "script": "x", "settings": {"tone": "educational"}},
+        {"story_tone": "", "style_prompt": ""},
+        CTX,
+    )
+    assert seen["story_tone"] == "educational"
+    assert seen["style_prompt"] == ""  # nothing inherited: the empty value stays
+
+
 def test_caption_adapter_writes_fixture_project(monkeypatch, tmp_path):
     monkeypatch.setattr(captions, "CAPTIONS_DIR", str(tmp_path))
     monkeypatch.setattr(captions, "with_artifacts", lambda payload, *paths: {**payload, "artifact_refs": list(paths)})

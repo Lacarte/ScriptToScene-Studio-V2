@@ -70,6 +70,14 @@ def generate(inputs, config, context):
         "duration": merged.get("duration", "6s"),
     }
     result = _step_assets(inputs["scenes"], merged, pid, context)
+    # Verified live (step 6.1): a provider that errors every scene still
+    # completes the job manifest — zero produced assets must fail the node.
+    if not result.get("ready"):
+        raise AdapterError(
+            "ANIMATOR_FAILED",
+            f"All {result.get('total', 0)} animator scenes failed",
+            details={"errors": result.get("errors"), "provider": result.get("provider")},
+        )
     asset_root = os.path.join(ANIMATOR_DIR, pid)
     result["artifact_refs"] = []
     if os.path.isdir(asset_root):
