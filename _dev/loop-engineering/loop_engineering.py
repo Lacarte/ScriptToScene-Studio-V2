@@ -27,6 +27,7 @@ import datetime as dt
 import json
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -166,11 +167,15 @@ def steps_done_in_git() -> set[str]:
 # ---------------------------------------------------------------------------
 
 def run_capture(cmd, cwd=ROOT, timeout=120) -> str:
-    result = subprocess.run(
+    result = run_capture_result(cmd, cwd=cwd, timeout=timeout)
+    return (result.stdout or "") + (result.stderr or "")
+
+
+def run_capture_result(cmd, cwd=ROOT, timeout=120) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         cmd, cwd=str(cwd), capture_output=True, text=True,
         timeout=timeout, shell=isinstance(cmd, str), encoding="utf-8", errors="replace",
     )
-    return (result.stdout or "") + (result.stderr or "")
 
 
 @dataclass
@@ -271,6 +276,17 @@ def unfinished_phase_baselines(state: dict) -> dict[int, str]:
     return unfinished
 
 
+def ensure_agents_available(args) -> None:
+    """Fail before touching the worktree if a selected agent CLI is missing."""
+    selected = {args.builder, args.fixer}
+    if args.reviewer != "none":
+        selected.add(args.reviewer)
+    missing = sorted(agent for agent in selected if shutil.which(agent) is None)
+    if missing:
+        names = ", ".join(missing)
+        sys.exit(f"Cannot start: required agent command(s) not found: {names}")
+
+
 # ---------------------------------------------------------------------------
 # Validation (never trust the agent)
 # ---------------------------------------------------------------------------
@@ -285,18 +301,14 @@ def validate(log_file: Path) -> tuple[bool, str]:
         started = time.monotonic()
         say(f"validate: running {name} ({'backend test suite' if name == 'pytest' else 'frontend test suite' if name == 'vitest' else 'production build'})")
         try:
-            output = run_capture(cmd, cwd=cwd, timeout=VALIDATE_TIMEOUT_S)
+            result = run_capture_result(cmd, cwd=cwd, timeout=VALIDATE_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             return False, f"{name} timed out"
+        output = (result.stdout or "") + (result.stderr or "")
         log_file.parent.mkdir(parents=True, exist_ok=True)
         with log_file.open("a", encoding="utf-8") as log:
             log.write(f"\n----- validate:{name}\n{output}\n")
-        failed = (
-            (name == "pytest" and (" failed" in output or "error" in output.lower().split("=")[-1]))
-            or (name == "vitest" and " failed" in output)
-            or (name == "build" and "✓ built" not in output and "built in" not in output)
-        )
-        if failed:
+        if result.returncode != 0:
             tail = "\n".join(output.strip().splitlines()[-25:])
             say(f"validate: {name} is RED after {elapsed(started)}", icon="✗")
             return False, f"{name} FAILED:\n{tail}"
@@ -681,6 +693,8 @@ def main() -> None:
             for step in targets:
                 print(f"  {step.id}  {step.title}")
         return
+
+    ensure_agents_available(args)
 
     run_started = time.monotonic()
     print("=" * 72)

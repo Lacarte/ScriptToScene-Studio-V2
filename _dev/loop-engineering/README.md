@@ -16,11 +16,11 @@ selected phase or step range is complete.
 
 ## Quick start
 
-Double-click `run.bat` to run all remaining work phase by phase. The window
-prints the current phase, step, and stage as it runs, and stays open with the
-final exit code when the loop finishes. Codex is the default builder,
-debugger/fixer, and reviewer. Agent output and idle-process heartbeats appear
-in the main window.
+Double-click `run.bat`, choose an agent profile, and run all remaining work
+phase by phase. Four profiles are available: all Codex, all Claude, Codex build
+with Claude fix/review, or Claude build with Codex fix/review. The window prints
+the selected roles, current phase, step, and stage, and stays open with the final
+exit code. Agent output and idle-process heartbeats appear in the main window.
 
 ```bat
 _dev\loop-engineering\run.bat --status            &:: where am I? what's next?
