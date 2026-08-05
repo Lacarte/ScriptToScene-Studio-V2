@@ -26,6 +26,7 @@ import WatchFolderSettings from '../components/WatchFolderSettings.vue'
 import WebhookSettings from '../components/WebhookSettings.vue'
 import NotificationCenter from '../components/NotificationCenter.vue'
 import AssetGarbageCollection from '../components/AssetGarbageCollection.vue'
+import ProjectArchiveManager from '../components/ProjectArchiveManager.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
@@ -38,6 +39,7 @@ const watchFolderOpen = ref(false)
 const webhookOpen = ref(false)
 const notificationsOpen = ref(false)
 const assetGcOpen = ref(false)
+const projectArchiveOpen = ref(false)
 const notificationUnseen = ref(0)
 
 async function refreshNotificationBadge() {
@@ -703,6 +705,18 @@ function onExport() {
   anchor.click()
 }
 
+async function onProjectRestored(workflowId, projectId) {
+  projectArchiveOpen.value = false
+  try {
+    await store.refreshWorkflowList()
+    await store.openWorkflow(workflowId)
+    await restoreViewport()
+    toast.success(`Project ${projectId} restored`)
+  } catch (err) {
+    toast.error(store.persistenceError || err?.message || 'Project restored, but could not be opened')
+  }
+}
+
 async function onRun(mode = runMode.value, nodeId = store.selectedNodeId) {
   const targets = targetsForMode(mode, nodeId)
   if (!canRun(mode, nodeId)) {
@@ -792,6 +806,7 @@ async function onStop() {
               <button :disabled="store.persistenceLoading || !!store.saveBlockedReason" :title="store.saveBlockedReason || ''" @click="onDuplicate">Duplicate workflow</button>
               <button :disabled="store.persistenceLoading" @click="importInput?.click()">Import JSON…</button>
               <button :disabled="!store.workflowId" @click="onExport">Export JSON</button>
+              <button @click="projectArchiveOpen = true">Project archive…</button>
             </div>
           </details>
           <input ref="importInput" class="wf-file-input" type="file" accept="application/json,.json" @change="onImportFile" />
@@ -1037,6 +1052,11 @@ async function onStop() {
       @seen="notificationUnseen = 0"
     />
     <AssetGarbageCollection v-if="assetGcOpen" @close="assetGcOpen = false" />
+    <ProjectArchiveManager
+      v-if="projectArchiveOpen"
+      @close="projectArchiveOpen = false"
+      @restored="onProjectRestored"
+    />
   </div>
 </template>
 

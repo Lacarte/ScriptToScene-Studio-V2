@@ -766,6 +766,25 @@ restore recreates it under a new or original ID with references rewritten. Used 
 machine moves.
 **Done when:** archive → delete → restore round-trips a fixture project with byte-identical referenced artifacts and a workflow that validates and runs.
 
+#### Step 9.4 review status — 2026-08-05
+
+- **Complete.** Saved workflow projects can be downloaded as one versioned `.sts-project.zip`
+  containing the workflow, matching execution records, referenced managed artifacts, and referenced
+  branding. A SHA-256 manifest inventories every member before restore.
+- Restore can preserve or regenerate both workflow and project IDs. Workflow snapshots, execution
+  records, artifact references, and project-bearing artifact paths are rewritten consistently;
+  execution ID collisions are also remapped. Existing files are never overwritten.
+- Archive intake rejects traversal, symlinks, duplicate or undeclared members, unsupported versions,
+  unsafe compression ratios, excessive file/count/total sizes, corrupt hashes, and invalid restored
+  workflows. Files are staged and promoted only after complete validation, with rollback on failure.
+- The workflow toolbar exposes project selection, archive download, and restore ID choices. A
+  successful restore refreshes and opens the restored workflow.
+- Verification passes with 221 backend tests (10 live-provider tests skipped, 62 subtests), all 147
+  frontend tests across 24 files, the Vite production build, and generated-document drift checks.
+  Dedicated tests prove archive/delete/restore with original and new IDs, byte-identical artifacts,
+  reference rewriting, pinned-viewer retention, restored-workflow execution, integrity/traversal
+  refusal, API behavior, and UI restore options.
+
 ### 9.5 Large-canvas performance
 Profile and fix canvas behavior at 150+ nodes: memoized node cards, viewport-culled rendering
 if needed, debounced persistence, and a generated large-workflow fixture for regression use.

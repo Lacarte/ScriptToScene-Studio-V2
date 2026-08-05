@@ -4,9 +4,11 @@ import io
 import ipaddress
 import json
 import os
+import shutil
+import tempfile
 import uuid
 
-from flask import Blueprint, Response, jsonify, request, send_from_directory, stream_with_context
+from flask import Blueprint, Response, jsonify, request, send_file, send_from_directory, stream_with_context
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from config import BRANDING_DIR
@@ -30,6 +32,13 @@ from .persistence import (
     update_workflow,
 )
 from .options import resolve_options
+from .project_archive import (
+    MAX_ARCHIVE_BYTES,
+    ProjectArchiveError,
+    create_archive,
+    project_summaries,
+    restore_archive,
+)
 from .notifications import list_notifications, mark_notifications_seen
 from .registry import serialize_registry
 from .sample_data import all_sample_payloads
@@ -531,6 +540,84 @@ def workflows_export(workflow_id):
         mimetype="application/json",
         headers={"Content-Disposition": f'attachment; filename="{workflow_id}.json"'},
     )
+
+
+@workflows_bp.route("/api/workflows/<workflow_id>/projects", methods=["GET"])
+def workflow_projects(workflow_id):
+    """List the concrete project IDs created by a saved workflow."""
+    denied = _require_loopback()
+    if denied:
+        return denied
+    try:
+        load_workflow(workflow_id)
+        projects = project_summaries(workflow_id, output_dir=execution_manager.output_dir)
+    except (ValueError, WorkflowNotFound, WorkflowValidationError) as exc:
+        return _persistence_error(exc)
+    except ProjectArchiveError as exc:
+        return _error(exc.code, str(exc), 400)
+    return jsonify({"projects": projects, "total": len(projects)})
+
+
+@workflows_bp.route("/api/workflows/<workflow_id>/projects/<project_id>/archive", methods=["GET"])
+def workflow_project_archive(workflow_id, project_id):
+    """Download a portable ZIP containing one workflow project and its assets."""
+    denied = _require_loopback()
+    if denied:
+        return denied
+    output = tempfile.TemporaryFile(mode="w+b")
+    try:
+        create_archive(workflow_id, project_id, output, output_dir=execution_manager.output_dir)
+        output.seek(0)
+    except ProjectArchiveError as exc:
+        output.close()
+        status = 404 if exc.code in {"NOT_FOUND", "PROJECT_NOT_FOUND"} else 422
+        return _error(exc.code, str(exc), status)
+    return send_file(
+        output,
+        mimetype="application/vnd.scripttoscene.project+zip",
+        as_attachment=True,
+        download_name=f"{workflow_id}_{project_id}.sts-project.zip",
+        conditional=False,
+    )
+
+
+@workflows_bp.route("/api/workflow/projects/restore", methods=["POST"])
+def workflow_project_restore():
+    """Restore an integrity-checked project archive under original or new IDs."""
+    denied = _require_loopback()
+    if denied:
+        return denied
+    request.max_content_length = MAX_ARCHIVE_BYTES + 1024 * 1024
+    declared = request.content_length
+    if declared is not None and declared > request.max_content_length:
+        return _error("REQUEST_TOO_LARGE", "Project archive exceeds the 2 GiB limit", 413)
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return _error("BAD_REQUEST", "Multipart field 'file' is required", 400)
+    buffered = tempfile.TemporaryFile(mode="w+b")
+    try:
+        shutil.copyfileobj(upload.stream, buffered, length=1024 * 1024)
+        buffered.seek(0)
+        result = restore_archive(
+            buffered, output_dir=execution_manager.output_dir,
+            project_id_mode=request.form.get("project_id_mode", "new"),
+            workflow_id_mode=request.form.get("workflow_id_mode", "new"),
+        )
+    except ProjectArchiveError as exc:
+        status = 409 if exc.code == "RESTORE_CONFLICT" else 422
+        if exc.code == "BAD_REQUEST":
+            status = 400
+        return _error(exc.code, str(exc), status)
+    finally:
+        buffered.close()
+    return jsonify({
+        "workflow": result.workflow,
+        "project_id": result.project_id,
+        "original_workflow_id": result.original_workflow_id,
+        "original_project_id": result.original_project_id,
+        "executions": result.executions,
+        "files_restored": result.files_restored,
+    }), 201
 
 
 @workflows_bp.route("/api/workflow/run", methods=["POST"])
