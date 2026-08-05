@@ -541,6 +541,24 @@ avoids half-written files; the file feeds the script input (or a configured port
 Processed files move to a `processed/` subfolder to prevent re-triggering.
 **Done when:** dropping a file into a watched tmp folder triggers exactly one queued run carrying the file's content, half-written files do not trigger, and processed files never re-trigger (pytest with tmp dirs).
 
+#### Step 7.3 review status — 2026-08-05
+
+- **Complete.** Each workflow can persist one enabled watch folder with an absolute path,
+  filename glob, and optional text/script input-port destination. With no explicit port, file
+  content replaces the enabled Script Input value in the execution snapshot without changing the
+  saved workflow.
+- A daemon polling service starts with the app. It requires an unchanged size and modification
+  timestamp for at least one second, accepts bounded UTF-8 text, atomically claims stable matches,
+  queues them with `source: watch`, and moves successful claims into `processed/`. Failed enqueue
+  attempts restore the source file for a later retry; processed files are outside the scan root.
+- The workflow toolbar now opens Watch folder settings for enablement, absolute folder path,
+  filename pattern, and compatible port selection. Server validation rejects malformed settings,
+  missing targets, and non-text destinations.
+- Automated verification: the backend suite passes with 179 tests and 61 subtests (10 live-provider
+  tests skipped); the frontend suite passes with 139 tests across 20 files; the production build
+  succeeds. Dedicated tmp-directory tests prove stable-write debounce, exactly-once queueing,
+  content injection, pattern/disable behavior, and processed-file isolation.
+
 ### 7.4 Webhook trigger
 Loopback-only `POST /api/workflow/hooks/<workflow_id>/<token>` starts a queued run; per-workflow
 random token, regenerable in the UI; JSON payload validated and mapped to declared typed inputs.

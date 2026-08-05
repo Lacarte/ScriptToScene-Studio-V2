@@ -49,14 +49,28 @@ def _transient_workflow_id() -> str:
     return "wf_" + "".join(random.SystemRandom().choices(alphabet, k=6))
 
 
-def prepare_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
+def prepare_snapshot(
+    document: Mapping[str, Any],
+    *,
+    input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     snapshot = deepcopy(dict(document))
     if "workflow_id" not in snapshot:
         snapshot["workflow_id"] = _transient_workflow_id()
     timestamp = now_iso()
     snapshot.setdefault("created_at", timestamp)
     snapshot.setdefault("updated_at", timestamp)
-    problems = validation_errors(validate_workflow(snapshot, require_identity=True, require_complete=True))
+    provided_inputs = {
+        (str(node_id), str(port_id))
+        for node_id, ports in (input_overrides or {}).items()
+        for port_id in ports
+    }
+    problems = validation_errors(validate_workflow(
+        snapshot,
+        require_identity=True,
+        require_complete=True,
+        provided_inputs=provided_inputs,
+    ))
     if problems:
         raise ExecutionRequestError(
             "WORKFLOW_INVALID", "Workflow has validation errors", details={"problems": problems}
@@ -138,10 +152,12 @@ class ExecutionManager:
         project_id: str | None = None,
         force: bool = False,
         source: str = "manual",
+        input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> tuple[str, str]:
         if source not in {"manual", "schedule", "watch", "webhook"}:
             raise ExecutionRequestError("BAD_REQUEST", "Unsupported run source")
-        snapshot = prepare_snapshot(workflow)
+        overrides = self._validate_input_overrides(workflow, input_overrides or {})
+        snapshot = prepare_snapshot(workflow, input_overrides=overrides)
         scope = resolve_scope(snapshot, run_mode, target_node_ids)
         resolved_project = resolve_project_id(snapshot, project_id)
         execution_id = generate_execution_id(root=self.execution_root)
@@ -182,6 +198,7 @@ class ExecutionManager:
             on_event=emit,
             executor_resolver=self.executor_resolver,
             force=force,
+            input_overrides=overrides,
         )
         scheduler.record.status = "queued"
         save_execution(scheduler.record, root=self.execution_root, secrets=scheduler.redactor.secrets)
@@ -208,6 +225,34 @@ class ExecutionManager:
             else:
                 handle.thread = worker
         return execution_id, resolved_project
+
+    @staticmethod
+    def _validate_input_overrides(
+        workflow: Mapping[str, Any],
+        supplied: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        if not isinstance(supplied, Mapping):
+            raise ExecutionRequestError("BAD_REQUEST", "input_overrides must be an object")
+        nodes = {node.get("id"): node for node in workflow.get("nodes", []) if isinstance(node, Mapping)}
+        result: dict[str, dict[str, Any]] = {}
+        for node_id, ports in supplied.items():
+            node = nodes.get(node_id)
+            if node is None or node.get("disabled"):
+                raise ExecutionRequestError("BAD_REQUEST", f"Input override node is unavailable: {node_id}")
+            if not isinstance(ports, Mapping):
+                raise ExecutionRequestError("BAD_REQUEST", "Input override ports must be an object")
+            definition = get_node_type(node.get("type")) or {}
+            known = {port.get("id"): port for port in definition.get("inputs", [])}
+            result[str(node_id)] = {}
+            for port_id, value in ports.items():
+                port = known.get(port_id)
+                port_type = port.get("type") if port else None
+                if not port or port_type not in {"text", "script"} or not isinstance(value, str):
+                    raise ExecutionRequestError(
+                        "BAD_REQUEST", f"Input override {node_id}.{port_id} must be text or script"
+                    )
+                result[str(node_id)][str(port_id)] = value
+        return result
 
     def _drain_project(self, project_id: str) -> None:
         """Drain one project's FIFO without occupying workers for other projects."""

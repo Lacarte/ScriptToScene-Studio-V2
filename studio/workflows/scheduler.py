@@ -374,8 +374,19 @@ class WorkflowScheduler:
         stop_requested: Callable[[], bool] | None = None,
         force: bool = False,
         sleeper: Callable[[float], None] = time.sleep,
+        input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
     ):
-        problems = validation_errors(validate_workflow(dict(workflow), require_complete=True))
+        self.input_overrides = {
+            str(node_id): dict(ports) for node_id, ports in (input_overrides or {}).items()
+        }
+        provided_inputs = {
+            (node_id, port_id)
+            for node_id, ports in self.input_overrides.items()
+            for port_id in ports
+        }
+        problems = validation_errors(validate_workflow(
+            dict(workflow), require_complete=True, provided_inputs=provided_inputs
+        ))
         if scope_node_ids is not None:
             problems.extend(validate_expressions(workflow, scope_node_ids=scope_node_ids))
         if problems:
@@ -470,6 +481,7 @@ class WorkflowScheduler:
                     continue
 
                 inputs = self._resolve_inputs(node_id, graph, node_outputs, active_edges=active_edges)
+                inputs.update(self.input_overrides.get(node_id, {}))
                 node_record = self.record.nodes[node_id]
                 node_record.from_sample_data = (
                     node.get("type") == "stub.input"

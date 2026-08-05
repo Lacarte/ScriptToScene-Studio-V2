@@ -22,6 +22,7 @@ import StickyNote from '../components/StickyNote.vue'
 import NodeInspector from '../components/NodeInspector.vue'
 import ExecutionPanel from '../components/ExecutionPanel.vue'
 import ScheduleSettings from '../components/ScheduleSettings.vue'
+import WatchFolderSettings from '../components/WatchFolderSettings.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
@@ -30,6 +31,7 @@ const importInput = ref(null)
 const canvasSelection = ref(new Set())
 const runMode = ref('full')
 const schedulesOpen = ref(false)
+const watchFolderOpen = ref(false)
 
 onMounted(async () => {
   try {
@@ -822,6 +824,7 @@ async function onStop() {
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Workflow triggers">
           <span class="wf-action-label">Trigger</span>
           <button class="wf-btn" @click="schedulesOpen = true">Schedule</button>
+          <button class="wf-btn" @click="watchFolderOpen = true">Folder</button>
         </div>
 
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Canvas view">
@@ -980,6 +983,7 @@ async function onStop() {
     <!-- Bottom — live execution inspector (step 3.6) -->
     <ExecutionPanel />
     <ScheduleSettings v-if="schedulesOpen" @close="schedulesOpen = false" />
+    <WatchFolderSettings v-if="watchFolderOpen" @close="watchFolderOpen = false" />
   </div>
 </template>
 

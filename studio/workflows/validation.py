@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from datetime import datetime
 from typing import Any
@@ -139,6 +140,52 @@ def _validate_schedules(value: Any, problems: list[dict]) -> None:
             CronExpression(schedule.get("cron"))
         except CronExpressionError as exc:
             problems.append(_problem("WORKFLOW_INVALID", str(exc), f"{path}.cron"))
+
+
+def _validate_watch_folder(value: Any, node_map: dict, problems: list[dict]) -> None:
+    if value is None:
+        return
+    path = "settings.watch_folder"
+    if not isinstance(value, dict):
+        problems.append(_problem("WORKFLOW_INVALID", "settings.watch_folder must be an object", path))
+        return
+    allowed = {"enabled", "folder", "pattern", "target_node_id", "target_port"}
+    for unknown in sorted(set(value) - allowed):
+        problems.append(_problem("WORKFLOW_INVALID", f"Unknown watch-folder field: {unknown}", f"{path}.{unknown}"))
+    if not isinstance(value.get("enabled"), bool):
+        problems.append(_problem("WORKFLOW_INVALID", "Watch-folder enabled must be a boolean", f"{path}.enabled"))
+    folder = value.get("folder")
+    if not isinstance(folder, str) or not folder.strip() or len(folder) > 1024 or not os.path.isabs(folder):
+        problems.append(_problem("WORKFLOW_INVALID", "Watch folder must be an absolute path", f"{path}.folder"))
+    pattern = value.get("pattern")
+    if not isinstance(pattern, str) or not pattern or len(pattern) > 120 or "/" in pattern or "\\" in pattern:
+        problems.append(_problem("WORKFLOW_INVALID", "Watch pattern must be a filename glob", f"{path}.pattern"))
+
+    node_id = value.get("target_node_id", "")
+    port_id = value.get("target_port", "")
+    if not isinstance(node_id, str) or len(node_id) > 64:
+        problems.append(_problem("WORKFLOW_INVALID", "Watch target_node_id must be a node ID", f"{path}.target_node_id"))
+        return
+    if not isinstance(port_id, str) or len(port_id) > 64:
+        problems.append(_problem("WORKFLOW_INVALID", "Watch target_port must be a port ID", f"{path}.target_port"))
+        return
+    if bool(node_id) != bool(port_id):
+        problems.append(_problem("WORKFLOW_INVALID", "Watch target node and port must be configured together", path))
+        return
+    if node_id:
+        pair = node_map.get(node_id)
+        if not pair:
+            problems.append(_problem("WORKFLOW_INVALID", "Watch target node does not exist", f"{path}.target_node_id"))
+            return
+        node, definition = pair
+        port = next((item for item in definition.get("inputs", []) if item.get("id") == port_id), None)
+        if not port or _port_type(node, port) not in {"text", "script"}:
+            problems.append(_problem("WORKFLOW_INVALID", "Watch target must be a text or script input port", f"{path}.target_port"))
+    elif value.get("enabled") and not any(
+        node.get("type") == "script.input" and not node.get("disabled")
+        for node, _ in node_map.values()
+    ):
+        problems.append(_problem("WORKFLOW_INVALID", "An enabled watch folder needs a Script Input node or configured target port", path))
 
 
 def _finite_number(value: Any) -> bool:
@@ -322,7 +369,13 @@ def _validate_error_policy(node: dict, definition: dict, path: str, problems: li
         ))
 
 
-def validate_workflow(document: Any, *, require_identity: bool = True, require_complete: bool = False) -> list[dict]:
+def validate_workflow(
+    document: Any,
+    *,
+    require_identity: bool = True,
+    require_complete: bool = False,
+    provided_inputs: set[tuple[str, str]] | None = None,
+) -> list[dict]:
     """Return structured errors/warnings for a workflow document."""
     problems: list[dict] = []
     if not isinstance(document, dict):
@@ -410,7 +463,7 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
     connections: set[tuple[str, str, str, str]] = set()
     occupied: set[tuple[str, str]] = set()
     adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_map}
-    connected_inputs: set[tuple[str, str]] = set()
+    connected_inputs: set[tuple[str, str]] = set(provided_inputs or ())
     for index, edge in enumerate(edges):
         path = f"edges[{index}]"
         if not isinstance(edge, dict):
@@ -506,13 +559,14 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
     if not isinstance(settings, dict):
         problems.append(_problem("WORKFLOW_INVALID", "settings must be an object", "settings"))
     else:
-        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs", "schedules"}):
+        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs", "schedules", "watch_folder"}):
             problems.append(_problem("WORKFLOW_INVALID", f"Unknown settings field: {unknown}", f"settings.{unknown}"))
         if settings.get("on_error", "stop") != "stop":
             problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))
         if not isinstance(settings.get("auto_attach_stubs", True), bool):
             problems.append(_problem("WORKFLOW_INVALID", "settings.auto_attach_stubs must be a boolean", "settings.auto_attach_stubs"))
         _validate_schedules(settings.get("schedules"), problems)
+        _validate_watch_folder(settings.get("watch_folder"), node_map, problems)
     problems.extend(validate_expressions(document))
     return problems
 

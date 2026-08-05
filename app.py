@@ -465,5 +465,7 @@ if __name__ == "__main__":
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     bind_host = os.environ.get("STS_BIND_HOST", "127.0.0.1")
     from studio.workflows.scheduled_runs import schedule_service
+    from studio.workflows.watch_folders import watch_folder_service
     schedule_service.start()
+    watch_folder_service.start()
     app.run(host=bind_host, port=port, debug=False, threaded=True)
