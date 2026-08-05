@@ -589,6 +589,19 @@ persisted notification log surfaced in the UI (badge + list). Outbound webhook n
 an optional channel.
 **Done when:** failed and successful runs each produce the configured notification record (pytest), and the UI shows unseen-notification state.
 
+#### Step 7.5 review status — 2026-08-05
+
+- **Complete.** Per-workflow settings independently enable completion and failure records, Windows
+  toast delivery, and an optional outbound HTTP(S) webhook. Terminal dispatch is idempotent per
+  execution and channel failures remain delivery metadata instead of changing workflow results.
+- Records persist under `output/workflows/notifications/`; local-only list and acknowledge APIs
+  expose total and unseen counts. The workflow toolbar now shows an unseen badge, and its notification
+  center combines channel settings with the persisted success/failure history.
+- Automated verification: the backend suite passes with 188 tests and 61 subtests (10 live-provider
+  tests skipped); the frontend suite passes with 142 tests across 22 files; the production build
+  succeeds. Dedicated tests cover success/failure records, idempotent channel delivery, bounded
+  webhook payloads, unseen acknowledgement, settings validation, and notification-center behavior.
+
 ---
 
 ## Phase 8 — Node developer kit

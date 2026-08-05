@@ -28,6 +28,7 @@ from .persistence import (
     update_workflow,
 )
 from .options import resolve_options
+from .notifications import list_notifications, mark_notifications_seen
 from .registry import serialize_registry
 from .sample_data import all_sample_payloads
 from .scheduled_runs import schedule_details
@@ -587,6 +588,41 @@ def workflow_queue_cancel(execution_id):
     except ValueError as exc:
         return _error("BAD_REQUEST", str(exc), 400)
     return jsonify({"execution_id": execution_id, "status": status}), 202
+
+
+@workflows_bp.route("/api/workflow/notifications", methods=["GET"])
+def workflow_notifications_list():
+    denied = _require_loopback()
+    if denied:
+        return denied
+    workflow_id = request.args.get("workflow_id", "")
+    try:
+        limit = int(request.args.get("limit", 100))
+        items, total, unseen = list_notifications(
+            workflow_id, output_dir=execution_manager.output_dir, limit=limit
+        )
+    except (TypeError, ValueError) as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    return jsonify({"notifications": items, "total": total, "unseen": unseen})
+
+
+@workflows_bp.route("/api/workflow/notifications/seen", methods=["POST"])
+def workflow_notifications_seen():
+    denied = _require_loopback()
+    if denied:
+        return denied
+    body, failure = _json_body()
+    if failure:
+        return failure
+    if set(body) != {"workflow_id"}:
+        return _error("BAD_REQUEST", "Body must contain only workflow_id", 400)
+    try:
+        changed = mark_notifications_seen(
+            body.get("workflow_id"), output_dir=execution_manager.output_dir
+        )
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    return jsonify({"seen": True, "updated": changed})
 
 
 @workflows_bp.route("/api/workflow/executions/<execution_id>", methods=["GET"])

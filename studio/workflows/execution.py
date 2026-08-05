@@ -17,6 +17,7 @@ from studio.io_utils import JobStore, now_iso
 from .adapters.common import PROJECT_ID_RE
 from .events import EventBroker, ExecutionEventBuffer, TERMINAL_STATUSES
 from .models import QueueRecord
+from .notifications import dispatch_run_notification
 from .persistence import (
     generate_execution_id,
     list_queue_records,
@@ -314,6 +315,16 @@ class ExecutionManager:
             )
             handle.queue_record.finished_at = handle.scheduler.record.finished_at or now_iso()
             save_queue_record(handle.queue_record, root=self.queue_root)
+            try:
+                dispatch_run_notification(
+                    handle.scheduler.workflow,
+                    handle.scheduler.record.to_dict(),
+                    output_dir=self.output_dir,
+                )
+            except Exception:
+                # Notification persistence/delivery is best effort and cannot
+                # retroactively turn a completed workflow into a failed run.
+                pass
 
     def stop(self, execution_id: str) -> str:
         record = load_execution(execution_id, root=self.execution_root)

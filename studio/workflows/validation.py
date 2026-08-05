@@ -566,7 +566,7 @@ def validate_workflow(
     if not isinstance(settings, dict):
         problems.append(_problem("WORKFLOW_INVALID", "settings must be an object", "settings"))
     else:
-        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs", "schedules", "watch_folder", "webhook"}):
+        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs", "schedules", "watch_folder", "webhook", "notifications"}):
             problems.append(_problem("WORKFLOW_INVALID", f"Unknown settings field: {unknown}", f"settings.{unknown}"))
         if settings.get("on_error", "stop") != "stop":
             problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))
@@ -575,6 +575,8 @@ def validate_workflow(
         _validate_schedules(settings.get("schedules"), problems)
         _validate_watch_folder(settings.get("watch_folder"), node_map, problems)
         _validate_webhook(settings.get("webhook"), node_map, problems)
+        from .notifications import validate_notification_settings
+        validate_notification_settings(settings.get("notifications"), problems)
     problems.extend(validate_expressions(document))
     return problems
 

@@ -970,6 +970,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
     })
   }
 
+  function setNotifications(nextNotifications) {
+    return executeCommand('Change run notifications', () => {
+      const value = plain(nextNotifications)
+      if (JSON.stringify(settings.value.notifications || null) === JSON.stringify(value)) return false
+      settings.value = { ...settings.value, notifications: value }
+      markDocumentDirty()
+      return true
+    })
+  }
+
   function isStubType(typeKey) {
     return nodeTypes.value[typeKey]?.category === 'testing'
   }
@@ -1555,7 +1565,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // validation (step 2.2)
     issuesByNode,
     // sample-data stubs (step 2.5)
-    autoAttachStubs, setAutoAttachStubs, setSchedules, setWatchFolder, setWebhook, isStubType, samplePayloadFor,
+    autoAttachStubs, setAutoAttachStubs, setSchedules, setWatchFolder, setWebhook, setNotifications, isStubType, samplePayloadFor,
     addNodeWithStubs, attachSampleInputs, attachResultViewer,
     canUndoStubDetach, undoStubDetach,
     // live execution (step 3.6)

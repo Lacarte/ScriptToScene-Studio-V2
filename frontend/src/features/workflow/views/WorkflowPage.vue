@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { VueFlow, useVueFlow, MarkerType } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -24,6 +24,7 @@ import ExecutionPanel from '../components/ExecutionPanel.vue'
 import ScheduleSettings from '../components/ScheduleSettings.vue'
 import WatchFolderSettings from '../components/WatchFolderSettings.vue'
 import WebhookSettings from '../components/WebhookSettings.vue'
+import NotificationCenter from '../components/NotificationCenter.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
@@ -34,6 +35,31 @@ const runMode = ref('full')
 const schedulesOpen = ref(false)
 const watchFolderOpen = ref(false)
 const webhookOpen = ref(false)
+const notificationsOpen = ref(false)
+const notificationUnseen = ref(0)
+
+async function refreshNotificationBadge() {
+  if (!store.workflowId) {
+    notificationUnseen.value = 0
+    return
+  }
+  try {
+    const workflowId = encodeURIComponent(store.workflowId)
+    const data = await api.get(`/api/workflow/notifications?workflow_id=${workflowId}&limit=1`)
+    notificationUnseen.value = data.unseen || 0
+  } catch {
+    // The badge is supplementary; normal editor errors remain authoritative.
+  }
+}
+
+watch(
+  () => [store.workflowId, store.currentExecution?.status],
+  ([workflowId, status], previous = []) => {
+    if (workflowId !== previous[0] || ['succeeded', 'partial', 'failed'].includes(status)) {
+      refreshNotificationBadge()
+    }
+  },
+)
 
 onMounted(async () => {
   try {
@@ -828,6 +854,9 @@ async function onStop() {
           <button class="wf-btn" @click="schedulesOpen = true">Schedule</button>
           <button class="wf-btn" @click="watchFolderOpen = true">Folder</button>
           <button class="wf-btn" @click="webhookOpen = true">Webhook</button>
+          <button class="wf-btn wf-notification-button" @click="notificationsOpen = true">
+            Notifications <span v-if="notificationUnseen" class="wf-unseen" aria-label="unseen notifications">{{ notificationUnseen }}</span>
+          </button>
         </div>
 
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Canvas view">
@@ -988,6 +1017,11 @@ async function onStop() {
     <ScheduleSettings v-if="schedulesOpen" @close="schedulesOpen = false" />
     <WatchFolderSettings v-if="watchFolderOpen" @close="watchFolderOpen = false" />
     <WebhookSettings v-if="webhookOpen" @close="webhookOpen = false" />
+    <NotificationCenter
+      v-if="notificationsOpen"
+      @close="notificationsOpen = false"
+      @seen="notificationUnseen = 0"
+    />
   </div>
 </template>
 
@@ -1140,6 +1174,9 @@ async function onStop() {
   cursor: pointer;
   transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
 }
+
+.wf-notification-button { display: inline-flex; align-items: center; gap: 6px; }
+.wf-unseen { min-width: 17px; padding: 2px 5px; border-radius: 999px; color: #21070d; background: #fb7185; font-size: 9px; text-align: center; }
 
 a.wf-legacy-link {
   display: inline-flex;
