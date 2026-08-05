@@ -543,6 +543,24 @@ def load_generated_node_types(directory=None):
                 raise RuntimeError(
                     f"Generated node {key!r} port {port.get('id')!r} has invalid type {port.get('type')!r}"
                 )
+        migrations = definition.get("migrations", {})
+        if not isinstance(migrations, dict):
+            raise RuntimeError(f"Generated node {key!r} migrations must be an object")
+        for version, target in migrations.items():
+            try:
+                source_version = int(version)
+            except (TypeError, ValueError):
+                raise RuntimeError(
+                    f"Generated node {key!r} migration versions must be integers"
+                ) from None
+            if source_version < 1 or source_version >= definition["type_version"]:
+                raise RuntimeError(
+                    f"Generated node {key!r} migration {version!r} is outside its version range"
+                )
+            if not isinstance(target, str) or ":" not in target:
+                raise RuntimeError(
+                    f"Generated node {key!r} migration {version!r} must be a module:function string"
+                )
         generated[key] = definition
     return generated
 
@@ -583,7 +601,7 @@ def reload_generated_node_types(directory=None):
 reload_generated_node_types()
 
 # Fields internal to the backend, stripped from the served form.
-_INTERNAL_FIELDS = ("executor",)
+_INTERNAL_FIELDS = ("executor", "migrations")
 
 
 def get_node_type(type_key):

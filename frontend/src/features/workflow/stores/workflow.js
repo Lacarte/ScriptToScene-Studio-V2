@@ -87,6 +87,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const extensions = ref({})
   const createdAt = ref(null)
   const updatedAt = ref(null)
+  const readOnly = ref(false)
+  const loadWarnings = ref([])
+  const migrationTrail = ref([])
   const dirty = ref(false)
   const draftSavedAt = ref(null)
   const recentNodeTypes = ref(loadRecentNodeTypes())
@@ -158,6 +161,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   function executeCommand(label, mutate) {
+    if (readOnly.value) return false
     if (commandDepth > 0) return mutate()
     const before = commandSnapshot()
     commandDepth += 1
@@ -582,8 +586,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /** Every mutation that makes the document diverge from disk funnels here. */
   function markDocumentDirty() {
+    if (readOnly.value) return false
     dirty.value = true
     scheduleDraftAutosave()
+    return true
   }
 
   /** Write the draft immediately (no-op when there is nothing unsaved). */
@@ -678,6 +684,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   const saveBlockedReason = computed(() => {
+    if (readOnly.value) {
+      return loadWarnings.value[0]?.message
+        || 'This workflow uses newer node versions and is read-only.'
+    }
     const reasons = Object.values(invalidConfigFields.value)
     if (!reasons.length) return ''
     return reasons.length === 1
@@ -1140,6 +1150,9 @@ export const useWorkflowStore = defineStore('workflow', () => {
     markDirty = false,
     preserveSelection = false,
     preserveExecution = false,
+    readOnly: nextReadOnly = false,
+    warnings = [],
+    migrations = [],
   } = {}) {
     if (!preserveExecution) {
       clearExecution()
@@ -1156,13 +1169,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
     extensions.value = plain(document.extensions || {})
     createdAt.value = document.created_at || null
     updatedAt.value = document.updated_at || null
+    readOnly.value = Boolean(nextReadOnly)
+    loadWarnings.value = plain(warnings || [])
+    migrationTrail.value = plain(migrations || [])
     resetCounters()
     clearCommandHistory()
     // Editor widgets remount against the new document; any invalid text they
     // held is gone with them.
     clearInvalidFields()
     if (!preserveSelection || !nodeById(selectedNodeId.value)) selectedNodeId.value = null
-    if (markDirty) {
+    if (markDirty && !readOnly.value) {
       // Unsaved content (template/import-as-draft, draft recovery): keep the
       // autosave loop armed so the new document is protected too.
       markDocumentDirty()
@@ -1214,7 +1230,13 @@ export const useWorkflowStore = defineStore('workflow', () => {
     persistenceError.value = ''
     try {
       const data = await api.get(`/api/workflows/${encodeURIComponent(id)}`)
-      applyDocument(data.workflow)
+      const migrations = data.migration_trail || []
+      applyDocument(data.workflow, {
+        markDirty: migrations.length > 0,
+        readOnly: data.read_only === true,
+        warnings: data.warnings || [],
+        migrations,
+      })
       return data.workflow
     } catch (err) {
       persistenceError.value = apiErrorText(err, 'Failed to open workflow')
@@ -1560,6 +1582,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // document
     workflowId, workflowName, workflowDescription, nodes, edges, viewport,
     variables, updateVariables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,
+    readOnly, loadWarnings, migrationTrail,
     notes, addNote, updateNote, moveNotes, removeNotes, noteById,
     recentNodeTypes, recordNodeUse,
     workflowList, templates, persistenceLoading, persistenceError,

@@ -520,7 +520,7 @@ function targetsForMode(mode, nodeId = store.selectedNodeId) {
 }
 
 function canRun(mode, nodeId = store.selectedNodeId) {
-  if (!store.nodeCount || store.executionLoading || store.executionActive) return false
+  if (store.readOnly || !store.nodeCount || store.executionLoading || store.executionActive) return false
   const targets = targetsForMode(mode, nodeId)
   if (mode === 'full') return true
   if (mode === 'selected') return targets.length > 0
@@ -853,9 +853,9 @@ async function onStop() {
 
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Workflow triggers">
           <span class="wf-action-label">Trigger</span>
-          <button class="wf-btn" @click="schedulesOpen = true">Schedule</button>
-          <button class="wf-btn" @click="watchFolderOpen = true">Folder</button>
-          <button class="wf-btn" @click="webhookOpen = true">Webhook</button>
+          <button class="wf-btn" :disabled="store.readOnly" @click="schedulesOpen = true">Schedule</button>
+          <button class="wf-btn" :disabled="store.readOnly" @click="watchFolderOpen = true">Folder</button>
+          <button class="wf-btn" :disabled="store.readOnly" @click="webhookOpen = true">Webhook</button>
           <button class="wf-btn wf-notification-button" @click="notificationsOpen = true">
             Notifications <span v-if="notificationUnseen" class="wf-unseen" aria-label="unseen notifications">{{ notificationUnseen }}</span>
           </button>
@@ -863,11 +863,12 @@ async function onStop() {
 
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Canvas view">
           <span class="wf-action-label">View</span>
-          <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">Tidy</button>
+          <button class="wf-btn" :disabled="!store.nodeCount || store.readOnly" title="Auto-arrange nodes" @click="tidyUp">Tidy</button>
           <button class="wf-btn" :disabled="!store.nodeCount" title="Fit all nodes in view" @click="fitView({ padding: 0.15 })">Fit</button>
           <label class="wf-toggle" title="Auto-attach editable sample stubs when dropping unconnected nodes">
             <input
               type="checkbox"
+              :disabled="store.readOnly"
               :checked="store.autoAttachStubs"
               @change="store.setAutoAttachStubs($event.target.checked)"
             />
@@ -886,6 +887,12 @@ async function onStop() {
       </nav>
     </header>
 
+    <div v-if="store.readOnly" class="wf-read-only-warning" role="alert">
+      <strong>View only.</strong>
+      {{ store.loadWarnings[0]?.message || 'This workflow contains node versions newer than this installation.' }}
+      Update ScriptToScene Studio before editing or running it.
+    </div>
+
     <div class="wf-body">
       <!-- Left — node library -->
       <aside class="wf-library">
@@ -903,7 +910,9 @@ async function onStop() {
           :max-zoom="1.5"
           :snap-to-grid="true"
           :snap-grid="[20, 20]"
-          :delete-key-code="'Delete'"
+          :delete-key-code="store.readOnly ? null : 'Delete'"
+          :nodes-draggable="!store.readOnly"
+          :nodes-connectable="!store.readOnly"
           :multi-selection-key-code="'Control'"
           :is-valid-connection="isValidConnection"
           fit-view-on-init
@@ -1008,7 +1017,7 @@ async function onStop() {
       </main>
 
       <!-- Right — node inspector -->
-      <aside class="wf-inspector">
+      <aside class="wf-inspector" :class="{ 'wf-inspector-read-only': store.readOnly }">
         <div class="wf-panel-header">Inspector</div>
         <NodeInspector />
       </aside>
@@ -1035,6 +1044,23 @@ async function onStop() {
   min-height: 0;
   background: var(--bg-dark);
   color: var(--text);
+}
+
+.wf-read-only-warning {
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.38);
+  background: rgba(245, 158, 11, 0.13);
+  color: #fcd38d;
+  font-size: 12px;
+}
+
+.wf-inspector-read-only :deep(input),
+.wf-inspector-read-only :deep(textarea),
+.wf-inspector-read-only :deep(select),
+.wf-inspector-read-only :deep(button) {
+  pointer-events: none;
+  opacity: 0.65;
 }
 
 .wf-toolbar {

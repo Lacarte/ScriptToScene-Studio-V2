@@ -17,6 +17,7 @@ from .execution import ExecutionRequestError, execution_manager
 from .persistence import (
     WorkflowConflict,
     WorkflowNotFound,
+    WorkflowReadOnlyError,
     WorkflowValidationError,
     create_workflow,
     delete_workflow,
@@ -25,6 +26,7 @@ from .persistence import (
     load_execution,
     list_workflows,
     load_workflow,
+    load_workflow_state,
     update_workflow,
 )
 from .options import resolve_options
@@ -109,6 +111,12 @@ def _persistence_error(exc):
         return _error("NOT_FOUND", "Workflow not found", 404)
     if isinstance(exc, WorkflowConflict):
         return _error("WORKFLOW_CONFLICT", "Workflow changed since it was opened", 409)
+    if isinstance(exc, WorkflowReadOnlyError):
+        return _error(
+            "WORKFLOW_READ_ONLY",
+            "Workflow contains node versions newer than this installation and is read-only",
+            409,
+        )
     if isinstance(exc, WorkflowValidationError):
         return _error(
             "WORKFLOW_INVALID",
@@ -359,7 +367,13 @@ def workflows_get(workflow_id):
     if denied:
         return denied
     try:
-        return jsonify({"workflow": load_workflow(workflow_id)})
+        state = load_workflow_state(workflow_id)
+        return jsonify({
+            "workflow": state.document,
+            "migration_trail": state.trail,
+            "read_only": state.read_only,
+            "warnings": state.warnings,
+        })
     except (ValueError, WorkflowNotFound, WorkflowValidationError) as exc:
         return _persistence_error(exc)
 
@@ -479,7 +493,10 @@ def workflows_update(workflow_id):
             body["workflow"],
             expected_updated_at=body.get("expected_updated_at", ""),
         )
-    except (ValueError, WorkflowNotFound, WorkflowConflict, WorkflowValidationError) as exc:
+    except (
+        ValueError, WorkflowNotFound, WorkflowConflict,
+        WorkflowValidationError, WorkflowReadOnlyError,
+    ) as exc:
         return _persistence_error(exc)
     return jsonify({"workflow": document})
 

@@ -1,5 +1,6 @@
 """Phase 1.6/1.7 workflow validation, persistence, routes, and templates."""
 
+import json
 import math
 import os
 import tempfile
@@ -10,6 +11,7 @@ from copy import deepcopy
 from datetime import datetime
 
 from flask import Flask
+from unittest.mock import patch
 
 from studio.workflows import workflows_bp
 from studio.workflows.models import workflow_draft
@@ -17,6 +19,7 @@ from studio.workflows import persistence
 from studio.workflows.persistence import WorkflowConflict, WorkflowValidationError
 from studio.workflows.templates import serialize_templates
 from studio.workflows.registry import get_node_type
+from studio.workflows import registry
 from studio.workflows.scheduler import WorkflowScheduler
 from studio.workflows.validation import validate_workflow, validation_errors
 from studio.workflows.validation import _field_is_visible
@@ -210,6 +213,49 @@ class ValidationTests(unittest.TestCase):
 
 
 class PersistenceTests(WorkflowTestBase):
+    def test_load_applies_two_hop_node_migration_and_resave_persists_it(self):
+        definition = get_node_type("script.input")
+        definition["type_version"] = 3
+        definition["migrations"] = {
+            1: lambda config: {"body": config["text"]},
+            2: lambda config: {"text": config["body"] + " (migrated)"},
+        }
+        document = draft()
+        document.update({
+            "workflow_id": "wf_ABC123",
+            "created_at": "2026-08-05T12:00:00+00:00",
+            "updated_at": "2026-08-05T12:00:00+00:00",
+        })
+        path = os.path.join(persistence.WORKFLOWS_DIR, "wf_ABC123.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(document, handle)
+
+        with patch.dict(registry._NODE_TYPES, {"script.input": definition}):
+            state = persistence.load_workflow_state("wf_ABC123")
+            self.assertFalse(state.read_only)
+            self.assertEqual(state.document["nodes"][0]["type_version"], 3)
+            self.assertEqual(
+                state.document["nodes"][0]["configuration"]["text"],
+                "A small test script. (migrated)",
+            )
+            self.assertEqual(
+                [(item["from_version"], item["to_version"]) for item in state.trail],
+                [(1, 2), (2, 3)],
+            )
+            # Loading is non-destructive; Save is the explicit persistence point.
+            with open(path, encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["nodes"][0]["type_version"], 1)
+
+            saved = persistence.update_workflow(
+                "wf_ABC123",
+                state.document,
+                expected_updated_at=state.document["updated_at"],
+            )
+            self.assertEqual(saved["nodes"][0]["type_version"], 3)
+            self.assertEqual(
+                len(saved["extensions"]["type_version_migrations"]), 2
+            )
+
     def test_create_load_update_list_and_soft_delete(self):
         created = persistence.create_workflow(draft())
         self.assertRegex(created["workflow_id"], r"^wf_[A-Z0-9]{6}$")
@@ -445,6 +491,33 @@ class RouteTests(WorkflowTestBase):
         )
         self.assertEqual(denied.status_code, 403)
         self.assertIn("error", denied.get_json())
+
+    def test_future_node_version_opens_read_only_with_visible_metadata(self):
+        document = draft()
+        document.update({
+            "workflow_id": "wf_FUTURE",
+            "created_at": "2026-08-05T12:00:00+00:00",
+            "updated_at": "2026-08-05T12:00:00+00:00",
+        })
+        document["nodes"][0]["type_version"] = 99
+        document["nodes"][0]["configuration"] = {"future_field": True}
+        path = os.path.join(persistence.WORKFLOWS_DIR, "wf_FUTURE.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(document, handle)
+
+        opened = self.client.get("/api/workflows/wf_FUTURE")
+        self.assertEqual(opened.status_code, 200)
+        payload = opened.get_json()
+        self.assertTrue(payload["read_only"])
+        self.assertEqual(payload["warnings"][0]["code"], "FUTURE_NODE_VERSION")
+        self.assertEqual(payload["workflow"]["nodes"][0]["configuration"], {"future_field": True})
+
+        update = self.client.put("/api/workflows/wf_FUTURE", json={
+            "workflow": payload["workflow"],
+            "expected_updated_at": payload["workflow"]["updated_at"],
+        })
+        self.assertEqual(update.status_code, 409)
+        self.assertEqual(update.get_json()["error"]["code"], "WORKFLOW_READ_ONLY")
 
 
 if __name__ == "__main__":

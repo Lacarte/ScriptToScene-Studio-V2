@@ -199,6 +199,43 @@ describe('workflow store', () => {
     expect(store.dirty).toBe(false)
   })
 
+  it('opens migrated documents dirty and future documents read-only', async () => {
+    const store = seededStore()
+    const document = {
+      schema_version: 1,
+      workflow_id: 'wf_ABC123',
+      name: 'Versioned',
+      description: '',
+      nodes: [], edges: [], variables: {},
+      viewport: { x: 0, y: 0, zoom: 1 },
+      settings: { on_error: 'stop' }, extensions: {},
+      created_at: 'created', updated_at: 'v1',
+    }
+    vi.spyOn(api, 'get').mockResolvedValueOnce({
+      workflow: document,
+      migration_trail: [{ node_id: 'n_1', from_version: 1, to_version: 2 }],
+      read_only: false,
+      warnings: [],
+    })
+    await store.openWorkflow('wf_ABC123')
+    expect(store.dirty).toBe(true)
+    expect(store.migrationTrail).toHaveLength(1)
+
+    vi.mocked(api.get).mockResolvedValueOnce({
+      workflow: document,
+      migration_trail: [],
+      read_only: true,
+      warnings: [{ code: 'FUTURE_NODE_VERSION', message: 'A newer node version is required.' }],
+    })
+    await store.openWorkflow('wf_ABC123')
+    expect(store.readOnly).toBe(true)
+    expect(store.saveBlockedReason).toContain('newer node version')
+    expect(store.addNode('script.input', { x: 0, y: 0 })).toBe(false)
+    const putSpy = vi.spyOn(api, 'put')
+    await expect(store.saveWorkflow()).rejects.toThrow('newer node version')
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+
   it('loads the built-in template as a dirty unsaved workflow', () => {
     const store = seededStore()
     store.templates = [{

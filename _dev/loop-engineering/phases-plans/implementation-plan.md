@@ -656,6 +656,25 @@ recorded migration trail; unknown future versions load read-only with a warning 
 crashing.
 **Done when:** a stored workflow with an old node version opens upgraded and re-saves at the new version (pytest covers a two-hop migration chain), and a future-version document is view-only with a visible warning.
 
+#### Step 8.3 review status — 2026-08-05
+
+- **Complete.** Node definitions may declare backend-only `migrations` keyed by source
+  `type_version`; each callable or generated-node `module:function` reference transforms only the
+  node configuration and every intermediate hop is required. Migration declarations and callables
+  are stripped from the presentation-safe registry response.
+- Loads apply migrations to a copy before validation, append a bounded audit trail under
+  `extensions.type_version_migrations`, and leave the stored file untouched until the user saves.
+  The editor marks a migrated workflow dirty so that Save persists the current node version and
+  trail through the existing optimistic-concurrency path.
+- Known node types from a future version load with their configuration and incident edges preserved,
+  plus explicit `read_only`, warning, and migration metadata. The editor displays a view-only warning,
+  disables graph/config mutations and execution, and the backend independently rejects update
+  attempts with `WORKFLOW_READ_ONLY`.
+- Verification passes with 201 backend tests (10 live-provider tests skipped, 61 subtests), all 145
+  frontend tests across 22 files, and the Vite production build. Dedicated coverage exercises a
+  two-hop migration, non-destructive load and re-save, future-version preservation/API refusal, and
+  frontend migrated/read-only state.
+
 ### 8.4 Node-author guide
 A written guide (docs/ or in-app) walking scaffold → schema → adapter → test → ship, generated
 partly from `contracts.md` and the registry so port types and rules cannot drift. Validated by

@@ -382,6 +382,7 @@ def validate_workflow(
     require_identity: bool = True,
     require_complete: bool = False,
     provided_inputs: set[tuple[str, str]] | None = None,
+    allow_future_versions: bool = False,
 ) -> list[dict]:
     """Return structured errors/warnings for a workflow document."""
     problems: list[dict] = []
@@ -430,6 +431,7 @@ def validate_workflow(
         problems.append(_problem("WORKFLOW_INVALID", f"edges exceeds the {MAX_EDGES} item limit", "edges"))
 
     node_map: dict[str, tuple[dict, dict]] = {}
+    future_node_ids: set[str] = set()
     for index, node in enumerate(nodes):
         path = f"nodes[{index}]"
         if not isinstance(node, dict):
@@ -449,8 +451,23 @@ def validate_workflow(
         if not definition:
             problems.append(_problem("UNKNOWN_NODE_TYPE", f"Unknown node type: {type_key}", f"{path}.type"))
             continue
-        if not is_supported(type_key, node.get("type_version")):
-            problems.append(_problem("UNSUPPORTED_NODE_VERSION", f"Unsupported version for {type_key}", f"{path}.type_version"))
+        type_version = node.get("type_version")
+        is_future = (
+            allow_future_versions
+            and isinstance(type_version, int)
+            and not isinstance(type_version, bool)
+            and type_version > definition["type_version"]
+        )
+        if not is_supported(type_key, type_version):
+            problems.append(_problem(
+                "FUTURE_NODE_VERSION" if is_future else "UNSUPPORTED_NODE_VERSION",
+                (f"Future version {type_version} for {type_key}; current version is {definition['type_version']}"
+                 if is_future else f"Unsupported version for {type_key}"),
+                f"{path}.type_version",
+                severity="warning" if is_future else "error",
+            ))
+        if is_future:
+            future_node_ids.add(node_id)
         node_name = node.get("name")
         if not isinstance(node_name, str) or not (1 <= len(node_name.strip()) <= 120):
             problems.append(_problem("WORKFLOW_INVALID", "node name must contain 1–120 characters", f"{path}.name"))
@@ -462,8 +479,9 @@ def validate_workflow(
         if not isinstance(node.get("disabled"), bool):
             problems.append(_problem("WORKFLOW_INVALID", "disabled must be a boolean", f"{path}.disabled"))
         _validate_extensions(node.get("extensions"), f"{path}.extensions", problems)
-        _validate_config(node, definition, path, problems, require_complete=require_complete)
-        _validate_error_policy(node, definition, path, problems)
+        if not is_future:
+            _validate_config(node, definition, path, problems, require_complete=require_complete)
+            _validate_error_policy(node, definition, path, problems)
         node_map[node_id] = (node, definition)
 
     edge_ids: set[str] = set()
@@ -492,6 +510,12 @@ def validate_workflow(
             continue
         source_node, source_def = node_map[source_id]
         target_node, target_def = node_map[target_id]
+        if source_id in future_node_ids or target_id in future_node_ids:
+            # A newer node contract may have changed its ports. Preserve the
+            # edge verbatim for view-only display instead of interpreting it
+            # through the older local registry.
+            adjacency[source_id].append(target_id)
+            continue
         source_port = next((p for p in source_def["outputs"] if p["id"] == edge.get("source_port")), None)
         target_port = next((p for p in target_def["inputs"] if p["id"] == edge.get("target_port")), None)
         if not source_port or not target_port:
@@ -538,6 +562,8 @@ def validate_workflow(
         problems.append(_problem("CYCLE_DETECTED", "Workflow connections must form a DAG", "edges"))
 
     for node_id, (_, definition) in node_map.items():
+        if node_id in future_node_ids:
+            continue
         for port in definition.get("inputs", []):
             if port.get("required") and (node_id, port["id"]) not in connected_inputs:
                 problems.append(_problem(

@@ -18,6 +18,7 @@ from studio.io_utils import now_iso, safe_json_read, safe_json_write
 from studio.security import safe_join
 
 from .models import summary
+from .migrations import MigrationResult, NodeMigrationError, migrate_workflow
 from .redaction import redact
 from .validation import WORKFLOW_ID_RE, validate_workflow, validation_errors
 
@@ -39,6 +40,10 @@ class WorkflowValidationError(ValueError):
     def __init__(self, problems: list[dict]):
         super().__init__("Workflow has validation errors")
         self.problems = problems
+
+
+class WorkflowReadOnlyError(RuntimeError):
+    pass
 
 
 EXECUTIONS_DIR = WORKFLOW_EXECUTIONS_DIR
@@ -133,8 +138,15 @@ def _generate_id() -> str:
     raise RuntimeError("Could not allocate a workflow id")
 
 
-def _validate_or_raise(document: dict, *, require_complete: bool = False) -> list[dict]:
-    problems = validate_workflow(document, require_identity=True, require_complete=require_complete)
+def _validate_or_raise(
+    document: dict, *, require_complete: bool = False, allow_future_versions: bool = False
+) -> list[dict]:
+    problems = validate_workflow(
+        document,
+        require_identity=True,
+        require_complete=require_complete,
+        allow_future_versions=allow_future_versions,
+    )
     errors = validation_errors(problems)
     if errors:
         raise WorkflowValidationError(problems)
@@ -158,15 +170,34 @@ def create_workflow(draft: dict) -> dict:
     return document
 
 
-def load_workflow(workflow_id: str) -> dict:
+def load_workflow_state(workflow_id: str) -> MigrationResult:
     path = _path(workflow_id)
     try:
         document = safe_json_read(path)
     except FileNotFoundError as exc:
         raise WorkflowNotFound(workflow_id) from exc
     document = redact(document)
-    _validate_or_raise(document)
-    return document
+    try:
+        state = migrate_workflow(document)
+    except NodeMigrationError as exc:
+        raise WorkflowValidationError([{
+            "code": "NODE_MIGRATION_FAILED",
+            "message": str(exc),
+            "severity": "error",
+            "path": "nodes",
+        }]) from exc
+    findings = _validate_or_raise(state.document, allow_future_versions=state.read_only)
+    validation_warnings = [item for item in findings if item.get("severity") == "warning"]
+    # migrate_workflow supplies the more readable future-version warning;
+    # retain unrelated validation warnings without duplicating that code.
+    warnings = state.warnings + [
+        item for item in validation_warnings if item.get("code") != "FUTURE_NODE_VERSION"
+    ]
+    return MigrationResult(state.document, state.trail, state.read_only, warnings)
+
+
+def load_workflow(workflow_id: str) -> dict:
+    return load_workflow_state(workflow_id).document
 
 
 def list_workflows(*, limit: int = 100) -> tuple[list[dict], int]:
@@ -189,7 +220,12 @@ def list_workflows(*, limit: int = 100) -> tuple[list[dict], int]:
 def update_workflow(workflow_id: str, draft: dict, *, expected_updated_at: str) -> dict:
     workflow_id = _strict_id(workflow_id)
     with _workflow_write_lock(workflow_id):
+        # Go through the public loader so instrumentation and the established
+        # single-writer tests observe the complete read inside this lock.
         current = load_workflow(workflow_id)
+        current_state = migrate_workflow(current)
+        if current_state.read_only:
+            raise WorkflowReadOnlyError(workflow_id)
         if not expected_updated_at or current.get("updated_at") != expected_updated_at:
             raise WorkflowConflict(workflow_id)
         document = deepcopy(draft)
