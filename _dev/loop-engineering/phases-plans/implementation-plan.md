@@ -727,6 +727,20 @@ Multiple runs for different projects execute simultaneously; the same project st
 through the Phase 7 queue. Run history and SSE streams stay correctly scoped per execution.
 **Done when:** pytest proves two projects run at the same time without cross-talk in events, records, or artifacts, and same-project runs still serialize.
 
+#### Step 9.2 review status — 2026-08-05
+
+- **Complete.** The Phase 7 per-project FIFO workers already provide the required scheduling
+  boundary: runs for distinct projects use separate workers, while every run for one project stays
+  on that project's single queue worker.
+- A barrier-based pytest now requires two project runs to overlap and publishes an artifact from
+  each run through its execution-scoped staging directory. It verifies that persisted execution
+  records, workflow history summaries, monotonically sequenced SSE buffers, artifact references,
+  and artifact bytes contain only the matching execution and project identities.
+- The existing queue regression continues to hold two same-project runs behind one worker while a
+  different project proceeds, proving the same-project concurrency maximum remains one.
+- Verification passes with 212 backend tests (10 live-provider tests skipped, 62 subtests), all 145
+  frontend tests across 22 files, the Vite production build, and generated-document drift checks.
+
 ### 9.3 Asset garbage collection
 An orphan scan lists artifacts under `output/` referenced by no execution record or pinned
 payload; a GC command (UI + CLI) deletes only listed orphans, with a dry-run default and a

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 
 from flask import Flask
 
 import studio.workflows.routes as workflow_routes
 from studio.workflows import workflows_bp
 from studio.workflows.execution import ExecutionManager
-from studio.workflows.persistence import load_execution, load_queue_record
+from studio.workflows.persistence import list_executions, load_execution, load_queue_record
 
 
 def _workflow():
@@ -89,6 +90,81 @@ def test_same_project_serializes_while_different_projects_run_concurrently(tmp_p
     assert maximum_by_project == {"pm_ABC123": 1, "pm_DEF456": 1}
     assert started_by_project == {"pm_ABC123": 2, "pm_DEF456": 1}
     assert load_queue_record(second, root=manager.queue_root)["status"] == "done"
+
+
+def test_concurrent_projects_isolate_events_records_history_and_artifacts(tmp_path):
+    workflow = _workflow()
+    workflow["workflow_id"] = "wf_CONCUR"
+    rendezvous = threading.Barrier(2)
+
+    def resolver(_node):
+        def execute(_inputs, _config, context):
+            # Neither run can pass this point unless both project workers are
+            # executing at the same time.
+            rendezvous.wait(timeout=2)
+            artifact_ref = (
+                f"projects/{context.project_id}/"
+                f"concurrent-{context.execution_id}.txt"
+            )
+            staged = context.stage_artifact(artifact_ref)
+            Path(staged).write_text(
+                f"{context.project_id}:{context.execution_id}", encoding="utf-8"
+            )
+            return {"control": {
+                "ok": True,
+                "project_id": context.project_id,
+                "execution_id": context.execution_id,
+                "artifact_refs": [artifact_ref],
+            }}
+        return execute
+
+    manager = ExecutionManager(output_dir=str(tmp_path), executor_resolver=resolver)
+    projects = ("pm_ABC123", "pm_DEF456")
+    execution_ids = [
+        manager.start(
+            workflow, run_mode="full", target_node_ids=[], project_id=project_id
+        )[0]
+        for project_id in projects
+    ]
+
+    workers = [manager.active.get(execution_id).thread for execution_id in execution_ids]
+    for worker in workers:
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+
+    records = {
+        execution_id: load_execution(execution_id, root=manager.execution_root)
+        for execution_id in execution_ids
+    }
+    for execution_id, project_id in zip(execution_ids, projects):
+        record = records[execution_id]
+        expected_ref = f"projects/{project_id}/concurrent-{execution_id}.txt"
+        assert record["execution_id"] == execution_id
+        assert record["project_id"] == project_id
+        assert record["status"] == "succeeded"
+        assert record["nodes"]["work"]["artifact_refs"] == [expected_ref]
+        assert (tmp_path / expected_ref).read_text(encoding="utf-8") == (
+            f"{project_id}:{execution_id}"
+        )
+
+        replay = manager.events.get(execution_id).replay(0)
+        assert replay.terminal is True
+        assert [event["sequence"] for event in replay.events] == list(
+            range(1, len(replay.events) + 1)
+        )
+        assert {event["execution_id"] for event in replay.events} == {execution_id}
+
+    history, total = list_executions(
+        "wf_CONCUR", root=manager.execution_root
+    )
+    assert total == 2
+    assert {
+        (item["execution_id"], item["project_id"], item["status"])
+        for item in history
+    } == {
+        (execution_ids[0], projects[0], "succeeded"),
+        (execution_ids[1], projects[1], "succeeded"),
+    }
 
 
 def test_pending_run_can_be_cancelled_and_never_executes(tmp_path):
