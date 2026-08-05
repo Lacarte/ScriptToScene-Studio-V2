@@ -52,18 +52,17 @@ onBeforeUnmount(() => {
   store.flushDraft()
 })
 
-// Ctrl+Z restores the most recently auto-detached sample stub (step 2.5;
-// the full undo/redo command stack arrives in Phase 5.1).
 function onKeydown(event) {
-  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
   const target = event.target
   if (target instanceof HTMLElement
     && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) {
     return
   }
-  if (store.canUndoStubDetach && store.undoStubDetach()) {
+  const changed = event.shiftKey ? store.redo() : store.undo()
+  if (changed) {
     event.preventDefault()
-    toast.info('Sample input restored')
+    toast.info(event.shiftKey ? 'Redone' : 'Undone')
   }
 }
 
@@ -175,9 +174,10 @@ function onNodeDragStop({ node, nodes: draggedNodes }) {
   // Multi-select/box drags carry every moved node in `nodes`; persisting
   // only the grab target would snap the rest back on the next re-render.
   const moved = draggedNodes?.length ? draggedNodes : [node]
-  for (const dragged of moved) {
-    store.moveNode(dragged.id, { x: dragged.position.x, y: dragged.position.y })
-  }
+  store.moveNodes(moved.map((dragged) => ({
+    id: dragged.id,
+    position: { x: dragged.position.x, y: dragged.position.y },
+  })))
 }
 
 function onNodesChange(changes) {
@@ -307,15 +307,20 @@ function tidyUp() {
     g.setEdge(edge.source_node, edge.target_node)
   }
   dagre.layout(g)
+  const moves = []
   for (const node of store.nodes) {
     const pos = g.node(node.id)
     if (pos) {
-      store.moveNode(node.id, {
-        x: Math.round((pos.x - 100) / 20) * 20,
-        y: Math.round((pos.y - 30) / 20) * 20,
+      moves.push({
+        id: node.id,
+        position: {
+          x: Math.round((pos.x - 100) / 20) * 20,
+          y: Math.round((pos.y - 30) / 20) * 20,
+        },
       })
     }
   }
+  store.moveNodes(moves)
   requestAnimationFrame(() => fitView({ padding: 0.15 }))
 }
 
@@ -515,6 +520,18 @@ async function onStop() {
         <button class="wf-btn" :disabled="store.persistenceLoading" @click="onDuplicate">Duplicate</button>
         <button class="wf-btn" :disabled="store.persistenceLoading" @click="importInput?.click()">Import</button>
         <button class="wf-btn" :disabled="!store.workflowId" @click="onExport">Export</button>
+        <button
+          class="wf-btn"
+          :disabled="!store.canUndo"
+          :title="store.undoLabel ? `Undo ${store.undoLabel} (Ctrl+Z)` : 'Nothing to undo'"
+          @click="store.undo()"
+        >Undo</button>
+        <button
+          class="wf-btn"
+          :disabled="!store.canRedo"
+          :title="store.redoLabel ? `Redo ${store.redoLabel} (Ctrl+Shift+Z)` : 'Nothing to redo'"
+          @click="store.redo()"
+        >Redo</button>
         <input ref="importInput" class="wf-file-input" type="file" accept="application/json,.json" @change="onImportFile" />
         <button class="wf-btn" :disabled="!store.nodeCount || validating" title="Validate workflow on the server" @click="onValidate">
           Validate

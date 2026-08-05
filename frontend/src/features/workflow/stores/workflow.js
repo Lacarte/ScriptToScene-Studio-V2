@@ -61,6 +61,87 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const dirty = ref(false)
   const draftSavedAt = ref(null)
 
+  // Undo/redo is intentionally runtime-only. Commands capture a bounded,
+  // complete graph-editing state, never enter workflow JSON, and make nested
+  // mutations (add-with-stubs, stub replacement) one atomic history entry.
+  const undoStack = ref([])
+  const redoStack = ref([])
+  const canUndo = computed(() => undoStack.value.length > 0)
+  const canRedo = computed(() => redoStack.value.length > 0)
+  const undoLabel = computed(() => undoStack.value.at(-1)?.label || '')
+  const redoLabel = computed(() => redoStack.value.at(-1)?.label || '')
+  const COMMAND_HISTORY_LIMIT = 100
+  let commandDepth = 0
+
+  function commandSnapshot() {
+    return plain({
+      nodes: nodes.value,
+      edges: edges.value,
+      settings: settings.value,
+      staleNodeIds: staleNodeIds.value,
+      selectedNodeId: selectedNodeId.value,
+      dirty: dirty.value,
+    })
+  }
+
+  function restoreCommandSnapshot(snapshot) {
+    nodes.value = plain(snapshot.nodes)
+    edges.value = plain(snapshot.edges)
+    settings.value = plain(snapshot.settings)
+    staleNodeIds.value = plain(snapshot.staleNodeIds)
+    selectedNodeId.value = snapshot.selectedNodeId && nodeById(snapshot.selectedNodeId)
+      ? snapshot.selectedNodeId
+      : null
+    dirty.value = Boolean(snapshot.dirty)
+    if (dirty.value) scheduleDraftAutosave()
+    else clearDraft()
+  }
+
+  function clearCommandHistory() {
+    undoStack.value = []
+    redoStack.value = []
+  }
+
+  function executeCommand(label, mutate) {
+    if (commandDepth > 0) return mutate()
+    const before = commandSnapshot()
+    commandDepth += 1
+    let result
+    try {
+      result = mutate()
+    } finally {
+      commandDepth -= 1
+    }
+    const after = commandSnapshot()
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      undoStack.value.push({
+        label,
+        kind: result?.detachedStub ? 'stub-detach' : null,
+        before,
+        after,
+      })
+      if (undoStack.value.length > COMMAND_HISTORY_LIMIT) undoStack.value.shift()
+      redoStack.value = []
+    }
+    return result
+  }
+
+  function undo() {
+    const command = undoStack.value.pop()
+    if (!command) return false
+    restoreCommandSnapshot(command.before)
+    redoStack.value.push(command)
+    return true
+  }
+
+  function redo() {
+    const command = redoStack.value.pop()
+    if (!command) return false
+    restoreCommandSnapshot(command.after)
+    undoStack.value.push(command)
+    return true
+  }
+
   // Live execution state (step 3.6). This is deliberately separate from the
   // persisted workflow document, so status updates never make a graph dirty.
   const currentExecution = ref(null)
@@ -480,52 +561,72 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   function addNode(typeKey, position) {
-    const def = nodeTypes.value[typeKey]
-    if (!def) return null
-    const node = {
-      id: nextNodeId(),
-      type: typeKey,
-      type_version: def.type_version,
-      name: def.display_name,
-      position: {
-        x: Math.round((position?.x ?? 0) / 20) * 20,
-        y: Math.round((position?.y ?? 0) / 20) * 20,
-      },
-      configuration: defaultsFor(typeKey),
-      disabled: false,
-      on_error: { policy: 'stop' },
-    }
-    nodes.value.push(node)
-    markDocumentDirty()
-    return node
+    return executeCommand('Add node', () => {
+      const def = nodeTypes.value[typeKey]
+      if (!def) return null
+      const node = {
+        id: nextNodeId(),
+        type: typeKey,
+        type_version: def.type_version,
+        name: def.display_name,
+        position: {
+          x: Math.round((position?.x ?? 0) / 20) * 20,
+          y: Math.round((position?.y ?? 0) / 20) * 20,
+        },
+        configuration: defaultsFor(typeKey),
+        disabled: false,
+        on_error: { policy: 'stop' },
+      }
+      nodes.value.push(node)
+      markDocumentDirty()
+      return node
+    })
   }
 
   function moveNode(nodeId, position) {
-    const node = nodes.value.find((n) => n.id === nodeId)
-    if (!node) return
-    node.position = { x: position.x, y: position.y }
-    markDocumentDirty()
+    return moveNodes([{ id: nodeId, position }])
+  }
+
+  function moveNodes(moves) {
+    return executeCommand('Move node', () => {
+      let changed = false
+      for (const move of moves || []) {
+        const node = nodes.value.find((n) => n.id === move.id)
+        if (!node || !move.position) continue
+        if (node.position.x === move.position.x && node.position.y === move.position.y) continue
+        node.position = { x: move.position.x, y: move.position.y }
+        changed = true
+      }
+      if (changed) markDocumentDirty()
+      return changed
+    })
   }
 
   function renameNode(nodeId, name) {
-    const node = nodes.value.find((n) => n.id === nodeId)
-    if (!node) return
-    node.name = name
-    markDocumentDirty()
+    return executeCommand('Rename node', () => {
+      const node = nodes.value.find((n) => n.id === nodeId)
+      if (!node || node.name === name) return false
+      node.name = name
+      markDocumentDirty()
+      return true
+    })
   }
 
   function removeNodes(nodeIds) {
-    const doomed = new Set(nodeIds)
-    if (!doomed.size) return
-    const oldEdges = [...edges.value]
-    const affected = oldEdges.filter((e) => doomed.has(e.source_node)).map((e) => e.target_node)
-    markNodesStale(affected, oldEdges)
-    nodes.value = nodes.value.filter((n) => !doomed.has(n.id))
-    edges.value = edges.value.filter(
-      (e) => !doomed.has(e.source_node) && !doomed.has(e.target_node),
-    )
-    if (doomed.has(selectedNodeId.value)) selectedNodeId.value = null
-    markDocumentDirty()
+    return executeCommand('Delete node', () => {
+      const doomed = new Set(nodeIds)
+      if (!doomed.size || !nodes.value.some((node) => doomed.has(node.id))) return false
+      const oldEdges = [...edges.value]
+      const affected = oldEdges.filter((e) => doomed.has(e.source_node)).map((e) => e.target_node)
+      markNodesStale(affected, oldEdges)
+      nodes.value = nodes.value.filter((n) => !doomed.has(n.id))
+      edges.value = edges.value.filter(
+        (e) => !doomed.has(e.source_node) && !doomed.has(e.target_node),
+      )
+      if (doomed.has(selectedNodeId.value)) selectedNodeId.value = null
+      markDocumentDirty()
+      return true
+    })
   }
 
   let edgeCounter = 0
@@ -548,80 +649,79 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * other inputs) is removed first — undoably via undoStubDetach().
    */
   function connectNodes({ sourceNode, sourcePort, targetNode, targetPort }) {
-    const sourceIsStub = nodeById(sourceNode)?.type === 'stub.input'
-    const stubEdge = sourceIsStub
-      ? null
-      : edges.value.find(
-        (e) => e.target_node === targetNode && e.target_port === targetPort
-          && nodeById(e.source_node)?.type === 'stub.input',
+    return executeCommand('Connect nodes', () => {
+      const sourceIsStub = nodeById(sourceNode)?.type === 'stub.input'
+      const stubEdge = sourceIsStub
+        ? null
+        : edges.value.find(
+          (e) => e.target_node === targetNode && e.target_port === targetPort
+            && nodeById(e.source_node)?.type === 'stub.input',
+        )
+      // Validate against the graph as it would look after the stub detaches,
+      // so replacing sample data with a real edge is never "input occupied".
+      const candidateEdges = stubEdge
+        ? edges.value.filter((e) => e.id !== stubEdge.id)
+        : edges.value
+      const verdict = validateConnection(
+        { nodes: nodes.value, edges: candidateEdges, nodeTypes: nodeTypes.value, portTypes: portTypes.value },
+        { sourceNode, sourcePort, targetNode, targetPort },
       )
-    // Validate against the graph as it would look after the stub detaches,
-    // so replacing sample data with a real edge is never "input occupied".
-    const candidateEdges = stubEdge
-      ? edges.value.filter((e) => e.id !== stubEdge.id)
-      : edges.value
-    const verdict = validateConnection(
-      { nodes: nodes.value, edges: candidateEdges, nodeTypes: nodeTypes.value, portTypes: portTypes.value },
-      { sourceNode, sourcePort, targetNode, targetPort },
-    )
-    if (!verdict.ok) return verdict
+      if (!verdict.ok) return verdict
 
-    let undoEntry = null
-    if (stubEdge) {
-      const stubNode = nodeById(stubEdge.source_node)
-      const stillFeedsOthers = edges.value.some(
-        (e) => e.source_node === stubNode.id && e.id !== stubEdge.id,
-      )
-      undoEntry = {
-        stubNode: stillFeedsOthers ? null : plain(stubNode),
-        stubEdge: plain(stubEdge),
+      if (stubEdge) {
+        const stubNode = nodeById(stubEdge.source_node)
+        const stillFeedsOthers = edges.value.some(
+          (e) => e.source_node === stubNode.id && e.id !== stubEdge.id,
+        )
+        edges.value = edges.value.filter((e) => e.id !== stubEdge.id)
+        if (!stillFeedsOthers) {
+          nodes.value = nodes.value.filter((n) => n.id !== stubNode.id)
+          if (selectedNodeId.value === stubNode.id) selectedNodeId.value = null
+        }
       }
-      edges.value = edges.value.filter((e) => e.id !== stubEdge.id)
-      if (!stillFeedsOthers) {
-        nodes.value = nodes.value.filter((n) => n.id !== stubNode.id)
-        if (selectedNodeId.value === stubNode.id) selectedNodeId.value = null
-      }
-    }
 
-    const edge = {
-      id: nextEdgeId(),
-      source_node: sourceNode,
-      source_port: sourcePort,
-      target_node: targetNode,
-      target_port: targetPort,
-      edge_type: verdict.edgeType,
-    }
-    edges.value.push(edge)
-    markNodesStale([targetNode])
-    if (undoEntry) {
-      undoEntry.realEdgeId = edge.id
-      stubDetachUndo.value.push(undoEntry)
-    }
-    markDocumentDirty()
-    return { ...verdict, detachedStub: Boolean(undoEntry) }
+      const edge = {
+        id: nextEdgeId(),
+        source_node: sourceNode,
+        source_port: sourcePort,
+        target_node: targetNode,
+        target_port: targetPort,
+        edge_type: verdict.edgeType,
+      }
+      edges.value.push(edge)
+      markNodesStale([targetNode])
+      markDocumentDirty()
+      return { ...verdict, detachedStub: Boolean(stubEdge) }
+    })
   }
 
   function removeEdges(edgeIds) {
-    const doomed = new Set(edgeIds)
-    if (!doomed.size) return
-    const oldEdges = [...edges.value]
-    const affected = oldEdges.filter((e) => doomed.has(e.id)).map((e) => e.target_node)
-    markNodesStale(affected, oldEdges)
-    edges.value = edges.value.filter((e) => !doomed.has(e.id))
-    markDocumentDirty()
+    return executeCommand('Disconnect nodes', () => {
+      const doomed = new Set(edgeIds)
+      if (!doomed.size || !edges.value.some((edge) => doomed.has(edge.id))) return false
+      const oldEdges = [...edges.value]
+      const affected = oldEdges.filter((e) => doomed.has(e.id)).map((e) => e.target_node)
+      markNodesStale(affected, oldEdges)
+      edges.value = edges.value.filter((e) => !doomed.has(e.id))
+      markDocumentDirty()
+      return true
+    })
   }
 
   // ── Sample-data stubs (step 2.5) ──────────────────────────────────────
-  // {stubNode|null, stubEdge, realEdgeId} entries, newest last. Replaced by
-  // the full command stack in Phase 5.1.
-  const stubDetachUndo = ref([])
-  const canUndoStubDetach = computed(() => stubDetachUndo.value.length > 0)
+  // Compatibility aliases retained for the step 2.5 API and its tests.
+  const canUndoStubDetach = computed(() => undoStack.value.at(-1)?.kind === 'stub-detach')
 
   const autoAttachStubs = computed(() => settings.value.auto_attach_stubs !== false)
 
   function setAutoAttachStubs(enabled) {
-    settings.value = { ...settings.value, auto_attach_stubs: Boolean(enabled) }
-    markDocumentDirty()
+    return executeCommand('Change workflow settings', () => {
+      const value = Boolean(enabled)
+      if (settings.value.auto_attach_stubs === value) return false
+      settings.value = { ...settings.value, auto_attach_stubs: value }
+      markDocumentDirty()
+      return true
+    })
   }
 
   function isStubType(typeKey) {
@@ -646,6 +746,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * data input of `nodeId`. Returns the created stub nodes.
    */
   function attachSampleInputs(nodeId) {
+    return executeCommand('Attach sample inputs', () => {
     const node = nodeById(nodeId)
     const def = nodeTypes.value[node?.type]
     if (!node || !def || !nodeTypes.value['stub.input']) return []
@@ -677,10 +778,12 @@ export const useWorkflowStore = defineStore('workflow', () => {
     }
     if (created.length) markDocumentDirty()
     return created
+    })
   }
 
   /** Attach a Result Viewer to the node's principal (first data) output. */
   function attachResultViewer(nodeId) {
+    return executeCommand('Attach result viewer', () => {
     const node = nodeById(nodeId)
     const def = nodeTypes.value[node?.type]
     if (!node || !def || !nodeTypes.value['stub.output']) return null
@@ -702,6 +805,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     })
     markDocumentDirty()
     return stub
+    })
   }
 
   /**
@@ -710,36 +814,20 @@ export const useWorkflowStore = defineStore('workflow', () => {
    * wire up sample inputs and a result viewer.
    */
   function addNodeWithStubs(typeKey, position) {
-    const node = addNode(typeKey, position)
-    if (!node) return null
-    if (autoAttachStubs.value && !isStubType(typeKey)) {
-      attachSampleInputs(node.id)
-      attachResultViewer(node.id)
-    }
-    return node
+    return executeCommand('Add node', () => {
+      const node = addNode(typeKey, position)
+      if (!node) return null
+      if (autoAttachStubs.value && !isStubType(typeKey)) {
+        attachSampleInputs(node.id)
+        attachResultViewer(node.id)
+      }
+      return node
+    })
   }
 
   /** Undo the most recent stub detach: drop the real edge, restore the stub. */
   function undoStubDetach() {
-    const entry = stubDetachUndo.value.pop()
-    if (!entry) return false
-    edges.value = edges.value.filter((e) => e.id !== entry.realEdgeId)
-    if (entry.stubNode && !nodeById(entry.stubNode.id)) {
-      const restored = plain(entry.stubNode)
-      if (nodes.value.some((n) => n.id === restored.id)) restored.id = nextNodeId()
-      nodes.value.push(restored)
-      entry.stubEdge.source_node = restored.id
-    }
-    const stubEdge = plain(entry.stubEdge)
-    const occupied = edges.value.some(
-      (e) => e.target_node === stubEdge.target_node && e.target_port === stubEdge.target_port,
-    )
-    if (!occupied && nodeById(stubEdge.source_node) && nodeById(stubEdge.target_node)) {
-      if (edges.value.some((e) => e.id === stubEdge.id)) stubEdge.id = nextEdgeId()
-      edges.value.push(stubEdge)
-    }
-    markDocumentDirty()
-    return true
+    return canUndoStubDetach.value ? undo() : false
   }
 
   function setViewport(vp) {
@@ -796,7 +884,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     createdAt.value = document.created_at || null
     updatedAt.value = document.updated_at || null
     resetCounters()
-    stubDetachUndo.value = []
+    clearCommandHistory()
     if (!preserveSelection || !nodeById(selectedNodeId.value)) selectedNodeId.value = null
     if (markDirty) {
       // Unsaved content (template/import-as-draft, draft recovery): keep the
@@ -946,16 +1034,20 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   function updateNodeConfig(nodeId, name, value) {
+    return executeCommand('Change node configuration', () => {
     const node = nodeById(nodeId)
-    if (!node) return
-    const previous = node.configuration[name]
-    node.configuration[name] = value
-    if (JSON.stringify(previous) !== JSON.stringify(value)) markNodesStale([nodeId])
+    if (!node) return false
+    const previous = node.configuration[name] === undefined
+      ? undefined
+      : plain(node.configuration[name])
+    if (JSON.stringify(previous) === JSON.stringify(value)) return false
+    node.configuration[name] = value === undefined ? undefined : plain(value)
+    markNodesStale([nodeId])
     // Retyping a stub retargets its dynamic port: reseed the editable sample
     // payload and drop edges that no longer type-match (contracts §3 —
     // dynamic ports obey exact-match once resolved).
     if (
-      name === 'port_type' && value !== previous
+      name === 'port_type'
       && (node.type === 'stub.input' || node.type === 'stub.output')
     ) {
       if (node.type === 'stub.input') {
@@ -974,24 +1066,36 @@ export const useWorkflowStore = defineStore('workflow', () => {
       })
     }
     markDocumentDirty()
+    return true
+    })
   }
 
   function setNodeDisabled(nodeId, disabled) {
+    return executeCommand('Disable node', () => {
     const node = nodeById(nodeId)
-    if (!node) return
-    node.disabled = Boolean(disabled)
+    const value = Boolean(disabled)
+    if (!node || node.disabled === value) return false
+    node.disabled = value
     markNodesStale([nodeId])
     markDocumentDirty()
+    return true
+    })
   }
 
   function updateNodeErrorPolicy(nodeId, patch) {
+    return executeCommand('Change error policy', () => {
     const node = nodeById(nodeId)
-    if (!node) return
-    node.on_error = { ...(node.on_error || { policy: 'stop' }), ...plain(patch) }
+    if (!node) return false
+    const next = { ...(node.on_error || { policy: 'stop' }), ...plain(patch) }
+    if (JSON.stringify(node.on_error) === JSON.stringify(next)) return false
+    node.on_error = next
     markDocumentDirty()
+    return true
+    })
   }
 
   function duplicateNode(nodeId) {
+    return executeCommand('Duplicate node', () => {
     const source = nodeById(nodeId)
     if (!source) return null
     const suffix = ' copy'
@@ -1014,6 +1118,41 @@ export const useWorkflowStore = defineStore('workflow', () => {
     markDocumentDirty()
     selectedNodeId.value = copy.id
     return copy
+    })
+  }
+
+  function replaceNode(nodeId, typeKey, { configuration, keepEdges = true } = {}) {
+    return executeCommand('Replace node', () => {
+      const node = nodeById(nodeId)
+      const def = nodeTypes.value[typeKey]
+      if (!node || !def || node.type === typeKey) return null
+      const previous = plain(node.configuration || {})
+      const defaults = defaultsFor(typeKey)
+      const compatible = Object.fromEntries(
+        Object.keys(defaults)
+          .filter((name) => Object.hasOwn(previous, name))
+          .map((name) => [name, previous[name]]),
+      )
+      node.type = typeKey
+      node.type_version = def.type_version
+      node.configuration = configuration === undefined
+        ? { ...defaults, ...compatible }
+        : plain(configuration)
+      node.on_error = { policy: 'stop' }
+      edges.value = edges.value.filter((edge) => {
+        if (!keepEdges && (edge.source_node === nodeId || edge.target_node === nodeId)) return false
+        if (edge.source_node === nodeId) {
+          return (def.outputs || []).some((port) => port.id === edge.source_port)
+        }
+        if (edge.target_node === nodeId) {
+          return (def.inputs || []).some((port) => port.id === edge.target_port)
+        }
+        return true
+      })
+      markNodesStale([nodeId])
+      markDocumentDirty()
+      return node
+    })
   }
 
   return {
@@ -1024,7 +1163,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     workflowId, workflowName, workflowDescription, nodes, edges, viewport,
     variables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,
     workflowList, templates, persistenceLoading, persistenceError,
-    addNode, moveNode, renameNode, removeNodes, removeEdges, connectNodes,
+    addNode, moveNode, moveNodes, renameNode, removeNodes, removeEdges, connectNodes,
+    replaceNode,
     setViewport, nodeById, defaultsFor, toDocument, applyDocument, newWorkflow,
     refreshWorkflowList, loadTemplates, openWorkflow, saveWorkflow, saveAs,
     importDocument, applyTemplate,
@@ -1033,6 +1173,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // selection + inspector
     selectedNodeId, selectedNode, selectNode, clearSelection,
     updateNodeConfig, updateNodeErrorPolicy, setNodeDisabled, duplicateNode,
+    // undo/redo command stack (step 5.1)
+    canUndo, canRedo, undoLabel, redoLabel, undo, redo, clearCommandHistory,
     // validation (step 2.2)
     issuesByNode,
     // sample-data stubs (step 2.5)

@@ -226,6 +226,12 @@ Bottom panel full version: execution list (`GET /api/workflow/executions?workflo
 Commands: add, move (drag coalesced into one command), delete, connect, disconnect, config change, disable, replace. Ctrl+Z / Ctrl+Shift+Z.
 **Done when:** every canvas operation round-trips through undo/redo (Vitest on the command stack).
 
+#### Step 5.1 review status â€” 2026-08-04
+
+- **Complete.** The workflow store now has a bounded runtime-only command history for add, atomic multi-node move, delete, connect, disconnect, configuration, disable, and replace. Compound add-with-stubs and real-edge stub replacement operations undo and redo as single commands; new edits invalidate redo, and document loads clear history.
+- The canvas exposes Undo/Redo controls and handles Ctrl+Z / Ctrl+Shift+Z outside editable fields. Tidy-up and group dragging each produce one move command.
+- Automated verification: all 92 frontend tests pass, including dedicated round-trip command-stack coverage, and the production frontend build succeeds.
+
 ### 5.2 Clipboard, duplicate, replace, context menus
 Copy/paste minimal workflow fragments (works across workflows), Ctrl+D duplicate, right-click context menus, "Replace with…" preserving position/name/compatible config/connections with warning for incompatible ones (undoable). Drop-connection-on-empty-canvas → compatible-filtered palette → auto-connect.
 **Done when:** each operation has a test and is undoable.
