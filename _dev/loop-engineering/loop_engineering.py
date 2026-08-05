@@ -246,7 +246,11 @@ def run_logged(cmd, log_file: Path, cwd=ROOT, timeout=AGENT_TIMEOUT_S) -> Logged
 
 def agent_run_ok(result: LoggedResult, state: dict, scope: str, stage: str) -> bool:
     """Never treat a silent, limited, or failed agent invocation as success."""
-    if result.blocker:
+    # A blocker phrase only counts when the agent actually died with it: a
+    # healthy long run can QUOTE "you've hit your limit" (docs, log echoes)
+    # without being limited — that false positive halted step 9.5 once.
+    blocker_fatal = result.blocker and (result.returncode != 0 or result.output_lines < 80)
+    if blocker_fatal:
         detail = f"{stage} blocked: {result.blocker}"
     elif result.returncode != 0:
         detail = f"{stage} exited with code {result.returncode}"
