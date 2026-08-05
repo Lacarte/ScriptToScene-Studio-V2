@@ -614,6 +614,22 @@ config schema stub, and a passing test file, wired into the palette on next star
 existing keys and invalid port types.
 **Done when:** running the scaffolder for a demo node yields a palette-visible, configurable, executable node whose generated tests pass unmodified.
 
+#### Step 8.1 review status — 2026-08-05
+
+- **Complete.** `python -m studio.workflows.scaffold <node_key>` creates a source-controlled JSON
+  registry entry, editable adapter skeleton, JSON config-field stub, and node-specific smoke tests.
+  Repeatable `--input ID:TYPE` and `--output ID:TYPE` options use the registry's frozen port
+  vocabulary; invalid port types, reserved/duplicate port IDs, existing node keys, and existing
+  target files are refused without overwriting them.
+- Generated definitions are discovered when the workflow registry imports, so the existing
+  node-types endpoint exposes them to the palette on the next application start and the scheduler
+  resolves their generated adapter normally. Built-in registry contract tests now require the core
+  catalog as a subset so developer nodes can extend it without weakening per-node validation.
+- End-to-end verification scaffolded `scaffold_check.echo` through the real CLI: the node was
+  registry-visible, configurable, executable, and both generated tests passed unchanged. The
+  temporary demo files were then removed. The focused suite passes with 17 tests; the complete
+  workflow backend suite passes with 172 tests and 59 subtests.
+
 ### 8.2 Dev hot-reload
 Behind a dev-mode flag: registry and adapter modules reload on file change without restarting
 Flask; the frontend refetches node-types on a reload signal. Never active in normal runs.

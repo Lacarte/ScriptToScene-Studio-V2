@@ -8,6 +8,8 @@ field, which is never serialized.
 """
 
 from copy import deepcopy
+import json
+from pathlib import Path
 
 REGISTRY_VERSION = 3
 
@@ -498,6 +500,53 @@ _NODE_TYPES = {
         "executor": "studio.workflows.adapters.stubs:result_viewer",
     },
 }
+
+_BUILTIN_NODE_KEYS = frozenset(_NODE_TYPES)
+
+
+def load_generated_node_types(directory=None):
+    """Load source-controlled node definitions emitted by the scaffolder.
+
+    Definitions live outside this module so adding a node never requires
+    rewriting the hand-maintained catalog.  Loading happens once at process
+    start, which makes a scaffolded node available to the API and scheduler
+    on the next application start.
+    """
+    root = Path(directory) if directory is not None else Path(__file__).with_name("node_definitions")
+    generated = {}
+    if not root.is_dir():
+        return generated
+
+    for path in sorted(root.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Cannot load generated node definition {path}: {exc}") from exc
+        key = payload.get("key") if isinstance(payload, dict) else None
+        definition = payload.get("definition") if isinstance(payload, dict) else None
+        if not isinstance(key, str) or not isinstance(definition, dict):
+            raise RuntimeError(f"Generated node definition {path} must contain key and definition")
+        if key in generated or key in _BUILTIN_NODE_KEYS:
+            raise RuntimeError(f"Duplicate workflow node key {key!r} in {path}")
+        required = {
+            "type_version", "display_name", "description", "category", "icon",
+            "inputs", "outputs", "config_schema", "capabilities", "executor",
+        }
+        missing = sorted(required - definition.keys())
+        if missing:
+            raise RuntimeError(f"Generated node {key!r} is missing: {', '.join(missing)}")
+        if definition["category"] not in CATEGORIES:
+            raise RuntimeError(f"Generated node {key!r} has unknown category {definition['category']!r}")
+        for port in definition["inputs"] + definition["outputs"]:
+            if port.get("type") not in PORT_TYPES:
+                raise RuntimeError(
+                    f"Generated node {key!r} port {port.get('id')!r} has invalid type {port.get('type')!r}"
+                )
+        generated[key] = definition
+    return generated
+
+
+_NODE_TYPES.update(load_generated_node_types())
 
 # Resilience capabilities are backend-owned just like retry/cancel support.
 # Any executable node with a normal control output may expose a distinct error
