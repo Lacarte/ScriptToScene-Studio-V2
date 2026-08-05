@@ -830,6 +830,15 @@ async function onStop() {
             <span>Auto-stubs</span>
           </label>
         </div>
+
+        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Legacy surfaces">
+          <span class="wf-action-label">Legacy</span>
+          <a
+            class="wf-btn wf-legacy-link"
+            href="#/pipeline"
+            title="Open the legacy step-by-step pipeline dashboard"
+          >Pipeline</a>
+        </div>
       </nav>
     </header>
 
@@ -1114,6 +1123,12 @@ async function onStop() {
   white-space: nowrap;
   cursor: pointer;
   transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+a.wf-legacy-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 .wf-btn:hover:not(:disabled) {

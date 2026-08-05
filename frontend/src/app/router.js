@@ -3,13 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 const routes = [
   {
     path: '/',
-    redirect: '/pipeline',
-  },
-  {
-    path: '/pipeline',
-    name: 'pipeline',
-    component: () => import('@/features/pipeline/views/PipelinePage.vue'),
-    meta: { title: 'Pipeline', icon: 'rocket' },
+    redirect: '/workflow',
   },
   {
     path: '/workflow',
@@ -18,14 +12,16 @@ const routes = [
     meta: { title: 'Workflow Builder', icon: 'workflow' },
   },
   {
+    path: '/pipeline',
+    name: 'pipeline',
+    component: () => import('@/features/pipeline/views/PipelinePage.vue'),
+    meta: { title: 'Legacy Pipeline', icon: 'rocket' },
+  },
+  {
     path: '/tts',
     name: 'tts',
     component: () => import('@/features/tts/views/TtsPage.vue'),
     meta: { title: 'Text to Speech', icon: 'mic' },
-  },
-  {
-    path: '/timing',
-    redirect: '/alignment',
   },
   {
     path: '/alignment',

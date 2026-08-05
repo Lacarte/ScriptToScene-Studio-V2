@@ -1563,9 +1563,13 @@ function logStepLabel(step) {
     <!-- Header -->
     <div class="header">
       <div>
-        <h2 class="page-title">Pipeline</h2>
+        <h2 class="page-title">Pipeline <span class="legacy-badge">Legacy</span></h2>
         <p class="page-subtitle">TTS &rarr; Alignment &rarr; Segment &rarr; Scenes &rarr; Storyboard &rarr; Animator &rarr; Build &rarr; Export</p>
       </div>
+      <a class="workflow-bridge-link" href="#/workflow" title="Build and run the same pipeline as a graph on the workflow canvas">
+        Open Workflow Builder
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
     </div>
 
     <!-- Input -->
@@ -2628,6 +2632,41 @@ function logStepLabel(step) {
 
 .page-title {
   letter-spacing: -0.02em;
+}
+
+.legacy-badge {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.workflow-bridge-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(78, 205, 196, 0.35);
+  background: rgba(78, 205, 196, 0.08);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.workflow-bridge-link:hover {
+  background: rgba(78, 205, 196, 0.16);
+  border-color: rgba(78, 205, 196, 0.55);
 }
 
 .header-actions {

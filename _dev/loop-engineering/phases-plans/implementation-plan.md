@@ -432,6 +432,25 @@ navigation, with cross-links both ways for the same project; routes that no surf
 anymore are removed. No behavior changes inside the legacy pages themselves.
 **Done when:** opening the app lands on the workflow builder, each surface links to the other, and no dead routes remain.
 
+#### Step 6.5 review status — 2026-08-05
+
+- **Complete.** The root route now redirects to `/workflow`, so opening the app lands on the
+  workflow canvas; the sidebar lists the Workflow Builder as the primary surface with the
+  legacy pipeline dashboard explicitly below it ("Legacy Pipeline Dashboard").
+- Cross-links run both ways: the workflow toolbar gains a "Legacy → Pipeline" link to the
+  step-by-step dashboard, and the legacy pipeline header (now badged "Legacy") gains an
+  "Open Workflow Builder" link. Project-scoped bridging already existed and is preserved —
+  the execution panel's "Open in Timeline Editor" carries `?project=` into the legacy editor,
+  and legacy pages keep their own `?project=` hand-offs. No behavior inside legacy pages
+  changed; both additions are pure hash-history navigation links.
+- Dead-route removal: the `/timing` → `/alignment` alias redirect, which no surface linked to,
+  is deleted; a route test asserts every remaining route is either the root redirect or a
+  surface-linked page.
+- Automated verification: 4 new Vitest cases (default-landing redirect, legacy pipeline
+  reachability, no-dead-routes allowlist, workflow-toolbar legacy link) bring the frontend
+  suite to 135 passed across 18 files; the production build succeeds. No backend code changed
+  in this step.
+
 ### 6.6 Docs and onboarding
 A user guide for building, validating, and running workflows (including sample-data stubs, run
 modes, and draft recovery), plus a node reference generated from the backend registry so it
