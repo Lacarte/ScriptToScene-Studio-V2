@@ -340,6 +340,138 @@ cannot drift from the code.
 
 ---
 
+## Phase 7 — Triggers & automation
+
+Until now every run is a human clicking Run. This phase makes workflows fire themselves:
+scheduled, file-driven, and webhook-driven runs, serialized through a queue, with notifications.
+
+### 7.1 Run queue
+Queue model persisted next to executions: pending/running/done/failed/cancelled, source
+(manual/schedule/watch/webhook), requested run mode. Triggered runs enqueue; the existing
+project lock drains the queue one run per project at a time. Queue panel in the bottom UI
+with cancel-pending.
+**Done when:** two runs triggered for the same project serialize (pytest-proven) while runs for different projects do not block each other, and pending runs can be cancelled from the UI.
+
+### 7.2 Scheduled runs
+Per-workflow cron-style schedules (persisted in workflow `settings`), a scheduler tick service
+started with the app, enable/disable per schedule, next-fire display in the UI. Missed fires
+while the app was closed run at most once on startup (catch-up policy: latest only).
+**Done when:** an accelerated-clock pytest proves a schedule enqueues exactly one run at the right time, catch-up fires at most once, and disabled schedules never fire.
+
+### 7.3 Watch-folder trigger
+A workflow can watch a configured folder for files matching a pattern; a stable-size debounce
+avoids half-written files; the file feeds the script input (or a configured port) of the run.
+Processed files move to a `processed/` subfolder to prevent re-triggering.
+**Done when:** dropping a file into a watched tmp folder triggers exactly one queued run carrying the file's content, half-written files do not trigger, and processed files never re-trigger (pytest with tmp dirs).
+
+### 7.4 Webhook trigger
+Loopback-only `POST /api/workflow/hooks/<workflow_id>/<token>` starts a queued run; per-workflow
+random token, regenerable in the UI; JSON payload validated and mapped to declared typed inputs.
+Invalid token or payload rejected with the standard error envelope.
+**Done when:** a valid POST enqueues a run with the mapped payload, invalid token/payload/oversize are rejected with the envelope, and the endpoint refuses non-loopback binds.
+
+### 7.5 Run notifications
+Per-workflow notification settings: on completion/failure, emit a Windows toast and append to a
+persisted notification log surfaced in the UI (badge + list). Outbound webhook notification as
+an optional channel.
+**Done when:** failed and successful runs each produce the configured notification record (pytest), and the UI shows unseen-notification state.
+
+---
+
+## Phase 8 — Node developer kit
+
+Turns the builder from a feature into a platform: creating a node becomes one command plus a guide.
+
+### 8.1 Node scaffolder
+`python -m studio.workflows.scaffold <node_key>` generates a registry entry, adapter skeleton,
+config schema stub, and a passing test file, wired into the palette on next start. Refuses
+existing keys and invalid port types.
+**Done when:** running the scaffolder for a demo node yields a palette-visible, configurable, executable node whose generated tests pass unmodified.
+
+### 8.2 Dev hot-reload
+Behind a dev-mode flag: registry and adapter modules reload on file change without restarting
+Flask; the frontend refetches node-types on a reload signal. Never active in normal runs.
+**Done when:** with the flag on, editing a node definition updates the palette without a server restart; with the flag off, nothing watches or reloads (tests cover the guard).
+
+### 8.3 type_version migrations
+Nodes declare config migrations between `type_version`s; documents upgrade on load with a
+recorded migration trail; unknown future versions load read-only with a warning instead of
+crashing.
+**Done when:** a stored workflow with an old node version opens upgraded and re-saves at the new version (pytest covers a two-hop migration chain), and a future-version document is view-only with a visible warning.
+
+### 8.4 Node-author guide
+A written guide (docs/ or in-app) walking scaffold → schema → adapter → test → ship, generated
+partly from `contracts.md` and the registry so port types and rules cannot drift. Validated by
+building one real node following only the guide.
+**Done when:** the demo node from 8.1 is rebuilt following only the guide, and the guide's port/type tables are generated from the registry.
+
+---
+
+## Phase 9 — Scale & asset lifecycle
+
+New node types and automated triggers will multiply workflows, runs, and artifacts; this phase
+keeps execution fast and disk usage bounded.
+
+### 9.1 Parallel branch execution
+The scheduler runs independent DAG branches concurrently under a bounded worker pool while
+keeping SSE event ordering deterministic per node and the run-level record consistent.
+Per-node concurrency opt-out for adapters that are not thread-safe (Kokoro singleton et al.).
+**Done when:** a diamond workflow executes both branches concurrently (measured overlap in pytest), results and event streams are deterministic, and opted-out adapters never overlap.
+
+### 9.2 Concurrent runs across projects
+Multiple runs for different projects execute simultaneously; the same project still serializes
+through the Phase 7 queue. Run history and SSE streams stay correctly scoped per execution.
+**Done when:** pytest proves two projects run at the same time without cross-talk in events, records, or artifacts, and same-project runs still serialize.
+
+### 9.3 Asset garbage collection
+An orphan scan lists artifacts under `output/` referenced by no execution record or pinned
+payload; a GC command (UI + CLI) deletes only listed orphans, with a dry-run default and a
+protected-paths allowlist.
+**Done when:** GC removes seeded orphans and provably never touches referenced or pinned artifacts (pytest builds both cases), and dry-run reports without deleting.
+
+### 9.4 Project archive & restore
+Export a project (workflow, executions, referenced artifacts, branding) as one archive file;
+restore recreates it under a new or original ID with references rewritten. Used for backup and
+machine moves.
+**Done when:** archive → delete → restore round-trips a fixture project with byte-identical referenced artifacts and a workflow that validates and runs.
+
+### 9.5 Large-canvas performance
+Profile and fix canvas behavior at 150+ nodes: memoized node cards, viewport-culled rendering
+if needed, debounced persistence, and a generated large-workflow fixture for regression use.
+**Done when:** the 150-node fixture loads, pans, and drags without dropped-frame stalls (documented measurement), and interaction tests on the fixture pass.
+
+---
+
+## Phase 10 — Distribution & assistant
+
+The app stops depending on a terminal and a memory of `python main.py`; a copilot drafts
+workflows from prompts.
+
+### 10.1 Desktop launcher
+A single entry point that starts the backend, waits for health, opens the app window (browser
+or lightweight shell), adds a tray icon with open/restart/quit, and handles port-in-use
+gracefully.
+**Done when:** double-clicking the launcher on a clean boot yields the running app with no console window, and quit from the tray stops the backend cleanly.
+
+### 10.2 Versioned release build
+A build script that produces a versioned, reproducible release folder/installer: frontend
+production build, pinned dependencies, version stamp surfaced in the UI, and a changelog entry
+gate.
+**Done when:** one command emits a versioned artifact from a clean checkout, and the running app displays that version.
+
+### 10.3 Backup & restore of all state
+One command/UI action exports all workflows, settings, schedules, and (optionally) projects to
+a single backup file; restore brings a fresh install to the same state. Builds on 9.4.
+**Done when:** backup → fresh install → restore round-trips the full app state and every workflow validates afterward.
+
+### 10.4 Workflow copilot
+Prompt → draft workflow: an assistant panel that sends the registry (declarative node/port
+contracts) plus the user's goal to a configured LLM, receives a workflow document, runs
+authoritative validation, and only offers valid results for insertion — never silent apply.
+**Done when:** a natural-language prompt yields a workflow that passes server validation and appears on the canvas only after explicit user acceptance; invalid generations surface their validation errors instead of applying.
+
+---
+
 ## Step count & sequencing summary
 
 | Phase | Steps | Parallelizable? |
@@ -351,5 +483,11 @@ cannot drift from the code.
 | 4 — Partial runs & resilience | 4.1–4.4 (4) | 4.3 parallel with 4.2 |
 | 5 — Power UX & expressions | 5.1–5.5 (5) | 5.1–5.3 parallelizable |
 | 6 — Hardening & production readiness | 6.1–6.6 (6) | 6.2/6.3/6.4 parallelizable; 6.1 first (may reveal new work); 6.5/6.6 last |
+| 7 — Triggers & automation | 7.1–7.5 (5) | 7.1 (queue) must land first; 7.2/7.3/7.4 parallel after it |
+| 8 — Node developer kit | 8.1–8.4 (4) | 8.2/8.3 parallel after 8.1; 8.4 last |
+| 9 — Scale & asset lifecycle | 9.1–9.5 (5) | 9.1 must land alone (scheduler change); 9.3/9.4/9.5 parallelizable |
+| 10 — Distribution & assistant | 10.1–10.4 (4) | 10.1/10.2 first; 10.3 builds on 9.4; 10.4 independent |
 
-37 steps total (31 original + 6 hardening). The critical path is 0.1 → 0.2 → 0.4 → 1.2 → 1.6 → 3.1 → 3.2 → 3.3 → 3.5 → 3.6; everything else hangs off it. The two steps to treat with the most care are **3.1** (extracting step functions from the 2,400-line `routes.py` without behavior change) and **4.2** (cache correctness — wrong reuse silently corrupts projects).
+55 steps total (31 original + 6 hardening + 18 roadmap). Phases 7–10 ordering logic: automation
+(7) multiplies the value of existing workflows; the developer kit (8) creates the node variety
+that surfaces the scale problems (9) fixes; distribution (10) wants a stable feature set last. The critical path is 0.1 → 0.2 → 0.4 → 1.2 → 1.6 → 3.1 → 3.2 → 3.3 → 3.5 → 3.6; everything else hangs off it. The two steps to treat with the most care are **3.1** (extracting step functions from the 2,400-line `routes.py` without behavior change) and **4.2** (cache correctness — wrong reuse silently corrupts projects).
