@@ -39,6 +39,7 @@ describe('ExecutionPanel deep inspection', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.stubGlobal('EventSource', FakeEventSource)
+    window.localStorage.clear()
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -107,5 +108,27 @@ describe('ExecutionPanel deep inspection', () => {
       '/api/workflow/queue/ex_QUEUE1/cancel', { body: {} },
     ))
     expect(store.runQueue[0].status).toBe('cancelled')
+  })
+
+  it('collapses without unmounting diagnostics and remembers the preference', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div />' } }] })
+    const wrapper = mount(ExecutionPanel, { global: { plugins: [router] } })
+    const toggle = wrapper.find('.execution-collapse-toggle')
+
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('.execution-content').exists()).toBe(true)
+
+    await toggle.trigger('click')
+
+    expect(wrapper.find('.execution-panel').classes()).toContain('collapsed')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.execution-body').attributes('style')).toContain('display: none')
+    expect(wrapper.find('.execution-content').exists()).toBe(true)
+    expect(window.localStorage.getItem('sts.workflow.execution-panel-collapsed')).toBe('1')
+
+    wrapper.unmount()
+    const restored = mount(ExecutionPanel, { global: { plugins: [router] } })
+    expect(restored.find('.execution-panel').classes()).toContain('collapsed')
+    expect(restored.find('.execution-collapse-toggle').attributes('aria-expanded')).toBe('false')
   })
 })

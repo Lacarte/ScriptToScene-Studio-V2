@@ -857,6 +857,32 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return executeCommand('Delete node', () => {
       const doomed = new Set(nodeIds)
       if (!doomed.size || !nodes.value.some((node) => doomed.has(node.id))) return false
+
+      // Sample inputs and result viewers are lifecycle children of the main
+      // node they were attached to. Remove an adjacent stub only when every
+      // graph connection it has belongs to the requested deletion set; a
+      // shared stub must survive for the other node that still consumes it.
+      const requestedMainNodes = new Set(
+        nodes.value
+          .filter((node) => doomed.has(node.id) && !['stub.input', 'stub.output'].includes(node.type))
+          .map((node) => node.id),
+      )
+      for (const node of nodes.value) {
+        if (doomed.has(node.id) || !['stub.input', 'stub.output'].includes(node.type)) continue
+        const incidentEdges = edges.value.filter(
+          (edge) => edge.source_node === node.id || edge.target_node === node.id,
+        )
+        const neighbourIds = incidentEdges.map(
+          (edge) => edge.source_node === node.id ? edge.target_node : edge.source_node,
+        )
+        if (
+          neighbourIds.some((id) => requestedMainNodes.has(id))
+          && neighbourIds.every((id) => doomed.has(id))
+        ) {
+          doomed.add(node.id)
+        }
+      }
+
       const oldEdges = [...edges.value]
       const affected = oldEdges.filter((e) => doomed.has(e.source_node)).map((e) => e.target_node)
       markNodesStale(affected, oldEdges)

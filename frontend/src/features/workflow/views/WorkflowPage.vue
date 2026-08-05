@@ -42,6 +42,22 @@ const notificationsOpen = ref(false)
 const assetGcOpen = ref(false)
 const projectArchiveOpen = ref(false)
 const notificationUnseen = ref(0)
+const INSPECTOR_COLLAPSED_KEY = 'sts.workflow.inspector-collapsed'
+const inspectorCollapsed = ref(false)
+
+try {
+  inspectorCollapsed.value = localStorage.getItem(INSPECTOR_COLLAPSED_KEY) === '1'
+} catch {
+  // Storage is an optional convenience; panel interaction still works without it.
+}
+
+watch(inspectorCollapsed, (collapsed) => {
+  try {
+    localStorage.setItem(INSPECTOR_COLLAPSED_KEY, collapsed ? '1' : '0')
+  } catch {
+    // Ignore unavailable/private storage.
+  }
+})
 
 async function refreshNotificationBadge() {
   if (!store.workflowId) {
@@ -1045,9 +1061,27 @@ async function onStop() {
       </main>
 
       <!-- Right — node inspector -->
-      <aside class="wf-inspector" :class="{ 'wf-inspector-read-only': store.readOnly }">
-        <div class="wf-panel-header">Inspector</div>
-        <NodeInspector />
+      <aside
+        class="wf-inspector"
+        :class="{ collapsed: inspectorCollapsed, 'wf-inspector-read-only': store.readOnly }"
+      >
+        <div class="wf-panel-header wf-inspector-header">
+          <span class="wf-inspector-title">Inspector</span>
+          <button
+            type="button"
+            class="wf-inspector-toggle"
+            :aria-expanded="String(!inspectorCollapsed)"
+            aria-controls="workflow-inspector-content"
+            :title="inspectorCollapsed ? 'Expand inspector' : 'Collapse inspector'"
+            @click="inspectorCollapsed = !inspectorCollapsed"
+          >
+            <span aria-hidden="true">{{ inspectorCollapsed ? '‹' : '›' }}</span>
+            <span class="wf-sr-only">{{ inspectorCollapsed ? 'Expand inspector' : 'Collapse inspector' }}</span>
+          </button>
+        </div>
+        <div id="workflow-inspector-content" v-show="!inspectorCollapsed" class="wf-inspector-content">
+          <NodeInspector />
+        </div>
       </aside>
     </div>
 
@@ -1089,10 +1123,10 @@ async function onStop() {
   font-size: 12px;
 }
 
-.wf-inspector-read-only :deep(input),
-.wf-inspector-read-only :deep(textarea),
-.wf-inspector-read-only :deep(select),
-.wf-inspector-read-only :deep(button) {
+.wf-inspector-read-only .wf-inspector-content :deep(input),
+.wf-inspector-read-only .wf-inspector-content :deep(textarea),
+.wf-inspector-read-only .wf-inspector-content :deep(select),
+.wf-inspector-read-only .wf-inspector-content :deep(button) {
   pointer-events: none;
   opacity: 0.65;
 }
@@ -1451,10 +1485,91 @@ async function onStop() {
 .wf-inspector {
   width: 300px;
   min-width: 300px;
+  box-sizing: border-box;
   border-left: 1px solid var(--border);
   background: var(--bg-darkest);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  transition: width 0.18s ease, min-width 0.18s ease;
+}
+
+.wf-inspector.collapsed {
+  width: 42px;
+  min-width: 42px;
+}
+
+.wf-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 7px 8px 6px 14px;
+}
+
+.wf-inspector-title { white-space: nowrap; }
+
+.wf-inspector-toggle {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(111, 137, 168, 0.24);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  background: rgba(20, 34, 51, 0.72);
+  font: 700 19px/1 inherit;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.wf-inspector-toggle:hover {
+  color: var(--text);
+  border-color: rgba(78, 205, 196, 0.55);
+  background: rgba(28, 47, 69, 0.95);
+}
+
+.wf-inspector-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
+  outline-offset: 2px;
+}
+
+.wf-inspector-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.wf-inspector.collapsed .wf-inspector-header {
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 7px;
+}
+
+.wf-inspector.collapsed .wf-inspector-toggle { order: -1; }
+
+.wf-inspector.collapsed .wf-inspector-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.wf-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .wf-canvas {

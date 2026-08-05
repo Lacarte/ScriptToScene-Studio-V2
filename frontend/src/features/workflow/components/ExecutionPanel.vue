@@ -9,6 +9,22 @@ const expanded = ref({})
 const retrying = ref(false)
 const actionMessage = ref('')
 const cancellingQueueId = ref(null)
+const panelCollapsedKey = 'sts.workflow.execution-panel-collapsed'
+const panelCollapsed = ref(false)
+
+try {
+  panelCollapsed.value = window.localStorage.getItem(panelCollapsedKey) === '1'
+} catch {
+  // Storage can be unavailable in privacy-restricted browser contexts.
+}
+
+watch(panelCollapsed, (collapsed) => {
+  try {
+    window.localStorage.setItem(panelCollapsedKey, collapsed ? '1' : '0')
+  } catch {
+    // Collapsing still works for this session when storage is unavailable.
+  }
+})
 
 const queueItems = computed(() => {
   const active = store.runQueue.filter((item) => ['pending', 'running'].includes(item.status))
@@ -164,7 +180,7 @@ function openEditor() {
 </script>
 
 <template>
-  <footer class="execution-panel">
+  <footer class="execution-panel" :class="{ collapsed: panelCollapsed }">
     <div class="execution-head">
       <div class="execution-heading">
         <span class="execution-title">Runs & diagnostics</span>
@@ -184,14 +200,26 @@ function openEditor() {
           class="execution-open"
           @click="openEditor"
         >Open in Timeline Editor</button>
+        <button
+          type="button"
+          class="execution-collapse-toggle"
+          :aria-expanded="!panelCollapsed"
+          aria-controls="workflow-execution-panel-content"
+          :aria-label="panelCollapsed ? 'Expand runs and diagnostics' : 'Collapse runs and diagnostics'"
+          :title="panelCollapsed ? 'Expand runs and diagnostics' : 'Collapse runs and diagnostics'"
+          @click="panelCollapsed = !panelCollapsed"
+        >
+          <span aria-hidden="true">{{ panelCollapsed ? '⌃' : '⌄' }}</span>
+        </button>
       </div>
     </div>
 
-    <div v-if="store.executionError || store.executionHistoryError || store.runQueueError" class="execution-stream-error" role="status">
-      {{ store.executionError || store.executionHistoryError || store.runQueueError }}
-    </div>
+    <div id="workflow-execution-panel-content" v-show="!panelCollapsed" class="execution-body">
+      <div v-if="store.executionError || store.executionHistoryError || store.runQueueError" class="execution-stream-error" role="status">
+        {{ store.executionError || store.executionHistoryError || store.runQueueError }}
+      </div>
 
-    <section class="queue-pane" aria-label="Run queue">
+      <section class="queue-pane" aria-label="Run queue">
       <span class="pane-title">Run queue <b>{{ store.runQueueTotal }}</b></span>
       <span v-if="!queueItems.length" class="queue-empty">No queued runs.</span>
       <article
@@ -210,9 +238,9 @@ function openEditor() {
           @click="cancelPending(item.execution_id)"
         >{{ cancellingQueueId === item.execution_id ? 'Cancelling…' : 'Cancel' }}</button>
       </article>
-    </section>
+      </section>
 
-    <div class="execution-content">
+      <div class="execution-content">
       <aside class="history-pane" aria-label="Run history">
         <div class="pane-title">
           Run history
@@ -346,18 +374,26 @@ function openEditor() {
         </template>
         <div v-else class="execution-empty">Select a finished node to inspect inputs, outputs, logs, errors, attempts, and cache decisions.</div>
       </section>
+      </div>
     </div>
   </footer>
 </template>
 
 <style scoped>
-.execution-panel { height: 300px; min-height: 220px; border-top: 1px solid var(--border); background: var(--bg-darkest); display: flex; flex-direction: column; color: var(--text-secondary); }
+.execution-panel { height: 300px; min-height: 220px; overflow: hidden; border-top: 1px solid var(--border); background: var(--bg-darkest); display: flex; flex-direction: column; color: var(--text-secondary); transition: height .18s ease, min-height .18s ease; }
+.execution-panel.collapsed { height: 40px; min-height: 40px; }
+.execution-panel.collapsed .execution-head { border-bottom-color: transparent; }
 .execution-head { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 12px; border-bottom: 1px solid var(--border); }
+.execution-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .execution-heading, .execution-actions { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .execution-title, .pane-title { font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: .14em; color: var(--text-muted); }
 .execution-id, .action-message { font-size: 9px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .execution-actions { justify-content: flex-end; }
 .quiet-button, .execution-open, .retry-actions button, .value-head button, .error-card button { border: 1px solid var(--border); border-radius: 5px; background: rgba(255,255,255,.035); color: var(--text-secondary); font-size: 9px; padding: 4px 7px; cursor: pointer; }
+.execution-collapse-toggle { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,.035); color: var(--text-secondary); cursor: pointer; }
+.execution-collapse-toggle span { display: block; height: 16px; font-size: 16px; line-height: 12px; }
+.execution-collapse-toggle:hover { border-color: rgba(78,205,196,.45); background: rgba(78,205,196,.08); color: var(--accent); }
+.execution-collapse-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:disabled { cursor: default; opacity: .45; }
 .execution-open { border-color: rgba(78,205,196,.45); color: var(--accent); }
 .execution-stream-error { padding: 3px 12px; border-bottom: 1px solid rgba(251,113,133,.3); background: rgba(68,20,30,.65); color: #fecdd3; font-size: 9px; }

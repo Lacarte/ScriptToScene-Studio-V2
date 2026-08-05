@@ -140,6 +140,40 @@ describe('sample-data stub auto-attach', () => {
     const seg = store.addNodeWithStubs('segment.run', { x: 0, y: 0 })
     expect(store.attachSampleInputs(seg.id)).toEqual([])
   })
+
+  it('deletes a main node together with its attached sample nodes', () => {
+    const store = seededStore()
+    const seg = store.addNodeWithStubs('segment.run', { x: 0, y: 0 })
+
+    expect(store.nodes).toHaveLength(3)
+    expect(store.removeNodes([seg.id])).toBe(true)
+    expect(store.nodes).toEqual([])
+    expect(store.edges).toEqual([])
+
+    expect(store.undo()).toBe(true)
+    expect(store.nodes).toHaveLength(3)
+    expect(store.edges).toHaveLength(2)
+  })
+
+  it('keeps a sample input that is still shared with another main node', () => {
+    const store = seededStore()
+    const seg = store.addNodeWithStubs('segment.run', { x: 0, y: 0 })
+    const seg2 = store.addNode('segment.run', { x: 400, y: 0 })
+    const stubIn = store.nodes.find((node) => node.type === 'stub.input')
+    store.connectNodes({
+      sourceNode: stubIn.id, sourcePort: 'value',
+      targetNode: seg2.id, targetPort: 'alignment',
+    })
+
+    store.removeNodes([seg.id])
+
+    expect(store.nodeById(stubIn.id)).not.toBeNull()
+    expect(store.nodeById(seg2.id)).not.toBeNull()
+    expect(store.nodes.some((node) => node.type === 'stub.output')).toBe(false)
+    expect(store.edges).toEqual([
+      expect.objectContaining({ source_node: stubIn.id, target_node: seg2.id }),
+    ])
+  })
 })
 
 describe('stub detach on real connection + undo', () => {
