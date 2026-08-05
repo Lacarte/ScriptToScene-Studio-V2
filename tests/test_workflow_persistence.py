@@ -4,6 +4,7 @@ import math
 import os
 import tempfile
 import unittest
+from copy import deepcopy
 
 from flask import Flask
 
@@ -12,6 +13,8 @@ from studio.workflows.models import workflow_draft
 from studio.workflows import persistence
 from studio.workflows.persistence import WorkflowConflict, WorkflowValidationError
 from studio.workflows.templates import serialize_templates
+from studio.workflows.registry import get_node_type
+from studio.workflows.scheduler import WorkflowScheduler
 from studio.workflows.validation import validate_workflow, validation_errors
 from studio.workflows.validation import _field_is_visible
 
@@ -113,14 +116,52 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("WORKFLOW_INVALID", codes)
         self.assertIn("PORT_TYPE_MISMATCH", codes)
 
-    def test_full_video_template_is_complete_and_valid(self):
+    def test_built_in_templates_are_typed_valid_and_schedulable(self):
         templates = serialize_templates()
-        self.assertEqual([item["template_id"] for item in templates], ["full_video"])
-        problems = validate_workflow(
-            templates[0]["workflow"], require_identity=False, require_complete=False
-        )
-        self.assertEqual(validation_errors(problems), [])
-        self.assertTrue(any(problem["severity"] == "warning" for problem in problems))
+        self.assertEqual([item["template_id"] for item in templates], [
+            "full_video", "narration_only", "storyboard_only", "reexport_existing_project",
+        ])
+
+        def resolver(node):
+            def execute(inputs, config, context):
+                return {
+                    port["id"]: ({"ok": True} if port["type"] == "control" else {})
+                    for port in get_node_type(node["type"])["outputs"]
+                }
+            return execute
+
+        with tempfile.TemporaryDirectory(prefix="sts_template_runs_") as root:
+            for item in templates:
+                workflow = deepcopy(item["workflow"])
+                problems = validate_workflow(
+                    workflow, require_identity=False, require_complete=False
+                )
+                self.assertEqual(validation_errors(problems), [], item["template_id"])
+                workflow.update({
+                    "workflow_id": "wf_ABC123",
+                    "created_at": "2026-08-04T12:00:00Z",
+                    "updated_at": "2026-08-04T12:00:00Z",
+                })
+                for node in workflow["nodes"]:
+                    if node["type"] == "script.input":
+                        node["configuration"]["text"] = "A small template execution test."
+                    elif node["type"] == "project.existing":
+                        node["configuration"]["project_id"] = "pm_ABC123"
+                result = WorkflowScheduler(
+                    workflow,
+                    project_id="pm_ABC123",
+                    lock_root=os.path.join(root, "locks"),
+                    output_dir=root,
+                    executor_resolver=resolver,
+                ).run()
+                self.assertEqual(result.status, "succeeded", item["template_id"])
+
+        self.assertTrue(any(
+            problem["severity"] == "warning"
+            for problem in validate_workflow(
+                templates[0]["workflow"], require_identity=False, require_complete=False
+            )
+        ))
 
     def test_rejects_non_finite_numbers_and_excessive_nesting(self):
         non_finite = draft()

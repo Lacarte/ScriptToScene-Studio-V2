@@ -18,6 +18,8 @@ import { makeWorkflowFragment, parseWorkflowFragment } from '../fragments.js'
 // lost to an in-flight network call, and the frozen API surface stays intact.
 export const DRAFT_STORAGE_KEY = 'sts-workflow-draft'
 export const DRAFT_DEBOUNCE_MS = 1000
+export const RECENT_NODE_TYPES_KEY = 'sts-workflow-recent-node-types'
+export const RECENT_NODE_TYPES_LIMIT = 5
 
 export const useWorkflowStore = defineStore('workflow', () => {
   // ── Registry (served by the backend, loaded once) ─────────────────────
@@ -61,6 +63,30 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const updatedAt = ref(null)
   const dirty = ref(false)
   const draftSavedAt = ref(null)
+  const recentNodeTypes = ref(loadRecentNodeTypes())
+
+  function loadRecentNodeTypes() {
+    try {
+      const value = JSON.parse(globalThis.localStorage?.getItem(RECENT_NODE_TYPES_KEY) || '[]')
+      return Array.isArray(value) ? value.filter((item) => typeof item === 'string').slice(0, RECENT_NODE_TYPES_LIMIT) : []
+    } catch {
+      return []
+    }
+  }
+
+  function recordNodeUse(typeKey) {
+    if (!nodeTypes.value[typeKey]) return false
+    recentNodeTypes.value = [
+      typeKey,
+      ...recentNodeTypes.value.filter((item) => item !== typeKey),
+    ].slice(0, RECENT_NODE_TYPES_LIMIT)
+    try {
+      globalThis.localStorage?.setItem(RECENT_NODE_TYPES_KEY, JSON.stringify(recentNodeTypes.value))
+    } catch {
+      /* storage unavailable: the session-local list still works */
+    }
+    return true
+  }
 
   // Undo/redo is intentionally runtime-only. Commands capture a bounded,
   // complete graph-editing state, never enter workflow JSON, and make nested
@@ -79,6 +105,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       nodes: nodes.value,
       edges: edges.value,
       settings: settings.value,
+      extensions: extensions.value,
       staleNodeIds: staleNodeIds.value,
       selectedNodeId: selectedNodeId.value,
       dirty: dirty.value,
@@ -89,6 +116,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     nodes.value = plain(snapshot.nodes)
     edges.value = plain(snapshot.edges)
     settings.value = plain(snapshot.settings)
+    extensions.value = plain(snapshot.extensions)
     staleNodeIds.value = plain(snapshot.staleNodeIds)
     selectedNodeId.value = snapshot.selectedNodeId && nodeById(snapshot.selectedNodeId)
       ? snapshot.selectedNodeId
@@ -584,6 +612,89 @@ export const useWorkflowStore = defineStore('workflow', () => {
     })
   }
 
+  const notes = computed(() => Array.isArray(extensions.value.notes) ? extensions.value.notes : [])
+  let noteCounter = 0
+
+  function nextNoteId() {
+    noteCounter += 1
+    let candidate = `note_${noteCounter}`
+    while (notes.value.some((note) => note.id === candidate) || nodeById(candidate)) {
+      noteCounter += 1
+      candidate = `note_${noteCounter}`
+    }
+    return candidate
+  }
+
+  function addNote(position, text = 'New note') {
+    return executeCommand('Add note', () => {
+      const note = {
+        id: nextNoteId(),
+        text: String(text).slice(0, 4000),
+        position: {
+          x: Math.round((position?.x ?? 0) / 20) * 20,
+          y: Math.round((position?.y ?? 0) / 20) * 20,
+        },
+        color: 'yellow',
+      }
+      extensions.value = { ...extensions.value, notes: [...notes.value, note] }
+      markDocumentDirty()
+      return note
+    })
+  }
+
+  function updateNote(noteId, patch) {
+    return executeCommand('Edit note', () => {
+      const current = notes.value.find((note) => note.id === noteId)
+      if (!current) return false
+      const next = {
+        ...current,
+        ...(Object.hasOwn(patch || {}, 'text') ? { text: String(patch.text).slice(0, 4000) } : {}),
+        ...(Object.hasOwn(patch || {}, 'color') && ['yellow', 'blue', 'green', 'pink'].includes(patch.color)
+          ? { color: patch.color }
+          : {}),
+      }
+      if (JSON.stringify(current) === JSON.stringify(next)) return false
+      extensions.value = {
+        ...extensions.value,
+        notes: notes.value.map((note) => note.id === noteId ? next : note),
+      }
+      markDocumentDirty()
+      return true
+    })
+  }
+
+  function moveNotes(moves) {
+    return executeCommand('Move note', () => {
+      const byId = new Map((moves || []).map((move) => [move.id, move.position]))
+      let changed = false
+      const next = notes.value.map((note) => {
+        const position = byId.get(note.id)
+        if (!position || (position.x === note.position.x && position.y === note.position.y)) return note
+        changed = true
+        return { ...note, position: { x: position.x, y: position.y } }
+      })
+      if (!changed) return false
+      extensions.value = { ...extensions.value, notes: next }
+      markDocumentDirty()
+      return true
+    })
+  }
+
+  function removeNotes(noteIds) {
+    return executeCommand('Delete note', () => {
+      const doomed = new Set(noteIds || [])
+      const next = notes.value.filter((note) => !doomed.has(note.id))
+      if (next.length === notes.value.length) return false
+      extensions.value = { ...extensions.value, notes: next }
+      markDocumentDirty()
+      return true
+    })
+  }
+
+  function noteById(noteId) {
+    return notes.value.find((note) => note.id === noteId) || null
+  }
+
   function moveNode(nodeId, position) {
     return moveNodes([{ id: nodeId, position }])
   }
@@ -818,6 +929,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return executeCommand('Add node', () => {
       const node = addNode(typeKey, position)
       if (!node) return null
+      recordNodeUse(typeKey)
       if (autoAttachStubs.value && !isStubType(typeKey)) {
         attachSampleInputs(node.id)
         attachResultViewer(node.id)
@@ -862,6 +974,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   function resetCounters() {
     idCounter = 0
     edgeCounter = 0
+    noteCounter = 0
   }
 
   function applyDocument(document, {
@@ -1228,6 +1341,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
       const previousStale = plain(staleNodeIds.value)
       const node = addNode(typeKey, position)
       if (!node) return null
+      recordNodeUse(typeKey)
       if (nodeTypes.value[typeKey]?.category === 'testing') {
         node.configuration.port_type = start.portType
         if (typeKey === 'stub.input') node.configuration.payload = samplePayloadFor(start.portType)
@@ -1254,6 +1368,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // document
     workflowId, workflowName, workflowDescription, nodes, edges, viewport,
     variables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,
+    notes, addNote, updateNote, moveNotes, removeNotes, noteById,
+    recentNodeTypes, recordNodeUse,
     workflowList, templates, persistenceLoading, persistenceError,
     addNode, moveNode, moveNodes, renameNode, removeNodes, removeEdges, connectNodes,
     replaceNode, replacementPlan, insertNodeAndConnect,

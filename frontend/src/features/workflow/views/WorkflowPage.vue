@@ -18,6 +18,7 @@ import { compatibleInsertions, parseWorkflowFragment } from '../fragments.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import NodeCard from '../components/NodeCard.vue'
+import StickyNote from '../components/StickyNote.vue'
 import NodeInspector from '../components/NodeInspector.vue'
 import ExecutionPanel from '../components/ExecutionPanel.vue'
 
@@ -162,18 +163,27 @@ onBeforeRouteLeave(() => {
   )
 })
 
-const nodeTypes = { sts: markRaw(NodeCard) }
+const nodeTypes = { sts: markRaw(NodeCard), note: markRaw(StickyNote) }
 
 // Store (persisted shape) → Vue Flow elements. Vue Flow runtime props stay here.
-const flowNodes = computed(() =>
-  store.nodes.map((n) => ({
+const flowNodes = computed(() => [
+  ...store.nodes.map((n) => ({
     id: n.id,
     type: 'sts',
     position: { ...n.position },
     selected: canvasSelection.value.has(n.id),
     data: { nodeType: n.type, label: n.name, disabled: n.disabled },
   })),
-)
+  ...store.notes.map((note) => ({
+    id: note.id,
+    type: 'note',
+    position: { ...note.position },
+    selected: canvasSelection.value.has(note.id),
+    selectable: true,
+    connectable: false,
+    data: {},
+  })),
+])
 
 const flowEdges = computed(() =>
   store.edges.map((e) => {
@@ -227,15 +237,27 @@ function onDrop(event) {
   store.addNodeWithStubs(typeKey, position)
 }
 
+function addNoteAt(position) {
+  const note = store.addNote(position)
+  if (note) canvasSelection.value = new Set([note.id])
+  return note
+}
+
+function addNoteAtCenter() {
+  return addNoteAt(screenToFlowCoordinate({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+}
+
 // ── Sync Vue Flow interactions back into the store ─────────────────────
 function onNodeDragStop({ node, nodes: draggedNodes }) {
   // Multi-select/box drags carry every moved node in `nodes`; persisting
   // only the grab target would snap the rest back on the next re-render.
   const moved = draggedNodes?.length ? draggedNodes : [node]
-  store.moveNodes(moved.map((dragged) => ({
+  const moves = moved.map((dragged) => ({
     id: dragged.id,
     position: { x: dragged.position.x, y: dragged.position.y },
-  })))
+  }))
+  store.moveNodes(moves.filter((move) => store.nodeById(move.id)))
+  store.moveNotes(moves.filter((move) => store.noteById(move.id)))
 }
 
 function onNodesChange(changes) {
@@ -250,7 +272,8 @@ function onNodesChange(changes) {
   }
   const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id)
   if (removed.length) {
-    store.removeNodes(removed)
+    store.removeNodes(removed.filter((id) => store.nodeById(id)))
+    store.removeNotes(removed.filter((id) => store.noteById(id)))
     canvasSelection.value = new Set(
       [...canvasSelection.value].filter((nodeId) => !removed.includes(nodeId)),
     )
@@ -298,7 +321,12 @@ let connectionCompleted = false
 function onNodeContextMenu({ event, node }) {
   event.preventDefault()
   // Fixed positioning: viewport coordinates work regardless of panel layout.
-  contextMenu.value = { kind: 'node', nodeId: node.id, x: event.clientX, y: event.clientY }
+  contextMenu.value = {
+    kind: store.noteById(node.id) ? 'note' : 'node',
+    nodeId: node.id,
+    x: event.clientX,
+    y: event.clientY,
+  }
   insertionPalette.value = null
 }
 
@@ -334,6 +362,7 @@ function onContextDuplicate() {
 
 function onContextDelete() {
   if (contextMenu.value.kind === 'edge') store.removeEdges([contextMenu.value.edgeId])
+  else if (contextMenu.value.kind === 'note') store.removeNotes([contextMenu.value.nodeId])
   else store.removeNodes([contextMenu.value.nodeId])
   closeContextMenu()
 }
@@ -460,6 +489,7 @@ function isValidConnection(params) {
 
 // ── Minimap colored by category ────────────────────────────────────────
 function minimapColor(node) {
+  if (node.type === 'note') return '#f5d86e'
   const def = store.nodeTypes[node.data?.nodeType]
   return store.categories[def?.category]?.color || '#4b5563'
 }
@@ -688,6 +718,7 @@ async function onStop() {
         </button>
         <button class="wf-btn" :disabled="store.persistenceLoading" @click="onSaveAs">Save As</button>
         <button class="wf-btn" :disabled="store.persistenceLoading" @click="onDuplicate">Duplicate</button>
+        <button class="wf-btn" @click="addNoteAtCenter">Add note</button>
         <button class="wf-btn" :disabled="store.persistenceLoading" @click="importInput?.click()">Import</button>
         <button class="wf-btn" :disabled="!store.workflowId" @click="onExport">Export</button>
         <button
@@ -777,7 +808,7 @@ async function onStop() {
           @connect="onConnect"
           @connect-start="onConnectStart"
           @connect-end="onConnectEnd"
-          @node-click="({ node }) => store.selectNode(node.id)"
+          @node-click="({ node }) => store.nodeById(node.id) ? store.selectNode(node.id) : store.clearSelection()"
           @node-context-menu="onNodeContextMenu"
           @edge-context-menu="onEdgeContextMenu"
           @pane-context-menu="onPaneContextMenu"
@@ -790,7 +821,7 @@ async function onStop() {
           <Background pattern-color="rgba(255,255,255,0.12)" :gap="20" />
           <Controls position="bottom-left" />
           <MiniMap position="bottom-right" pannable zoomable :node-color="minimapColor" />
-          <div v-if="!store.nodeCount" class="wf-canvas-hint">
+          <div v-if="!flowNodes.length" class="wf-canvas-hint">
             Drag a node from the library to start building
           </div>
         </VueFlow>
@@ -801,10 +832,14 @@ async function onStop() {
           <div class="wf-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }">
             <template v-if="contextMenu.kind === 'pane'">
               <button class="wf-context-item" @click="onContextPaste">Paste here</button>
+              <button class="wf-context-item" @click="addNoteAt(contextMenu.flowPosition); closeContextMenu()">Add note</button>
               <button class="wf-context-item" :disabled="!store.nodeCount" @click="tidyUp(); closeContextMenu()">Tidy up</button>
             </template>
             <template v-else-if="contextMenu.kind === 'edge'">
               <button class="wf-context-item danger" @click="onContextDelete">Disconnect</button>
+            </template>
+            <template v-else-if="contextMenu.kind === 'note'">
+              <button class="wf-context-item danger" @click="onContextDelete">Delete note</button>
             </template>
             <template v-else>
               <button class="wf-context-item" @click="onContextCopy">Copy</button>

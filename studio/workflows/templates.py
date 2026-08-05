@@ -88,9 +88,87 @@ def full_video_template() -> dict:
     return doc
 
 
+def narration_only_template() -> dict:
+    doc = workflow_draft(name="Narration Only", description="Turn a script into narration audio")
+    doc["template_id"] = "narration_only"
+    doc["nodes"] = [
+        _node("n_trigger", "trigger.manual", 0, 160),
+        _node("n_script", "script.input", 240, 160),
+        _node("n_tts", "tts.generate", 500, 160),
+        _node(
+            "n_output", "workflow.output", 760, 160,
+            config={"port_type": "audio_file", "label": "Narration audio"},
+        ),
+    ]
+    doc["edges"] = [
+        _edge("e_trigger_script", "n_trigger", "control", "n_script", "trigger", "control"),
+        _edge("e_script_tts", "n_script", "script", "n_tts", "script"),
+        _edge("e_tts_output", "n_tts", "audio", "n_output", "value"),
+    ]
+    return doc
+
+
+def storyboard_only_template() -> dict:
+    doc = workflow_draft(name="Storyboard Only", description="Generate storyboard images from a script")
+    doc["template_id"] = "storyboard_only"
+    doc["nodes"] = [
+        _node("n_trigger", "trigger.manual", 0, 220),
+        _node("n_script", "script.input", 240, 220),
+        _node("n_tts", "tts.generate", 500, 100),
+        _node("n_align", "timing.align", 760, 220),
+        _node("n_segment", "segment.run", 1020, 220),
+        _node("n_scenes", "scenes.blueprint", 1280, 220),
+        _node("n_storyboard", "storyboard.generate", 1540, 220),
+        _node(
+            "n_output", "workflow.output", 1800, 220,
+            config={"port_type": "storyboard_images", "label": "Storyboard images"},
+        ),
+    ]
+    doc["edges"] = [
+        _edge("e_trigger_script", "n_trigger", "control", "n_script", "trigger", "control"),
+        _edge("e_script_tts", "n_script", "script", "n_tts", "script"),
+        _edge("e_tts_align_audio", "n_tts", "audio", "n_align", "audio"),
+        _edge("e_script_align", "n_script", "script", "n_align", "script"),
+        _edge("e_align_segment", "n_align", "alignment", "n_segment", "alignment"),
+        _edge("e_segment_scenes", "n_segment", "segments", "n_scenes", "segments"),
+        _edge("e_script_scenes", "n_script", "script", "n_scenes", "script"),
+        _edge("e_scenes_storyboard", "n_scenes", "scenes", "n_storyboard", "scenes"),
+        _edge("e_storyboard_output", "n_storyboard", "images", "n_output", "value"),
+    ]
+    return doc
+
+
+def reexport_existing_project_template() -> dict:
+    doc = workflow_draft(
+        name="Re-export Existing Project",
+        description="Render a new export from an existing timeline project",
+    )
+    doc["template_id"] = "reexport_existing_project"
+    doc["nodes"] = [
+        _node("n_trigger", "trigger.manual", 0, 160),
+        _node("n_project", "project.existing", 260, 160),
+        _node("n_export", "export.video", 540, 160),
+        _node(
+            "n_output", "workflow.output", 820, 160,
+            config={"port_type": "video_file", "label": "Exported video"},
+        ),
+    ]
+    doc["edges"] = [
+        _edge("e_trigger_project", "n_trigger", "control", "n_project", "trigger", "control"),
+        _edge("e_project_export", "n_project", "project", "n_export", "project"),
+        _edge("e_export_output", "n_export", "video", "n_output", "value"),
+    ]
+    return doc
+
+
 def serialize_templates() -> list[dict]:
     result = []
-    for template in (full_video_template(),):
+    for template in (
+        full_video_template(),
+        narration_only_template(),
+        storyboard_only_template(),
+        reexport_existing_project_template(),
+    ):
         template_id = template.pop("template_id")
         # Templates may intentionally leave required user-authored configuration
         # (notably Script Input text) blank, but the graph itself must be valid.

@@ -247,6 +247,12 @@ Copy/paste minimal workflow fragments (works across workflows), Ctrl+D duplicate
 Sticky notes; recently-used section in the library; ship **Narration Only**, **Storyboard Only**, **Re-export Existing Project** templates (valid and typed).
 **Done when:** all templates validate and run.
 
+#### Step 5.3 review status — 2026-08-04
+
+- **Complete.** Sticky notes are editable, colorable, draggable, persisted in workflow extensions, and covered by undo/redo without entering the execution DAG. The node library keeps a bounded local recently-used section based on actual palette/insert usage.
+- Narration Only, Storyboard Only, and Re-export Existing Project are versioned, typed built-ins. All four built-in templates pass authoritative validation and execute successfully through the deterministic scheduler with adapter boundaries mocked.
+- Automated verification: 121 backend tests plus 38 subtests and 101 frontend tests pass; the production frontend build succeeds.
+
 ### 5.4 Utility nodes (semantics first)
 Merge, Condition, Set Value, Wait — define ports, skip/join behavior, and scheduler semantics in `contracts.md` first, then implement with pytest coverage. Story Generator node wrapping `studio/story`.
 **Done when:** a branched workflow (Condition → two paths → Merge) executes correctly, including skip propagation.

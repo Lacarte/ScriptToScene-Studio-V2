@@ -30,6 +30,14 @@ const groups = computed(() => {
     }))
 })
 
+const recentNodes = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  return store.recentNodeTypes
+    .map((type) => store.nodeTypes[type])
+    .filter(Boolean)
+    .filter((node) => !q || `${node.display_name} ${node.description} ${node.type}`.toLowerCase().includes(q))
+})
+
 function onDragStart(event, node) {
   event.dataTransfer.setData(DRAG_MIME, node.type)
   event.dataTransfer.effectAllowed = 'copy'
@@ -52,6 +60,28 @@ function onDragStart(event, node) {
     <div v-else-if="!groups.length" class="library-note">No nodes match “{{ query }}”</div>
 
     <div class="library-groups">
+      <section v-if="recentNodes.length" class="library-group library-recent">
+        <header class="library-group-header">
+          <span class="library-group-dot recent-dot" />
+          Recently used
+        </header>
+        <div
+          v-for="node in recentNodes"
+          :key="`recent:${node.type}`"
+          class="library-item"
+          draggable="true"
+          :title="node.description"
+          @dragstart="onDragStart($event, node)"
+        >
+          <span class="library-item-icon" :style="{ color: store.categories[node.category]?.color || '#9CA3AF' }">
+            <NodeIcon :icon="node.icon" />
+          </span>
+          <span class="library-item-text">
+            <span class="library-item-name">{{ node.display_name }}</span>
+            <span class="library-item-desc">{{ node.description }}</span>
+          </span>
+        </div>
+      </section>
       <section v-for="group in groups" :key="group.key" class="library-group">
         <header class="library-group-header">
           <span class="library-group-dot" :style="{ background: group.color }" />
@@ -132,6 +162,9 @@ function onDragStart(event, node) {
   color: var(--text-muted);
   padding: 10px 14px 4px;
 }
+
+.library-recent { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.recent-dot { background: var(--accent, #8b5cf6); }
 
 .library-group-dot {
   width: 7px;
