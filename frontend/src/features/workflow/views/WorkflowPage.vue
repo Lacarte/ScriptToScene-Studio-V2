@@ -21,6 +21,7 @@ import NodeCard from '../components/NodeCard.vue'
 import StickyNote from '../components/StickyNote.vue'
 import NodeInspector from '../components/NodeInspector.vue'
 import ExecutionPanel from '../components/ExecutionPanel.vue'
+import ScheduleSettings from '../components/ScheduleSettings.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
@@ -28,6 +29,7 @@ const { screenToFlowCoordinate, fitView, setViewport: setFlowViewport } = useVue
 const importInput = ref(null)
 const canvasSelection = ref(new Set())
 const runMode = ref('full')
+const schedulesOpen = ref(false)
 
 onMounted(async () => {
   try {
@@ -817,6 +819,11 @@ async function onStop() {
           >{{ store.currentExecution?.status === 'cancelling' ? 'Stopping…' : '■ Stop' }}</button>
         </div>
 
+        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Workflow triggers">
+          <span class="wf-action-label">Trigger</span>
+          <button class="wf-btn" @click="schedulesOpen = true">Schedule</button>
+        </div>
+
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Canvas view">
           <span class="wf-action-label">View</span>
           <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">Tidy</button>
@@ -972,6 +979,7 @@ async function onStop() {
 
     <!-- Bottom — live execution inspector (step 3.6) -->
     <ExecutionPanel />
+    <ScheduleSettings v-if="schedulesOpen" @close="schedulesOpen = false" />
   </div>
 </template>
 

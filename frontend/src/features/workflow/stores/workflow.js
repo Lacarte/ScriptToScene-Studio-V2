@@ -940,6 +940,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
     })
   }
 
+  function setSchedules(nextSchedules) {
+    return executeCommand('Change scheduled runs', () => {
+      const value = plain(Array.isArray(nextSchedules) ? nextSchedules : [])
+      if (JSON.stringify(settings.value.schedules || []) === JSON.stringify(value)) return false
+      settings.value = { ...settings.value, schedules: value }
+      markDocumentDirty()
+      return true
+    })
+  }
+
   function isStubType(typeKey) {
     return nodeTypes.value[typeKey]?.category === 'testing'
   }
@@ -1525,7 +1535,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // validation (step 2.2)
     issuesByNode,
     // sample-data stubs (step 2.5)
-    autoAttachStubs, setAutoAttachStubs, isStubType, samplePayloadFor,
+    autoAttachStubs, setAutoAttachStubs, setSchedules, isStubType, samplePayloadFor,
     addNodeWithStubs, attachSampleInputs, attachResultViewer,
     canUndoStubDetach, undoStubDetach,
     // live execution (step 3.6)

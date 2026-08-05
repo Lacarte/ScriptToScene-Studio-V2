@@ -29,6 +29,7 @@ from .persistence import (
 from .options import resolve_options
 from .registry import serialize_registry
 from .sample_data import all_sample_payloads
+from .scheduled_runs import schedule_details
 from .templates import serialize_templates
 from .validation import MAX_DOCUMENT_BYTES, validate_workflow
 
@@ -321,6 +322,18 @@ def workflows_get(workflow_id):
         return denied
     try:
         return jsonify({"workflow": load_workflow(workflow_id)})
+    except (ValueError, WorkflowNotFound, WorkflowValidationError) as exc:
+        return _persistence_error(exc)
+
+
+@workflows_bp.route("/api/workflows/<workflow_id>/schedules", methods=["GET"])
+def workflow_schedules_get(workflow_id):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    try:
+        workflow = load_workflow(workflow_id)
+        return jsonify({"schedules": schedule_details(workflow), "timezone": "UTC"})
     except (ValueError, WorkflowNotFound, WorkflowValidationError) as exc:
         return _persistence_error(exc)
 

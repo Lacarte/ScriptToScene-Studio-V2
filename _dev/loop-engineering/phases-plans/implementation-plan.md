@@ -517,6 +517,24 @@ started with the app, enable/disable per schedule, next-fire display in the UI. 
 while the app was closed run at most once on startup (catch-up policy: latest only).
 **Done when:** an accelerated-clock pytest proves a schedule enqueues exactly one run at the right time, catch-up fires at most once, and disabled schedules never fire.
 
+#### Step 7.2 review status â€” 2026-08-05
+
+- **Complete.** Workflows persist up to 16 independently enabled five-field UTC cron schedules
+  in `settings.schedules`; server validation rejects malformed expressions, duplicate/invalid
+  schedule IDs, unknown fields, and invalid enable flags.
+- The app starts a daemon tick service alongside the Flask server. Runtime cursors live under
+  `output/workflows/schedule-state/`, separate from workflow definitions, so ticks do not disturb
+  optimistic edit tokens. Each cursor advances before queue dispatch, scheduled executions use
+  the Phase 7.1 queue with `source: schedule`, and startup catch-up selects only the latest missed
+  fire. Disabled intervals advance the cursor without firing and are never replayed on re-enable.
+- The workflow toolbar now opens Scheduled runs settings with add/remove and per-schedule enable
+  controls, UTC cron editing, catch-up policy guidance, and a server-computed next-fire display.
+  Unsaved schedule edits explicitly ask the user to save before recalculating.
+- Automated verification: the full backend suite passes with 176 tests and 61 subtests
+  (10 live-provider tests skipped); the frontend suite and production build pass. Dedicated
+  accelerated-clock tests prove exact-time enqueueing, tick idempotence, latest-only catch-up,
+  disabled behavior, cron validation, and next-fire metadata.
+
 ### 7.3 Watch-folder trigger
 A workflow can watch a configured folder for files matching a pattern; a stable-size debounce
 avoids half-written files; the file feeds the script input (or a configured port) of the run.

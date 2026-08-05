@@ -110,6 +110,37 @@ def _validate_extensions(value: Any, path: str, problems: list[dict]) -> None:
         problems.append(_problem("WORKFLOW_INVALID", "extensions exceeds 64 KiB", path))
 
 
+def _validate_schedules(value: Any, problems: list[dict]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        problems.append(_problem("WORKFLOW_INVALID", "settings.schedules must be an array", "settings.schedules"))
+        return
+    if len(value) > 16:
+        problems.append(_problem("WORKFLOW_INVALID", "A workflow can have at most 16 schedules", "settings.schedules"))
+    seen = set()
+    from .scheduled_runs import CronExpression, CronExpressionError
+    for index, schedule in enumerate(value):
+        path = f"settings.schedules.{index}"
+        if not isinstance(schedule, dict):
+            problems.append(_problem("WORKFLOW_INVALID", "Schedule must be an object", path))
+            continue
+        for unknown in sorted(set(schedule) - {"id", "cron", "enabled"}):
+            problems.append(_problem("WORKFLOW_INVALID", f"Unknown schedule field: {unknown}", f"{path}.{unknown}"))
+        schedule_id = schedule.get("id")
+        if not isinstance(schedule_id, str) or not re.fullmatch(r"sch_[A-Za-z0-9_-]{1,32}", schedule_id):
+            problems.append(_problem("WORKFLOW_INVALID", "Schedule id must match sch_<1-32 characters>", f"{path}.id"))
+        elif schedule_id in seen:
+            problems.append(_problem("WORKFLOW_INVALID", "Schedule ids must be unique", f"{path}.id"))
+        seen.add(schedule_id)
+        if not isinstance(schedule.get("enabled"), bool):
+            problems.append(_problem("WORKFLOW_INVALID", "Schedule enabled must be a boolean", f"{path}.enabled"))
+        try:
+            CronExpression(schedule.get("cron"))
+        except CronExpressionError as exc:
+            problems.append(_problem("WORKFLOW_INVALID", str(exc), f"{path}.cron"))
+
+
 def _finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
@@ -475,12 +506,13 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
     if not isinstance(settings, dict):
         problems.append(_problem("WORKFLOW_INVALID", "settings must be an object", "settings"))
     else:
-        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs"}):
+        for unknown in sorted(set(settings) - {"on_error", "auto_attach_stubs", "schedules"}):
             problems.append(_problem("WORKFLOW_INVALID", f"Unknown settings field: {unknown}", f"settings.{unknown}"))
         if settings.get("on_error", "stop") != "stop":
             problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))
         if not isinstance(settings.get("auto_attach_stubs", True), bool):
             problems.append(_problem("WORKFLOW_INVALID", "settings.auto_attach_stubs must be a boolean", "settings.auto_attach_stubs"))
+        _validate_schedules(settings.get("schedules"), problems)
     problems.extend(validate_expressions(document))
     return problems
 

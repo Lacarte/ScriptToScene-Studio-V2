@@ -464,4 +464,6 @@ if __name__ == "__main__":
     if not os.environ.get("STS_NO_BROWSER"):
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     bind_host = os.environ.get("STS_BIND_HOST", "127.0.0.1")
+    from studio.workflows.scheduled_runs import schedule_service
+    schedule_service.start()
     app.run(host=bind_host, port=port, debug=False, threaded=True)
