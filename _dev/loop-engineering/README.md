@@ -18,8 +18,9 @@ selected phase or step range is complete.
 
 Double-click `run.bat` to run all remaining work phase by phase. The window
 prints the current phase, step, and stage as it runs, and stays open with the
-final exit code when the loop finishes. Codex is the default builder and
-reviewer, and its live output plus idle-process heartbeats appear in that window.
+final exit code when the loop finishes. Codex is the default builder,
+debugger/fixer, and reviewer. Agent output and idle-process heartbeats appear
+in the main window.
 
 ```bat
 _dev\loop-engineering\run.bat --status            &:: where am I? what's next?
@@ -42,9 +43,9 @@ fixes what it finds — only then does the loop advance to the next phase.
    description, its *Done when* criteria, and the working agreements.
 3. **Validate** — the orchestrator itself runs `pytest`, `npm run test`, and
    `npm run build`. Agent claims are never trusted.
-4. **Correct** — while red: a fixer prompt with the failure tail, up to
+4. **Correct** — while red: Codex receives a fixer prompt with the failure tail, up to
    `--max-fix-attempts` (default 3). Still red → **halt** with a log pointer.
-5. **Review** — `codex exec` (or `--reviewer claude`) audits exactly that
+5. **Review** — Codex audits exactly that
    step's commit range, fixes what it finds; the board is re-validated.
 6. **Done** — step recorded in `runtime/state.json`, pushed (unless `--no-push`).
 
@@ -65,6 +66,6 @@ without marking that work complete. An interrupted phase review is shown as
 
 - Don't run the loop while an interactive session edits the same repo —
   one writer at a time.
-- Headless agents can't answer permission prompts: keep a project allowlist
-  for git/npm/pytest in `.claude/settings.json`, or the run may stall.
+- Headless agents cannot answer interactive permission prompts; keep Codex's
+  non-interactive execution permissions configured for this trusted workspace.
 - Watch the first live cycle end-to-end before leaving it unattended.

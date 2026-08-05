@@ -37,6 +37,18 @@ Write-Host ""
 $currentFile = $null
 $pos = 0
 $lastHead = (git -C $repoRoot log -1 --format='%h %s' 2>$null)
+$sawRunner = $false
+$runnerStartupDeadline = (Get-Date).AddSeconds(15)
+
+# Do not replay the last agent's transcript when this viewer opens. Follow it
+# only from its current end; a newly spawned Claude session starts at byte 0.
+$existing = Get-ChildItem "$transcriptDir\*.jsonl" |
+    Sort-Object CreationTime -Descending | Select-Object -First 1
+if ($existing) {
+    $currentFile = $existing.FullName
+    $pos = $existing.Length
+    Line 'WAIT' 'previous Claude transcript skipped; waiting for new Claude activity' DarkGray
+}
 
 while ($true) {
     # Follow the most recently CREATED transcript: each agent spawn makes a new
@@ -107,6 +119,21 @@ while ($true) {
     if ($head -and $head -ne $lastHead) {
         $lastHead = $head
         Line 'GIT' ("new commit: " + $head) Magenta
+    }
+
+    # Close this viewer with its orchestrator instead of accumulating stale
+    # watcher windows across repeated run.bat launches.
+    $runnerActive = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -eq 'python.exe' -and $_.CommandLine -match 'loop_engineering\.py'
+    }).Count -gt 0
+    if ($runnerActive) {
+        $sawRunner = $true
+    } elseif ($sawRunner) {
+        Line 'DONE' 'loop-engineering runner stopped; closing activity viewer' Cyan
+        break
+    } elseif ((Get-Date) -gt $runnerStartupDeadline) {
+        Line 'DONE' 'no loop-engineering runner started; closing activity viewer' DarkYellow
+        break
     }
 
     Start-Sleep -Seconds $PollSeconds

@@ -17,7 +17,7 @@ Usage (from the repo root, or via run.bat in this folder):
     python _dev/loop-engineering/loop_engineering.py --steps 1
     python _dev/loop-engineering/loop_engineering.py --dry-run --phase 2
     python _dev/loop-engineering/loop_engineering.py --mark-done-through 2.3
-Options: --builder codex|claude  --reviewer codex|claude|none  --no-push
+Options: --builder codex|claude  --fixer codex|claude  --reviewer codex|claude|none
 """
 
 from __future__ import annotations
@@ -433,11 +433,11 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
             say("board is green — validation passed", icon="✓")
             break
         say(f"board is RED (fix attempt {attempt}/{args.max_fix_attempts}) — "
-            f"launching a fixer agent with the failure output", icon="✗")
+            f"launching the {args.fixer} fixer with the failure output", icon="✗")
         record(state, step.id, "validation_red", detail)
         stage = time.monotonic()
         fix_baseline = head_commit()
-        result = run_logged(agent_cmd(args.builder, fix_prompt(step, detail)), log_file)
+        result = run_logged(agent_cmd(args.fixer, fix_prompt(step, detail)), log_file)
         say(f"fixer finished in {elapsed(stage)} — re-validating")
         if not agent_run_ok(result, state, step.id, "validation fixer"):
             return False
@@ -473,7 +473,7 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
         if not ok:
             say("reviewer broke the board — one repair pass", icon="✗")
             record(state, step.id, "review_red", detail)
-            result = run_logged(agent_cmd(args.builder, fix_prompt(step, detail)), log_file)
+            result = run_logged(agent_cmd(args.fixer, fix_prompt(step, detail)), log_file)
             if not agent_run_ok(result, state, step.id, "post-review fixer"):
                 return False
             if working_tree_dirty():
@@ -550,7 +550,7 @@ def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args,
             say("phase review left the board RED — one repair pass", icon="✗")
             record(state, f"phase-{phase}", "review_red", detail)
             repair_step = (steps or plan.phase_steps(phase))[-1]
-            result = run_logged(agent_cmd(args.builder, fix_prompt(repair_step, detail)), log_file)
+            result = run_logged(agent_cmd(args.fixer, fix_prompt(repair_step, detail)), log_file)
             if not agent_run_ok(result, state, f"phase-{phase}", "phase repair agent"):
                 return False
             if working_tree_dirty():
@@ -615,7 +615,9 @@ def main() -> None:
     ap.add_argument("--steps", type=int, help="run at most N steps")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
     ap.add_argument("--builder", choices=["codex", "claude"], default="codex",
-                    help="agent used to implement and repair steps (default: codex)")
+                    help="agent used to implement steps (default: codex)")
+    ap.add_argument("--fixer", choices=["codex", "claude"], default="codex",
+                    help="agent used to diagnose and repair failures (default: codex)")
     ap.add_argument("--reviewer", choices=["codex", "claude", "none"], default="codex")
     ap.add_argument("--max-fix-attempts", type=int, default=3)
     ap.add_argument("--no-push", action="store_true")
@@ -668,6 +670,7 @@ def main() -> None:
         return
 
     if args.dry_run:
+        print(f"Agents: builder={args.builder}, fixer={args.fixer}, reviewer={args.reviewer}")
         if args.by_phase:
             print("Would run, phase by phase (build all steps, then one phase review):")
             for phase in phase_numbers:
@@ -685,7 +688,7 @@ def main() -> None:
     scope = ", ".join(s.id for s in targets) or "unfinished phase review only"
     say(f"scope: {len(targets)} step(s) → {scope}")
     say(f"mode: {'phase-level cycles (build phase → review phase → advance)' if args.by_phase else 'step-level cycles'} · "
-        f"builder: {args.builder} · reviewer: {args.reviewer} · "
+        f"builder: {args.builder} · fixer: {args.fixer} · reviewer: {args.reviewer} · "
         f"max fix attempts: {args.max_fix_attempts} · "
         f"push: {'off' if args.no_push else 'on'}")
 

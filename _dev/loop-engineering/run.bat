@@ -7,7 +7,7 @@ set "PYTHONIOENCODING=utf-8"
 :: From a terminal:
 ::   run.bat --status
 ::   run.bat --phase 2
-::   run.bat --until 3.3 --builder codex --reviewer codex
+::   run.bat --until 3.3 --builder codex --fixer codex --reviewer codex
 ::   run.bat --steps 1 --no-push
 cd /d "%~dp0..\.."
 title ScriptToScene Studio - Loop Engineering
@@ -21,11 +21,11 @@ set EXITCODE=0
 if "%~1"=="" (
     echo ========================================================================
     echo [run.bat] LOOP STARTING - running all remaining work phase by phase.
-    echo [run.bat] Codex will build and review; live activity appears below.
+    echo [run.bat] Codex builds, debugs, fixes, and reviews.
     echo [run.bat] Press Ctrl+C here if you need to stop the engineering loop.
     echo ========================================================================
     echo.
-    venv\Scripts\python.exe -u "_dev\loop-engineering\loop_engineering.py" --by-phase --builder codex --reviewer codex
+    venv\Scripts\python.exe -u "_dev\loop-engineering\loop_engineering.py" --by-phase --builder codex --fixer codex --reviewer codex
 ) else (
     venv\Scripts\python.exe -u "_dev\loop-engineering\loop_engineering.py" %*
 )
