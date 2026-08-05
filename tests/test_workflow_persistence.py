@@ -178,16 +178,16 @@ class ValidationTests(unittest.TestCase):
         problems = validation_errors(validate_workflow(nested, require_identity=False))
         self.assertIn("nesting depth", problems[0]["message"])
 
-    def test_rejects_oversized_reserved_data_and_bad_extensions(self):
+    def test_rejects_oversized_variables_and_bad_extensions(self):
         oversized = draft()
         oversized["variables"] = {"value": "x" * (64 * 1024)}
         problems = validation_errors(validate_workflow(oversized, require_identity=False))
         self.assertTrue(any(problem.get("path") == "variables" for problem in problems))
 
-        reserved = draft()
-        reserved["variables"] = {"future": True}
-        problems = validation_errors(validate_workflow(reserved, require_identity=False))
-        self.assertTrue(any("Phase 5" in problem["message"] for problem in problems))
+        populated = draft()
+        populated["variables"] = {"future": True}
+        problems = validation_errors(validate_workflow(populated, require_identity=False))
+        self.assertFalse(any(problem.get("path") == "variables" for problem in problems))
 
         bad_extensions = draft()
         bad_extensions["extensions"] = []

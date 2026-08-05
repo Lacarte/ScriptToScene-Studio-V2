@@ -12,6 +12,7 @@ import re
 from datetime import datetime
 from typing import Any
 
+from .expressions import is_expression, validate_expressions
 from .registry import DYNAMIC_PORT_TYPES, get_node_type, is_supported
 from .sample_data import validate_stub_payload
 
@@ -164,6 +165,10 @@ def _validate_config(
             continue
         if value is None:
             continue
+        # Expressions are checked against the completed graph below and are
+        # type-checked after typed resolution immediately before execution.
+        if is_expression(value):
+            continue
         widget = field.get("type")
         if widget in {"string", "textarea"}:
             if not isinstance(value, str):
@@ -210,6 +215,24 @@ def _validate_config(
                     stub_problem["message"],
                     f"{path}.configuration.payload",
                 ))
+
+
+def validate_resolved_configuration(node: dict, configuration: dict) -> list[dict]:
+    """Validate the typed value produced after expression resolution."""
+    definition = get_node_type(node.get("type"))
+    if definition is None:
+        return [_problem("WORKFLOW_INVALID", "Unknown node type", f"nodes.{node.get('id')}.type")]
+    resolved_node = dict(node)
+    resolved_node["configuration"] = configuration
+    problems: list[dict] = []
+    _validate_config(
+        resolved_node,
+        definition,
+        f"nodes.{node.get('id')}",
+        problems,
+        require_complete=True,
+    )
+    return problems
 
 
 def _validate_error_policy(node: dict, definition: dict, path: str, problems: list[dict]) -> None:
@@ -429,10 +452,14 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
     variables = document.get("variables", {})
     if not isinstance(variables, dict):
         problems.append(_problem("WORKFLOW_INVALID", "variables must be an object", "variables"))
-    elif _json_size(variables) > MAX_VARIABLES_BYTES:
-        problems.append(_problem("WORKFLOW_INVALID", "variables exceeds 64 KiB", "variables"))
-    elif variables:
-        problems.append(_problem("WORKFLOW_INVALID", "variables must remain empty until Phase 5", "variables"))
+    else:
+        try:
+            variables_size = _json_size(variables)
+        except (TypeError, ValueError):
+            problems.append(_problem("WORKFLOW_INVALID", "variables must contain finite JSON data", "variables"))
+        else:
+            if variables_size > MAX_VARIABLES_BYTES:
+                problems.append(_problem("WORKFLOW_INVALID", "variables exceeds 64 KiB", "variables"))
     _validate_extensions(document.get("extensions"), "extensions", problems)
     settings = document.get("settings", {"on_error": "stop"})
     if not isinstance(settings, dict):
@@ -444,6 +471,7 @@ def validate_workflow(document: Any, *, require_identity: bool = True, require_c
             problems.append(_problem("WORKFLOW_INVALID", "settings.on_error must be stop in Phase 1", "settings.on_error"))
         if not isinstance(settings.get("auto_attach_stubs", True), bool):
             problems.append(_problem("WORKFLOW_INVALID", "settings.auto_attach_stubs must be a boolean", "settings.auto_attach_stubs"))
+    problems.extend(validate_expressions(document))
     return problems
 
 

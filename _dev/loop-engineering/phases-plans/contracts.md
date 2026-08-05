@@ -223,7 +223,7 @@ mandatory for partial or isolated execution.
 
 ## 4. Workflow JSON schema (frozen)
 
-As specified in [proposition-final.md](proposition-final.md) §Persistence — `schema_version: 1`, nodes `{id, type, type_version, name, position, configuration, disabled}`, edges `{id, source_node, source_port, target_node, target_port, edge_type}`, reserved `variables: {}`, `viewport`, `settings: {on_error}`, ISO timestamps. Persisted under `output/workflows/{workflow_id}.json` via `safe_json_write`; soft-delete to `output/TRASH/workflows/`. `output/workflows/` and `output/branding/` must be added to clear-all handling.
+As specified in [proposition-final.md](proposition-final.md) §Persistence — `schema_version: 1`, nodes `{id, type, type_version, name, position, configuration, disabled}`, edges `{id, source_node, source_port, target_node, target_port, edge_type}`, `variables`, `viewport`, `settings: {on_error}`, ISO timestamps. Persisted under `output/workflows/{workflow_id}.json` via `safe_json_write`; soft-delete to `output/TRASH/workflows/`. `output/workflows/` and `output/branding/` must be added to clear-all handling.
 
 `sanitize_project_id` is a normalizer, not sufficient request validation: it silently removes
 invalid characters and can alias two user inputs. API IDs must first match the entire strict
@@ -256,7 +256,7 @@ are transport-independent:
 | edge `id` | `^[A-Za-z][A-Za-z0-9_-]{0,63}$`, unique |
 | edge endpoints/ports | existing node IDs and registry port IDs; maximum 64 characters each |
 | edge `edge_type` | `data` or `control`, and must match the source/target port types |
-| `variables` | JSON object, maximum 64 KiB; persisted but empty until Phase 5 |
+| `variables` | finite JSON object, maximum 64 KiB; expression path segments match `[A-Za-z_][A-Za-z0-9_]{0,63}` |
 | `viewport` | finite `x/y`; `zoom` in `[0.1, 1.5]` |
 | `settings.on_error` | `stop` in v1; later values enabled only with Phase 4 capability support |
 | timestamps | RFC 3339 strings written by the server; clients cannot override them on update |
@@ -265,6 +265,23 @@ V1 rejects unknown fields at the document, node, and edge levels. Forward-compat
 must live under a bounded `extensions` object (reserved now, optional, ignored by execution,
 round-tripped). This avoids silently trusting misspelled contract fields while leaving an
 explicit extension path. JSON numbers must be finite; `NaN` and infinities are rejected.
+
+### Expressions and data mapping (Phase 5.5)
+
+An expression is a string containing exactly one whole-value reference (surrounding whitespace
+is ignored): `{{ nodes.<node_id>.outputs.<port_id> }}`, `{{ workflow.project_id }}`, or
+`{{ variables.<name>[.<nested_name>...] }}`. Interpolation, operators, calls, indexing, and
+all other roots are invalid. Whole-value replacement preserves the referenced JSON type.
+Expressions may appear recursively in configuration JSON, but structural configuration such as
+dynamic `port_type` must still resolve to a valid registry value.
+
+Node-output references must name an existing non-control output on a strict graph ancestor and
+that ancestor must be included in the selected execution scope. Static expression validation is
+part of workflow validation and scheduler construction. Immediately before a node is fingerprinted
+and invoked, expressions resolve from already-produced outputs, immutable execution `project_id`,
+and the workflow snapshot's finite JSON `variables`; the resolved configuration is schema-validated.
+A skipped, absent, or stale output fails with `EXPRESSION_VALUE_UNAVAILABLE`. The parser does not
+evaluate code and exposes no environment, secret store, object attributes, or filesystem API.
 
 ## 5. Execution record schema (frozen)
 

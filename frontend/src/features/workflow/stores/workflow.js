@@ -1184,6 +1184,17 @@ export const useWorkflowStore = defineStore('workflow', () => {
     })
   }
 
+  function updateVariables(value) {
+    return executeCommand('Change workflow variables', () => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+      if (JSON.stringify(variables.value) === JSON.stringify(value)) return false
+      variables.value = plain(value)
+      markNodesStale(nodes.value.map((node) => node.id))
+      markDocumentDirty()
+      return true
+    })
+  }
+
   function setNodeDisabled(nodeId, disabled) {
     return executeCommand('Disable node', () => {
     const node = nodeById(nodeId)
@@ -1367,7 +1378,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     registryLoading, registryError, loadNodeTypes,
     // document
     workflowId, workflowName, workflowDescription, nodes, edges, viewport,
-    variables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,
+    variables, updateVariables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,
     notes, addNote, updateNote, moveNotes, removeNotes, noteById,
     recentNodeTypes, recordNodeUse,
     workflowList, templates, persistenceLoading, persistenceError,

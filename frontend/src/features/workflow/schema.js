@@ -5,6 +5,7 @@
  */
 
 import { validateStubPayload } from './stubPayloads.js'
+import { expressionSyntaxError, isExpressionValue } from './expressions.js'
 
 /** n8n-style display_options: {show: {field: [values]}, hide: {...}}. */
 export function shouldDisplayField(field, configuration) {
@@ -40,6 +41,7 @@ function fieldValue(configuration, field) {
 function validateField(field, value) {
   const label = field.label || field.name
   if (value === null || value === undefined) return null
+  if (isExpressionValue(value)) return expressionSyntaxError(value) || null
   if (field.type === 'string' || field.type === 'textarea') {
     if (typeof value !== 'string') return `${label} must be a string`
     if (value.length < (field.min_length ?? 0) || value.length > (field.max_length ?? 100000)) {

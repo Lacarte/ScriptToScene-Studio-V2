@@ -1,9 +1,10 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useWorkflowStore } from '../stores/workflow.js'
 import { shouldDisplayField } from '../schema.js'
 import ConfigField from './ConfigField.vue'
 import NodeIcon from './NodeIcon.vue'
+import { expressionOptions } from '../expressions.js'
 
 const store = useWorkflowStore()
 
@@ -29,6 +30,21 @@ const visibleFields = computed(() =>
 )
 
 const issues = computed(() => store.issuesByNode[node.value?.id] || [])
+const mappingOptions = computed(() => expressionOptions(
+  node.value, store.nodes, store.edges, store.nodeTypes, store.variables,
+))
+const variablesError = ref('')
+
+function updateVariables(event) {
+  try {
+    const parsed = JSON.parse(event.target.value || '{}')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
+    variablesError.value = ''
+    store.updateVariables(parsed)
+  } catch {
+    variablesError.value = 'Variables must be a valid JSON object'
+  }
+}
 
 function onUpdate(name, value) {
   store.updateNodeConfig(node.value.id, name, value)
@@ -79,6 +95,19 @@ function updateErrorPolicy(patch) {
 
     <p v-if="def.description" class="inspector-desc">{{ def.description }}</p>
 
+    <details class="workflow-variables">
+      <summary>Workflow variables</summary>
+      <textarea
+        class="variables-editor"
+        :value="JSON.stringify(store.variables, null, 2)"
+        rows="4"
+        spellcheck="false"
+        @blur="updateVariables"
+      />
+      <span v-if="variablesError" class="variables-error">{{ variablesError }}</span>
+      <p>Named finite JSON values are available as <code v-pre>{{ variables.name }}</code>.</p>
+    </details>
+
     <section v-if="errorPolicies.length > 1" class="error-policy">
       <label>
         <span>On error</span>
@@ -124,6 +153,7 @@ function updateErrorPolicy(patch) {
         :key="field.name"
         :field="field"
         :value="node.configuration[field.name]"
+        :expression-options="mappingOptions"
         @update="(value) => onUpdate(field.name, value)"
       />
     </div>
@@ -233,6 +263,13 @@ function updateErrorPolicy(patch) {
   border-radius: 8px;
   background: var(--bg-dark);
 }
+
+.workflow-variables { margin: 6px 14px 0; border: 1px solid var(--border); border-radius: 8px; }
+.workflow-variables summary { cursor: pointer; padding: 7px 9px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.workflow-variables :deep(.cfg-field) { padding: 4px 9px 9px; }
+.variables-editor { width: calc(100% - 18px); margin: 0 9px; padding: 6px; resize: vertical; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: 10.5px ui-monospace, 'Cascadia Mono', Consolas, monospace; }
+.workflow-variables p, .variables-error { display: block; margin: 5px 9px 8px; font-size: 9.5px; color: var(--text-muted); }
+.variables-error { color: #f87171; }
 
 .error-policy label { display: grid; gap: 4px; font-size: 10.5px; color: var(--text-muted); }
 .error-policy select,

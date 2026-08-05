@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useOptionSource } from '../composables/useOptionSources.js'
 import MediaAssetField from './MediaAssetField.vue'
+import { isExpressionValue } from '../expressions.js'
 
 /**
  * One schema field → one widget (n8n ParameterInput pattern).
@@ -12,6 +13,7 @@ import MediaAssetField from './MediaAssetField.vue'
 const props = defineProps({
   field: { type: Object, required: true },
   value: { required: false, default: undefined },
+  expressionOptions: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update'])
 
@@ -73,6 +75,11 @@ const selectOptions = computed(() => {
 
 const optionsLoading = computed(() => Boolean(asyncOptions?.value.loading))
 const optionsError = computed(() => asyncOptions?.value.error || '')
+const expressionActive = computed(() => isExpressionValue(props.value))
+
+function restoreLiteral() {
+  emit('update', props.field.default ?? (props.field.type === 'json' ? {} : ''))
+}
 </script>
 
 <template>
@@ -82,9 +89,26 @@ const optionsError = computed(() => asyncOptions?.value.error || '')
       <span v-if="field.required" class="cfg-required" title="Required">*</span>
     </span>
 
+    <span v-if="expressionOptions.length" class="cfg-expression-picker">
+      <select aria-label="Insert expression" @change="$event.target.value && emit('update', $event.target.value); $event.target.value = ''">
+        <option value="">Map from upstream output…</option>
+        <option v-for="option in expressionOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+      <button v-if="expressionActive" type="button" @click="restoreLiteral">Use literal</button>
+    </span>
+
+    <input
+      v-if="expressionActive"
+      class="cfg-input cfg-expression"
+      type="text"
+      :value="value"
+      spellcheck="false"
+      @input="emit('update', $event.target.value)"
+    />
+
     <!-- string -->
     <input
-      v-if="field.type === 'string'"
+      v-else-if="field.type === 'string'"
       class="cfg-input"
       type="text"
       :value="value ?? ''"
@@ -282,4 +306,10 @@ const optionsError = computed(() => asyncOptions?.value.error || '')
   color: var(--text-muted);
   line-height: 1.4;
 }
+
+.cfg-expression-picker { display: flex; gap: 5px; }
+.cfg-expression-picker select { min-width: 0; flex: 1; }
+.cfg-expression-picker select,
+.cfg-expression-picker button { background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); font-size: 10.5px; padding: 4px 6px; }
+.cfg-expression { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; color: var(--accent); }
 </style>

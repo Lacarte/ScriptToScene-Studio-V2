@@ -26,11 +26,12 @@ from studio.security import safe_join
 from .adapters import AdapterContext, AdapterError
 from .adapters.common import PROJECT_ID_RE
 from .cache import CacheLookup, NodeCache, canonical_fingerprint, fingerprint_components, output_fingerprint
+from .expressions import ExpressionError, resolve_configuration, validate_expressions
 from .registry import get_node_type
 from .models import ExecutionLog, ExecutionRecord, NodeExecutionRecord
 from .persistence import generate_execution_id, save_execution
 from .redaction import Redactor
-from .validation import validate_workflow, validation_errors
+from .validation import validate_resolved_configuration, validate_workflow, validation_errors
 
 
 class SchedulerError(RuntimeError):
@@ -375,6 +376,8 @@ class WorkflowScheduler:
         sleeper: Callable[[float], None] = time.sleep,
     ):
         problems = validation_errors(validate_workflow(dict(workflow), require_complete=True))
+        if scope_node_ids is not None:
+            problems.extend(validate_expressions(workflow, scope_node_ids=scope_node_ids))
         if problems:
             raise SchedulerError("WORKFLOW_INVALID", "Workflow has validation errors", details={"problems": problems})
         if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
@@ -476,7 +479,22 @@ class WorkflowScheduler:
                     )
                 )
                 node_record.resolved_inputs_summary = self.redactor(_summarize(inputs))
-                configuration = self._configuration(node)
+                try:
+                    configuration = resolve_configuration(
+                        self._configuration(node),
+                        node_outputs=node_outputs,
+                        variables=self.workflow.get("variables", {}),
+                        project_id=self.project_id,
+                    )
+                except ExpressionError as exc:
+                    raise SchedulerError(exc.code, exc.message, details={"node_id": node_id}) from exc
+                resolved_problems = validation_errors(validate_resolved_configuration(node, configuration))
+                if resolved_problems:
+                    raise SchedulerError(
+                        "EXPRESSION_TYPE_MISMATCH",
+                        f"Resolved configuration is invalid for node {node_id}",
+                        details={"node_id": node_id, "problems": resolved_problems},
+                    )
                 incoming_fingerprints = {
                     ":".join((
                         edge["id"], edge["source_node"], edge["source_port"], edge["target_port"],

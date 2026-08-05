@@ -275,6 +275,20 @@ Merge, Condition, Set Value, Wait — define ports, skip/join behavior, and sche
 `expressions.py`: deliberately small parser for `{{ nodes.x.outputs.y }}`, `{{ workflow.project_id }}`, `{{ variables.* }}` — no eval, upstream-only references, typed value preservation, sandbox tests (no env/secrets/attribute/filesystem access). Visual upstream-output picker in the inspector; pre-execution expression validation.
 **Done when:** expression-driven config runs correctly and the sandbox test suite passes.
 
+#### Step 5.5 review status — 2026-08-04
+
+- **Complete.** Whole-value expressions support typed upstream outputs, the immutable execution
+  project ID, and nested workflow variables through a fixed non-evaluating grammar. Static
+  validation enforces real non-control output ports, strict graph ancestry, and selected-run scope;
+  resolved values are schema-validated before fingerprinting and adapter execution.
+- The inspector provides workflow-variable JSON editing and a visual picker containing only data
+  outputs from graph ancestors. Expression mode works for every schema widget without coercing
+  referenced arrays, objects, numbers, or booleans to strings.
+- Sandbox coverage rejects interpolation, operators, calls, environment/secret roots, arbitrary
+  attributes, and filesystem access. Automated verification: 140 backend tests plus 38 subtests
+  and 105 frontend tests pass; the production frontend build succeeds. The in-app browser surface
+  was unavailable, so the Phase 5 interactive expression-picker smoke check remains outstanding.
+
 ### Final gate — Definition of Done
 Walk the 14-point Definition of Done checklist in [proposition-final.md](proposition-final.md) in the running app; fix anything that fails; record the results. Only then is the upgrade complete.
 
