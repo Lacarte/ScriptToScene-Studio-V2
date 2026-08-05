@@ -25,6 +25,7 @@ import ScheduleSettings from '../components/ScheduleSettings.vue'
 import WatchFolderSettings from '../components/WatchFolderSettings.vue'
 import WebhookSettings from '../components/WebhookSettings.vue'
 import NotificationCenter from '../components/NotificationCenter.vue'
+import AssetGarbageCollection from '../components/AssetGarbageCollection.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
@@ -36,6 +37,7 @@ const schedulesOpen = ref(false)
 const watchFolderOpen = ref(false)
 const webhookOpen = ref(false)
 const notificationsOpen = ref(false)
+const assetGcOpen = ref(false)
 const notificationUnseen = ref(0)
 
 async function refreshNotificationBadge() {
@@ -859,6 +861,7 @@ async function onStop() {
           <button class="wf-btn wf-notification-button" @click="notificationsOpen = true">
             Notifications <span v-if="notificationUnseen" class="wf-unseen" aria-label="unseen notifications">{{ notificationUnseen }}</span>
           </button>
+          <button class="wf-btn" @click="assetGcOpen = true">Clean assets</button>
         </div>
 
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Canvas view">
@@ -1033,6 +1036,7 @@ async function onStop() {
       @close="notificationsOpen = false"
       @seen="notificationUnseen = 0"
     />
+    <AssetGarbageCollection v-if="assetGcOpen" @close="assetGcOpen = false" />
   </div>
 </template>
 

@@ -671,6 +671,49 @@ def workflow_notifications_seen():
     return jsonify({"seen": True, "updated": changed})
 
 
+@workflows_bp.route("/api/workflow/assets/orphans", methods=["GET"])
+def workflow_asset_orphans():
+    """Preview collectible assets. A preview never mutates the output tree."""
+    from .asset_gc import collect_orphans
+
+    denied = _require_loopback()
+    if denied:
+        return denied
+    return jsonify(collect_orphans(output_dir=execution_manager.output_dir, dry_run=True))
+
+
+@workflows_bp.route("/api/workflow/assets/gc", methods=["POST"])
+def workflow_asset_gc():
+    """Collect only caller-selected paths that remain orphaned on a fresh scan."""
+    from .asset_gc import collect_orphans
+
+    denied = _require_loopback()
+    if denied:
+        return denied
+    body, failure = _json_body(allow_empty=True)
+    if failure:
+        return failure
+    if set(body) - {"paths", "dry_run"}:
+        return _error("BAD_REQUEST", "Body may contain only paths and dry_run", 400)
+    dry_run = body.get("dry_run", True)
+    paths = body.get("paths")
+    if not isinstance(dry_run, bool):
+        return _error("BAD_REQUEST", "dry_run must be a boolean", 400)
+    if paths is not None and (
+        not isinstance(paths, list)
+        or any(not isinstance(path, str) for path in paths)
+    ):
+        return _error("BAD_REQUEST", "paths must be an array of strings", 400)
+    try:
+        report = collect_orphans(
+            output_dir=execution_manager.output_dir, paths=paths, dry_run=dry_run
+        )
+    except ValueError as exc:
+        return _error("ASSET_GC_STALE", str(exc), 409)
+    status = 207 if report["failures"] else 200
+    return jsonify(report), status
+
+
 @workflows_bp.route("/api/workflow/executions/<execution_id>", methods=["GET"])
 def workflow_execution_get(execution_id):
     denied = _require_loopback()

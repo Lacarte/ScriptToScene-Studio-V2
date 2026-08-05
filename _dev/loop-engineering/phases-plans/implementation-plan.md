@@ -747,6 +747,19 @@ payload; a GC command (UI + CLI) deletes only listed orphans, with a dry-run def
 protected-paths allowlist.
 **Done when:** GC removes seeded orphans and provably never touches referenced or pinned artifacts (pytest builds both cases), and dry-run reports without deleting.
 
+#### Step 9.3 review status — 2026-08-05
+
+- **Complete.** One conservative scanner powers the local-only API, workflow toolbar dialog, and
+  `python -m studio.workflows.asset_gc` CLI. The CLI and API default to dry-run reports; permanent
+  deletion requires an explicit flag or confirmed UI action with exact selected paths.
+- Execution-record `artifact_refs` and managed paths nested in pinned Result Viewer payloads are
+  retained. Workflow runtime state and `TRASH` are protected by a path-prefix allowlist, symlinks
+  are never followed or deleted, and every deletion request is checked against a fresh orphan scan.
+- Verification passes with 216 backend tests (10 live-provider tests skipped, 62 subtests), all 146
+  frontend tests across 23 files, and the Vite production build. Dedicated tests prove orphan
+  deletion, dry-run behavior, protected/reference/pin retention, stale-path refusal, API behavior,
+  CLI behavior, and explicit UI selection.
+
 ### 9.4 Project archive & restore
 Export a project (workflow, executions, referenced artifacts, branding) as one archive file;
 restore recreates it under a new or original ID with references rewritten. Used for backup and
