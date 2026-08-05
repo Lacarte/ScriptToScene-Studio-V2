@@ -80,4 +80,32 @@ describe('ExecutionPanel deep inspection', () => {
       }),
     })
   })
+
+  it('shows the run queue and cancels a pending item', async () => {
+    const store = useWorkflowStore()
+    store.workflowId = 'wf_ABC123'
+    const pending = {
+      execution_id: 'ex_QUEUE1', workflow_id: 'wf_ABC123', project_id: 'pm_ABC123',
+      status: 'pending', source: 'manual', requested_run_mode: 'full',
+      requested_at: '2026-08-05T12:00:00Z',
+    }
+    vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(
+      path === '/api/workflow/queue'
+        ? { queue: [pending], total: 1 }
+        : { executions: [], total: 0 },
+    ))
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      execution_id: 'ex_QUEUE1', status: 'cancelled',
+    })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { template: '<div />' } }] })
+    const wrapper = mount(ExecutionPanel, { global: { plugins: [router] } })
+
+    await vi.waitFor(() => expect(wrapper.find('.queue-item').exists()).toBe(true))
+    expect(wrapper.text()).toContain('manual · full')
+    await wrapper.find('.queue-item button').trigger('click')
+    await vi.waitFor(() => expect(post).toHaveBeenCalledWith(
+      '/api/workflow/queue/ex_QUEUE1/cancel', { body: {} },
+    ))
+    expect(store.runQueue[0].status).toBe('cancelled')
+  })
 })

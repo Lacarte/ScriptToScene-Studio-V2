@@ -48,6 +48,26 @@ class ExecutionRecord:
         return asdict(self)
 
 
+@dataclass
+class QueueRecord:
+    """Persisted dispatch state for one workflow execution request."""
+
+    execution_id: str
+    workflow_id: str
+    project_id: str
+    status: str = "pending"
+    source: str = "manual"
+    requested_run_mode: str = "full"
+    target_node_ids: list[str] = field(default_factory=list)
+    requested_at: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+    schema_version: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def workflow_draft(*, name: str = "Untitled workflow", description: str = "") -> dict:
     return {
         "schema_version": 1,

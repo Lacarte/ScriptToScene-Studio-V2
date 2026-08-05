@@ -489,6 +489,28 @@ project lock drains the queue one run per project at a time. Queue panel in the 
 with cancel-pending.
 **Done when:** two runs triggered for the same project serialize (pytest-proven) while runs for different projects do not block each other, and pending runs can be cancelled from the UI.
 
+#### Step 7.1 review status — 2026-08-05
+
+- **Complete.** Every accepted run now creates an atomic queue record under
+  `output/workflows/queue/`, keyed by its execution ID, with the requested mode, target nodes,
+  project, source (`manual`, `schedule`, `watch`, or `webhook`), timestamps, and the persisted
+  `pending` → `running` → `done|failed|cancelled` lifecycle. Execution records and SSE streams
+  retain their existing IDs and envelopes.
+- Dispatch uses one FIFO worker per project. Runs for the same project therefore enter the
+  existing project lock one at a time, while different projects have independent workers and can
+  execute concurrently. Pending cancellation atomically updates both queue and execution records,
+  emits a terminal SSE event, and guarantees the cancelled request is skipped by its worker.
+- `GET /api/workflow/queue` serves the persisted queue for a workflow and
+  `POST /api/workflow/queue/<execution_id>/cancel` rejects anything except a pending run. The
+  bottom Runs & diagnostics UI now includes a queue strip with source/mode/status and a Cancel
+  action for pending items; the Pinia store refreshes it on load, manual refresh, enqueue, and
+  terminal events.
+- Automated verification: the full backend suite passes with 173 tests and 61 subtests
+  (10 live-provider tests skipped); the full frontend suite passes with 137 tests across 18 files;
+  the production frontend build succeeds. Dedicated queue tests prove same-project serialization,
+  cross-project overlap, persistence, source/mode capture, endpoint behavior, and pending
+  cancellation that never executes.
+
 ### 7.2 Scheduled runs
 Per-workflow cron-style schedules (persisted in workflow `settings`), a scheduler tick service
 started with the app, enable/disable per schedule, next-fire display in the UI. Missed fires

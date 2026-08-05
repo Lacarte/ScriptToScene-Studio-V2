@@ -150,4 +150,26 @@ describe('live workflow execution state', () => {
       'Wait for the current run to finish',
     )
   })
+
+  it('loads the persisted queue and cancels a pending run', async () => {
+    const store = seeded()
+    store.workflowId = 'wf_ABC123'
+    const pending = {
+      execution_id: 'ex_QUEUE1', workflow_id: 'wf_ABC123', project_id: 'pm_ABC123',
+      status: 'pending', source: 'manual', requested_run_mode: 'full',
+      requested_at: '2026-08-05T12:00:00Z',
+    }
+    vi.spyOn(api, 'get').mockResolvedValue({ queue: [pending], total: 1 })
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      execution_id: 'ex_QUEUE1', status: 'cancelled',
+    })
+
+    await store.refreshRunQueue()
+    expect(store.runQueue).toEqual([pending])
+    expect(store.runQueueTotal).toBe(1)
+    await store.cancelPendingRun('ex_QUEUE1')
+
+    expect(post).toHaveBeenCalledWith('/api/workflow/queue/ex_QUEUE1/cancel', { body: {} })
+    expect(store.runQueue[0].status).toBe('cancelled')
+  })
 })

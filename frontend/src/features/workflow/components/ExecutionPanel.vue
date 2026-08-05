@@ -8,6 +8,13 @@ const router = useRouter()
 const expanded = ref({})
 const retrying = ref(false)
 const actionMessage = ref('')
+const cancellingQueueId = ref(null)
+
+const queueItems = computed(() => {
+  const active = store.runQueue.filter((item) => ['pending', 'running'].includes(item.status))
+  const recent = store.runQueue.filter((item) => !['pending', 'running'].includes(item.status))
+  return [...active, ...recent].slice(0, Math.max(8, active.length))
+})
 
 const history = computed(() => {
   const items = [...store.executionHistory]
@@ -50,8 +57,15 @@ const canRetry = computed(() =>
 )
 
 watch(() => store.workflowId, (workflowId) => {
-  if (workflowId) void store.refreshExecutionHistory(workflowId).catch(() => {})
-  else store.clearExecutionHistory()
+  if (workflowId) {
+    void Promise.all([
+      store.refreshExecutionHistory(workflowId),
+      store.refreshRunQueue(workflowId),
+    ]).catch(() => {})
+  } else {
+    store.clearExecutionHistory()
+    store.clearRunQueue()
+  }
 }, { immediate: true })
 
 watch(() => store.selectedExecutionNodeId, () => {
@@ -109,7 +123,20 @@ async function inspect(executionId) {
 
 async function refreshHistory() {
   if (!store.workflowId) return
-  await store.refreshExecutionHistory().catch(() => {})
+  await Promise.all([store.refreshExecutionHistory(), store.refreshRunQueue()]).catch(() => {})
+}
+
+async function cancelPending(executionId) {
+  cancellingQueueId.value = executionId
+  actionMessage.value = ''
+  try {
+    await store.cancelPendingRun(executionId)
+    actionMessage.value = `Cancelled pending run ${executionId}.`
+  } catch (error) {
+    actionMessage.value = store.runQueueError || error?.message || 'Pending run could not be cancelled'
+  } finally {
+    cancellingQueueId.value = null
+  }
 }
 
 async function retry(mode) {
@@ -160,9 +187,30 @@ function openEditor() {
       </div>
     </div>
 
-    <div v-if="store.executionError || store.executionHistoryError" class="execution-stream-error" role="status">
-      {{ store.executionError || store.executionHistoryError }}
+    <div v-if="store.executionError || store.executionHistoryError || store.runQueueError" class="execution-stream-error" role="status">
+      {{ store.executionError || store.executionHistoryError || store.runQueueError }}
     </div>
+
+    <section class="queue-pane" aria-label="Run queue">
+      <span class="pane-title">Run queue <b>{{ store.runQueueTotal }}</b></span>
+      <span v-if="!queueItems.length" class="queue-empty">No queued runs.</span>
+      <article
+        v-for="item in queueItems"
+        :key="item.execution_id"
+        class="queue-item"
+        :class="`status-${item.status}`"
+      >
+        <span class="execution-dot" />
+        <code>{{ item.execution_id }}</code>
+        <span>{{ item.source }} · {{ item.requested_run_mode }}</span>
+        <strong>{{ item.status }}</strong>
+        <button
+          v-if="item.status === 'pending'"
+          :disabled="cancellingQueueId === item.execution_id"
+          @click="cancelPending(item.execution_id)"
+        >{{ cancellingQueueId === item.execution_id ? 'Cancelling…' : 'Cancel' }}</button>
+      </article>
+    </section>
 
     <div class="execution-content">
       <aside class="history-pane" aria-label="Run history">
@@ -313,6 +361,13 @@ function openEditor() {
 button:disabled { cursor: default; opacity: .45; }
 .execution-open { border-color: rgba(78,205,196,.45); color: var(--accent); }
 .execution-stream-error { padding: 3px 12px; border-bottom: 1px solid rgba(251,113,133,.3); background: rgba(68,20,30,.65); color: #fecdd3; font-size: 9px; }
+.queue-pane { min-height: 34px; display: flex; align-items: center; gap: 6px; padding: 3px 9px; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.queue-pane > .pane-title { position: static; flex: 0 0 auto; padding: 0 6px 0 0; background: transparent; gap: 5px; }
+.queue-pane > .pane-title b { color: var(--text-secondary); }
+.queue-empty { color: var(--text-muted); font-size: 9px; }
+.queue-item { --status-color: #64748b; flex: 0 0 auto; display: grid; grid-template-columns: 7px auto auto auto auto; align-items: center; gap: 5px; padding: 3px 5px; border: 1px solid var(--border); border-radius: 5px; font-size: 8px; }
+.queue-item code { color: var(--text); }.queue-item span { color: var(--text-muted); }.queue-item strong { color: var(--status-color); text-transform: capitalize; }
+.queue-item button { border: 1px solid rgba(245,158,11,.45); border-radius: 4px; background: transparent; color: #fbbf24; font-size: 8px; cursor: pointer; }
 .execution-content { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(190px, .6fr) minmax(380px, 1.25fr) minmax(330px, 1.15fr); }
 .history-pane, .timeline-pane, .detail-pane { min-width: 0; overflow: auto; }
 .history-pane, .timeline-pane { border-right: 1px solid var(--border); }
@@ -360,6 +415,6 @@ pre { max-height: 180px; overflow: auto; margin: 5px 0 0; padding: 6px; border-r
 .log-error p, .log-error span { color: #fda4af; }.log-warning p, .log-warning span { color: #fbbf24; }
 .no-data { color: var(--text-muted); padding-top: 5px; }
 .attempt-errors details { margin-top: 4px; color: #fca5a5; }.attempt-errors p { margin: 3px 0; }.attempt-errors small { color: var(--text-muted); }
-.status-idle, .status-queued { --status-color: #64748b; }.status-running { --status-color: #38bdf8; }.status-waiting { --status-color: #a78bfa; }.status-succeeded { --status-color: #34d399; }.status-failed { --status-color: #fb7185; }.status-cancelled { --status-color: #f59e0b; }.status-skipped { --status-color: #94a3b8; }.status-stale { --status-color: #fb923c; }.status-partial { --status-color: #f59e0b; }
+.status-idle, .status-queued, .status-pending { --status-color: #64748b; }.status-running { --status-color: #38bdf8; }.status-waiting { --status-color: #a78bfa; }.status-succeeded, .status-done { --status-color: #34d399; }.status-failed { --status-color: #fb7185; }.status-cancelled { --status-color: #f59e0b; }.status-skipped { --status-color: #94a3b8; }.status-stale { --status-color: #fb923c; }.status-partial { --status-color: #f59e0b; }
 @media (max-width: 1100px) { .execution-content { grid-template-columns: 180px minmax(330px, 1fr) minmax(300px, 1fr); }.execution-row { grid-template-columns: 16px 7px minmax(90px, 1fr) auto 45px 55px 42px; }.attempt-count { display: none; } }
 </style>

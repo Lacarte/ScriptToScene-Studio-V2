@@ -6,6 +6,7 @@ import os
 import random
 import string
 import threading
+from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -15,7 +16,14 @@ from studio.io_utils import JobStore, now_iso
 
 from .adapters.common import PROJECT_ID_RE
 from .events import EventBroker, ExecutionEventBuffer, TERMINAL_STATUSES
-from .persistence import generate_execution_id, load_execution, save_execution
+from .models import QueueRecord
+from .persistence import (
+    generate_execution_id,
+    list_queue_records,
+    load_execution,
+    save_execution,
+    save_queue_record,
+)
 from .registry import get_node_type
 from .scheduler import WorkflowScheduler, calculate_scope, resolve_executor
 from .validation import validate_workflow, validation_errors
@@ -32,6 +40,7 @@ class ExecutionRequestError(ValueError):
 class ActiveExecution:
     scheduler: WorkflowScheduler
     stop_event: threading.Event
+    queue_record: QueueRecord
     thread: threading.Thread | None = None
 
 
@@ -112,9 +121,13 @@ class ExecutionManager:
     ):
         self.output_dir = output_dir
         self.execution_root = os.path.join(output_dir, "workflows", "executions")
+        self.queue_root = os.path.join(output_dir, "workflows", "queue")
         self.active = JobStore()
         self.events = EventBroker(max_events=max_events)
         self.executor_resolver = executor_resolver
+        self._queue_lock = threading.Lock()
+        self._project_queues: dict[str, deque[ActiveExecution]] = {}
+        self._project_workers: dict[str, threading.Thread] = {}
 
     def start(
         self,
@@ -124,13 +137,40 @@ class ExecutionManager:
         target_node_ids: list[str],
         project_id: str | None = None,
         force: bool = False,
+        source: str = "manual",
     ) -> tuple[str, str]:
+        if source not in {"manual", "schedule", "watch", "webhook"}:
+            raise ExecutionRequestError("BAD_REQUEST", "Unsupported run source")
         snapshot = prepare_snapshot(workflow)
         scope = resolve_scope(snapshot, run_mode, target_node_ids)
         resolved_project = resolve_project_id(snapshot, project_id)
         execution_id = generate_execution_id(root=self.execution_root)
         stream = self.events.create(execution_id)
         stop_event = threading.Event()
+        queue_record = QueueRecord(
+            execution_id=execution_id,
+            workflow_id=snapshot["workflow_id"],
+            project_id=resolved_project,
+            source=source,
+            requested_run_mode=run_mode,
+            target_node_ids=list(target_node_ids),
+            requested_at=now_iso(),
+        )
+
+        def emit(event: dict[str, Any]) -> None:
+            # Persist the queue transition before publishing the terminal SSE;
+            # clients may refresh the queue as soon as they receive it.
+            if event.get("node_id") is None and event.get("status") in TERMINAL_STATUSES:
+                status = event["status"]
+                queue_record.status = (
+                    "done" if status in {"succeeded", "partial"}
+                    else "cancelled" if status == "cancelled"
+                    else "failed"
+                )
+                queue_record.finished_at = now_iso()
+                save_queue_record(queue_record, root=self.queue_root)
+            stream.emit(event)
+
         scheduler = WorkflowScheduler(
             snapshot,
             project_id=resolved_project,
@@ -139,23 +179,60 @@ class ExecutionManager:
             run_mode=run_mode,
             scope_node_ids=scope,
             stop_requested=stop_event.is_set,
-            on_event=stream.emit,
+            on_event=emit,
             executor_resolver=self.executor_resolver,
             force=force,
         )
+        scheduler.record.status = "queued"
         save_execution(scheduler.record, root=self.execution_root, secrets=scheduler.redactor.secrets)
         stream.emit({"type": "execution_status", "node_id": None, "status": "queued"})
-        handle = ActiveExecution(scheduler=scheduler, stop_event=stop_event)
-        thread = threading.Thread(
-            target=self._run,
-            args=(handle, stream),
-            name=f"workflow-{execution_id}",
-            daemon=True,
+        save_queue_record(queue_record, root=self.queue_root)
+        handle = ActiveExecution(
+            scheduler=scheduler, stop_event=stop_event, queue_record=queue_record
         )
-        handle.thread = thread
         self.active.set(execution_id, handle)
-        thread.start()
+        with self._queue_lock:
+            queue = self._project_queues.setdefault(resolved_project, deque())
+            queue.append(handle)
+            worker = self._project_workers.get(resolved_project)
+            if worker is None or not worker.is_alive():
+                worker = threading.Thread(
+                    target=self._drain_project,
+                    args=(resolved_project,),
+                    name=f"workflow-queue-{resolved_project}",
+                    daemon=True,
+                )
+                self._project_workers[resolved_project] = worker
+                handle.thread = worker
+                worker.start()
+            else:
+                handle.thread = worker
         return execution_id, resolved_project
+
+    def _drain_project(self, project_id: str) -> None:
+        """Drain one project's FIFO without occupying workers for other projects."""
+        while True:
+            with self._queue_lock:
+                queue = self._project_queues.get(project_id)
+                if not queue:
+                    self._project_queues.pop(project_id, None)
+                    self._project_workers.pop(project_id, None)
+                    return
+                handle = queue.popleft()
+                if handle.queue_record.status == "cancelled":
+                    continue
+                handle.queue_record.status = "running"
+                handle.queue_record.started_at = now_iso()
+                handle.scheduler.record.status = "running"
+                handle.scheduler.record.started_at = handle.queue_record.started_at
+                save_queue_record(handle.queue_record, root=self.queue_root)
+                save_execution(
+                    handle.scheduler.record,
+                    root=self.execution_root,
+                    secrets=handle.scheduler.redactor.secrets,
+                )
+            handle.thread = threading.current_thread()
+            self._run(handle, self.events.create(handle.scheduler.execution_id))
 
     def _run(self, handle: ActiveExecution, stream: ExecutionEventBuffer) -> None:
         try:
@@ -166,6 +243,9 @@ class ExecutionManager:
             record.status = status
             record.finished_at = now_iso()
             save_execution(record, root=self.execution_root, secrets=handle.scheduler.redactor.secrets)
+            handle.queue_record.status = "cancelled" if status == "cancelled" else "failed"
+            handle.queue_record.finished_at = record.finished_at
+            save_queue_record(handle.queue_record, root=self.queue_root)
             stream.emit({
                 "type": "execution_finished",
                 "node_id": None,
@@ -175,6 +255,15 @@ class ExecutionManager:
                     "message": str(exc),
                 },
             })
+        finally:
+            status = handle.scheduler.record.status
+            handle.queue_record.status = (
+                "done" if status in {"succeeded", "partial"}
+                else "cancelled" if status == "cancelled"
+                else "failed"
+            )
+            handle.queue_record.finished_at = handle.scheduler.record.finished_at or now_iso()
+            save_queue_record(handle.queue_record, root=self.queue_root)
 
     def stop(self, execution_id: str) -> str:
         record = load_execution(execution_id, root=self.execution_root)
@@ -183,11 +272,53 @@ class ExecutionManager:
         handle = self.active.get(execution_id)
         if handle is None:
             raise ExecutionRequestError("EXECUTION_NOT_ACTIVE", "Execution is not active")
+        with self._queue_lock:
+            if handle.queue_record.status == "pending":
+                self._cancel_pending_locked(handle)
+                return "cancelled"
         handle.stop_event.set()
         self.events.create(execution_id).emit({
             "type": "execution_status", "node_id": None, "status": "cancelling"
         })
         return "cancelling"
+
+    def _cancel_pending_locked(self, handle: ActiveExecution) -> None:
+        timestamp = now_iso()
+        handle.stop_event.set()
+        handle.queue_record.status = "cancelled"
+        handle.queue_record.finished_at = timestamp
+        handle.scheduler.record.status = "cancelled"
+        handle.scheduler.record.finished_at = timestamp
+        for node_id in handle.scheduler.scope_node_ids:
+            handle.scheduler.record.nodes[node_id].status = "cancelled"
+        save_queue_record(handle.queue_record, root=self.queue_root)
+        save_execution(
+            handle.scheduler.record,
+            root=self.execution_root,
+            secrets=handle.scheduler.redactor.secrets,
+        )
+        self.events.create(handle.scheduler.execution_id).emit({
+            "type": "execution_finished", "node_id": None, "status": "cancelled"
+        })
+
+    def cancel_pending(self, execution_id: str) -> str:
+        handle = self.active.get(execution_id)
+        if handle is None:
+            try:
+                record = load_execution(execution_id, root=self.execution_root)
+            except FileNotFoundError:
+                raise
+            if record.get("status") in TERMINAL_STATUSES:
+                raise ExecutionRequestError("EXECUTION_TERMINAL", "Execution is already terminal")
+            raise ExecutionRequestError("EXECUTION_NOT_ACTIVE", "Execution is not active")
+        with self._queue_lock:
+            if handle.queue_record.status != "pending":
+                raise ExecutionRequestError("QUEUE_NOT_PENDING", "Only pending runs can be cancelled")
+            self._cancel_pending_locked(handle)
+        return "cancelled"
+
+    def list_queue(self, workflow_id: str, *, limit: int = 100) -> tuple[list[dict], int]:
+        return list_queue_records(workflow_id, limit=limit, root=self.queue_root)
 
 
 execution_manager = ExecutionManager()

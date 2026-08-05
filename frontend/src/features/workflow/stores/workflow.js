@@ -191,6 +191,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const executionHistoryTotal = ref(0)
   const executionHistoryLoading = ref(false)
   const executionHistoryError = ref('')
+  const runQueue = ref([])
+  const runQueueTotal = ref(0)
+  const runQueueLoading = ref(false)
+  const runQueueError = ref('')
   const selectedExecutionNodeId = ref(null)
   const staleNodeIds = ref([])
   let executionStream = null
@@ -285,6 +289,56 @@ export const useWorkflowStore = defineStore('workflow', () => {
     executionHistoryError.value = ''
   }
 
+  function clearRunQueue() {
+    runQueue.value = []
+    runQueueTotal.value = 0
+    runQueueError.value = ''
+  }
+
+  async function refreshRunQueue(id = workflowId.value, { limit = 100 } = {}) {
+    if (!id) {
+      clearRunQueue()
+      return []
+    }
+    runQueueLoading.value = true
+    runQueueError.value = ''
+    try {
+      const data = await api.get('/api/workflow/queue', {
+        params: { workflow_id: id, limit },
+      })
+      runQueue.value = plain(data.queue || [])
+      runQueueTotal.value = Number.isInteger(data.total) ? data.total : runQueue.value.length
+      return runQueue.value
+    } catch (err) {
+      runQueueError.value = apiErrorText(err, 'Failed to load run queue')
+      throw err
+    } finally {
+      runQueueLoading.value = false
+    }
+  }
+
+  async function cancelPendingRun(executionId) {
+    runQueueError.value = ''
+    try {
+      const data = await api.post(
+        `/api/workflow/queue/${encodeURIComponent(executionId)}/cancel`,
+        { body: {} },
+      )
+      const item = runQueue.value.find((entry) => entry.execution_id === executionId)
+      if (item) {
+        item.status = data.status || 'cancelled'
+        item.finished_at ||= new Date().toISOString()
+      }
+      if (currentExecution.value?.execution_id === executionId) {
+        currentExecution.value.status = data.status || 'cancelled'
+      }
+      return data
+    } catch (err) {
+      runQueueError.value = apiErrorText(err, 'Failed to cancel pending run')
+      throw err
+    }
+  }
+
   function applyExecutionSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') return
     currentExecution.value = plain(snapshot)
@@ -369,7 +423,10 @@ export const useWorkflowStore = defineStore('workflow', () => {
       // The terminal record contains output summaries/artifact refs that are
       // intentionally not repeated in every SSE event.
       void refreshExecution(execution.execution_id)
-        .then(() => refreshExecutionHistory(execution.workflow_id))
+        .then(() => Promise.all([
+          refreshExecutionHistory(execution.workflow_id),
+          refreshRunQueue(execution.workflow_id),
+        ]))
         .catch(() => {})
     }
   }
@@ -433,6 +490,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
         ])),
       }
       upsertExecutionHistory(currentExecution.value)
+      if (workflowId.value) void refreshRunQueue(workflowId.value).catch(() => {})
       watchExecution(data.execution_id, { EventSourceImpl })
       return data
     } catch (err) {
@@ -1473,10 +1531,12 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // live execution (step 3.6)
     currentExecution, executionLoading, executionError, executionActive,
     executionHistory, executionHistoryTotal, executionHistoryLoading, executionHistoryError,
+    runQueue, runQueueTotal, runQueueLoading, runQueueError,
     staleNodeIds, markNodesStale,
     selectedExecutionNodeId, selectedExecutionNode, editorProjectId,
     nodeExecution, runWorkflow, stopExecution, refreshExecution,
     refreshExecutionHistory, inspectExecution, clearExecutionHistory,
+    refreshRunQueue, cancelPendingRun, clearRunQueue,
     applyExecutionEvent, watchExecution, closeExecutionStream, clearExecution,
     selectExecutionNode,
   }

@@ -444,6 +444,43 @@ def workflow_execution_stop(execution_id):
     return jsonify({"execution_id": execution_id, "status": status}), 202
 
 
+@workflows_bp.route("/api/workflow/queue", methods=["GET"])
+def workflow_queue_list():
+    denied = _require_loopback()
+    if denied:
+        return denied
+    workflow_id = request.args.get("workflow_id", "")
+    try:
+        limit = int(request.args.get("limit", 100))
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        items, total = execution_manager.list_queue(workflow_id, limit=limit)
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    return jsonify({"queue": items, "total": total})
+
+
+@workflows_bp.route("/api/workflow/queue/<execution_id>/cancel", methods=["POST"])
+def workflow_queue_cancel(execution_id):
+    denied = _require_loopback()
+    if denied:
+        return denied
+    body, failure = _json_body()
+    if failure:
+        return failure
+    if body:
+        return _error("BAD_REQUEST", "Cancel request body must be empty", 400)
+    try:
+        status = execution_manager.cancel_pending(execution_id)
+    except FileNotFoundError:
+        return _error("NOT_FOUND", "Execution not found", 404)
+    except ExecutionRequestError as exc:
+        return _error(exc.code, str(exc), 409, exc.details)
+    except ValueError as exc:
+        return _error("BAD_REQUEST", str(exc), 400)
+    return jsonify({"execution_id": execution_id, "status": status}), 202
+
+
 @workflows_bp.route("/api/workflow/executions/<execution_id>", methods=["GET"])
 def workflow_execution_get(execution_id):
     denied = _require_loopback()

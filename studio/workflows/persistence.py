@@ -42,6 +42,7 @@ class WorkflowValidationError(ValueError):
 
 
 EXECUTIONS_DIR = WORKFLOW_EXECUTIONS_DIR
+QUEUE_DIR = os.path.join(os.path.dirname(EXECUTIONS_DIR), "queue")
 EXECUTION_ID_RE = re.compile(r"^ex_[A-Za-z0-9]{6}$")
 
 
@@ -339,4 +340,48 @@ def list_executions(workflow_id: str, *, limit: int = 100, root: str | None = No
             "finished_at": record.get("finished_at"),
         })
     items.sort(key=lambda item: (item.get("started_at") or "", item["execution_id"]), reverse=True)
+    return items[:limit], len(items)
+
+
+def queue_path(execution_id: str, *, root: str | None = None) -> str:
+    return safe_join(root or QUEUE_DIR, f"{_strict_execution_id(execution_id)}.json")
+
+
+def save_queue_record(record, *, root: str | None = None) -> dict:
+    """Atomically persist a queue record beside the execution store."""
+    document = record.to_dict() if hasattr(record, "to_dict") else deepcopy(record)
+    _strict_execution_id(document.get("execution_id"))
+    if document.get("status") not in {"pending", "running", "done", "failed", "cancelled"}:
+        raise ValueError("Invalid queue status")
+    if document.get("source") not in {"manual", "schedule", "watch", "webhook"}:
+        raise ValueError("Invalid queue source")
+    safe_json_write(queue_path(document["execution_id"], root=root), redact(document), indent=2)
+    return document
+
+
+def load_queue_record(execution_id: str, *, root: str | None = None) -> dict:
+    return safe_json_read(queue_path(execution_id, root=root))
+
+
+def list_queue_records(
+    workflow_id: str, *, limit: int = 100, root: str | None = None
+) -> tuple[list[dict], int]:
+    if not isinstance(workflow_id, str) or not WORKFLOW_ID_RE.fullmatch(workflow_id):
+        raise ValueError("workflow_id must match wf_XXXXXX")
+    directory = root or QUEUE_DIR
+    os.makedirs(directory, exist_ok=True)
+    items = []
+    for filename in os.listdir(directory):
+        execution_id = filename[:-5] if filename.endswith(".json") else ""
+        if not EXECUTION_ID_RE.fullmatch(execution_id):
+            continue
+        try:
+            record = load_queue_record(execution_id, root=directory)
+        except (OSError, ValueError):
+            continue
+        if record.get("workflow_id") == workflow_id:
+            items.append(record)
+    items.sort(
+        key=lambda item: (item.get("requested_at") or "", item["execution_id"]), reverse=True
+    )
     return items[:limit], len(items)
