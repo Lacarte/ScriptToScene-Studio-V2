@@ -41,6 +41,7 @@ from .webhook_triggers import (
     token_matches,
     webhook_token,
 )
+from .dev_reload import dev_reload_enabled, dev_reloader, next_reload_event
 
 BRANDING_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 MAX_BRANDING_BYTES = 5 * 1024 * 1024
@@ -126,10 +127,38 @@ def node_types():
     if denied:
         return denied
     payload = serialize_registry()
+    payload["dev_reload_enabled"] = dev_reload_enabled()
     # Default stub payloads per dynamic port type (step 2.5). Fixture-derived,
     # presentation-safe: fixture-relative refs only, no executor internals.
     payload["sample_payloads"] = all_sample_payloads()
     return jsonify(payload)
+
+
+@workflows_bp.route("/api/workflow/dev-reload/events", methods=["GET"])
+def workflow_dev_reload_events():
+    """Dev-only SSE signal; normal runs do not expose or start a watcher."""
+    denied = _require_loopback()
+    if denied:
+        return denied
+    if not dev_reload_enabled():
+        return _error("NOT_FOUND", "Not found", 404)
+
+    reloader = dev_reloader()
+    channel = reloader.subscribe()
+
+    def stream():
+        try:
+            yield ": workflow dev reload connected\n\n"
+            while True:
+                event = next_reload_event(channel)
+                if event is None:
+                    yield ": keepalive\n\n"
+                else:
+                    yield f"event: registry-reload\ndata: {json.dumps(event)}\n\n"
+        finally:
+            reloader.unsubscribe(channel)
+
+    return Response(stream_with_context(stream()), mimetype="text/event-stream")
 
 
 @workflows_bp.route("/api/workflow/templates", methods=["GET"])

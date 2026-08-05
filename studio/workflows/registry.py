@@ -502,6 +502,7 @@ _NODE_TYPES = {
 }
 
 _BUILTIN_NODE_KEYS = frozenset(_NODE_TYPES)
+_BUILTIN_NODE_TYPES = deepcopy(_NODE_TYPES)
 
 
 def load_generated_node_types(directory=None):
@@ -546,24 +547,40 @@ def load_generated_node_types(directory=None):
     return generated
 
 
-_NODE_TYPES.update(load_generated_node_types())
+def _with_resilience_capabilities(node_types):
+    """Return a catalog with backend-owned recovery capabilities applied."""
+    catalog = deepcopy(node_types)
+    for type_key, definition in catalog.items():
+        capabilities = definition.setdefault("capabilities", {})
+        has_control_output = any(
+            port.get("id") == "control" and port.get("type") == "control"
+            for port in definition.get("outputs", [])
+        )
+        recoverable = has_control_output and type_key != "trigger.manual"
+        capabilities.setdefault("error_output", recoverable)
+        capabilities.setdefault("skip_optional", recoverable)
+        output_ids = {port.get("id") for port in definition.get("outputs", [])}
+        if capabilities["error_output"] and "error" not in output_ids:
+            definition["outputs"].append(_out("error", "control"))
+    return catalog
 
-# Resilience capabilities are backend-owned just like retry/cancel support.
-# Any executable node with a normal control output may expose a distinct error
-# control path and may be treated as optional.  Trigger/result-only nodes do
-# not have meaningful recovery behavior.  The error port is deliberately a
-# control port: structured exception details remain in execution diagnostics.
-for _type_key, _definition in _NODE_TYPES.items():
-    _capabilities = _definition.setdefault("capabilities", {})
-    _has_control_output = any(
-        port.get("id") == "control" and port.get("type") == "control"
-        for port in _definition.get("outputs", [])
-    )
-    _recoverable = _has_control_output and _type_key != "trigger.manual"
-    _capabilities.setdefault("error_output", _recoverable)
-    _capabilities.setdefault("skip_optional", _recoverable)
-    if _capabilities["error_output"]:
-        _definition["outputs"].append(_out("error", "control"))
+
+def reload_generated_node_types(directory=None):
+    """Atomically refresh generated definitions while Flask keeps running.
+
+    Loading and validation finish before the process-wide catalog is changed,
+    so a partially-written or invalid developer file cannot corrupt requests
+    or executions already using the registry.
+    """
+    global _NODE_TYPES
+    refreshed = deepcopy(_BUILTIN_NODE_TYPES)
+    refreshed.update(load_generated_node_types(directory))
+    refreshed = _with_resilience_capabilities(refreshed)
+    _NODE_TYPES = refreshed
+    return len(refreshed)
+
+
+reload_generated_node_types()
 
 # Fields internal to the backend, stripped from the served form.
 _INTERNAL_FIELDS = ("executor",)

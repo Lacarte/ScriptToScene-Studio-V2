@@ -41,9 +41,11 @@ export const useWorkflowStore = defineStore('workflow', () => {
   const samplePayloads = ref({})
   const registryLoading = ref(false)
   const registryError = ref('')
+  const devReloadEnabled = ref(false)
+  let devReloadSource = null
 
-  async function loadNodeTypes() {
-    if (registryLoading.value || registryVersion.value !== null) return
+  async function loadNodeTypes({ force = false } = {}) {
+    if (registryLoading.value || (!force && registryVersion.value !== null)) return
     registryLoading.value = true
     registryError.value = ''
     try {
@@ -53,11 +55,24 @@ export const useWorkflowStore = defineStore('workflow', () => {
       categories.value = data.categories || {}
       portTypes.value = data.port_types || []
       samplePayloads.value = data.sample_payloads || {}
+      devReloadEnabled.value = data.dev_reload_enabled === true
     } catch (err) {
       registryError.value = apiErrorText(err, 'Failed to load node types')
     } finally {
       registryLoading.value = false
     }
+  }
+
+  function watchNodeTypeReloads({ EventSourceImpl = globalThis.EventSource } = {}) {
+    if (!devReloadEnabled.value || devReloadSource || !EventSourceImpl) return null
+    devReloadSource = new EventSourceImpl('/api/workflow/dev-reload/events')
+    devReloadSource.addEventListener('registry-reload', () => loadNodeTypes({ force: true }))
+    return devReloadSource
+  }
+
+  function closeNodeTypeReloads() {
+    devReloadSource?.close()
+    devReloadSource = null
   }
 
   // ── Document state (persisted shape only) ─────────────────────────────
@@ -1540,7 +1555,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
   return {
     // registry
     registryVersion, nodeTypes, categories, portTypes, samplePayloads,
-    registryLoading, registryError, loadNodeTypes,
+    registryLoading, registryError, devReloadEnabled, loadNodeTypes,
+    watchNodeTypeReloads, closeNodeTypeReloads,
     // document
     workflowId, workflowName, workflowDescription, nodes, edges, viewport,
     variables, updateVariables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,

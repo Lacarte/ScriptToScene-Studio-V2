@@ -71,6 +71,7 @@ onMounted(async () => {
   } catch (err) {
     toast.error(err?.message || 'Failed to load workflow data')
   }
+  store.watchNodeTypeReloads()
   await maybeRecoverDraft()
   window.addEventListener('beforeunload', onBeforeUnload)
   document.addEventListener('visibilitychange', onVisibilityChange)
@@ -78,6 +79,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  store.closeNodeTypeReloads()
   window.removeEventListener('beforeunload', onBeforeUnload)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('keydown', onKeydown)

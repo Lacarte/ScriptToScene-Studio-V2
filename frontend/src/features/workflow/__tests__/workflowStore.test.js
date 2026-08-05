@@ -36,6 +36,46 @@ describe('workflow store', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => vi.restoreAllMocks())
 
+  it('refetches node types when the dev reload stream signals', async () => {
+    const store = useWorkflowStore()
+    const refreshedTypes = { ...FAKE_TYPES, 'dev.hot_node': { type: 'dev.hot_node' } }
+    vi.spyOn(api, 'get')
+      .mockResolvedValueOnce({ registry_version: 1, node_types: FAKE_TYPES, dev_reload_enabled: true })
+      .mockResolvedValueOnce({ registry_version: 1, node_types: refreshedTypes, dev_reload_enabled: true })
+
+    class FakeEventSource {
+      constructor(url) {
+        this.url = url
+        this.listeners = {}
+        this.closed = false
+      }
+      addEventListener(name, handler) { this.listeners[name] = handler }
+      close() { this.closed = true }
+    }
+
+    await store.loadNodeTypes()
+    const source = store.watchNodeTypeReloads({ EventSourceImpl: FakeEventSource })
+    expect(source.url).toBe('/api/workflow/dev-reload/events')
+    source.listeners['registry-reload']()
+    await vi.waitFor(() => expect(store.nodeTypes['dev.hot_node']).toBeTruthy())
+    expect(api.get).toHaveBeenCalledTimes(2)
+    store.closeNodeTypeReloads()
+    expect(source.closed).toBe(true)
+  })
+
+  it('does not open a reload stream in normal mode', async () => {
+    const store = useWorkflowStore()
+    const EventSourceImpl = vi.fn()
+    vi.spyOn(api, 'get').mockResolvedValue({
+      registry_version: 1,
+      node_types: FAKE_TYPES,
+      dev_reload_enabled: false,
+    })
+    await store.loadNodeTypes()
+    expect(store.watchNodeTypeReloads({ EventSourceImpl })).toBeNull()
+    expect(EventSourceImpl).not.toHaveBeenCalled()
+  })
+
   it('adds a node with registry defaults and snapped position', () => {
     const store = seededStore()
     const node = store.addNode('tts.generate', { x: 33, y: 47 })

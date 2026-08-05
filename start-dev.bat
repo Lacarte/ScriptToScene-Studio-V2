@@ -114,6 +114,7 @@ echo   %G%+%X% Chromium installed
 :start_flask
 echo   %D%~%X% Starting Flask server...
 set "STS_NO_BROWSER=1"
+set "STS_WORKFLOW_DEV_RELOAD=1"
 start "STS - Flask Server (:5050)" /min /d "%CD%" cmd /c "venv\Scripts\activate.bat && python app.py"
 
 set "RETRIES=0"

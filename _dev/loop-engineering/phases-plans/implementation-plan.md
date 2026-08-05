@@ -635,6 +635,21 @@ Behind a dev-mode flag: registry and adapter modules reload on file change witho
 Flask; the frontend refetches node-types on a reload signal. Never active in normal runs.
 **Done when:** with the flag on, editing a node definition updates the palette without a server restart; with the flag off, nothing watches or reloads (tests cover the guard).
 
+#### Step 8.2 review status — 2026-08-05
+
+- **Complete.** `start-dev.bat` enables the narrowly scoped `STS_WORKFLOW_DEV_RELOAD`
+  flag; normal `app.py` runs leave the watcher stopped and the reload SSE endpoint hidden.
+- A dependency-free background watcher observes workflow registry, generated definition, and
+  adapter files. Generated catalogs validate before an atomic swap, loaded adapter modules are
+  refreshed after edits, and failed/partial saves keep the last valid catalog serving.
+- Successful reloads publish a dev-only SSE signal. The workflow store opens that stream only
+  when the node-types response advertises dev mode, then force-refetches the complete registry so
+  the palette updates without restarting Flask.
+- Guard, change detection, live registry replacement, invalid-edit safety, endpoint visibility,
+  and frontend refetch behavior are covered. Verification passes with 199 backend tests, 10
+  skipped tests, and 61 subtests; all 140 workflow frontend tests and the Vite production build
+  also pass.
+
 ### 8.3 type_version migrations
 Nodes declare config migrations between `type_version`s; documents upgrade on load with a
 recorded migration trail; unknown future versions load read-only with a warning instead of

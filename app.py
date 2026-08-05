@@ -466,6 +466,8 @@ if __name__ == "__main__":
     bind_host = os.environ.get("STS_BIND_HOST", "127.0.0.1")
     from studio.workflows.scheduled_runs import schedule_service
     from studio.workflows.watch_folders import watch_folder_service
+    from studio.workflows.dev_reload import start_dev_reloader
     schedule_service.start()
     watch_folder_service.start()
+    start_dev_reloader()
     app.run(host=bind_host, port=port, debug=False, threaded=True)
