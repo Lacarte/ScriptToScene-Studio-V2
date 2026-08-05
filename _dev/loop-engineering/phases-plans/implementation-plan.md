@@ -370,6 +370,29 @@ Enforce body-size limits that chunked transfer encoding cannot bypass; validate 
 and count. All rejections use the standard error envelope.
 **Done when:** pytest proves an oversized chunked request, an invalid option value, and an oversized upload are each rejected with the envelope and correct status code.
 
+#### Step 6.3 review status — 2026-08-05
+
+- **Complete.** JSON endpoints now read the body through a bounded stream read
+  (2 MiB + 1 byte) instead of trusting the `Content-Length` header, so a chunked request
+  (terminated stream, no declared length) is rejected `413 REQUEST_TOO_LARGE` with the standard
+  envelope; non-empty bodies still require a JSON content type, preserving the CORS-preflight
+  requirement for cross-origin callers. The DELETE route was moved onto the same bounded reader.
+- Submitted values for `options_source` config fields are validated server-side against the
+  allowlisted resolver's current values (`allowed_option_values` in `options.py`, process-lifetime
+  cached). A bad value fails a save with the `422 WORKFLOW_INVALID` envelope naming the exact
+  config path; an unavailable resolver fails open so a missing provider never blocks saving,
+  and non-string values are rejected rather than crashing set membership.
+- Branding uploads cap the whole multipart request at 6 MiB via per-request
+  `max_content_length` — Werkzeug enforces it while reading the stream, chunked included, and a
+  blueprint `RequestEntityTooLarge` handler converts the failure to the `413` envelope with no
+  file written. The library itself is capped at 50 stored logos (`409 LIMIT_EXCEEDED`), counted
+  by allowed extension before any multipart parsing.
+- Automated verification: `tests/test_workflow_request_hardening.py` proves the oversized
+  chunked JSON request, oversized chunked and declared multipart uploads, invalid/valid/
+  non-string option values, fail-open resolver behavior, and the count cap — each rejection
+  asserting the envelope and status code. Full backend run: 160 passed, 38 subtests,
+  10 gated live tests skipped; no frontend code changed in this step.
+
 ### 6.4 Client error-truth
 Parse the `{error:{code,message}}` envelope on every remaining API call in the workflow store
 (save/load/list/import paths), block Save with a visible reason while any JSON widget holds

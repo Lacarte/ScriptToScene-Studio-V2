@@ -6,6 +6,7 @@ import os
 import uuid
 
 from flask import Blueprint, Response, jsonify, request, send_from_directory, stream_with_context
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from config import BRANDING_DIR
 from studio.security import is_loopback_remote, sanitize_folder_name
@@ -33,6 +34,11 @@ from .validation import MAX_DOCUMENT_BYTES, validate_workflow
 
 BRANDING_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 MAX_BRANDING_BYTES = 5 * 1024 * 1024
+# Whole-request cap for the multipart upload: the 5 MB file plus generous
+# multipart framing overhead. Enforced by Werkzeug while the stream is read,
+# so chunked transfer encoding cannot bypass it (step 6.3).
+MAX_BRANDING_REQUEST_BYTES = MAX_BRANDING_BYTES + 1024 * 1024
+MAX_BRANDING_ASSETS = 50
 
 workflows_bp = Blueprint("workflows", __name__)
 
@@ -44,16 +50,44 @@ def _error(code, message, status, details=None):
     return jsonify(body), status
 
 
+@workflows_bp.errorhandler(RequestEntityTooLarge)
+def _request_entity_too_large(_exc):
+    """Werkzeug raises this mid-read when max_content_length trips (including
+    chunked requests with no Content-Length); answer with the envelope."""
+    return _error("REQUEST_TOO_LARGE", "Request body exceeds the allowed size", 413)
+
+
 def _require_loopback():
     if not is_loopback_remote(request.remote_addr):
         return _error("FORBIDDEN", "Workflow endpoints are local-only", 403)
     return None
 
 
-def _json_body():
-    if request.content_length and request.content_length > MAX_DOCUMENT_BYTES:
+def _json_body(*, allow_empty=False):
+    """Parse a bounded JSON object body.
+
+    Reads at most MAX_DOCUMENT_BYTES + 1 bytes from the request stream, so the
+    2 MiB limit holds even for chunked transfer encoding, where Content-Length
+    is absent and header checks alone are bypassable (step 6.3).
+    """
+    declared = request.content_length
+    if declared is not None and declared > MAX_DOCUMENT_BYTES:
         return None, _error("REQUEST_TOO_LARGE", "Request exceeds the 2 MiB limit", 413)
-    body = request.get_json(silent=True)
+    raw = request.stream.read(MAX_DOCUMENT_BYTES + 1)
+    if len(raw) > MAX_DOCUMENT_BYTES:
+        return None, _error("REQUEST_TOO_LARGE", "Request exceeds the 2 MiB limit", 413)
+    if not raw:
+        if allow_empty:
+            return {}, None
+        return None, _error("BAD_REQUEST", "Request body must be a JSON object", 400)
+    # Require a JSON content type like get_json did: cross-origin "simple"
+    # requests cannot send application/json without a CORS preflight.
+    if not request.is_json:
+        return None, _error("BAD_REQUEST", "Request body must be a JSON object", 400)
+    try:
+        body = json.loads(raw)
+    except (UnicodeDecodeError, ValueError):
+        return None, _error("BAD_REQUEST", "Request body must be a JSON object", 400)
     if not isinstance(body, dict):
         return None, _error("BAD_REQUEST", "Request body must be a JSON object", 400)
     return body, None
@@ -135,6 +169,17 @@ def branding_list():
     return jsonify({"assets": assets})
 
 
+def _branding_asset_count():
+    if not os.path.isdir(BRANDING_DIR):
+        return 0
+    count = 0
+    for name in os.listdir(BRANDING_DIR):
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext in BRANDING_EXTENSIONS:
+            count += 1
+    return count
+
+
 @workflows_bp.route("/api/workflow/branding", methods=["POST"])
 def branding_upload():
     """Managed logo upload (contracts §11): extension + MIME + size + decode
@@ -142,6 +187,19 @@ def branding_upload():
     denied = _require_loopback()
     if denied:
         return denied
+    # Transport cap before any multipart parsing: Werkzeug enforces
+    # max_content_length while reading the stream, so a chunked request with
+    # no Content-Length still stops at the limit (step 6.3).
+    request.max_content_length = MAX_BRANDING_REQUEST_BYTES
+    declared = request.content_length
+    if declared is not None and declared > MAX_BRANDING_REQUEST_BYTES:
+        return _error("REQUEST_TOO_LARGE", "Logo exceeds the 5 MB limit", 413)
+    if _branding_asset_count() >= MAX_BRANDING_ASSETS:
+        return _error(
+            "LIMIT_EXCEEDED",
+            f"Branding library is full ({MAX_BRANDING_ASSETS} logos) — delete unused logos first",
+            409,
+        )
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         return _error("BAD_REQUEST", "Multipart field 'file' is required", 400)
@@ -293,9 +351,9 @@ def workflows_delete(workflow_id):
     denied = _require_loopback()
     if denied:
         return denied
-    body = request.get_json(silent=True) or {}
-    if not isinstance(body, dict):
-        return _error("BAD_REQUEST", "Request body must be a JSON object", 400)
+    body, failure = _json_body(allow_empty=True)
+    if failure:
+        return failure
     try:
         delete_workflow(workflow_id, expected_updated_at=body.get("expected_updated_at"))
     except (ValueError, WorkflowNotFound, WorkflowConflict, WorkflowValidationError) as exc:

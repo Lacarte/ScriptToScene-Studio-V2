@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from .expressions import is_expression, validate_expressions
+from .options import allowed_option_values
 from .registry import DYNAMIC_PORT_TYPES, get_node_type, is_supported
 from .sample_data import validate_stub_payload
 
@@ -190,8 +191,17 @@ def _validate_config(
             problems.append(_problem("WORKFLOW_INVALID", "must be a boolean", field_path))
         elif widget == "options":
             options = field.get("options")
-            if options and value not in options:
-                problems.append(_problem("WORKFLOW_INVALID", "value is not an allowed option", field_path))
+            source = field.get("options_source")
+            if options:
+                if value not in options:
+                    problems.append(_problem("WORKFLOW_INVALID", "value is not an allowed option", field_path))
+            elif source:
+                # Async sources resolve through the backend allowlist only
+                # (step 6.3). None = source unavailable right now: fail open
+                # so a missing provider never blocks saving.
+                allowed = allowed_option_values(source)
+                if allowed is not None and (not isinstance(value, str) or value not in allowed):
+                    problems.append(_problem("WORKFLOW_INVALID", "value is not an allowed option", field_path))
         elif widget == "json":
             try:
                 _json_size(value)

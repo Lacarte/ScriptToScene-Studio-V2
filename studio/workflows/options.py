@@ -77,6 +77,34 @@ assert set(_RESOLVERS) == set(ASYNC_OPTION_SOURCES), (
 )
 
 
+# Process-lifetime cache of legal values per source: every resolver serves
+# static in-process data, and validation runs on each save (step 6.3).
+_VALUE_CACHE: dict[str, frozenset] = {}
+
+
+def allowed_option_values(source: str):
+    """Frozen set of legal values for an allowlisted source, or None when the
+    source is unknown or currently unavailable.
+
+    Server-side validation of submitted option values (step 6.3) fails open on
+    resolver errors: bad values are rejected, but an unavailable provider must
+    never block saving otherwise-valid workflows.
+    """
+    cached = _VALUE_CACHE.get(source)
+    if cached is not None:
+        return cached
+    resolver = _RESOLVERS.get(source)
+    if resolver is None:
+        return None
+    try:
+        values = frozenset(option["value"] for option in resolver())
+    except Exception as exc:
+        logger.warning("option source {} unavailable for validation: {}", source, exc)
+        return None
+    _VALUE_CACHE[source] = values
+    return values
+
+
 def resolve_options(source: str):
     """Return [{value, label}] for an allowlisted source, or None if unknown.
 
