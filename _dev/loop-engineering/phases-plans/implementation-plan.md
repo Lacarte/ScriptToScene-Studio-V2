@@ -294,6 +294,52 @@ Walk the 14-point Definition of Done checklist in [proposition-final.md](proposi
 
 ---
 
+## Phase 6 — Hardening & production readiness
+
+The feature is built; this phase makes it safe under real conditions. Sources: the outstanding
+findings from the 2026-08-04 adversarial review that Phases 3–5 did not absorb, plus the two
+surfaces no automation has ever touched (live providers, legacy-UI relationship).
+
+### 6.1 Live-provider verification
+Every suite runs on fixtures; run the full pipeline template through the workflow runner against
+the real providers (TTS, alignment, storyboard, animator, export). Fix what breaks. Capture
+provider quirks as tests marked `@pytest.mark.live`, skipped unless `STS_LIVE=1` is set, so the
+orchestrator's fixture-based validation stays green and deterministic.
+**Done when:** one full live run from script to playable export succeeds through the workflow runner, and the live-marked tests document each provider's verified behavior.
+
+### 6.2 Persistence hardening
+`persistence.py`: atomic trash move with no `.bak` resurrection path, single-writer file locking
+around read-modify-write cycles, monotonic `updated_at` so optimistic concurrency cannot alias
+within the same millisecond, and a delete path that works on a stored workflow that no longer
+parses or validates.
+**Done when:** a concurrency test with two interleaved writers corrupts nothing and loses neither write's conflict signal, and a hand-corrupted workflow file can be trashed via the API.
+
+### 6.3 Request hardening
+Enforce body-size limits that chunked transfer encoding cannot bypass; validate submitted
+`options_source` values server-side against the allowlisted resolvers; cap branding upload size
+and count. All rejections use the standard error envelope.
+**Done when:** pytest proves an oversized chunked request, an invalid option value, and an oversized upload are each rejected with the envelope and correct status code.
+
+### 6.4 Client error-truth
+Parse the `{error:{code,message}}` envelope on every remaining API call in the workflow store
+(save/load/list/import paths), block Save with a visible reason while any JSON widget holds
+invalid text, and fix the number-widget DOM desync so the displayed value always matches state.
+**Done when:** Vitest covers envelope surfacing for each store API path, and Save is disabled with a visible reason while any field is invalid.
+
+### 6.5 Legacy UI bridge
+The canvas becomes the default landing surface. Legacy step pages stay reachable behind explicit
+navigation, with cross-links both ways for the same project; routes that no surface links to
+anymore are removed. No behavior changes inside the legacy pages themselves.
+**Done when:** opening the app lands on the workflow builder, each surface links to the other, and no dead routes remain.
+
+### 6.6 Docs and onboarding
+A user guide for building, validating, and running workflows (including sample-data stubs, run
+modes, and draft recovery), plus a node reference generated from the backend registry so it
+cannot drift from the code.
+**Done when:** a newcomer can build and run the pipeline template using only the docs, and the node reference is generated, not hand-written.
+
+---
+
 ## Step count & sequencing summary
 
 | Phase | Steps | Parallelizable? |
@@ -304,5 +350,6 @@ Walk the 14-point Definition of Done checklist in [proposition-final.md](proposi
 | 3 — Execution | 3.1–3.6 (6) | 3.1 must land alone; 3.3/3.4 parallel after 3.2 |
 | 4 — Partial runs & resilience | 4.1–4.4 (4) | 4.3 parallel with 4.2 |
 | 5 — Power UX & expressions | 5.1–5.5 (5) | 5.1–5.3 parallelizable |
+| 6 — Hardening & production readiness | 6.1–6.6 (6) | 6.2/6.3/6.4 parallelizable; 6.1 first (may reveal new work); 6.5/6.6 last |
 
-31 steps total. The critical path is 0.1 → 0.2 → 0.4 → 1.2 → 1.6 → 3.1 → 3.2 → 3.3 → 3.5 → 3.6; everything else hangs off it. The two steps to treat with the most care are **3.1** (extracting step functions from the 2,400-line `routes.py` without behavior change) and **4.2** (cache correctness — wrong reuse silently corrupts projects).
+37 steps total (31 original + 6 hardening). The critical path is 0.1 → 0.2 → 0.4 → 1.2 → 1.6 → 3.1 → 3.2 → 3.3 → 3.5 → 3.6; everything else hangs off it. The two steps to treat with the most care are **3.1** (extracting step functions from the 2,400-line `routes.py` without behavior change) and **4.2** (cache correctness — wrong reuse silently corrupts projects).
