@@ -10,7 +10,9 @@ The workflow builder is the default interface for assembling and running
 production pipelines. Start with the [Workflow Builder user guide](docs/workflow-guide.md)
 to create, validate, save, and run the built-in Full Video template. For every
 available node, port, setting, and built-in template, see the generated
-[Workflow Node Reference](docs/workflow-nodes.md).
+[Workflow Node Reference](docs/workflow-nodes.md). Developers can add a node
+from scaffold through release with the generated
+[Workflow Node Author Guide](docs/workflow-node-author-guide.md).
 
 ---
 

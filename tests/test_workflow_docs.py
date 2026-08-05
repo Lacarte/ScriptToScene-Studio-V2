@@ -2,8 +2,15 @@
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from studio.workflows.docs import DEFAULT_OUTPUT, generate_node_reference, main
+from studio.workflows.docs import (
+    DEFAULT_AUTHOR_OUTPUT,
+    DEFAULT_OUTPUT,
+    generate_node_author_guide,
+    generate_node_reference,
+    main,
+)
 from studio.workflows.registry import CATEGORIES, PORT_TYPES, all_node_types
 
 DOCS_DIR = Path(__file__).resolve().parents[1] / "docs"
@@ -68,6 +75,46 @@ class UserGuideTests(unittest.TestCase):
         text = readme.read_text(encoding="utf-8")
         self.assertIn("docs/workflow-guide.md", text)
         self.assertIn("docs/workflow-nodes.md", text)
+
+
+class NodeAuthorGuideTests(unittest.TestCase):
+    def setUp(self):
+        self.content = generate_node_author_guide()
+
+    def test_committed_author_guide_matches_generated_output(self):
+        self.assertTrue(DEFAULT_AUTHOR_OUTPUT.exists())
+        self.assertEqual(DEFAULT_AUTHOR_OUTPUT.read_text(encoding="utf-8"), self.content)
+
+    def test_guide_covers_the_complete_author_path_and_demo(self):
+        for topic in ("Scaffold", "schema", "adapter", "Test", "Ship", "scaffold_check.echo"):
+            self.assertIn(topic.lower(), self.content.lower())
+        self.assertIn("contracts.md", self.content)
+
+    def test_connection_rules_are_read_from_contracts(self):
+        with TemporaryDirectory() as directory:
+            contract = Path(directory) / "contracts.md"
+            contract.write_text(
+                "## 3. Port types & compatibility matrix\n\n"
+                "Types (v1): `stale_on_purpose`.\n\n"
+                "A unique frozen connection rule.\n\n"
+                "### 3.1 Stable port IDs and control readiness\n",
+                encoding="utf-8",
+            )
+            generated = generate_node_author_guide(contracts_path=contract)
+        self.assertIn("A unique frozen connection rule.", generated)
+        self.assertNotIn("stale_on_purpose", generated)
+
+    def test_port_tables_are_derived_from_the_registry(self):
+        for port_type in PORT_TYPES:
+            self.assertIn(f"| `{port_type}` |", self.content)
+        for type_key, definition in all_node_types().items():
+            self.assertIn(f"| `{type_key}` |", self.content)
+            for port in definition["inputs"] + definition["outputs"]:
+                self.assertIn(f"`{port['id']}:{port['type']}", self.content)
+
+    def test_readme_links_author_guide(self):
+        readme = DOCS_DIR.parent / "README.md"
+        self.assertIn("docs/workflow-node-author-guide.md", readme.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

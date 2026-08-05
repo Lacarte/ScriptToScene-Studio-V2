@@ -4,7 +4,7 @@
 
 # Workflow Node Reference
 
-Registry version **3** — 23 node types across 9 categories.
+Registry version **3** — 24 node types across 9 categories.
 
 Connections require the source and target port to have the **same** type; there are no implicit conversions. `control` ports carry execution order only and never data. Dynamic ports (`stub.input`, `stub.output`, `workflow.output`) take the type chosen in the node's `port_type` setting.
 
@@ -732,6 +732,34 @@ Captures a node's output for inspection (testing; pinning in Phase 4).
 | `port_type` | Data type | `options` | `"generic_json"` | yes | one of `text`, `script`, `project_id`, `project_settings`, `audio_file`, `tts_metadata`, `alignment`, `segments`, `scenes`, `image_prompts`, `storyboard_images`, `animation_assets`, `captions`, `music_track`, `editor_project`, `export_profile`, `video_file`, `generic_json` |
 | `pinned` | Pin edited result | `boolean` | `false` | no | — |
 | `payload` | Pinned payload | `json` | `{}` | no | shown when `pinned` is `true` |
+
+### Scaffold Check Echo (`scaffold_check.echo`)
+
+Echo a JSON value for node-author verification.
+
+- **Type version:** 1
+- **Capabilities:** supports error output, skip-optional; no retry, cancel
+
+**Inputs**
+
+| Port | Type | Notes |
+|---|---|---|
+| `trigger` | `control` | optional |
+| `source` | `generic_json` | optional |
+
+**Outputs**
+
+| Port | Type | Notes |
+|---|---|---|
+| `control` | `control` | — |
+| `result` | `generic_json` | — |
+| `error` | `control` | — |
+
+**Configuration**
+
+| Field | Label | Widget | Default | Required | Constraints |
+|---|---|---|---|---|---|
+| `value` | Fallback value | `json` | `{}` | no | — |
 
 ## Built-in templates
 
