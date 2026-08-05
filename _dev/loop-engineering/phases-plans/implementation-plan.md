@@ -790,6 +790,23 @@ Profile and fix canvas behavior at 150+ nodes: memoized node cards, viewport-cul
 if needed, debounced persistence, and a generated large-workflow fixture for regression use.
 **Done when:** the 150-node fixture loads, pans, and drags without dropped-frame stalls (documented measurement), and interaction tests on the fixture pass.
 
+#### Step 9.5 review status — 2026-08-05
+
+- **Complete.** Canvas projection now preserves element identity for unchanged nodes, node-card
+  subtrees are memoized by visible state, and Vue Flow enables viewport culling at 100 nodes.
+  Drag positions persist only at drag-stop, while the existing 1,000 ms trailing draft debounce
+  keeps serialization outside rapid interaction.
+- A deterministic generator owns the checked-in 150-node fixture. The full-page regression proves
+  fixture load, culling activation, cosmetic pan behavior, drag persistence, and delayed draft
+  serialization; it also guards fixture drift and stable element identity.
+- The repeatable 721-update benchmark recorded p95 projection times of 0.086–0.090 ms and maximums
+  of 0.756–0.812 ms across three runs, with zero updates exceeding the 16.67 ms frame budget.
+  Method, scope, raw results, and a browser paint spot-check procedure are documented in
+  `docs/workflow-canvas-performance.md`.
+- Verification passes with 221 backend tests (10 live-provider tests skipped, 62 subtests), all
+  150 frontend tests across 25 files, the Vite production build, and generated-document drift
+  checks.
+
 ---
 
 ## Phase 10 — Distribution & assistant

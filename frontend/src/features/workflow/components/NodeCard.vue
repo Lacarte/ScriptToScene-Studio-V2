@@ -23,6 +23,7 @@ const inputs = computed(() => def.value.inputs || [])
 const outputs = computed(() => def.value.outputs || [])
 
 const issues = computed(() => store.issuesByNode[props.id] || [])
+const issueSummary = computed(() => issues.value.map((issue) => issue.message).join('\n'))
 
 // Sample-data stubs (step 2.5): half-height dashed cards with a "sample"
 // badge; dynamic handles take the colour of their configured port type.
@@ -65,7 +66,11 @@ function handleTitle(port, required) {
 </script>
 
 <template>
-  <div class="node-card" :class="[{ selected, disabled: data.disabled, stub: isStub }, `status-${status}`]">
+  <div
+    v-memo="[selected, data.nodeType, data.label, data.disabled, def, category, status, execution.from_sample_data, issueSummary, isPinned, resultSummary, color]"
+    class="node-card"
+    :class="[{ selected, disabled: data.disabled, stub: isStub }, `status-${status}`]"
+  >
     <span class="node-strip" :style="{ background: color }" />
 
     <Handle
@@ -94,7 +99,7 @@ function handleTitle(port, required) {
       <span
         v-if="issues.length"
         class="node-badge"
-        :title="issues.map((i) => i.message).join('\n')"
+        :title="issueSummary"
       >{{ issues.length }}</span>
     </div>
     <div v-if="resultSummary" class="result-summary" :title="resultSummary">{{ resultSummary }}</div>

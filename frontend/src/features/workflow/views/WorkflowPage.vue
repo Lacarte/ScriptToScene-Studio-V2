@@ -15,6 +15,7 @@ import { useWorkflowStore } from '../stores/workflow.js'
 import { DRAG_MIME } from '../constants.js'
 import { validateConnection } from '../validation.js'
 import { compatibleInsertions, parseWorkflowFragment } from '../fragments.js'
+import { createCanvasNodeProjector, LARGE_CANVAS_NODE_THRESHOLD } from '../canvasElements.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import NodeCard from '../components/NodeCard.vue'
@@ -204,25 +205,15 @@ onBeforeRouteLeave(() => {
 const nodeTypes = { sts: markRaw(NodeCard), note: markRaw(StickyNote) }
 
 // Store (persisted shape) → Vue Flow elements. Vue Flow runtime props stay here.
-const flowNodes = computed(() => [
-  ...store.nodes.map((n) => ({
-    id: n.id,
-    type: 'sts',
-    position: { ...n.position },
-    selected: canvasSelection.value.has(n.id),
-    data: { nodeType: n.type, label: n.name, disabled: n.disabled },
-  })),
-  ...store.notes.map((note) => ({
-    id: note.id,
-    type: 'note',
-    dragHandle: '.sticky-note-drag-handle',
-    position: { ...note.position },
-    selected: canvasSelection.value.has(note.id),
-    selectable: true,
-    connectable: false,
-    data: {},
-  })),
-])
+const projectCanvasNodes = createCanvasNodeProjector()
+const flowNodes = computed(() => projectCanvasNodes(
+  store.nodes,
+  store.notes,
+  canvasSelection.value,
+))
+const cullOffscreenElements = computed(
+  () => flowNodes.value.length >= LARGE_CANVAS_NODE_THRESHOLD,
+)
 
 const flowEdges = computed(() =>
   store.edges.map((e) => {
@@ -777,18 +768,11 @@ async function onStop() {
 
       <nav class="wf-toolbar-actions" aria-label="Workflow commands">
         <div class="wf-action-group" role="group" aria-label="Workflow files">
-          <span class="wf-action-label">Workflow</span>
           <button class="wf-btn" :disabled="store.persistenceLoading" @click="onNew">New</button>
           <select class="wf-select wf-open-select" :disabled="store.persistenceLoading" aria-label="Open workflow" @change="onOpen">
             <option value="">Open…</option>
             <option v-for="item in store.workflowList" :key="item.workflow_id" :value="item.workflow_id">
               {{ item.name }}
-            </option>
-          </select>
-          <select class="wf-select wf-template-select" :disabled="store.persistenceLoading" aria-label="Create from template" @change="onTemplate">
-            <option value="">Template…</option>
-            <option v-for="item in store.templates" :key="item.template_id" :value="item.template_id">
-              {{ item.workflow.name }}
             </option>
           </select>
           <button
@@ -800,20 +784,27 @@ async function onStop() {
             Save
           </button>
           <details class="wf-more-menu">
-            <summary class="wf-btn" aria-label="More workflow actions">More <span aria-hidden="true">⌄</span></summary>
-            <div class="wf-more-popover">
+            <summary class="wf-btn" aria-label="More workflow actions">More <span class="wf-menu-chevron" aria-hidden="true">⌄</span></summary>
+            <div class="wf-more-popover wf-file-popover">
+              <div class="wf-menu-heading">Create</div>
+              <select class="wf-select wf-menu-select" :disabled="store.persistenceLoading" aria-label="Create from template" @change="onTemplate">
+                <option value="">Choose template…</option>
+                <option v-for="item in store.templates" :key="item.template_id" :value="item.template_id">
+                  {{ item.workflow.name }}
+                </option>
+              </select>
+              <div class="wf-menu-divider" />
+              <div class="wf-menu-heading">File</div>
               <button :disabled="store.persistenceLoading || !!store.saveBlockedReason" :title="store.saveBlockedReason || ''" @click="onSaveAs">Save as…</button>
               <button :disabled="store.persistenceLoading || !!store.saveBlockedReason" :title="store.saveBlockedReason || ''" @click="onDuplicate">Duplicate workflow</button>
               <button :disabled="store.persistenceLoading" @click="importInput?.click()">Import JSON…</button>
               <button :disabled="!store.workflowId" @click="onExport">Export JSON</button>
-              <button @click="projectArchiveOpen = true">Project archive…</button>
             </div>
           </details>
           <input ref="importInput" class="wf-file-input" type="file" accept="application/json,.json" @change="onImportFile" />
         </div>
 
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Edit history">
-          <span class="wf-action-label">Edit</span>
           <button
             class="wf-btn"
             :disabled="!store.canUndo"
@@ -829,14 +820,12 @@ async function onStop() {
         </div>
 
         <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Workflow quality">
-          <span class="wf-action-label">Check</span>
           <button class="wf-btn validate" :disabled="!store.nodeCount || validating" title="Validate workflow on the server" @click="onValidate">
             {{ validating ? 'Checking…' : 'Validate' }}
           </button>
         </div>
 
         <div class="wf-action-group wf-run-group" role="group" aria-label="Run workflow">
-          <span class="wf-action-label">Run</span>
           <select
             v-if="!store.executionActive"
             v-model="runMode"
@@ -868,39 +857,59 @@ async function onStop() {
           >{{ store.currentExecution?.status === 'cancelling' ? 'Stopping…' : '■ Stop' }}</button>
         </div>
 
-        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Workflow triggers">
-          <span class="wf-action-label">Trigger</span>
-          <button class="wf-btn" :disabled="store.readOnly" @click="schedulesOpen = true">Schedule</button>
-          <button class="wf-btn" :disabled="store.readOnly" @click="watchFolderOpen = true">Folder</button>
-          <button class="wf-btn" :disabled="store.readOnly" @click="webhookOpen = true">Webhook</button>
-          <button class="wf-btn wf-notification-button" @click="notificationsOpen = true">
-            Notifications <span v-if="notificationUnseen" class="wf-unseen" aria-label="unseen notifications">{{ notificationUnseen }}</span>
-          </button>
-          <button class="wf-btn" @click="assetGcOpen = true">Clean assets</button>
-        </div>
+        <div class="wf-action-group wf-utility-group" role="group" aria-label="Additional workflow tools">
+          <details class="wf-more-menu">
+            <summary class="wf-btn">
+              Automate
+              <span v-if="notificationUnseen" class="wf-unseen" aria-label="unseen notifications">{{ notificationUnseen }}</span>
+              <span class="wf-menu-chevron" aria-hidden="true">⌄</span>
+            </summary>
+            <div class="wf-more-popover">
+              <div class="wf-menu-heading">Triggers</div>
+              <button :disabled="store.readOnly" @click="schedulesOpen = true">Schedule runs…</button>
+              <button :disabled="store.readOnly" @click="watchFolderOpen = true">Watch folder…</button>
+              <button :disabled="store.readOnly" @click="webhookOpen = true">Webhook…</button>
+              <div class="wf-menu-divider" />
+              <button class="wf-notification-button" @click="notificationsOpen = true">
+                Notifications <span v-if="notificationUnseen" class="wf-unseen" aria-hidden="true">{{ notificationUnseen }}</span>
+              </button>
+            </div>
+          </details>
 
-        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Canvas view">
-          <span class="wf-action-label">View</span>
-          <button class="wf-btn" :disabled="!store.nodeCount || store.readOnly" title="Auto-arrange nodes" @click="tidyUp">Tidy</button>
-          <button class="wf-btn" :disabled="!store.nodeCount" title="Fit all nodes in view" @click="fitView({ padding: 0.15 })">Fit</button>
-          <label class="wf-toggle" title="Auto-attach editable sample stubs when dropping unconnected nodes">
-            <input
-              type="checkbox"
-              :disabled="store.readOnly"
-              :checked="store.autoAttachStubs"
-              @change="store.setAutoAttachStubs($event.target.checked)"
-            />
-            <span>Auto-stubs</span>
-          </label>
-        </div>
+          <details class="wf-more-menu">
+            <summary class="wf-btn">View <span class="wf-menu-chevron" aria-hidden="true">⌄</span></summary>
+            <div class="wf-more-popover">
+              <div class="wf-menu-heading">Canvas</div>
+              <button :disabled="!store.nodeCount || store.readOnly" @click="tidyUp">Tidy layout</button>
+              <button :disabled="!store.nodeCount" @click="fitView({ padding: 0.15 })">Fit all nodes</button>
+              <div class="wf-menu-divider" />
+              <label class="wf-menu-toggle" title="Auto-attach editable sample stubs when dropping unconnected nodes">
+                <span>Auto-attach stubs</span>
+                <input
+                  type="checkbox"
+                  :disabled="store.readOnly"
+                  :checked="store.autoAttachStubs"
+                  @change="store.setAutoAttachStubs($event.target.checked)"
+                />
+              </label>
+            </div>
+          </details>
 
-        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Legacy surfaces">
-          <span class="wf-action-label">Legacy</span>
-          <a
-            class="wf-btn wf-legacy-link"
-            href="#/pipeline"
-            title="Open the legacy step-by-step pipeline dashboard"
-          >Pipeline</a>
+          <details class="wf-more-menu">
+            <summary class="wf-btn">Tools <span class="wf-menu-chevron" aria-hidden="true">⌄</span></summary>
+            <div class="wf-more-popover">
+              <div class="wf-menu-heading">Project</div>
+              <button @click="projectArchiveOpen = true">Archive and restore…</button>
+              <button @click="assetGcOpen = true">Clean unused assets…</button>
+              <div class="wf-menu-divider" />
+              <div class="wf-menu-heading">Legacy</div>
+              <a
+                class="wf-menu-link wf-legacy-link"
+                href="#/pipeline"
+                title="Open the legacy step-by-step pipeline dashboard"
+              >Open pipeline dashboard</a>
+            </div>
+          </details>
         </div>
       </nav>
     </header>
@@ -931,6 +940,7 @@ async function onStop() {
           :delete-key-code="store.readOnly ? null : 'Delete'"
           :nodes-draggable="!store.readOnly"
           :nodes-connectable="!store.readOnly"
+          :only-render-visible-elements="cullOffscreenElements"
           :multi-selection-key-code="'Control'"
           :is-valid-connection="isValidConnection"
           fit-view-on-init
@@ -1120,7 +1130,7 @@ async function onStop() {
 .wf-toolbar-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 7px;
 }
 
@@ -1227,14 +1237,8 @@ async function onStop() {
   transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
 }
 
-.wf-notification-button { display: inline-flex; align-items: center; gap: 6px; }
+.wf-notification-button { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .wf-unseen { min-width: 17px; padding: 2px 5px; border-radius: 999px; color: #21070d; background: #fb7185; font-size: 9px; text-align: center; }
-
-a.wf-legacy-link {
-  display: inline-flex;
-  align-items: center;
-  text-decoration: none;
-}
 
 .wf-btn:hover:not(:disabled) {
   color: var(--text);
@@ -1249,7 +1253,9 @@ a.wf-legacy-link {
 .wf-btn:focus-visible,
 .wf-select:focus-visible,
 .wf-more-menu summary:focus-visible,
-.wf-toggle input:focus-visible {
+.wf-toggle input:focus-visible,
+.wf-menu-toggle input:focus-visible,
+.wf-menu-link:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
   outline-offset: 2px;
 }
@@ -1290,7 +1296,6 @@ a.wf-legacy-link {
 }
 
 .wf-open-select { width: 112px; }
-.wf-template-select { width: 138px; }
 .wf-run-select { width: 156px; max-width: 156px; }
 
 .wf-more-menu {
@@ -1303,6 +1308,14 @@ a.wf-legacy-link {
   gap: 5px;
   list-style: none;
 }
+
+.wf-menu-chevron {
+  color: var(--text-muted);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.wf-more-menu[open] .wf-menu-chevron { transform: rotate(180deg); }
 
 .wf-more-menu > summary::-webkit-details-marker { display: none; }
 
@@ -1319,7 +1332,7 @@ a.wf-legacy-link {
   z-index: 80;
   display: flex;
   flex-direction: column;
-  width: 190px;
+  width: 210px;
   padding: 5px;
   border: 1px solid rgba(111, 137, 168, 0.3);
   border-radius: 10px;
@@ -1327,7 +1340,35 @@ a.wf-legacy-link {
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
 }
 
-.wf-more-popover button {
+.wf-file-popover { width: 230px; }
+
+.wf-menu-heading {
+  padding: 7px 10px 5px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.wf-menu-divider {
+  height: 1px;
+  margin: 5px 7px;
+  background: rgba(111, 137, 168, 0.2);
+}
+
+.wf-menu-select {
+  width: calc(100% - 10px);
+  max-width: none;
+  margin: 0 5px 5px;
+}
+
+.wf-more-popover button,
+.wf-menu-link {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
   padding: 9px 10px;
   border: 0;
   border-radius: 6px;
@@ -1336,10 +1377,12 @@ a.wf-legacy-link {
   font: inherit;
   font-size: 11px;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 }
 
-.wf-more-popover button:hover:not(:disabled) {
+.wf-more-popover button:hover:not(:disabled),
+.wf-menu-link:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.06);
 }
@@ -1359,10 +1402,27 @@ a.wf-legacy-link {
   box-shadow: none;
 }
 
+.wf-utility-group {
+  margin-left: auto;
+  background: rgba(7, 16, 27, 0.3);
+}
+
+.wf-menu-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
 @media (max-width: 1180px) {
-  .wf-action-label { display: none; }
+  .wf-toolbar-actions { flex-wrap: wrap; }
   .wf-toolbar-actions { gap: 5px; }
   .wf-action-group { padding: 3px; }
+  .wf-utility-group { margin-left: 0; }
 }
 
 @media (max-width: 820px) {
@@ -1422,7 +1482,8 @@ a.wf-legacy-link {
   padding: 0 5px 0 3px;
 }
 
-.wf-toggle input {
+.wf-toggle input,
+.wf-menu-toggle input {
   appearance: none;
   position: relative;
   width: 28px;
@@ -1435,7 +1496,8 @@ a.wf-legacy-link {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.wf-toggle input::after {
+.wf-toggle input::after,
+.wf-menu-toggle input::after {
   content: '';
   position: absolute;
   top: 2px;
@@ -1447,15 +1509,19 @@ a.wf-legacy-link {
   transition: transform 0.15s ease, background 0.15s ease;
 }
 
-.wf-toggle input:checked {
+.wf-toggle input:checked,
+.wf-menu-toggle input:checked {
   border-color: rgba(78, 205, 196, 0.6);
   background: rgba(78, 205, 196, 0.22);
 }
 
-.wf-toggle input:checked::after {
+.wf-toggle input:checked::after,
+.wf-menu-toggle input:checked::after {
   background: var(--accent);
   transform: translateX(12px);
 }
+
+.wf-menu-toggle input:disabled { opacity: 0.4; cursor: default; }
 
 .wf-context-backdrop {
   position: fixed;
