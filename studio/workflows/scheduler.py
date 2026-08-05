@@ -1,4 +1,4 @@
-"""Deterministic, sequential workflow scheduling and project serialization.
+"""Deterministic workflow scheduling and project serialization.
 
 The scheduler deliberately contains no Flask state.  It consumes a validated
 workflow snapshot and invokes registry adapters directly, which makes ordering
@@ -15,7 +15,9 @@ import shutil
 import tempfile
 import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import AbstractContextManager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -181,6 +183,12 @@ class ScheduleResult:
     outputs: dict[str, dict[str, Any]]
     errors: dict[str, dict[str, Any]] = field(default_factory=dict)
     execution_record: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class _NodeOutcome:
+    stop: bool = False
+    cancelled: bool = False
 
 
 def _summarize(value: Any, *, depth: int = 0) -> Any:
@@ -358,6 +366,9 @@ def resolve_executor(node: Mapping[str, Any]) -> Callable:
 
 
 class WorkflowScheduler:
+    _exclusive_guard = threading.Lock()
+    _exclusive_adapter_locks: dict[str, threading.Lock] = {}
+
     def __init__(
         self,
         workflow: Mapping[str, Any],
@@ -375,7 +386,10 @@ class WorkflowScheduler:
         force: bool = False,
         sleeper: Callable[[float], None] = time.sleep,
         input_overrides: Mapping[str, Mapping[str, Any]] | None = None,
+        max_workers: int = 4,
     ):
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
         self.input_overrides = {
             str(node_id): dict(ports) for node_id, ports in (input_overrides or {}).items()
         }
@@ -407,6 +421,8 @@ class WorkflowScheduler:
         self.stop_requested = stop_requested or (lambda: False)
         self.force = force
         self.sleeper = sleeper
+        self.max_workers = max_workers
+        self._state_lock = threading.RLock()
         self.execution_root = execution_root
         self.cache = NodeCache(
             root=os.path.join(output_dir, "workflows", "cache"),
@@ -440,245 +456,113 @@ class WorkflowScheduler:
         node_outputs: dict[str, dict[str, Any]] = {}
         node_output_fingerprints: dict[str, str] = {}
         errors: dict[str, dict[str, Any]] = {}
-        executed: list[str] = []
+        completed: set[str] = set()
+        remaining = {node_id: len(graph.incoming[node_id]) for node_id in graph.nodes}
+        ready = [
+            (graph.saved_order[node_id], node_id)
+            for node_id, dependency_count in remaining.items()
+            if dependency_count == 0
+        ]
+        heapq.heapify(ready)
         self._persist()
         self._emit({"type": "execution_status", "node_id": None, "status": "running"})
 
+        stopped = False
+        cancelled = False
+        exclusive_running = False
+
+        def finish(node_id: str) -> None:
+            completed.add(node_id)
+            for target in graph.dependents[node_id]:
+                remaining[target] -= 1
+                if remaining[target] == 0:
+                    heapq.heappush(ready, (graph.saved_order[target], target))
+
         with ProjectLock(self.project_id, lock_root=self.lock_root, execution_id=self.execution_id):
-            stopped = False
-            cancelled = False
-            for node_id in order:
-                node = graph.nodes[node_id]
-                if self.stop_requested():
-                    cancelled = True
-                if cancelled:
-                    self.record.nodes[node_id].duration_ms = 0
-                    self._status(statuses, node_id, "cancelled")
-                    executed.append(node_id)
-                    continue
-                incoming_edges = graph.incoming[node_id]
-                active_edges = [
-                    edge for edge in incoming_edges
-                    if self._edge_was_activated(edge, statuses, node_outputs)
-                ]
-                if node.get("type") == "utility.merge":
-                    # Merge is the explicit convergence boundary for
-                    # conditional branches.  Skipped predecessors and absent
-                    # ports on successful Condition nodes are resolved but
-                    # inactive; failures remain governed by error policy.
-                    inactive_resolved = all(
-                        edge in active_edges
-                        or statuses.get(edge["source_node"]) in {"succeeded", "skipped"}
-                        for edge in incoming_edges
-                    )
-                    incoming_active = inactive_resolved and bool(active_edges)
-                else:
-                    incoming_active = len(active_edges) == len(incoming_edges)
-                if stopped or node.get("disabled") or not incoming_active:
-                    self.record.nodes[node_id].duration_ms = 0
-                    self._status(statuses, node_id, "skipped")
-                    executed.append(node_id)
-                    continue
-
-                inputs = self._resolve_inputs(node_id, graph, node_outputs, active_edges=active_edges)
-                inputs.update(self.input_overrides.get(node_id, {}))
-                node_record = self.record.nodes[node_id]
-                node_record.from_sample_data = (
-                    node.get("type") == "stub.input"
-                    or any(
-                        self.record.nodes[edge["source_node"]].from_sample_data
-                        for edge in graph.incoming[node_id]
-                    )
-                )
-                node_record.resolved_inputs_summary = self.redactor(_summarize(inputs))
-                try:
-                    configuration = resolve_configuration(
-                        self._configuration(node),
-                        node_outputs=node_outputs,
-                        variables=self.workflow.get("variables", {}),
-                        project_id=self.project_id,
-                    )
-                except ExpressionError as exc:
-                    raise SchedulerError(exc.code, exc.message, details={"node_id": node_id}) from exc
-                resolved_problems = validation_errors(validate_resolved_configuration(node, configuration))
-                if resolved_problems:
-                    raise SchedulerError(
-                        "EXPRESSION_TYPE_MISMATCH",
-                        f"Resolved configuration is invalid for node {node_id}",
-                        details={"node_id": node_id, "problems": resolved_problems},
-                    )
-                incoming_fingerprints = {
-                    ":".join((
-                        edge["id"], edge["source_node"], edge["source_port"], edge["target_port"],
-                    )): node_output_fingerprints[edge["source_node"]]
-                    for edge in active_edges
-                }
-                pinned = node.get("type") == "stub.output" and configuration.get("pinned") is True
-                fingerprint_inputs = {} if pinned else inputs
-                fingerprint_upstream = {} if pinned else incoming_fingerprints
-                components = fingerprint_components(
-                    node,
-                    configuration,
-                    fingerprint_inputs,
-                    fingerprint_upstream,
-                    adapter_schema_version=int(get_node_type(node["type"]).get("cache_schema_version", 1)),
-                )
-                fingerprint = canonical_fingerprint(components)
-                node_record.fingerprint = fingerprint
-
-                if pinned:
-                    result = {"value": configuration.get("payload")}
-                    self._validate_outputs(node, result)
-                    node_outputs[node_id] = result
-                    output_fp = output_fingerprint(result, {})
-                    node_output_fingerprints[node_id] = output_fp
-                    node_record.outputs_summary = self.redactor(_summarize(result))
-                    node_record.cache = {"hit": True, "reason": "pinned_payload"}
-                    node_record.duration_ms = 0
-                    self._status(statuses, node_id, "succeeded")
-                    executed.append(node_id)
-                    continue
-
-                cacheable = get_node_type(node["type"]).get("capabilities", {}).get("cacheable", True)
-                lookup = self.cache.lookup(
-                    workflow_id=str(self.workflow.get("workflow_id", "")),
-                    project_id=self.project_id,
-                    node_id=node_id,
-                    fingerprint=fingerprint,
-                    components=components,
-                    force=self.force,
-                ) if cacheable else CacheLookup(False, "cache_disabled")
-                node_record.cache = {"hit": lookup.hit, "reason": lookup.reason}
-                if lookup.hit:
-                    result = dict(lookup.outputs or {})
-                    try:
-                        self._validate_outputs(node, result)
-                    except SchedulerError:
-                        lookup = CacheLookup(False, "cache_corrupt")
-                        node_record.cache = {"hit": False, "reason": lookup.reason}
-                    else:
-                        node_outputs[node_id] = result
-                        node_output_fingerprints[node_id] = lookup.output_fingerprint or output_fingerprint(result, {})
-                        node_record.outputs_summary = self.redactor(_summarize(result))
-                        node_record.artifact_refs = self.redactor(_artifact_refs(result))
-                        node_record.duration_ms = 0
-                        self._status(statuses, node_id, "succeeded")
-                        executed.append(node_id)
-                        continue
-
-                if lookup.reason not in {"no_prior_success", "forced_regeneration", "cache_disabled"}:
-                    self._status(statuses, node_id, "stale")
-                started = time.perf_counter()
-                policy = self._error_policy(node)
-                max_attempts = policy["max_attempts"] if policy["policy"] == "retry" else 1
-                while node_record.attempts < max_attempts:
-                    node_record.attempts += 1
-                    self._status(statuses, node_id, "running")
-                    promoter = ArtifactPromoter(output_dir=self.output_dir, execution_id=self.execution_id or node_id)
-                    context = AdapterContext(
-                        project_id=self.project_id,
-                        execution_id=self.execution_id,
-                        node_id=node_id,
-                        stage_artifact=promoter.stage_path,
-                        stop_requested=self.stop_requested,
-                    )
-                    failure = None
-                    try:
-                        result = self.executor_resolver(node)(inputs, configuration, context)
-                        if self.stop_requested():
-                            raise CancellationRequested()
-                        if not isinstance(result, Mapping):
-                            raise SchedulerError("NODE_OUTPUT_INVALID", f"Node {node_id} returned a non-object output")
-                        result = dict(result)
-                        self._validate_outputs(node, result)
-                        promoter.promote()
-                        node_outputs[node_id] = result
-                        node_record.outputs_summary = self.redactor(_summarize(result))
-                        node_record.artifact_refs = self.redactor(_artifact_refs(result))
-                        if self.redactor(result) != result:
-                            output_fp, cache_failure = None, "sensitive_output"
-                        elif cacheable:
-                            output_fp, cache_failure = self.cache.store(
-                                workflow_id=str(self.workflow.get("workflow_id", "")),
-                                project_id=self.project_id,
-                                node_id=node_id,
-                                fingerprint=fingerprint,
-                                components=components,
-                                outputs=result,
-                                artifact_refs=_artifact_refs(result),
-                            )
-                        else:
-                            output_fp, cache_failure = output_fingerprint(result, {}), "cache_disabled"
-                        if output_fp is None:
-                            node_record.cache = {"hit": False, "reason": cache_failure}
-                            output_fp = output_fingerprint(result, {})
-                        node_output_fingerprints[node_id] = output_fp
-                        node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-                        node_record.error = None
-                        self._status(statuses, node_id, "succeeded")
-                        break
-                    except CancellationRequested as exc:
-                        failure = exc
+            with ThreadPoolExecutor(
+                max_workers=self.max_workers,
+                thread_name_prefix=f"workflow-{self.execution_id}",
+            ) as pool:
+                running: dict[Future[_NodeOutcome], str] = {}
+                while ready or running:
+                    if self.stop_requested():
                         cancelled = True
-                    except Exception as exc:  # adapters are a plugin boundary
-                        failure = exc
-                    finally:
-                        promoter.cleanup()
 
-                    if cancelled or getattr(failure, "code", None) == "CANCELLED":
-                        cancelled = True
-                        node_record.error = self._failure_payload(node, failure, node_record.attempts)
-                        node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-                        self._status(statuses, node_id, "cancelled")
-                        break
-
-                    attempt_error = self._failure_payload(node, failure, node_record.attempts)
-                    node_record.attempt_errors.append(attempt_error)
-                    if policy["policy"] == "retry" and node_record.attempts < max_attempts:
-                        delay_ms = min(
-                            60_000,
-                            round(policy["delay_ms"] * (policy["backoff_multiplier"] ** (node_record.attempts - 1))),
-                        )
-                        self._emit({
-                            "type": "node_retry", "execution_id": self.execution_id,
-                            "node_id": node_id, "attempt": node_record.attempts,
-                            "next_attempt": node_record.attempts + 1, "delay_ms": delay_ms,
-                            "error": attempt_error,
-                        })
-                        node_record.logs.append(self.redactor(ExecutionLog(
-                            ts=now_iso(), level="warning",
-                            message=f"Attempt {node_record.attempts} failed; retrying in {delay_ms} ms",
-                        ).__dict__))
-                        self._persist()
-                        if delay_ms:
-                            self._sleep_before_retry(delay_ms / 1000)
-                        if self.stop_requested():
-                            cancelled = True
-                            node_record.error = self._failure_payload(node, CancellationRequested(), node_record.attempts)
-                            self._status(statuses, node_id, "cancelled")
+                    made_progress = False
+                    while ready and len(running) < self.max_workers and not exclusive_running:
+                        # Preserve the v1 stop-policy boundary at run start:
+                        # establish the first root successfully before opening
+                        # the pool to independent ready work.  Once a node has
+                        # completed, normal branch parallelism applies.
+                        if not completed and running:
                             break
-                        continue
+                        _, node_id = ready[0]
+                        node = graph.nodes[node_id]
+                        incoming_edges = graph.incoming[node_id]
+                        active_edges = [
+                            edge for edge in incoming_edges
+                            if self._edge_was_activated(edge, statuses, node_outputs)
+                        ]
+                        if node.get("type") == "utility.merge":
+                            inactive_resolved = all(
+                                edge in active_edges
+                                or statuses.get(edge["source_node"]) in {"succeeded", "skipped"}
+                                for edge in incoming_edges
+                            )
+                            incoming_active = inactive_resolved and bool(active_edges)
+                        else:
+                            incoming_active = len(active_edges) == len(incoming_edges)
 
-                    error = attempt_error
-                    errors[node_id] = error
-                    node_record.error = error
-                    node_record.logs.append(self.redactor(ExecutionLog(
-                        ts=now_iso(), level="error", message=error["message"]
-                    ).__dict__))
-                    self._emit({"type": "node_error", "execution_id": self.execution_id,
-                                "node_id": node_id, "error": error})
-                    node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
-                    if policy["policy"] == "continue_error":
-                        node_outputs[node_id] = {"error": {"ok": False}}
-                        node_output_fingerprints[node_id] = output_fingerprint(node_outputs[node_id], {})
-                        self._status(statuses, node_id, "failed")
-                    elif policy["policy"] == "skip_optional":
-                        self._status(statuses, node_id, "skipped")
-                    else:
-                        self._status(statuses, node_id, "failed")
-                        stopped = True
-                    break
-                executed.append(node_id)
+                        if cancelled or stopped or node.get("disabled") or not incoming_active:
+                            heapq.heappop(ready)
+                            record = deepcopy(self.record.nodes[node_id])
+                            record.duration_ms = 0
+                            self._status(
+                                statuses,
+                                node_id,
+                                "cancelled" if cancelled else "skipped",
+                                node_record=record,
+                            )
+                            finish(node_id)
+                            made_progress = True
+                            continue
+
+                        parallel_safe = self._parallel_safe(node)
+                        if not parallel_safe and running:
+                            break
+
+                        heapq.heappop(ready)
+                        future = pool.submit(
+                            self._execute_node,
+                            node_id,
+                            node,
+                            graph,
+                            statuses,
+                            node_outputs,
+                            node_output_fingerprints,
+                            errors,
+                            active_edges,
+                        )
+                        running[future] = node_id
+                        exclusive_running = not parallel_safe
+                        made_progress = True
+                        if exclusive_running:
+                            break
+
+                    if not running:
+                        if made_progress:
+                            continue
+                        break
+
+                    done, _ = wait(tuple(running), return_when=FIRST_COMPLETED)
+                    for future in sorted(done, key=lambda item: graph.saved_order[running[item]]):
+                        node_id = running.pop(future)
+                        outcome = future.result()
+                        stopped = stopped or outcome.stop
+                        cancelled = cancelled or outcome.cancelled
+                        if not self._parallel_safe(graph.nodes[node_id]):
+                            exclusive_running = False
+                        finish(node_id)
 
         handled = any(
             self._error_policy(graph.nodes[node_id])["policy"] in {"continue_error", "skip_optional"}
@@ -691,29 +575,299 @@ class WorkflowScheduler:
         self.record.finished_at = now_iso()
         persisted = self._persist()
         self._emit({"type": "execution_finished", "node_id": None, "status": overall})
-        return ScheduleResult(overall, executed, statuses, node_outputs, errors, persisted)
+        executed = [node_id for node_id in order if node_id in completed]
+        ordered_outputs = {node_id: node_outputs[node_id] for node_id in order if node_id in node_outputs}
+        ordered_errors = {node_id: errors[node_id] for node_id in order if node_id in errors}
+        return ScheduleResult(overall, executed, statuses, ordered_outputs, ordered_errors, persisted)
 
-    def _status(self, statuses: dict[str, str], node_id: str, status: str) -> None:
-        statuses[node_id] = status
-        node_record = self.record.nodes[node_id]
-        node_record.status = status
-        node_record.logs.append(self.redactor(ExecutionLog(
-            ts=now_iso(), level="info", message=f"Node status changed to {status}"
-        ).__dict__))
-        self._persist()
-        if self.on_status:
-            self.on_status(node_id, status)
-        self._emit({
-            "type": "node_status",
-            "execution_id": self.execution_id,
-            "node_id": node_id,
-            "status": status,
-            "attempt": node_record.attempts,
-            "duration_ms": node_record.duration_ms or 0,
-            "from_sample_data": node_record.from_sample_data,
-        })
+    @staticmethod
+    def _parallel_safe(node: Mapping[str, Any]) -> bool:
+        definition = get_node_type(node.get("type")) or {}
+        return definition.get("capabilities", {}).get("parallel_safe", True) is not False
+
+    @classmethod
+    def _exclusive_adapter_lock(cls, node: Mapping[str, Any]) -> threading.Lock | None:
+        if cls._parallel_safe(node):
+            return None
+        node_type = str(node.get("type", ""))
+        with cls._exclusive_guard:
+            return cls._exclusive_adapter_locks.setdefault(node_type, threading.Lock())
+
+    def _execute_node(
+        self,
+        node_id: str,
+        node: Mapping[str, Any],
+        graph: WorkflowGraph,
+        statuses: dict[str, str],
+        node_outputs: dict[str, dict[str, Any]],
+        node_output_fingerprints: dict[str, str],
+        errors: dict[str, dict[str, Any]],
+        active_edges: list[Mapping[str, Any]],
+    ) -> _NodeOutcome:
+        """Execute one ready node; dependency scheduling stays on the caller thread."""
+        inputs = self._resolve_inputs(node_id, graph, node_outputs, active_edges=active_edges)
+        inputs.update(self.input_overrides.get(node_id, {}))
+        node_record = deepcopy(self.record.nodes[node_id])
+        node_record.from_sample_data = (
+            node.get("type") == "stub.input"
+            or any(
+                self.record.nodes[edge["source_node"]].from_sample_data
+                for edge in graph.incoming[node_id]
+            )
+        )
+        node_record.resolved_inputs_summary = self.redactor(_summarize(inputs))
+        try:
+            configuration = resolve_configuration(
+                self._configuration(node),
+                node_outputs=node_outputs,
+                variables=self.workflow.get("variables", {}),
+                project_id=self.project_id,
+            )
+        except ExpressionError as exc:
+            raise SchedulerError(exc.code, exc.message, details={"node_id": node_id}) from exc
+        resolved_problems = validation_errors(validate_resolved_configuration(node, configuration))
+        if resolved_problems:
+            raise SchedulerError(
+                "EXPRESSION_TYPE_MISMATCH",
+                f"Resolved configuration is invalid for node {node_id}",
+                details={"node_id": node_id, "problems": resolved_problems},
+            )
+        incoming_fingerprints = {
+            ":".join((
+                edge["id"], edge["source_node"], edge["source_port"], edge["target_port"],
+            )): node_output_fingerprints[edge["source_node"]]
+            for edge in active_edges
+        }
+        pinned = node.get("type") == "stub.output" and configuration.get("pinned") is True
+        components = fingerprint_components(
+            node,
+            configuration,
+            {} if pinned else inputs,
+            {} if pinned else incoming_fingerprints,
+            adapter_schema_version=int(get_node_type(node["type"]).get("cache_schema_version", 1)),
+        )
+        fingerprint = canonical_fingerprint(components)
+        node_record.fingerprint = fingerprint
+
+        if pinned:
+            result = {"value": configuration.get("payload")}
+            self._validate_outputs(node, result)
+            node_outputs[node_id] = result
+            node_output_fingerprints[node_id] = output_fingerprint(result, {})
+            node_record.outputs_summary = self.redactor(_summarize(result))
+            node_record.cache = {"hit": True, "reason": "pinned_payload"}
+            node_record.duration_ms = 0
+            self._status(statuses, node_id, "succeeded", node_record=node_record)
+            return _NodeOutcome()
+
+        cacheable = get_node_type(node["type"]).get("capabilities", {}).get("cacheable", True)
+        lookup = self.cache.lookup(
+            workflow_id=str(self.workflow.get("workflow_id", "")),
+            project_id=self.project_id,
+            node_id=node_id,
+            fingerprint=fingerprint,
+            components=components,
+            force=self.force,
+        ) if cacheable else CacheLookup(False, "cache_disabled")
+        node_record.cache = {"hit": lookup.hit, "reason": lookup.reason}
+        if lookup.hit:
+            result = dict(lookup.outputs or {})
+            try:
+                self._validate_outputs(node, result)
+            except SchedulerError:
+                lookup = CacheLookup(False, "cache_corrupt")
+                node_record.cache = {"hit": False, "reason": lookup.reason}
+            else:
+                node_outputs[node_id] = result
+                node_output_fingerprints[node_id] = (
+                    lookup.output_fingerprint or output_fingerprint(result, {})
+                )
+                node_record.outputs_summary = self.redactor(_summarize(result))
+                node_record.artifact_refs = self.redactor(_artifact_refs(result))
+                node_record.duration_ms = 0
+                self._status(statuses, node_id, "succeeded", node_record=node_record)
+                return _NodeOutcome()
+
+        if lookup.reason not in {"no_prior_success", "forced_regeneration", "cache_disabled"}:
+            self._status(statuses, node_id, "stale", node_record=node_record)
+        started = time.perf_counter()
+        policy = self._error_policy(node)
+        max_attempts = policy["max_attempts"] if policy["policy"] == "retry" else 1
+        while node_record.attempts < max_attempts:
+            node_record.attempts += 1
+            self._status(statuses, node_id, "running", node_record=node_record)
+            promoter = ArtifactPromoter(
+                output_dir=self.output_dir,
+                execution_id=f"{self.execution_id}_{node_id}",
+            )
+            context = AdapterContext(
+                project_id=self.project_id,
+                execution_id=self.execution_id,
+                node_id=node_id,
+                stage_artifact=promoter.stage_path,
+                stop_requested=self.stop_requested,
+            )
+            failure = None
+            cancelled = False
+            try:
+                executor = self.executor_resolver(node)
+                exclusive_lock = self._exclusive_adapter_lock(node)
+                if exclusive_lock is None:
+                    result = executor(inputs, configuration, context)
+                else:
+                    with exclusive_lock:
+                        result = executor(inputs, configuration, context)
+                if self.stop_requested():
+                    raise CancellationRequested()
+                if not isinstance(result, Mapping):
+                    raise SchedulerError(
+                        "NODE_OUTPUT_INVALID", f"Node {node_id} returned a non-object output"
+                    )
+                result = dict(result)
+                self._validate_outputs(node, result)
+                promoter.promote()
+                node_outputs[node_id] = result
+                node_record.outputs_summary = self.redactor(_summarize(result))
+                node_record.artifact_refs = self.redactor(_artifact_refs(result))
+                if self.redactor(result) != result:
+                    output_fp, cache_failure = None, "sensitive_output"
+                elif cacheable:
+                    output_fp, cache_failure = self.cache.store(
+                        workflow_id=str(self.workflow.get("workflow_id", "")),
+                        project_id=self.project_id,
+                        node_id=node_id,
+                        fingerprint=fingerprint,
+                        components=components,
+                        outputs=result,
+                        artifact_refs=_artifact_refs(result),
+                    )
+                else:
+                    output_fp, cache_failure = output_fingerprint(result, {}), "cache_disabled"
+                if output_fp is None:
+                    node_record.cache = {"hit": False, "reason": cache_failure}
+                    output_fp = output_fingerprint(result, {})
+                node_output_fingerprints[node_id] = output_fp
+                node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+                node_record.error = None
+                self._status(statuses, node_id, "succeeded", node_record=node_record)
+                return _NodeOutcome()
+            except CancellationRequested as exc:
+                failure = exc
+                cancelled = True
+            except Exception as exc:  # adapters are a plugin boundary
+                failure = exc
+            finally:
+                promoter.cleanup()
+
+            if cancelled or getattr(failure, "code", None) == "CANCELLED":
+                node_record.error = self._failure_payload(node, failure, node_record.attempts)
+                node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+                self._status(statuses, node_id, "cancelled", node_record=node_record)
+                return _NodeOutcome(cancelled=True)
+
+            attempt_error = self._failure_payload(node, failure, node_record.attempts)
+            node_record.attempt_errors.append(attempt_error)
+            if policy["policy"] == "retry" and node_record.attempts < max_attempts:
+                delay_ms = min(
+                    60_000,
+                    round(policy["delay_ms"] * (
+                        policy["backoff_multiplier"] ** (node_record.attempts - 1)
+                    )),
+                )
+                node_record.logs.append(self.redactor(ExecutionLog(
+                    ts=now_iso(),
+                    level="warning",
+                    message=f"Attempt {node_record.attempts} failed; retrying in {delay_ms} ms",
+                ).__dict__))
+                self._commit_node_record(node_id, node_record)
+                self._emit({
+                    "type": "node_retry",
+                    "execution_id": self.execution_id,
+                    "node_id": node_id,
+                    "attempt": node_record.attempts,
+                    "next_attempt": node_record.attempts + 1,
+                    "delay_ms": delay_ms,
+                    "error": attempt_error,
+                })
+                if delay_ms:
+                    self._sleep_before_retry(delay_ms / 1000)
+                if self.stop_requested():
+                    node_record.error = self._failure_payload(
+                        node, CancellationRequested(), node_record.attempts
+                    )
+                    self._status(statuses, node_id, "cancelled", node_record=node_record)
+                    return _NodeOutcome(cancelled=True)
+                continue
+
+            error = attempt_error
+            errors[node_id] = error
+            node_record.error = error
+            node_record.logs.append(self.redactor(ExecutionLog(
+                ts=now_iso(), level="error", message=error["message"]
+            ).__dict__))
+            node_record.duration_ms = max(0, round((time.perf_counter() - started) * 1000))
+            self._commit_node_record(node_id, node_record)
+            self._emit({
+                "type": "node_error",
+                "execution_id": self.execution_id,
+                "node_id": node_id,
+                "error": error,
+            })
+            if policy["policy"] == "continue_error":
+                node_outputs[node_id] = {"error": {"ok": False}}
+                node_output_fingerprints[node_id] = output_fingerprint(node_outputs[node_id], {})
+                self._status(statuses, node_id, "failed", node_record=node_record)
+                return _NodeOutcome()
+            if policy["policy"] == "skip_optional":
+                self._status(statuses, node_id, "skipped", node_record=node_record)
+                return _NodeOutcome()
+            self._status(statuses, node_id, "failed", node_record=node_record)
+            return _NodeOutcome(stop=True)
+
+        raise AssertionError("node attempt loop exited without a terminal outcome")
+
+    def _status(
+        self,
+        statuses: dict[str, str],
+        node_id: str,
+        status: str,
+        *,
+        node_record: NodeExecutionRecord | None = None,
+    ) -> None:
+        # A node keeps its own event order on its worker thread.  This lock
+        # makes the shared execution snapshot and the corresponding SSE event
+        # one atomic transition, even when sibling branches finish together.
+        with self._state_lock:
+            record = node_record or deepcopy(self.record.nodes[node_id])
+            statuses[node_id] = status
+            record.status = status
+            record.logs.append(self.redactor(ExecutionLog(
+                ts=now_iso(), level="info", message=f"Node status changed to {status}"
+            ).__dict__))
+            self.record.nodes[node_id] = deepcopy(record)
+            self._persist_unlocked()
+            if self.on_status:
+                self.on_status(node_id, status)
+            self._emit({
+                "type": "node_status",
+                "execution_id": self.execution_id,
+                "node_id": node_id,
+                "status": status,
+                "attempt": record.attempts,
+                "duration_ms": record.duration_ms or 0,
+                "from_sample_data": record.from_sample_data,
+            })
+
+    def _commit_node_record(self, node_id: str, node_record: NodeExecutionRecord) -> None:
+        with self._state_lock:
+            self.record.nodes[node_id] = deepcopy(node_record)
+            self._persist_unlocked()
 
     def _persist(self) -> dict[str, Any]:
+        with self._state_lock:
+            return self._persist_unlocked()
+
+    def _persist_unlocked(self) -> dict[str, Any]:
         return save_execution(self.record, root=self.execution_root, secrets=self.redactor.secrets)
 
     def _emit(self, event: dict[str, Any]) -> None:

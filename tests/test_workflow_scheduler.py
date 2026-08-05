@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 import pytest
 
@@ -68,7 +69,11 @@ def test_order_is_deterministic_by_saved_order_then_id(tmp_path):
     calls = []
     result = WorkflowScheduler(workflow, project_id="pm_ABC123", lock_root=str(tmp_path / "locks"),
                                output_dir=str(tmp_path), executor_resolver=_resolver(calls)).run()
-    assert [node_id for node_id, _ in calls] == result.order
+    call_ids = [node_id for node_id, _ in calls]
+    assert result.order == ["root", "later", "earlier", "join"]
+    assert call_ids[0] == "root"
+    assert set(call_ids[1:3]) == {"later", "earlier"}
+    assert call_ids[-1] == "join"
     dependencies, reverse = dependency_maps(workflow)
     assert dependencies["join"] == {"later"}
     assert reverse["root"] == {"later", "earlier"}
@@ -98,6 +103,104 @@ def test_multi_input_and_diamond_join_wait_for_every_predecessor(tmp_path):
     assert result.status == "succeeded"
     assert calls[-1] == ("join", {"script": "script-value", "settings": {"tone": "test"}})
     assert result.order == ["source", "left", "right", "join"]
+
+
+def test_diamond_branches_overlap_and_keep_deterministic_node_events(tmp_path):
+    nodes = [
+        _node("source"),
+        _node("left", "script.input", config={"text": "hello"}),
+        _node("right", "project.setup"),
+        _node("join", "tts.generate"),
+    ]
+    edges = [
+        _edge("e1", "source", "control", "left", "trigger"),
+        _edge("e2", "source", "control", "right", "trigger"),
+        _edge("e3", "left", "script", "join", "script", "data"),
+        _edge("e4", "right", "settings", "join", "settings", "data"),
+    ]
+    workflow = _workflow(nodes, edges)
+    branch_barrier = threading.Barrier(2)
+    intervals = {}
+    events = []
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            started = time.perf_counter()
+            if node["id"] in {"left", "right"}:
+                branch_barrier.wait(timeout=2)
+                time.sleep(0.03)
+            intervals[node["id"]] = (started, time.perf_counter())
+            if node["id"] == "source":
+                return {"control": {"ok": True}}
+            if node["id"] == "left":
+                return {"control": {"ok": True}, "script": "hello"}
+            if node["id"] == "right":
+                return {"control": {"ok": True}, "settings": {}}
+            return {"control": {"ok": True}, "audio": {}, "metadata": {}}
+        return execute
+
+    result = WorkflowScheduler(
+        workflow,
+        project_id="pm_ABC123",
+        lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path),
+        executor_resolver=resolver,
+        on_event=events.append,
+        max_workers=2,
+    ).run()
+
+    assert result.status == "succeeded"
+    assert result.order == ["source", "left", "right", "join"]
+    assert intervals["left"][0] < intervals["right"][1]
+    assert intervals["right"][0] < intervals["left"][1]
+    for node_id in result.order:
+        assert [
+            event["status"] for event in events
+            if event.get("type") == "node_status" and event.get("node_id") == node_id
+        ] == ["running", "succeeded"]
+
+
+def test_parallel_unsafe_nodes_execute_exclusively(tmp_path):
+    workflow = _workflow(
+        [
+            _node("source", "script.input", config={"text": "hello"}),
+            _node("left", "tts.generate"),
+            _node("right", "tts.generate"),
+        ],
+        [
+            _edge("e1", "source", "script", "left", "script", "data"),
+            _edge("e2", "source", "script", "right", "script", "data"),
+        ],
+    )
+    state_lock = threading.Lock()
+    active = 0
+    maximum_active = 0
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            nonlocal active, maximum_active
+            if node["id"] == "source":
+                return {"control": {"ok": True}, "script": "hello"}
+            with state_lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(0.03)
+            with state_lock:
+                active -= 1
+            return {"control": {"ok": True}, "audio": {}, "metadata": {}}
+        return execute
+
+    result = WorkflowScheduler(
+        workflow,
+        project_id="pm_ABC123",
+        lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path),
+        executor_resolver=resolver,
+        max_workers=4,
+    ).run()
+
+    assert result.status == "succeeded"
+    assert maximum_active == 1
 
 
 def test_partial_run_scopes_on_branch_and_diamond_graph():

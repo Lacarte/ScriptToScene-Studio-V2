@@ -190,7 +190,11 @@ _NODE_TYPES = {
              "default": 1.0, "min": 0.5, "max": 2.0, "step": 0.1},
             {"name": "provider_options", "label": "Provider options", "type": "json", "default": {}},
         ],
-        "capabilities": {"retry": True, "cancel": False},
+        # Kokoro owns a process-wide model singleton which is not safe to use
+        # alongside another TTS adapter invocation.  The scheduler treats
+        # this node type as exclusive (including with another provider) so
+        # the registry contract remains conservative and deterministic.
+        "capabilities": {"retry": True, "cancel": False, "parallel_safe": False},
         "executor": "studio.workflows.adapters.tts:generate",
     },
     "timing.align": {

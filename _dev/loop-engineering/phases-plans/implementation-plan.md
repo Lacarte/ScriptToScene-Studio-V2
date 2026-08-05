@@ -708,6 +708,20 @@ keeping SSE event ordering deterministic per node and the run-level record consi
 Per-node concurrency opt-out for adapters that are not thread-safe (Kokoro singleton et al.).
 **Done when:** a diamond workflow executes both branches concurrently (measured overlap in pytest), results and event streams are deterministic, and opted-out adapters never overlap.
 
+#### Step 9.1 review status — 2026-08-05
+
+- **Complete.** The scheduler dispatches ready nodes through a bounded worker pool (four workers
+  by default, configurable for tests/embedding) while retaining stable saved-order planning and
+  waiting for every predecessor before a convergence node becomes ready.
+- Node transitions atomically update the in-memory and persisted execution record before their SSE
+  notification. Per-node status/retry/error order remains deterministic, and returned outputs and
+  errors are normalized back into stable topological order regardless of completion timing.
+- Registry capability `parallel_safe: false` makes an adapter exclusive within a run and shares a
+  process-wide lock across runs. TTS uses this conservative opt-out to protect the Kokoro singleton.
+- Pytest measures real overlap between both sides of a diamond and proves opted-out TTS nodes never
+  overlap. Verification passes with 211 backend tests (10 live-provider tests skipped, 62 subtests),
+  all 145 frontend tests, the Vite production build, and generated-document drift checks.
+
 ### 9.2 Concurrent runs across projects
 Multiple runs for different projects execute simultaneously; the same project still serializes
 through the Phase 7 queue. Run history and SSE streams stay correctly scoped per execution.

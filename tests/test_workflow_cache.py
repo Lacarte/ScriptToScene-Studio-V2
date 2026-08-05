@@ -82,7 +82,8 @@ def test_unchanged_run_executes_zero_nodes_and_force_bypasses_cache(tmp_path):
     workflow = _workflow()
     first_calls = []
     _run(workflow, tmp_path, first_calls, "ex_CACHE1")
-    assert first_calls == ["source", "viewer", "tail", "independent"]
+    assert set(first_calls) == {"source", "viewer", "tail", "independent"}
+    assert first_calls.index("source") < first_calls.index("viewer") < first_calls.index("tail")
 
     second_calls = []
     second = _run(workflow, tmp_path, second_calls, "ex_CACHE2")
@@ -92,7 +93,8 @@ def test_unchanged_run_executes_zero_nodes_and_force_bypasses_cache(tmp_path):
 
     forced_calls = []
     forced = _run(workflow, tmp_path, forced_calls, "ex_CACHE3", force=True)
-    assert forced_calls == ["source", "viewer", "tail", "independent"]
+    assert set(forced_calls) == {"source", "viewer", "tail", "independent"}
+    assert forced_calls.index("source") < forced_calls.index("viewer") < forced_calls.index("tail")
     assert all(record["cache"]["reason"] == "forced_regeneration"
                for record in forced.execution_record["nodes"].values())
 
