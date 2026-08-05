@@ -6,6 +6,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
+  /* Native widgets (select popups, scrollbars, date pickers) follow the
+     page color scheme, not element CSS — without this they render light. */
+  color-scheme: dark;
+
   /* ---- Surface Palette ---- */
   --bg-darkest:       #0a0e13;
   --bg-dark:          #0f1520;

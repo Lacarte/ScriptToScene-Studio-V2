@@ -90,6 +90,7 @@ describe('step 5.2 context menus', () => {
         },
       },
     })
+    expect(wrapper.find('.wf-toolbar-actions').text()).not.toContain('Add note')
     await wrapper.find('.emit-node-menu').trigger('contextmenu')
     expect(wrapper.text()).toContain('Copy')
     expect(wrapper.text()).toContain('Replace with…')
@@ -106,7 +107,8 @@ describe('step 5.2 context menus', () => {
 
     await wrapper.find('.emit-pane-menu').trigger('contextmenu')
     expect(wrapper.text()).toContain('Paste here')
-    expect(wrapper.text()).toContain('Tidy up')
+    expect(wrapper.text()).toContain('Add note')
+    expect(wrapper.text()).toContain('Auto arrange')
     wrapper.unmount()
   })
 })

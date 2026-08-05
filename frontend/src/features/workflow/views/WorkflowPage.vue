@@ -177,6 +177,7 @@ const flowNodes = computed(() => [
   ...store.notes.map((note) => ({
     id: note.id,
     type: 'note',
+    dragHandle: '.sticky-note-drag-handle',
     position: { ...note.position },
     selected: canvasSelection.value.has(note.id),
     selectable: true,
@@ -243,8 +244,21 @@ function addNoteAt(position) {
   return note
 }
 
-function addNoteAtCenter() {
-  return addNoteAt(screenToFlowCoordinate({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))
+// ── Auto-align: magnet a dropped node into a neighbor's row/column ─────
+const ALIGN_TOLERANCE = 12
+
+function magnetAlign(id, position) {
+  const aligned = { x: position.x, y: position.y }
+  let bestDx = ALIGN_TOLERANCE + 1
+  let bestDy = ALIGN_TOLERANCE + 1
+  for (const other of [...store.nodes, ...store.notes]) {
+    if (other.id === id) continue
+    const dx = Math.abs(other.position.x - position.x)
+    const dy = Math.abs(other.position.y - position.y)
+    if (dx <= ALIGN_TOLERANCE && dx < bestDx) { bestDx = dx; aligned.x = other.position.x }
+    if (dy <= ALIGN_TOLERANCE && dy < bestDy) { bestDy = dy; aligned.y = other.position.y }
+  }
+  return aligned
 }
 
 // ── Sync Vue Flow interactions back into the store ─────────────────────
@@ -256,6 +270,11 @@ function onNodeDragStop({ node, nodes: draggedNodes }) {
     id: dragged.id,
     position: { x: dragged.position.x, y: dragged.position.y },
   }))
+  // Single-node drags magnet-align to the nearest neighbor; group drags
+  // keep their internal spacing untouched.
+  if (moves.length === 1) {
+    moves[0].position = magnetAlign(moves[0].id, moves[0].position)
+  }
   store.moveNodes(moves.filter((move) => store.nodeById(move.id)))
   store.moveNotes(moves.filter((move) => store.noteById(move.id)))
 }
@@ -687,100 +706,121 @@ async function onStop() {
   <div class="workflow-page">
     <!-- Top — toolbar -->
     <header class="wf-toolbar">
-      <div class="wf-toolbar-group">
-        <span class="wf-title">{{ store.workflowName }}</span>
-        <span v-if="store.dirty" class="wf-dirty" title="Unsaved changes">●</span>
+      <div class="wf-toolbar-identity">
+        <div class="wf-title-row">
+          <span class="wf-title">{{ store.workflowName }}</span>
+          <span v-if="store.dirty" class="wf-unsaved" title="Unsaved changes">Unsaved</span>
+          <span v-else-if="store.workflowId" class="wf-saved" title="All changes saved">Saved</span>
+          <span class="wf-badge">Workflow</span>
+        </div>
         <span
           v-if="store.dirty && store.draftSavedAt"
           class="wf-draft-hint"
           :title="`Draft autosaved ${new Date(store.draftSavedAt).toLocaleTimeString()}`"
-        >
-          draft saved
-        </span>
-        <span class="wf-badge">MVP</span>
+        >Draft safely autosaved</span>
       </div>
-      <div class="wf-toolbar-group wf-toolbar-actions">
-        <button class="wf-btn" :disabled="store.persistenceLoading" @click="onNew">New</button>
-        <select class="wf-select" :disabled="store.persistenceLoading" aria-label="Open workflow" @change="onOpen">
-          <option value="">Open…</option>
-          <option v-for="item in store.workflowList" :key="item.workflow_id" :value="item.workflow_id">
-            {{ item.name }}
-          </option>
-        </select>
-        <select class="wf-select" :disabled="store.persistenceLoading" aria-label="Workflow template" @change="onTemplate">
-          <option value="">Template…</option>
-          <option v-for="item in store.templates" :key="item.template_id" :value="item.template_id">
-            {{ item.workflow.name }}
-          </option>
-        </select>
-        <button class="wf-btn primary" :disabled="store.persistenceLoading || (!!store.workflowId && !store.dirty)" @click="onSave">
-          Save
-        </button>
-        <button class="wf-btn" :disabled="store.persistenceLoading" @click="onSaveAs">Save As</button>
-        <button class="wf-btn" :disabled="store.persistenceLoading" @click="onDuplicate">Duplicate</button>
-        <button class="wf-btn" @click="addNoteAtCenter">Add note</button>
-        <button class="wf-btn" :disabled="store.persistenceLoading" @click="importInput?.click()">Import</button>
-        <button class="wf-btn" :disabled="!store.workflowId" @click="onExport">Export</button>
-        <button
-          class="wf-btn"
-          :disabled="!store.canUndo"
-          :title="store.undoLabel ? `Undo ${store.undoLabel} (Ctrl+Z)` : 'Nothing to undo'"
-          @click="store.undo()"
-        >Undo</button>
-        <button
-          class="wf-btn"
-          :disabled="!store.canRedo"
-          :title="store.redoLabel ? `Redo ${store.redoLabel} (Ctrl+Shift+Z)` : 'Nothing to redo'"
-          @click="store.redo()"
-        >Redo</button>
-        <input ref="importInput" class="wf-file-input" type="file" accept="application/json,.json" @change="onImportFile" />
-        <button class="wf-btn" :disabled="!store.nodeCount || validating" title="Validate workflow on the server" @click="onValidate">
-          Validate
-        </button>
-        <select
-          v-if="!store.executionActive"
-          v-model="runMode"
-          class="wf-select"
-          aria-label="Run mode"
-          title="Choose which part of the workflow to run"
-        >
-          <option value="full">Full workflow</option>
-          <option value="node_with_deps">Node + dependencies</option>
-          <option value="node_isolated">Node in isolation</option>
-          <option value="selected">Selected + dependencies</option>
-          <option value="from_node">From node downstream</option>
-          <option value="retry_failed">Retry failed node</option>
-          <option value="retry_failed_desc">Retry failed + downstream</option>
-        </select>
-        <button
-          v-if="!store.executionActive"
-          class="wf-btn run"
-          :disabled="!canRun(runMode)"
-          :title="`Run mode: ${runMode}`"
-          @click="onRun()"
-        >Run</button>
-        <button
-          v-else
-          class="wf-btn stop"
-          :disabled="store.currentExecution?.status === 'cancelling'"
-          title="Cooperatively stop the current run"
-          @click="onStop"
-        >{{ store.currentExecution?.status === 'cancelling' ? 'Stopping…' : 'Stop' }}</button>
-        <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">
-          Tidy up
-        </button>
-        <button class="wf-btn" :disabled="!store.nodeCount" title="Fit view" @click="fitView({ padding: 0.15 })">
-          Fit
-        </button>
-        <label class="wf-toggle" title="Auto-attach editable sample stubs when dropping unconnected nodes">
-          <input
-            type="checkbox"
-            :checked="store.autoAttachStubs"
-            @change="store.setAutoAttachStubs($event.target.checked)"
-          />
-          Auto-stubs
-        </label>
-      </div>
+
+      <nav class="wf-toolbar-actions" aria-label="Workflow commands">
+        <div class="wf-action-group" role="group" aria-label="Workflow files">
+          <span class="wf-action-label">Workflow</span>
+          <button class="wf-btn" :disabled="store.persistenceLoading" @click="onNew">New</button>
+          <select class="wf-select wf-open-select" :disabled="store.persistenceLoading" aria-label="Open workflow" @change="onOpen">
+            <option value="">Open…</option>
+            <option v-for="item in store.workflowList" :key="item.workflow_id" :value="item.workflow_id">
+              {{ item.name }}
+            </option>
+          </select>
+          <select class="wf-select wf-template-select" :disabled="store.persistenceLoading" aria-label="Create from template" @change="onTemplate">
+            <option value="">Template…</option>
+            <option v-for="item in store.templates" :key="item.template_id" :value="item.template_id">
+              {{ item.workflow.name }}
+            </option>
+          </select>
+          <button class="wf-btn primary" :disabled="store.persistenceLoading || (!!store.workflowId && !store.dirty)" @click="onSave">
+            Save
+          </button>
+          <details class="wf-more-menu">
+            <summary class="wf-btn" aria-label="More workflow actions">More <span aria-hidden="true">⌄</span></summary>
+            <div class="wf-more-popover">
+              <button :disabled="store.persistenceLoading" @click="onSaveAs">Save as…</button>
+              <button :disabled="store.persistenceLoading" @click="onDuplicate">Duplicate workflow</button>
+              <button :disabled="store.persistenceLoading" @click="importInput?.click()">Import JSON…</button>
+              <button :disabled="!store.workflowId" @click="onExport">Export JSON</button>
+            </div>
+          </details>
+          <input ref="importInput" class="wf-file-input" type="file" accept="application/json,.json" @change="onImportFile" />
+        </div>
+
+        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Edit history">
+          <span class="wf-action-label">Edit</span>
+          <button
+            class="wf-btn"
+            :disabled="!store.canUndo"
+            :title="store.undoLabel ? `Undo ${store.undoLabel} (Ctrl+Z)` : 'Nothing to undo'"
+            @click="store.undo()"
+          >Undo</button>
+          <button
+            class="wf-btn"
+            :disabled="!store.canRedo"
+            :title="store.redoLabel ? `Redo ${store.redoLabel} (Ctrl+Shift+Z)` : 'Nothing to redo'"
+            @click="store.redo()"
+          >Redo</button>
+        </div>
+
+        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Workflow quality">
+          <span class="wf-action-label">Check</span>
+          <button class="wf-btn validate" :disabled="!store.nodeCount || validating" title="Validate workflow on the server" @click="onValidate">
+            {{ validating ? 'Checking…' : 'Validate' }}
+          </button>
+        </div>
+
+        <div class="wf-action-group wf-run-group" role="group" aria-label="Run workflow">
+          <span class="wf-action-label">Run</span>
+          <select
+            v-if="!store.executionActive"
+            v-model="runMode"
+            class="wf-select wf-run-select"
+            aria-label="Run mode"
+            title="Choose which part of the workflow to run"
+          >
+            <option value="full">Full workflow</option>
+            <option value="node_with_deps">Node + dependencies</option>
+            <option value="node_isolated">Node in isolation</option>
+            <option value="selected">Selected + dependencies</option>
+            <option value="from_node">From node downstream</option>
+            <option value="retry_failed">Retry failed node</option>
+            <option value="retry_failed_desc">Retry failed + downstream</option>
+          </select>
+          <button
+            v-if="!store.executionActive"
+            class="wf-btn run"
+            :disabled="!canRun(runMode)"
+            :title="`Run mode: ${runMode}`"
+            @click="onRun()"
+          ><span aria-hidden="true">▶</span> Run</button>
+          <button
+            v-else
+            class="wf-btn stop"
+            :disabled="store.currentExecution?.status === 'cancelling'"
+            title="Cooperatively stop the current run"
+            @click="onStop"
+          >{{ store.currentExecution?.status === 'cancelling' ? 'Stopping…' : '■ Stop' }}</button>
+        </div>
+
+        <div class="wf-action-group wf-action-group-compact" role="group" aria-label="Canvas view">
+          <span class="wf-action-label">View</span>
+          <button class="wf-btn" :disabled="!store.nodeCount" title="Auto-arrange nodes" @click="tidyUp">Tidy</button>
+          <button class="wf-btn" :disabled="!store.nodeCount" title="Fit all nodes in view" @click="fitView({ padding: 0.15 })">Fit</button>
+          <label class="wf-toggle" title="Auto-attach editable sample stubs when dropping unconnected nodes">
+            <input
+              type="checkbox"
+              :checked="store.autoAttachStubs"
+              @change="store.setAutoAttachStubs($event.target.checked)"
+            />
+            <span>Auto-stubs</span>
+          </label>
+        </div>
+      </nav>
     </header>
 
     <div class="wf-body">
@@ -802,7 +842,6 @@ async function onStop() {
           :snap-grid="[20, 20]"
           :delete-key-code="'Delete'"
           :multi-selection-key-code="'Control'"
-          :selection-key-code="'Shift'"
           :is-valid-connection="isValidConnection"
           fit-view-on-init
           @connect="onConnect"
@@ -820,7 +859,15 @@ async function onStop() {
         >
           <Background pattern-color="rgba(255,255,255,0.12)" :gap="20" />
           <Controls position="bottom-left" />
-          <MiniMap position="bottom-right" pannable zoomable :node-color="minimapColor" />
+          <MiniMap
+            position="bottom-right"
+            pannable
+            zoomable
+            :node-color="minimapColor"
+            mask-color="rgba(6, 8, 14, 0.65)"
+            mask-stroke-color="rgba(94, 234, 212, 0.35)"
+            :mask-border-radius="4"
+          />
           <div v-if="!flowNodes.length" class="wf-canvas-hint">
             Drag a node from the library to start building
           </div>
@@ -833,7 +880,8 @@ async function onStop() {
             <template v-if="contextMenu.kind === 'pane'">
               <button class="wf-context-item" @click="onContextPaste">Paste here</button>
               <button class="wf-context-item" @click="addNoteAt(contextMenu.flowPosition); closeContextMenu()">Add note</button>
-              <button class="wf-context-item" :disabled="!store.nodeCount" @click="tidyUp(); closeContextMenu()">Tidy up</button>
+              <div class="wf-context-divider" />
+              <button class="wf-context-item" :disabled="!store.nodeCount" @click="tidyUp(); closeContextMenu()">Auto arrange</button>
             </template>
             <template v-else-if="contextMenu.kind === 'edge'">
               <button class="wf-context-item danger" @click="onContextDelete">Disconnect</button>
@@ -920,49 +968,104 @@ async function onStop() {
 
 .wf-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 10px 12px 9px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-darkest);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-darkest) 92%, #17283a), var(--bg-darkest));
+  position: relative;
+  z-index: 20;
 }
 
-.wf-toolbar-group {
+.wf-toolbar-identity,
+.wf-title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+}
+
+.wf-toolbar-identity {
+  justify-content: space-between;
+  min-height: 20px;
+  gap: 16px;
+  padding: 0 3px;
+}
+
+.wf-title-row {
+  min-width: 0;
+  gap: 8px;
 }
 
 .wf-toolbar-actions {
-  gap: 6px;
-  min-width: 0;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
 }
 
-.wf-toolbar-actions > * {
+.wf-action-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid rgba(111, 137, 168, 0.16);
+  border-radius: 11px;
+  background: rgba(7, 16, 27, 0.52);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.wf-action-group > * {
   flex: 0 0 auto;
+}
+
+.wf-action-label {
+  padding: 0 5px 0 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  user-select: none;
 }
 
 .wf-title {
   font-family: var(--font-display);
-  font-size: 15px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.wf-dirty {
-  color: var(--accent-warning, #ffb347);
-  font-size: 14px;
-  line-height: 1;
+.wf-unsaved,
+.wf-saved {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wf-unsaved {
+  color: #ffd38a;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.wf-saved {
+  color: #8dd9b0;
+  background: rgba(52, 211, 153, 0.09);
+  border: 1px solid rgba(52, 211, 153, 0.18);
 }
 
 .wf-draft-hint {
   font-size: 10px;
   color: var(--text-muted);
   white-space: nowrap;
-  opacity: 0.8;
 }
 
 .wf-badge {
@@ -970,46 +1073,140 @@ async function onStop() {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--accent);
-  border: 1px solid rgba(78, 205, 196, 0.4);
-  border-radius: 6px;
-  padding: 2px 6px;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+  border: 1px solid rgba(78, 205, 196, 0.25);
+  background: rgba(78, 205, 196, 0.07);
+  border-radius: 999px;
+  padding: 2px 7px;
 }
 
 .wf-btn {
-  background: var(--bg-dark);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  min-height: 30px;
+  background: rgba(20, 34, 51, 0.78);
+  border: 1px solid rgba(111, 137, 168, 0.24);
+  border-radius: 7px;
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 12px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 7px 10px;
+  white-space: nowrap;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
 }
 
 .wf-btn:hover:not(:disabled) {
   color: var(--text);
-  border-color: var(--accent);
+  border-color: rgba(78, 205, 196, 0.55);
+  background: rgba(28, 47, 69, 0.95);
+}
+
+.wf-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.wf-btn:focus-visible,
+.wf-select:focus-visible,
+.wf-more-menu summary:focus-visible,
+.wf-toggle input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 75%, white);
+  outline-offset: 2px;
 }
 
 .wf-btn.primary {
   color: var(--bg-darkest);
   background: var(--accent);
   border-color: var(--accent);
+  box-shadow: 0 4px 14px rgba(78, 205, 196, 0.16);
 }
 
-.wf-btn.run { color: #a7f3d0; border-color: rgba(52,211,153,.45); background: rgba(52,211,153,.09); }
+.wf-btn.primary:hover:not(:disabled) {
+  color: var(--bg-darkest);
+  background: color-mix(in srgb, var(--accent) 86%, white);
+}
+
+.wf-btn.validate { color: #a8c9ed; }
+.wf-btn.run {
+  color: #062318;
+  border-color: #48d7a0;
+  background: #48d7a0;
+  box-shadow: 0 4px 14px rgba(52, 211, 153, 0.17);
+}
+.wf-btn.run:hover:not(:disabled) { color: #041b12; border-color: #75e4ba; background: #75e4ba; }
 .wf-btn.stop { color: #fda4af; border-color: rgba(251,113,133,.5); background: rgba(251,113,133,.09); }
 
 .wf-select {
-  max-width: 150px;
-  background: var(--bg-dark);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  min-height: 30px;
+  max-width: 145px;
+  background: rgba(20, 34, 51, 0.78);
+  border: 1px solid rgba(111, 137, 168, 0.24);
+  border-radius: 7px;
   color: var(--text-secondary);
-  font-size: 12px;
-  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  padding: 6px 26px 6px 8px;
+  cursor: pointer;
+}
+
+.wf-open-select { width: 112px; }
+.wf-template-select { width: 138px; }
+.wf-run-select { width: 156px; max-width: 156px; }
+
+.wf-more-menu {
+  position: relative;
+}
+
+.wf-more-menu > summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  list-style: none;
+}
+
+.wf-more-menu > summary::-webkit-details-marker { display: none; }
+
+.wf-more-menu[open] > summary {
+  color: var(--text);
+  border-color: rgba(78, 205, 196, 0.55);
+  background: rgba(28, 47, 69, 0.95);
+}
+
+.wf-more-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  width: 190px;
+  padding: 5px;
+  border: 1px solid rgba(111, 137, 168, 0.3);
+  border-radius: 10px;
+  background: #0d1826;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+}
+
+.wf-more-popover button {
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wf-more-popover button:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.wf-more-popover button:disabled {
+  opacity: 0.38;
+  cursor: default;
 }
 
 .wf-file-input {
@@ -1017,8 +1214,23 @@ async function onStop() {
 }
 
 .wf-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.34;
   cursor: default;
+  box-shadow: none;
+}
+
+@media (max-width: 1180px) {
+  .wf-action-label { display: none; }
+  .wf-toolbar-actions { gap: 5px; }
+  .wf-action-group { padding: 3px; }
+}
+
+@media (max-width: 820px) {
+  .wf-toolbar { padding-inline: 8px; }
+  .wf-toolbar-identity { align-items: flex-start; }
+  .wf-draft-hint { display: none; }
+  .wf-action-group { max-width: 100%; }
+  .wf-run-group { order: -1; }
 }
 
 .wf-body {
@@ -1051,20 +1263,58 @@ async function onStop() {
   position: relative;
 }
 
+/* Vue Flow applies a grab cursor to every draggable node wrapper. Notes use
+   their own small drag handle, so keep the rest of the note cursor neutral. */
+.wf-canvas :deep(.vue-flow__node-note.draggable),
+.wf-canvas :deep(.vue-flow__node-note.draggable.dragging) {
+  cursor: default;
+}
+
 .wf-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--text-secondary);
   white-space: nowrap;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 5px 0 3px;
 }
 
 .wf-toggle input {
-  accent-color: var(--accent);
+  appearance: none;
+  position: relative;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid rgba(111, 137, 168, 0.38);
+  border-radius: 999px;
+  background: rgba(111, 137, 168, 0.18);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.wf-toggle input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.wf-toggle input:checked {
+  border-color: rgba(78, 205, 196, 0.6);
+  background: rgba(78, 205, 196, 0.22);
+}
+
+.wf-toggle input:checked::after {
+  background: var(--accent);
+  transform: translateX(12px);
 }
 
 .wf-context-backdrop {
@@ -1194,4 +1444,26 @@ async function onStop() {
 :deep(.wf-edge-sample .vue-flow__edge-path) { stroke-dasharray: 3 4; }
 :deep(.vue-flow__edge-text) { fill: var(--text-secondary); font-size: 9px; }
 :deep(.vue-flow__edge-textbg) { fill: var(--bg-darkest); fill-opacity: .88; }
+
+:deep(.vue-flow__minimap) {
+  background: var(--bg-darkest);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+:deep(.vue-flow__minimap-node) { stroke: none; }
+
+:deep(.vue-flow__controls) {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: none;
+}
+:deep(.vue-flow__controls-button) {
+  background: var(--bg-darkest);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+:deep(.vue-flow__controls-button:last-child) { border-bottom: none; }
+:deep(.vue-flow__controls-button:hover) { background: rgba(255, 255, 255, 0.06); }
+:deep(.vue-flow__controls-button svg) { fill: var(--text-secondary); }
 </style>
