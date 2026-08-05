@@ -14,6 +14,7 @@ import { api } from '@/shared/api/client.js'
 import { useWorkflowStore } from '../stores/workflow.js'
 import { DRAG_MIME } from '../constants.js'
 import { validateConnection } from '../validation.js'
+import { compatibleInsertions, parseWorkflowFragment } from '../fragments.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import NodeLibrary from '../components/NodeLibrary.vue'
 import NodeCard from '../components/NodeCard.vue'
@@ -53,17 +54,74 @@ onBeforeUnmount(() => {
 })
 
 function onKeydown(event) {
-  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
   const target = event.target
   if (target instanceof HTMLElement
     && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)) {
     return
   }
-  const changed = event.shiftKey ? store.redo() : store.undo()
-  if (changed) {
+  if (!(event.ctrlKey || event.metaKey)) return
+  const key = event.key.toLowerCase()
+  if (key === 'z') {
+    const changed = event.shiftKey ? store.redo() : store.undo()
+    if (changed) {
+      event.preventDefault()
+      toast.info(event.shiftKey ? 'Redone' : 'Undone')
+    }
+  } else if (key === 'c') {
+    if (copySelection()) event.preventDefault()
+  } else if (key === 'v') {
     event.preventDefault()
-    toast.info(event.shiftKey ? 'Redone' : 'Undone')
+    pasteClipboard()
+  } else if (key === 'd') {
+    const ids = selectedCanvasNodeIds()
+    if (ids.length) {
+      event.preventDefault()
+      selectCanvasNodes(store.duplicateNodes(ids).map((node) => node.id))
+    }
   }
+}
+
+let internalClipboard = null
+
+function selectedCanvasNodeIds() {
+  const ids = [...canvasSelection.value].filter((id) => store.nodeById(id))
+  if (!ids.length && store.selectedNodeId) ids.push(store.selectedNodeId)
+  return ids
+}
+
+function selectCanvasNodes(ids) {
+  canvasSelection.value = new Set(ids)
+  if (ids.length) store.selectNode(ids.at(-1))
+}
+
+function copySelection(nodeIds = selectedCanvasNodeIds()) {
+  const fragment = store.copyFragment(nodeIds)
+  if (!fragment) return false
+  internalClipboard = fragment
+  navigator.clipboard?.writeText(JSON.stringify(fragment)).catch(() => {})
+  toast.info(`${fragment.nodes.length} node${fragment.nodes.length === 1 ? '' : 's'} copied`)
+  return true
+}
+
+async function readClipboardFragment() {
+  try {
+    const text = await navigator.clipboard?.readText()
+    return parseWorkflowFragment(text) || internalClipboard
+  } catch {
+    return internalClipboard
+  }
+}
+
+async function pasteClipboard(position) {
+  const fragment = await readClipboardFragment()
+  const pasted = store.pasteFragment(fragment, { position })
+  if (!pasted.length) {
+    toast.warning('The clipboard does not contain compatible workflow nodes')
+    return []
+  }
+  selectCanvasNodes(pasted.map((node) => node.id))
+  toast.info(`${pasted.length} node${pasted.length === 1 ? '' : 's'} pasted`)
+  return pasted
 }
 
 // ── Draft autosave protection (step 2.4) ───────────────────────────────
@@ -222,6 +280,7 @@ function toConnectionShape(params) {
 }
 
 function onConnect(params) {
+  connectionCompleted = true
   const verdict = store.connectNodes(toConnectionShape(params))
   if (!verdict.ok) {
     toast.error(verdict.reason)
@@ -231,16 +290,127 @@ function onConnect(params) {
 }
 
 // ── Node context menu: manual stub attachment (step 2.5) ───────────────
-const contextMenu = ref(null) // {nodeId, x, y}
+const contextMenu = ref(null) // {kind, nodeId|edgeId, x, y, flowPosition}
+const insertionPalette = ref(null)
+let connectionStart = null
+let connectionCompleted = false
 
 function onNodeContextMenu({ event, node }) {
   event.preventDefault()
   // Fixed positioning: viewport coordinates work regardless of panel layout.
-  contextMenu.value = { nodeId: node.id, x: event.clientX, y: event.clientY }
+  contextMenu.value = { kind: 'node', nodeId: node.id, x: event.clientX, y: event.clientY }
+  insertionPalette.value = null
+}
+
+function onEdgeContextMenu({ event, edge }) {
+  event.preventDefault()
+  contextMenu.value = { kind: 'edge', edgeId: edge.id, x: event.clientX, y: event.clientY }
+  insertionPalette.value = null
+}
+
+function onPaneContextMenu(event) {
+  event.preventDefault()
+  contextMenu.value = {
+    kind: 'pane', x: event.clientX, y: event.clientY,
+    flowPosition: screenToFlowCoordinate({ x: event.clientX, y: event.clientY }),
+  }
+  insertionPalette.value = null
 }
 
 function closeContextMenu() {
   contextMenu.value = null
+}
+
+function onContextCopy() {
+  copySelection([contextMenu.value.nodeId])
+  closeContextMenu()
+}
+
+function onContextDuplicate() {
+  const copies = store.duplicateNodes([contextMenu.value.nodeId])
+  selectCanvasNodes(copies.map((node) => node.id))
+  closeContextMenu()
+}
+
+function onContextDelete() {
+  if (contextMenu.value.kind === 'edge') store.removeEdges([contextMenu.value.edgeId])
+  else store.removeNodes([contextMenu.value.nodeId])
+  closeContextMenu()
+}
+
+async function onContextPaste() {
+  const position = contextMenu.value.flowPosition
+  closeContextMenu()
+  await pasteClipboard(position)
+}
+
+function onContextDisable() {
+  const node = store.nodeById(contextMenu.value.nodeId)
+  store.setNodeDisabled(node.id, !node.disabled)
+  closeContextMenu()
+}
+
+function onContextReplace(typeKey) {
+  const nodeId = contextMenu.value.nodeId
+  const plan = store.replacementPlan(nodeId, typeKey)
+  if (!plan) return
+  if (plan.droppedEdges.length) {
+    const count = plan.droppedEdges.length
+    if (!window.confirm(`Replacing this node will remove ${count} incompatible connection${count === 1 ? '' : 's'}. Continue?`)) return
+  }
+  store.replaceNode(nodeId, typeKey)
+  closeContextMenu()
+}
+
+const replacementTypes = computed(() => {
+  if (contextMenu.value?.kind !== 'node') return []
+  const current = store.nodeById(contextMenu.value.nodeId)?.type
+  return Object.values(store.nodeTypes)
+    .filter((definition) => definition.type !== current)
+    .sort((left, right) => left.display_name.localeCompare(right.display_name))
+})
+
+function onConnectStart(params) {
+  connectionStart = params
+  connectionCompleted = false
+  insertionPalette.value = null
+}
+
+function pointerCoordinates(event) {
+  const point = event?.changedTouches?.[0] || event
+  return point && Number.isFinite(point.clientX) ? { x: point.clientX, y: point.clientY } : null
+}
+
+function onConnectEnd(event) {
+  const start = connectionStart
+  connectionStart = null
+  if (connectionCompleted || !start?.nodeId || !start.handleId) return
+  const point = pointerCoordinates(event)
+  if (!point || !event.target?.closest?.('.vue-flow__pane')) return
+  const candidates = compatibleInsertions({
+    nodeTypes: store.nodeTypes,
+    node: store.nodeById(start.nodeId),
+    handleId: start.handleId,
+    handleType: start.handleType,
+  })
+  if (!candidates.length) return
+  const palette = {
+    x: point.x, y: point.y,
+    position: screenToFlowCoordinate(point),
+    start: { ...start, portType: candidates[0].portType },
+    candidates,
+  }
+  requestAnimationFrame(() => { insertionPalette.value = palette })
+}
+
+function chooseInsertion(candidate) {
+  const palette = insertionPalette.value
+  const node = store.insertNodeAndConnect(
+    candidate.type, palette.position, palette.start, candidate.portId,
+  )
+  insertionPalette.value = null
+  if (!node) toast.error('That node could not be connected')
+  else selectCanvasNodes([node.id])
 }
 
 function onAttachSampleInputs() {
@@ -605,8 +775,12 @@ async function onStop() {
           :is-valid-connection="isValidConnection"
           fit-view-on-init
           @connect="onConnect"
+          @connect-start="onConnectStart"
+          @connect-end="onConnectEnd"
           @node-click="({ node }) => store.selectNode(node.id)"
           @node-context-menu="onNodeContextMenu"
+          @edge-context-menu="onEdgeContextMenu"
+          @pane-context-menu="onPaneContextMenu"
           @pane-click="store.clearSelection(); closeContextMenu()"
           @node-drag-stop="onNodeDragStop"
           @nodes-change="onNodesChange"
@@ -621,27 +795,68 @@ async function onStop() {
           </div>
         </VueFlow>
 
-        <!-- Node context menu: sample helpers and partial run modes. -->
+        <!-- Node, edge, and pane context menus. -->
         <template v-if="contextMenu">
           <div class="wf-context-backdrop" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu" />
           <div class="wf-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }">
-            <button class="wf-context-item" @click="onContextRun('node_with_deps')">Run node + dependencies</button>
-            <button class="wf-context-item" @click="onContextRun('node_isolated')">Run node in isolation</button>
-            <button class="wf-context-item" @click="onContextRun('from_node')">Run from node downstream</button>
-            <button
-              class="wf-context-item"
-              :disabled="!isFailedNode(contextMenu.nodeId)"
-              @click="onContextRun('retry_failed')"
-            >Retry failed node</button>
-            <button
-              class="wf-context-item"
-              :disabled="!isFailedNode(contextMenu.nodeId)"
-              @click="onContextRun('retry_failed_desc')"
-            >Retry failed + downstream</button>
-            <template v-if="!store.isStubType(store.nodeById(contextMenu.nodeId)?.type)">
-              <button class="wf-context-item" @click="onAttachSampleInputs">Attach sample inputs</button>
-              <button class="wf-context-item" @click="onAttachResultViewer">Attach result viewer</button>
+            <template v-if="contextMenu.kind === 'pane'">
+              <button class="wf-context-item" @click="onContextPaste">Paste here</button>
+              <button class="wf-context-item" :disabled="!store.nodeCount" @click="tidyUp(); closeContextMenu()">Tidy up</button>
             </template>
+            <template v-else-if="contextMenu.kind === 'edge'">
+              <button class="wf-context-item danger" @click="onContextDelete">Disconnect</button>
+            </template>
+            <template v-else>
+              <button class="wf-context-item" @click="onContextCopy">Copy</button>
+              <button class="wf-context-item" @click="onContextDuplicate">Duplicate</button>
+              <button class="wf-context-item" @click="onContextDisable">
+                {{ store.nodeById(contextMenu.nodeId)?.disabled ? 'Enable' : 'Disable' }}
+              </button>
+              <details class="wf-context-submenu">
+                <summary>Replace with…</summary>
+                <div class="wf-context-replacements">
+                  <button
+                    v-for="definition in replacementTypes"
+                    :key="definition.type"
+                    class="wf-context-item"
+                    @click="onContextReplace(definition.type)"
+                  >{{ definition.display_name }}</button>
+                </div>
+              </details>
+              <div class="wf-context-divider" />
+              <button class="wf-context-item" @click="onContextRun('node_with_deps')">Run node + dependencies</button>
+              <button class="wf-context-item" @click="onContextRun('node_isolated')">Run node in isolation</button>
+              <button class="wf-context-item" @click="onContextRun('from_node')">Run from node downstream</button>
+              <button
+                class="wf-context-item"
+                :disabled="!isFailedNode(contextMenu.nodeId)"
+                @click="onContextRun('retry_failed')"
+              >Retry failed node</button>
+              <button
+                class="wf-context-item"
+                :disabled="!isFailedNode(contextMenu.nodeId)"
+                @click="onContextRun('retry_failed_desc')"
+              >Retry failed + downstream</button>
+              <template v-if="!store.isStubType(store.nodeById(contextMenu.nodeId)?.type)">
+                <button class="wf-context-item" @click="onAttachSampleInputs">Attach sample inputs</button>
+                <button class="wf-context-item" @click="onAttachResultViewer">Attach result viewer</button>
+              </template>
+              <div class="wf-context-divider" />
+              <button class="wf-context-item danger" @click="onContextDelete">Delete</button>
+            </template>
+          </div>
+        </template>
+
+        <template v-if="insertionPalette">
+          <div class="wf-context-backdrop" @click="insertionPalette = null" @contextmenu.prevent="insertionPalette = null" />
+          <div class="wf-context-menu wf-insert-palette" :style="{ left: `${insertionPalette.x}px`, top: `${insertionPalette.y}px` }">
+            <div class="wf-context-heading">Insert compatible node</div>
+            <button
+              v-for="candidate in insertionPalette.candidates"
+              :key="`${candidate.type}:${candidate.portId}`"
+              class="wf-context-item"
+              @click="chooseInsertion(candidate)"
+            >{{ candidate.displayName }} <small>· {{ candidate.portId }}</small></button>
           </div>
         </template>
       </main>
@@ -834,6 +1049,7 @@ async function onStop() {
   padding: 4px;
   display: flex;
   flex-direction: column;
+  max-height: min(70vh, 520px);
 }
 
 .wf-context-item {
@@ -850,6 +1066,58 @@ async function onStop() {
 .wf-context-item:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text);
+}
+
+.wf-context-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wf-context-item.danger {
+  color: #fda4af;
+}
+
+.wf-context-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.wf-context-heading {
+  padding: 7px 10px 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wf-context-submenu summary {
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.wf-context-submenu summary::-webkit-details-marker { display: none; }
+
+.wf-context-replacements {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.wf-insert-palette {
+  width: 250px;
+  overflow-y: auto;
+}
+
+.wf-insert-palette small {
+  color: var(--text-muted);
 }
 
 .wf-canvas-hint {

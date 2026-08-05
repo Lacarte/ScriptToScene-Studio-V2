@@ -236,6 +236,13 @@ Commands: add, move (drag coalesced into one command), delete, connect, disconne
 Copy/paste minimal workflow fragments (works across workflows), Ctrl+D duplicate, right-click context menus, "Replace with…" preserving position/name/compatible config/connections with warning for incompatible ones (undoable). Drop-connection-on-empty-canvas → compatible-filtered palette → auto-connect.
 **Done when:** each operation has a test and is undoable.
 
+#### Step 5.2 review status — 2026-08-04
+
+- **Complete.** Selected nodes copy as versioned, document-independent workflow fragments with only internal edges; paste remaps node/edge IDs and supports positioning on another workflow. Ctrl+D duplicates a selected node or subgraph, including internal connections.
+- Node, edge, and pane context menus expose copy, paste, duplicate, enable/disable, delete/disconnect, existing run/sample actions, and replacement. Replacement retains identity, name, position, shared configuration, and type-compatible connections, and confirms before removing incompatible connections.
+- Dropping an unfinished connection on empty canvas opens a palette filtered to compatible ports and inserts plus connects the chosen node atomically. Clipboard, duplication, replacement (compatible and incompatible cases), and insert-and-connect all round-trip through undo/redo.
+- Automated verification: all 98 frontend tests pass, including 6 focused step 5.2 domain/UI tests, and the production frontend build succeeds.
+
 ### 5.3 Notes, recently used, remaining templates
 Sticky notes; recently-used section in the library; ship **Narration Only**, **Storyboard Only**, **Re-export Existing Project** templates (valid and typed).
 **Done when:** all templates validate and run.

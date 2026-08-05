@@ -4,6 +4,7 @@ import { api } from '@/shared/api/client.js'
 import { validateConnection } from '../validation.js'
 import { nodeIssues } from '../schema.js'
 import { createExecutionEventStream } from '../composables/useExecutionEvents.js'
+import { makeWorkflowFragment, parseWorkflowFragment } from '../fragments.js'
 
 /**
  * Workflow builder store — the domain model behind the canvas.
@@ -1095,30 +1096,97 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   function duplicateNode(nodeId) {
-    return executeCommand('Duplicate node', () => {
-    const source = nodeById(nodeId)
-    if (!source) return null
-    const suffix = ' copy'
-    const copyName = `${source.name.slice(0, 120 - suffix.length).trimEnd()}${suffix}`
-    const copy = {
-      id: nextNodeId(),
-      type: source.type,
-      type_version: source.type_version,
-      name: copyName,
-      position: {
-        x: Math.min(1_000_000, source.position.x + 40),
-        y: Math.min(1_000_000, source.position.y + 40),
-      },
-      configuration: plain(source.configuration),
-      disabled: source.disabled,
-      ...(source.on_error ? { on_error: plain(source.on_error) } : {}),
-      ...(source.extensions ? { extensions: plain(source.extensions) } : {}),
-    }
-    nodes.value.push(copy)
-    markDocumentDirty()
-    selectedNodeId.value = copy.id
-    return copy
+    return duplicateNodes([nodeId])[0] || null
+  }
+
+  function copyFragment(nodeIds) {
+    return makeWorkflowFragment(nodes.value, edges.value, nodeIds)
+  }
+
+  function pasteFragment(value, { position, label = 'Paste nodes' } = {}) {
+    return executeCommand(label, () => {
+      const fragment = parseWorkflowFragment(value)
+      if (!fragment?.nodes.length) return []
+      if (fragment.nodes.some((node) => {
+        const definition = nodeTypes.value[node.type]
+        return !definition || definition.type_version !== node.type_version
+      })) return []
+
+      const minX = Math.min(...fragment.nodes.map((node) => node.position?.x ?? 0))
+      const minY = Math.min(...fragment.nodes.map((node) => node.position?.y ?? 0))
+      const offsetX = position ? position.x - minX : 40
+      const offsetY = position ? position.y - minY : 40
+      const ids = new Map()
+      const pasted = fragment.nodes.map((source) => {
+        const copy = plain(source)
+        copy.id = nextNodeId()
+        copy.position = {
+          x: Math.max(-1_000_000, Math.min(1_000_000, (source.position?.x ?? 0) + offsetX)),
+          y: Math.max(-1_000_000, Math.min(1_000_000, (source.position?.y ?? 0) + offsetY)),
+        }
+        ids.set(source.id, copy.id)
+        return copy
+      })
+      nodes.value.push(...pasted)
+      for (const source of fragment.edges) {
+        if (!ids.has(source.source_node) || !ids.has(source.target_node)) continue
+        edges.value.push({
+          ...plain(source),
+          id: nextEdgeId(),
+          source_node: ids.get(source.source_node),
+          target_node: ids.get(source.target_node),
+        })
+      }
+      markDocumentDirty()
+      selectedNodeId.value = pasted.at(-1)?.id || null
+      return pasted
     })
+  }
+
+  function duplicateNodes(nodeIds) {
+    const fragment = copyFragment(nodeIds)
+    if (!fragment) return []
+    for (const source of fragment.nodes) {
+      const suffix = ' copy'
+      source.name = `${source.name.slice(0, 120 - suffix.length).trimEnd()}${suffix}`
+    }
+    return pasteFragment(fragment, { label: nodeIds.length === 1 ? 'Duplicate node' : 'Duplicate nodes' })
+  }
+
+  function replacementPlan(nodeId, typeKey) {
+    const node = nodeById(nodeId)
+    const definition = nodeTypes.value[typeKey]
+    if (!node || !definition || node.type === typeKey) return null
+    const defaults = defaultsFor(typeKey)
+    const compatible = Object.fromEntries(
+      Object.keys(defaults)
+        .filter((name) => Object.hasOwn(node.configuration || {}, name))
+        .map((name) => [name, plain(node.configuration[name])]),
+    )
+    const candidate = {
+      ...plain(node), type: typeKey, type_version: definition.type_version,
+      configuration: { ...defaults, ...compatible },
+    }
+    const keptEdges = []
+    const droppedEdges = []
+    const inputCounts = new Map()
+    for (const edge of edges.value) {
+      if (edge.source_node !== nodeId && edge.target_node !== nodeId) continue
+      let compatible = true
+      if (edge.source_node === nodeId) {
+        compatible = endpointPortType(candidate, 'outputs', edge.source_port)
+          === endpointPortType(nodeById(edge.target_node), 'inputs', edge.target_port)
+      } else {
+        const port = (definition.inputs || []).find((item) => item.id === edge.target_port)
+        const count = inputCounts.get(edge.target_port) || 0
+        compatible = endpointPortType(nodeById(edge.source_node), 'outputs', edge.source_port)
+          === endpointPortType(candidate, 'inputs', edge.target_port)
+          && Boolean(port?.multiple || count === 0)
+        if (compatible) inputCounts.set(edge.target_port, count + 1)
+      }
+      ;(compatible ? keptEdges : droppedEdges).push(edge)
+    }
+    return { keptEdges: plain(keptEdges), droppedEdges: plain(droppedEdges) }
   }
 
   function replaceNode(nodeId, typeKey, { configuration, keepEdges = true } = {}) {
@@ -1127,12 +1195,14 @@ export const useWorkflowStore = defineStore('workflow', () => {
       const def = nodeTypes.value[typeKey]
       if (!node || !def || node.type === typeKey) return null
       const previous = plain(node.configuration || {})
+      const previousEdges = plain(edges.value)
       const defaults = defaultsFor(typeKey)
       const compatible = Object.fromEntries(
         Object.keys(defaults)
           .filter((name) => Object.hasOwn(previous, name))
           .map((name) => [name, previous[name]]),
       )
+      const plan = replacementPlan(nodeId, typeKey)
       node.type = typeKey
       node.type_version = def.type_version
       node.configuration = configuration === undefined
@@ -1141,16 +1211,38 @@ export const useWorkflowStore = defineStore('workflow', () => {
       node.on_error = { policy: 'stop' }
       edges.value = edges.value.filter((edge) => {
         if (!keepEdges && (edge.source_node === nodeId || edge.target_node === nodeId)) return false
-        if (edge.source_node === nodeId) {
-          return (def.outputs || []).some((port) => port.id === edge.source_port)
-        }
-        if (edge.target_node === nodeId) {
-          return (def.inputs || []).some((port) => port.id === edge.target_port)
+        if (edge.source_node === nodeId || edge.target_node === nodeId) {
+          return plan.keptEdges.some((kept) => kept.id === edge.id)
         }
         return true
       })
-      markNodesStale([nodeId])
+      markNodesStale([nodeId], previousEdges)
       markDocumentDirty()
+      return node
+    })
+  }
+
+  function insertNodeAndConnect(typeKey, position, start, candidatePort) {
+    return executeCommand('Insert connected node', () => {
+      const wasDirty = dirty.value
+      const previousStale = plain(staleNodeIds.value)
+      const node = addNode(typeKey, position)
+      if (!node) return null
+      if (nodeTypes.value[typeKey]?.category === 'testing') {
+        node.configuration.port_type = start.portType
+        if (typeKey === 'stub.input') node.configuration.payload = samplePayloadFor(start.portType)
+      }
+      const connection = start.handleType === 'target'
+        ? { sourceNode: node.id, sourcePort: candidatePort, targetNode: start.nodeId, targetPort: start.handleId }
+        : { sourceNode: start.nodeId, sourcePort: start.handleId, targetNode: node.id, targetPort: candidatePort }
+      const verdict = connectNodes(connection)
+      if (!verdict.ok) {
+        nodes.value = nodes.value.filter((item) => item.id !== node.id)
+        dirty.value = wasDirty
+        staleNodeIds.value = previousStale
+        return null
+      }
+      selectedNodeId.value = node.id
       return node
     })
   }
@@ -1164,7 +1256,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     variables, settings, extensions, createdAt, updatedAt, dirty, nodeCount,
     workflowList, templates, persistenceLoading, persistenceError,
     addNode, moveNode, moveNodes, renameNode, removeNodes, removeEdges, connectNodes,
-    replaceNode,
+    replaceNode, replacementPlan, insertNodeAndConnect,
     setViewport, nodeById, defaultsFor, toDocument, applyDocument, newWorkflow,
     refreshWorkflowList, loadTemplates, openWorkflow, saveWorkflow, saveAs,
     importDocument, applyTemplate,
@@ -1172,7 +1264,8 @@ export const useWorkflowStore = defineStore('workflow', () => {
     draftSavedAt, markDocumentDirty, flushDraft, peekDraft, clearDraft, recoverDraft,
     // selection + inspector
     selectedNodeId, selectedNode, selectNode, clearSelection,
-    updateNodeConfig, updateNodeErrorPolicy, setNodeDisabled, duplicateNode,
+    updateNodeConfig, updateNodeErrorPolicy, setNodeDisabled, duplicateNode, duplicateNodes,
+    copyFragment, pasteFragment,
     // undo/redo command stack (step 5.1)
     canUndo, canRedo, undoLabel, redoLabel, undo, redo, clearCommandHistory,
     // validation (step 2.2)
