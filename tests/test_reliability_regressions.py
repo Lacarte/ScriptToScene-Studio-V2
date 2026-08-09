@@ -253,6 +253,57 @@ class ReliabilityRegressionTests(unittest.TestCase):
 
         self.assertEqual(calls, ["assets", "assemble", "export"])
 
+    def test_safe_json_write_retries_windows_sharing_violations(self):
+        """WinError 5/32 on ``os.replace`` must not fail a concurrent writer.
+
+        Step 15.2's first validation red was a full-video template run that
+        hit this race while persisting an execution record mid-node. The
+        atomic write now retries a bounded number of times so a transient
+        share (reader, antivirus, indexer) clears instead of aborting the
+        workflow. Real permission failures still propagate.
+        """
+        from studio import io_utils
+
+        target = os.path.join(self._make_tempdir("test_safe_json_write_"), "ex.json")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write('{"version": 1}')
+
+        attempts = {"n": 0}
+        real_replace = os.replace
+
+        def flaky_replace(src, dst):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise PermissionError(5, "Access is denied")
+            real_replace(src, dst)
+
+        with patch.object(io_utils, "_REPLACE_DELAY", 0), \
+             patch.object(io_utils.os, "name", "nt"), \
+             patch.object(io_utils.os, "replace", side_effect=flaky_replace):
+            io_utils.safe_json_write(target, {"version": 2}, indent=2)
+
+        self.assertEqual(attempts["n"], 3)
+        with open(target, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle), {"version": 2})
+
+    def test_safe_json_write_propagates_exhausted_permission_errors(self):
+        """A permanent sharing violation still surfaces after the retry budget."""
+        from studio import io_utils
+
+        target = os.path.join(self._make_tempdir("test_safe_json_fail_"), "ex.json")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write("{}")
+
+        with patch.object(io_utils, "_REPLACE_DELAY", 0), \
+             patch.object(io_utils, "_REPLACE_ATTEMPTS", 2), \
+             patch.object(io_utils.os, "name", "nt"), \
+             patch.object(
+                 io_utils.os, "replace",
+                 side_effect=PermissionError(5, "Access is denied"),
+             ):
+            with self.assertRaises(PermissionError):
+                io_utils.safe_json_write(target, {"ok": False})
+
 
 if __name__ == "__main__":
     unittest.main()
