@@ -112,7 +112,10 @@ class HubSurfaceTests(unittest.TestCase):
         self.assertEqual(list(payload), list(DOMAINS))
         self.assertEqual(payload['tts']['selected'], 'kokoro')
         self.assertIsNone(payload['animator']['selected'])
-        self.assertEqual([p['id'] for p in payload['script']['providers']], ['builtin'])
+        self.assertEqual(
+            [p['id'] for p in payload['script']['providers']],
+            ['builtin', 'random_template'],
+        )
         self.assertEqual([p['id'] for p in payload['scene_blueprint']['providers']], ['builtin'])
 
     def test_shipped_domains_resolve_their_providers(self):

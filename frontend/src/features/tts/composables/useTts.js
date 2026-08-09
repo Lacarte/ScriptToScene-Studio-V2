@@ -265,12 +265,17 @@ function copyPromptPlain() {
   return navigator.clipboard.writeText(plain)
 }
 
-function randomStory() {
-  const story = pickRandomStory()
-  if (!story) return ''
-  prompt.value = story
-  persist('sts-tts-prompt', prompt.value)
-  return prompt.value
+async function randomStory() {
+  try {
+    const story = await pickRandomStory()
+    if (!story) return ''
+    prompt.value = story
+    persist('sts-tts-prompt', prompt.value)
+    return prompt.value
+  } catch (e) {
+    console.error('random story failed', e)
+    return ''
+  }
 }
 
 // ── Generate ──

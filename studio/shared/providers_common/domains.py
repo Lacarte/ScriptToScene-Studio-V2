@@ -62,6 +62,8 @@ DOMAINS: dict[str, DomainSpec] = {
             providers_base=_base("studio", "story", "providers"),
             default_provider="builtin",
             capability_vocabulary=_caps("structured_sections", "language_select", "offline"),
+            request_model="studio.story.providers.contract:ScriptRequest",
+            result_model="studio.story.providers.contract:ScriptResultPayload",
         ),
         DomainSpec(
             id="scene_blueprint",

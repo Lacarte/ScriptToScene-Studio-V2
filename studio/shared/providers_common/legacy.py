@@ -136,6 +136,70 @@ def _provenance_from_job_meta(job_meta: Mapping[str, Any], *, domain: str) -> Pr
     )
 
 
+# -- script (contracts.md §32.1) --------------------------------------------
+
+
+def script_document_to_result(
+    document: Mapping[str, Any],
+    *,
+    document_ref: str,
+    provider_id: str = "",
+    provider_version: str = "",
+) -> ProviderResult:
+    """A legacy `story.json` / `generate_story` dict -> §32.1 envelope.
+
+    Maps `story_text→script_text`, `metadata.word_count→word_count`,
+    `metadata.estimated_duration→estimated_duration_s`. Everything else in
+    today's metadata moves to envelope `metadata`; the hardcoded
+    `"provider": "gemini"` label is dropped because provenance owns identity.
+    """
+    data = dict(document or {})
+    meta = dict(data.get("metadata") or {})
+    script_text = str(data.get("script_text") or data.get("story_text") or "")
+    sections = data.get("sections") if isinstance(data.get("sections"), Mapping) else {}
+    word_count = int(
+        data.get("word_count")
+        if data.get("word_count") is not None
+        else meta.get("word_count") or len(script_text.split())
+    )
+    estimated = int(
+        data.get("estimated_duration_s")
+        if data.get("estimated_duration_s") is not None
+        else meta.get("estimated_duration") or 0
+    )
+    language = str(
+        data.get("language")
+        or meta.get("language")
+        or "english"
+    )
+    leftover = {
+        key: value
+        for key, value in meta.items()
+        if key
+        not in {
+            "word_count",
+            "estimated_duration",
+            "language",
+            "provider",  # superseded by provenance.provider_id (P33)
+        }
+    }
+    return ProviderResult(
+        domain="script",
+        provider_id=provider_id or str(meta.get("provider") or ""),
+        provider_version=provider_version,
+        payload={
+            "script_text": script_text,
+            "sections": {str(k): str(v) for k, v in sections.items()},
+            "word_count": word_count,
+            "estimated_duration_s": estimated,
+            "language": language,
+            "document_ref": document_ref,
+        },
+        artifact_refs=dedupe_refs([document_ref]),
+        metadata=leftover,
+    )
+
+
 # -- storyboard (contracts.md §32.4) ----------------------------------------
 
 # `scene_statuses` values use these strings today; `done` appears in the legacy

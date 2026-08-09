@@ -13,6 +13,18 @@
       "bytes": 283,
       "sha256": "ea80a3bb6a7512eb473a1b57538ada8b0ec0724e3c1a3dd94b9bcf6c9063b60b"
     },
+    "script/random_template/expected_result.json": {
+      "bytes": 1779,
+      "sha256": "0e30760788404b9bb028e106b967479d1f5471dc7c6c5913d0429ae9019dc180"
+    },
+    "script/random_template/raw_response.json": {
+      "bytes": 736,
+      "sha256": "9a1102ca2efd7a04ed84117e6109ccfa8f6b65e3d5bfe5b8aaa57cc7d29f867a"
+    },
+    "script/random_template/request.json": {
+      "bytes": 196,
+      "sha256": "4b884dc2fc799b49e673f7a8e1cea05cd328f969a84de63e2fe2167ce637bc4c"
+    },
     "storyboard/wavespeed_webhook/expected_result.json": {
       "bytes": 1766,
       "sha256": "567971144b3bf91a955d451158ef2d72a452f659f6606f0ea03e608895299726"

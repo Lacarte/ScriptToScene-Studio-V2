@@ -47,6 +47,38 @@ def _visual(domain, provider_id, manifest_ref, version):
     return build
 
 
+def _script_random_template(raw):
+    """Hand-written catalog pick -> §32.1 envelope (step 13.1)."""
+    from studio.story.prompts import WORDS_PER_SECOND
+
+    text = str(raw.get("text") or "")
+    words = len(text.split())
+    document = {
+        "story_text": text,
+        "sections": {},
+        "metadata": {
+            "preset_style": "cinematic",
+            "language": "english",
+            "story_category": raw.get("type") or "",
+            "story_tone": "",
+            "duration": 45,
+            "word_count": words,
+            "estimated_duration": round(words / WORDS_PER_SECOND),
+            "template_type": raw.get("type") or "",
+            "template_styles": ",".join(raw.get("styles") or []),
+            "template_index": raw.get("index"),
+            "seed": raw.get("seed"),
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        },
+    }
+    return legacy.script_document_to_result(
+        document,
+        document_ref="stories/pm_SAMPLE/story.json",
+        provider_id="random_template",
+        provider_version="1.0.0",
+    )
+
+
 BUILDERS = {
     ("tts", "kokoro"): _tts_kokoro,
     ("storyboard", "wavespeed_webhook"): _visual(
@@ -55,6 +87,7 @@ BUILDERS = {
     ("animator", "kie_ai"): _visual(
         "animator", "kie_ai", "animator/pm_SAMPLE/grabber_job.json", "1.0.0"
     ),
+    ("script", "random_template"): _script_random_template,
 }
 
 

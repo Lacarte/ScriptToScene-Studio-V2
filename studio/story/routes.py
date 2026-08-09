@@ -2,6 +2,7 @@
 
 Provides:
   POST /api/story/generate       — generate a story via n8n/Gemini webhook
+  POST /api/story/random         — pick a curated sample from random_template
   GET  /api/story/webhook-url    — return the configured story webhook URL
   GET  /api/story/history        — list generated stories
   GET  /api/story/<project_id>   — get a specific story
@@ -192,6 +193,68 @@ def get_webhook_url():
 def get_categories():
     """Return available story categories."""
     return jsonify(list(dict.fromkeys([*STORY_CATEGORIES, *NICHE_CATEGORIES])))
+
+
+@story_bp.route("/api/story/random", methods=["POST"])
+def random_template_story():
+    """Pick a curated sample narration from the `random_template` provider.
+
+    Replaces the frontend-local `RANDOM_STORIES` catalog and anti-repeat rule
+    (step 13.1). Body fields are optional:
+
+      - category: template type label (e.g. "Anecdote"); empty = full catalog
+      - seed: integer for deterministic tests (skips anti-repeat)
+
+    Returns the same `{text, type, styles}` shape the UI badge/recommended-
+    styles row already consumes, plus `word_count` and the catalog `index`.
+    """
+    body = request.get_json(silent=True) or {}
+    if body and not isinstance(body, dict):
+        return jsonify({"error": {"code": "INVALID_REQUEST", "message": "Expected JSON object"}}), 400
+
+    seed = body.get("seed")
+    if seed is not None and seed != "":
+        try:
+            seed = int(seed)
+        except (TypeError, ValueError):
+            return jsonify({
+                "error": {"code": "INVALID_REQUEST", "message": "seed must be an integer"}
+            }), 400
+    else:
+        seed = None
+
+    category = (body.get("category") or "").strip() or None
+
+    try:
+        from studio.shared.providers_common.hub import hub
+
+        provider = hub.create("script", "random_template")
+        if provider is None:
+            return jsonify({
+                "error": {
+                    "code": "PROVIDER_UNAVAILABLE",
+                    "message": "The random_template script provider is not registered",
+                }
+            }), 503
+        picked = provider.pick(category=category, seed=seed)
+    except Exception:
+        logger.exception("random_template pick failed")
+        return jsonify({
+            "error": {
+                "code": "PROVIDER_FAILED",
+                "message": "Failed to pick a random template",
+            }
+        }), 500
+
+    return jsonify({
+        "text": picked["text"],
+        "type": picked.get("type") or "",
+        "styles": list(picked.get("styles") or []),
+        "word_count": picked.get("word_count") or len(str(picked["text"]).split()),
+        "index": picked.get("index"),
+        "seed": picked.get("seed"),
+        "provider_id": "random_template",
+    })
 
 
 @story_bp.route("/api/story/generate", methods=["POST"])

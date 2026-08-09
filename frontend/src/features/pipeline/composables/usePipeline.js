@@ -368,13 +368,17 @@ async function regenerateAssets(projectId) {
   }
 }
 
-function randomStory() {
+async function randomStory() {
   const toast = useToast()
   const { text } = usePipelineForm()
-  const story = pickRandomStory()
-  if (!story) return
-  text.value = story
-  toast.success('Random story loaded')
+  try {
+    const story = await pickRandomStory()
+    if (!story) return
+    text.value = story
+    toast.success('Random story loaded')
+  } catch (e) {
+    toast.error(e.message || 'Failed to load random story')
+  }
 }
 
 function loadFromHistory(index) {

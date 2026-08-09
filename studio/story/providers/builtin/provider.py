@@ -6,13 +6,16 @@ provider writes is byte-identical to the one the pre-conversion adapter wrote
 (the Phase 12 bridging rule; asserted in `tests/test_workflow_provider_nodes.py`).
 
 Phase 13 replaces this package with the real `gemini` provider behind the same
-`generate()` seam.
+`generate()` seam. Step 13.1 subclasses `ScriptProvider` so the bridge already
+sits on the domain interface.
 """
 
 from typing import Any, Mapping
 
+from studio.story.providers.base import ScriptProvider
 
-class BuiltinScriptProvider:
+
+class BuiltinScriptProvider(ScriptProvider):
     """Passthrough over the importable story service."""
 
     def generate(self, configuration: Mapping[str, Any], *, project_id: str) -> dict:

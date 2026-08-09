@@ -47,9 +47,10 @@ function handleCopy() {
     .catch(() => toast.error('Copy failed'))
 }
 
-function handleRandom() {
-  tts.randomStory()
-  toast.info('Random story loaded')
+async function handleRandom() {
+  const text = await tts.randomStory()
+  if (text) toast.info('Random story loaded')
+  else toast.error('Failed to load random story')
 }
 
 // ── Speed ──
