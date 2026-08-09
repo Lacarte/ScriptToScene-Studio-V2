@@ -7,7 +7,7 @@ set "PYTHONIOENCODING=utf-8"
 :: From a terminal:
 ::   run.bat --status
 ::   run.bat --phase 2
-::   run.bat --until 3.3 --builder codex --fixer codex --reviewer codex
+::   run.bat --until 3.3 --builder claude --coding-fallback agy --reviewer codex
 ::   run.bat --steps 1 --no-push
 cd /d "%~dp0..\.."
 title ScriptToScene Studio - Loop Engineering
@@ -24,40 +24,40 @@ if not "%~1"=="" goto :with_args
 echo ========================================================================
 echo [run.bat] Choose the agents for this run:
 echo.
-echo   [1] Codex builds, fixes, and reviews
-echo   [2] Claude builds, fixes, and reviews
-echo   [3] Codex builds; Claude fixes and reviews
-echo   [4] Claude builds; Codex fixes and reviews
+echo   [1] Claude codes; AGY takes over at the limit; Codex reviews
+echo   [2] Codex builds, fixes, and reviews
+echo   [3] Claude builds, fixes, and reviews
+echo   [4] AGY codes; Codex reviews
 echo   [Q] Cancel
 echo.
 choice /c 1234Q /n /m "Select 1, 2, 3, 4, or Q: "
 if errorlevel 5 goto :cancelled
-if errorlevel 4 goto :claude_build_codex_fix
-if errorlevel 3 goto :codex_build_claude_fix
-if errorlevel 2 goto :all_claude
+if errorlevel 4 goto :agy_code_codex_review
+if errorlevel 3 goto :all_claude
+if errorlevel 2 goto :all_codex
+
+:default_profile
+set "PROFILE=Claude codes; AGY limit fallback; Codex reviews"
+set "RUNARGS=--by-phase --builder claude --fixer claude --coding-fallback agy --reviewer codex"
+set "USES_CLAUDE=1"
+goto :launch
 
 :all_codex
 set "PROFILE=Codex builds, fixes, and reviews"
-set "RUNARGS=--by-phase --builder codex --fixer codex --reviewer codex"
+set "RUNARGS=--by-phase --builder codex --fixer codex --coding-fallback none --reviewer codex"
 set "USES_CLAUDE=0"
 goto :launch
 
 :all_claude
 set "PROFILE=Claude builds, fixes, and reviews"
-set "RUNARGS=--by-phase --builder claude --fixer claude --reviewer claude"
+set "RUNARGS=--by-phase --builder claude --fixer claude --coding-fallback none --reviewer claude"
 set "USES_CLAUDE=1"
 goto :launch
 
-:codex_build_claude_fix
-set "PROFILE=Codex builds; Claude fixes and reviews"
-set "RUNARGS=--by-phase --builder codex --fixer claude --reviewer claude"
-set "USES_CLAUDE=1"
-goto :launch
-
-:claude_build_codex_fix
-set "PROFILE=Claude builds; Codex fixes and reviews"
-set "RUNARGS=--by-phase --builder claude --fixer codex --reviewer codex"
-set "USES_CLAUDE=1"
+:agy_code_codex_review
+set "PROFILE=AGY builds and fixes; Codex reviews"
+set "RUNARGS=--by-phase --builder agy --fixer agy --coding-fallback none --reviewer codex"
+set "USES_CLAUDE=0"
 goto :launch
 
 :launch

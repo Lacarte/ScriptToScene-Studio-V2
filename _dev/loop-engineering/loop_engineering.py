@@ -17,7 +17,8 @@ Usage (from the repo root, or via run.bat in this folder):
     python _dev/loop-engineering/loop_engineering.py --steps 1
     python _dev/loop-engineering/loop_engineering.py --dry-run --phase 2
     python _dev/loop-engineering/loop_engineering.py --mark-done-through 2.3
-Options: --builder codex|claude  --fixer codex|claude  --reviewer codex|claude|none
+Defaults: Claude builds and fixes, AGY takes over if Claude reaches a usage
+limit, and Codex reviews. Roles remain configurable from the command line.
 """
 
 from __future__ import annotations
@@ -193,6 +194,8 @@ AGENT_BLOCKERS = (
     "credit balance is too low",
 )
 
+AGENT_CHOICES = ("claude", "agy", "codex")
+
 
 def run_logged(cmd, log_file: Path, cwd=ROOT, timeout=AGENT_TIMEOUT_S) -> LoggedResult:
     """Run a command streaming combined output to console + log file."""
@@ -249,7 +252,7 @@ def agent_run_ok(result: LoggedResult, state: dict, scope: str, stage: str) -> b
     # A blocker phrase only counts when the agent actually died with it: a
     # healthy long run can QUOTE "you've hit your limit" (docs, log echoes)
     # without being limited — that false positive halted step 9.5 once.
-    blocker_fatal = result.blocker and (result.returncode != 0 or result.output_lines < 80)
+    blocker_fatal = agent_limit_reached(result)
     if blocker_fatal:
         detail = f"{stage} blocked: {result.blocker}"
     elif result.returncode != 0:
@@ -261,6 +264,30 @@ def agent_run_ok(result: LoggedResult, state: dict, scope: str, stage: str) -> b
     record(state, scope, "halt", detail)
     say(f"HALT — {detail}. This work remains incomplete and is safe to resume.", icon="✗")
     return False
+
+
+def agent_limit_reached(result: LoggedResult) -> bool:
+    """Return whether an invocation failed because its account was limited."""
+    return bool(result.blocker and (result.returncode != 0 or result.output_lines < 80))
+
+
+def run_agent(agent: str, prompt: str, log_file: Path, *, fallback: str = "none",
+              fallback_state: dict | None = None) -> LoggedResult:
+    """Run a coding agent and make a limit-triggered fallback sticky for the run."""
+    if fallback_state and fallback_state.get("active") and fallback != "none":
+        say(f"coding fallback is active — launching {fallback} instead of {agent}")
+        agent = fallback
+    result = run_logged(agent_cmd(agent, prompt), log_file)
+    if fallback != "none" and fallback != agent and agent_limit_reached(result):
+        say(f"{agent} reached its credit/usage limit — switching coding work to {fallback} "
+            "for the rest of this run",
+            icon="!")
+        if fallback_state is not None:
+            fallback_state["active"] = True
+        with log_file.open("a", encoding="utf-8") as log:
+            log.write(f"\n===== LIMIT FALLBACK :: {agent} -> {fallback}\n")
+        return run_logged(agent_cmd(fallback, prompt), log_file)
+    return result
 
 
 def unfinished_phase_baselines(state: dict) -> dict[int, str]:
@@ -285,6 +312,8 @@ def ensure_agents_available(args) -> None:
     selected = {args.builder, args.fixer}
     if args.reviewer != "none":
         selected.add(args.reviewer)
+    if args.coding_fallback != "none":
+        selected.add(args.coding_fallback)
     missing = sorted(agent for agent in selected if shutil.which(agent) is None)
     if missing:
         names = ", ".join(missing)
@@ -397,7 +426,12 @@ def agent_cmd(agent: str, prompt: str) -> str:
     escaped = prompt.replace('"', "'")
     if agent == "codex":
         return f'codex exec "{escaped}"'
-    return f'claude -p --permission-mode acceptEdits "{escaped}"'
+    if agent == "claude":
+        return f'claude -p --permission-mode acceptEdits "{escaped}"'
+    if agent == "agy":
+        return (f'agy --mode accept-edits --dangerously-skip-permissions '
+                f'--print-timeout 60m -p "{escaped}"')
+    raise ValueError(f"Unsupported agent: {agent}")
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +461,8 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
     say(f"stage 1/4 EXECUTE — launching the builder agent ({args.builder}) with the "
         f"step description + done-when criteria; it will implement step {step.id}", icon="▶")
     stage = time.monotonic()
-    result = run_logged(agent_cmd(args.builder, execute_prompt(step)), log_file)
+    result = run_agent(args.builder, execute_prompt(step), log_file,
+                       fallback=args.coding_fallback, fallback_state=args.fallback_state)
     say(f"builder agent finished in {elapsed(stage)}")
     if not agent_run_ok(result, state, step.id, "builder agent"):
         return False
@@ -453,7 +488,8 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
         record(state, step.id, "validation_red", detail)
         stage = time.monotonic()
         fix_baseline = head_commit()
-        result = run_logged(agent_cmd(args.fixer, fix_prompt(step, detail)), log_file)
+        result = run_agent(args.fixer, fix_prompt(step, detail), log_file,
+                           fallback=args.coding_fallback, fallback_state=args.fallback_state)
         say(f"fixer finished in {elapsed(stage)} — re-validating")
         if not agent_run_ok(result, state, step.id, "validation fixer"):
             return False
@@ -489,7 +525,8 @@ def run_step(step: Step, state: dict, args, *, review: bool = True, push: bool =
         if not ok:
             say("reviewer broke the board — one repair pass", icon="✗")
             record(state, step.id, "review_red", detail)
-            result = run_logged(agent_cmd(args.fixer, fix_prompt(step, detail)), log_file)
+            result = run_agent(args.fixer, fix_prompt(step, detail), log_file,
+                               fallback=args.coding_fallback, fallback_state=args.fallback_state)
             if not agent_run_ok(result, state, step.id, "post-review fixer"):
                 return False
             if working_tree_dirty():
@@ -566,7 +603,8 @@ def run_phase(phase: int, steps: list[Step], plan: Plan, state: dict, args,
             say("phase review left the board RED — one repair pass", icon="✗")
             record(state, f"phase-{phase}", "review_red", detail)
             repair_step = (steps or plan.phase_steps(phase))[-1]
-            result = run_logged(agent_cmd(args.fixer, fix_prompt(repair_step, detail)), log_file)
+            result = run_agent(args.fixer, fix_prompt(repair_step, detail), log_file,
+                               fallback=args.coding_fallback, fallback_state=args.fallback_state)
             if not agent_run_ok(result, state, f"phase-{phase}", "phase repair agent"):
                 return False
             if working_tree_dirty():
@@ -630,16 +668,21 @@ def main() -> None:
     ap.add_argument("--until", help="run through this step id (e.g. 2.5)")
     ap.add_argument("--steps", type=int, help="run at most N steps")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
-    ap.add_argument("--builder", choices=["codex", "claude"], default="codex",
-                    help="agent used to implement steps (default: codex)")
-    ap.add_argument("--fixer", choices=["codex", "claude"], default="codex",
-                    help="agent used to diagnose and repair failures (default: codex)")
-    ap.add_argument("--reviewer", choices=["codex", "claude", "none"], default="codex")
+    ap.add_argument("--builder", choices=AGENT_CHOICES, default="claude",
+                    help="agent used to implement steps (default: claude)")
+    ap.add_argument("--fixer", choices=AGENT_CHOICES, default="claude",
+                    help="agent used to diagnose and repair failures (default: claude)")
+    ap.add_argument("--coding-fallback", choices=[*AGENT_CHOICES, "none"], default="agy",
+                    help="retry builder/fixer work with this agent when the selected agent "
+                         "hits a credit or usage limit (default: agy)")
+    ap.add_argument("--reviewer", choices=[*AGENT_CHOICES, "none"], default="codex",
+                    help="agent used for adversarial review (default: codex)")
     ap.add_argument("--max-fix-attempts", type=int, default=3)
     ap.add_argument("--no-push", action="store_true")
     ap.add_argument("--mark-done-through", metavar="STEP", help="mark all steps up to STEP as done")
     ap.add_argument("--sync-git", action="store_true", help="merge steps found in git log into done state")
     args = ap.parse_args()
+    args.fallback_state = {"active": False}
 
     plan = parse_plan(PLAN_PATH.read_text(encoding="utf-8"))
     state = load_state()
@@ -686,7 +729,8 @@ def main() -> None:
         return
 
     if args.dry_run:
-        print(f"Agents: builder={args.builder}, fixer={args.fixer}, reviewer={args.reviewer}")
+        print(f"Agents: builder={args.builder}, fixer={args.fixer}, "
+              f"coding fallback={args.coding_fallback}, reviewer={args.reviewer}")
         if args.by_phase:
             print("Would run, phase by phase (build all steps, then one phase review):")
             for phase in phase_numbers:

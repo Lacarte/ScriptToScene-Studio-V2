@@ -17,8 +17,10 @@ selected phase or step range is complete.
 ## Quick start
 
 Double-click `run.bat`, choose an agent profile, and run all remaining work
-phase by phase. Four profiles are available: all Codex, all Claude, Codex build
-with Claude fix/review, or Claude build with Codex fix/review. The window prints
+phase by phase. The first (and command-line default) profile uses Claude for
+coding, automatically retries limit-blocked coding tasks with AGY, and uses
+Codex for review. All-Codex, all-Claude, and AGY-code/Codex-review profiles are
+also available. The window prints
 the selected roles, current phase, step, and stage, and stays open with the final
 exit code. Agent output and idle-process heartbeats appear in the main window.
 
@@ -31,7 +33,7 @@ _dev\loop-engineering\run.bat --all               &:: everything, step-level cyc
 _dev\loop-engineering\run.bat --by-phase          &:: everything, PHASE-level cycles
 ```
 
-`--by-phase` is the "one shot" mode: Codex builds every step of a phase
+`--by-phase` is the "one shot" mode: the selected builder handles every step of a phase
 (each still validated individually so failures can't compound), then the
 reviewer audits + smoke-tests the **whole phase's commits** in one pass and
 fixes what it finds — only then does the loop advance to the next phase.
@@ -39,19 +41,20 @@ fixes what it finds — only then does the loop advance to the next phase.
 ## How a step runs
 
 1. **Guard** — dirty working tree is committed first, so every cycle starts clean.
-2. **Execute** — `codex exec` gets the step's full
+2. **Execute** — Claude gets the step's full
    description, its *Done when* criteria, and the working agreements.
 3. **Validate** — the orchestrator itself runs `pytest`, `npm run test`, and
    `npm run build`. Agent claims are never trusted.
-4. **Correct** — while red: Codex receives a fixer prompt with the failure tail, up to
+4. **Correct** — while red: Claude receives a fixer prompt with the failure tail, up to
    `--max-fix-attempts` (default 3). Still red → **halt** with a log pointer.
 5. **Review** — Codex audits exactly that
    step's commit range, fixes what it finds; the board is re-validated.
 6. **Done** — step recorded in `runtime/state.json`, pushed (unless `--no-push`).
 
-Agent quota/rate-limit messages, nonzero exits, timeouts, silent exits, and
-builder/fixer runs that produce no changes are hard failures. The loop halts
-without marking that work complete. An interrupted phase review is shown as
+Claude quota/rate-limit messages during builder or fixer work trigger one retry
+with AGY. Other agent failures, an unsuccessful AGY fallback, timeouts, silent
+exits, and builder/fixer runs that produce no changes are hard failures. The loop
+halts without marking that work complete. An interrupted phase review is shown as
 `REVIEW INCOMPLETE` and is resumed before later phases on the next phase-mode run.
 
 ## State

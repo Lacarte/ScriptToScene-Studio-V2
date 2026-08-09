@@ -61,8 +61,10 @@ commits** in one pass and fixes what it finds — only then does the loop
 advance to the next phase.
 
 Agents are selectable per role — `--builder`, `--fixer`, `--reviewer`, each
-`codex|claude` (`--reviewer none` to skip review). Defaults: codex for all
-three. Mixing vendors (one builds, the other reviews) gives a genuinely
+`codex|claude|agy` (`--reviewer none` to skip review). Defaults: Claude builds
+and fixes, AGY retries coding work when the primary reaches a credit/usage limit,
+and Codex reviews. Configure the fallback with `--coding-fallback`; use `none`
+to disable it. Mixing vendors (one builds, the other reviews) gives a genuinely
 independent second opinion.
 
 For a new project, point `PLAN_PATH` at the new plan (or copy the folder)
@@ -118,13 +120,14 @@ each step.
   (`ls`, `cat`, `grep`, `find`, `wc`, `head`, `tail`). Compound commands
   (`a && b`, `a; b`) are approved part-by-part, so simple single-purpose
   entries beat clever one-liners.
-- **Quota limits are detected, not trusted.** If an agent replies
-  "You've hit your limit" / "usage limit reached" (etc.), exits non-zero, or
-  produces no output at all, the run **halts** with a `halt` event instead of
-  advancing — a do-nothing agent must never mark a step done. The board is
+- **Quota limits are detected, not trusted.** If the builder or fixer replies
+  "You've hit your limit" / "usage limit reached" (etc.), the run switches
+  coding to the configured fallback for the remainder of the run. A failed
+  fallback, a limited reviewer, other non-zero exits, or no output still
+  **halts** with a `halt` event instead of advancing — a do-nothing agent must
+  never mark a step done. The board is
   green from the *previous* step, which is exactly why validation alone can't
-  catch this. Resume after the quota window resets by re-running the same
-  command; state and unfinished phase-review baselines survive restarts, so
+  catch this. State and unfinished phase-review baselines survive restarts, so
   every commit made during a phase still gets reviewed.
 - **If false completions ever slip into state** (they did once, before the
   guard existed): remove the step ids from `runtime/state.json` `done` and
