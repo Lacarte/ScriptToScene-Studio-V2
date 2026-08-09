@@ -29,8 +29,16 @@
 >   `animator/animation_routes.py:191-211`, `tts/routes.py:517/629/902`). Phases 11–15 therefore
 >   **wire these interfaces up for the first time** — the existing `provider.py` bodies have never run and
 >   must be treated as unverified, not as behavior-preserving baselines.
-> - Story/script generation, Scene Blueprint AI, Music, and Captions execute concrete services
->   directly and do not yet have domain provider registries or provider packages of any kind.
+> - Story/script generation and Scene Blueprint AI execute concrete services directly and do not yet
+>   have domain provider registries or provider packages of any kind.
+> - **Music and Captions are deliberately out of scope** (owner decision, 2026-08-08). Neither is an AI
+>   module: `music.select` picks a file from the local `resources/sounds/` library by tone/random/specific
+>   mode, and `captions.generate` groups words from the alignment output using local presets. Neither node
+>   has a provider dimension in its configuration — no provider IDs appear in either definition — so a
+>   provider layer would add indirection and buy nothing. They keep their current nodes, adapters, and
+>   services unchanged. The supported domains are therefore **five**: `script`, `scene_blueprint`, `tts`,
+>   `storyboard`, `animator`. If a generated-music or translated-caption source ever appears, add the
+>   domain then; the node/adapter seam already exists.
 > - `studio/workflows/registry.py` keeps node ports/executors generic but still embeds provider IDs
 >   and provider-specific configuration fields (9 occurrences); the Vue provider components in
 >   `frontend/src/features/providers/` are reusable foundations.
@@ -846,11 +854,12 @@ This is the Phase 0 equivalent for the provider-plugin migration. No production 
 behavior changes belong in this phase. The audit starts from the provider foundation already in
 `studio/shared/providers_common/` and the TTS, Storyboard, and Animator provider packages; it must
 also account for the provider-ID branches that remain in their routes/adapters and the currently
-non-provider-driven Story, Scene Blueprint, Music, and Captions modules.
+non-provider-driven Story and Scene Blueprint modules. Music and Captions are out of scope by owner
+decision (see the audit header); audit them only to confirm they stay working, not to migrate them.
 
 ### 10.1 Current-path and compatibility audit
 Trace every way the legacy pages, pipeline services, workflow adapters, settings UI, and tests invoke
-script/story generation, scene-blueprint AI, TTS, Storyboard, Animator, Music, and Captions. Inventory
+script/story generation, scene-blueprint AI, TTS, Storyboard, and Animator. Inventory
 all provider IDs, aliases, request fields, settings keys, environment fallbacks, output files, async
 callbacks, WebSocket/Automa hooks, and hard-coded provider branches. Include the frontend random-story
 templates in `frontend/src/shared/data/stories.js` and `useRandomStory.js`, the current Gemini/n8n story
@@ -890,8 +899,10 @@ workflow execution path is unaccounted for.
 ### 10.2 Freeze plugin, manifest, and settings contracts
 Extend `contracts.md` with Provider Contract v2, reusing `ProviderRegistry`, `ProviderManifest`,
 `settings_manager`, discovery, migrations, runtime hooks, and broken-provider isolation rather than
-building a parallel framework. Freeze the supported domains (`script`, `scene_blueprint`, `tts`,
-`storyboard`, `animator`, `music`, `captions`); package layout; provider ID/version rules; manifest
+building a parallel framework. Freeze the supported domains — exactly five: `script`,
+`scene_blueprint`, `tts`, `storyboard`, `animator` (Music and Captions are excluded by owner decision;
+the catalog must make adding a domain later a data change, not a redesign); package layout; provider
+ID/version rules; manifest
 metadata; capabilities; factory/lifecycle hooks; settings-schema widgets and conditional fields;
 secret/env handling; availability/health states; and frontend-safe serialization. Provider folders
 remain owned by their module, while one registry hub exposes all domain registries.
@@ -918,13 +929,13 @@ existing domain requires no edit to a workflow node, route dispatcher, or Vue co
 Define a shared invocation context (project/execution/node identity, managed output directory,
 cancellation token, progress callback, redacted logger) plus domain request/result schemas. Keep
 domain results typed—script document, scene-blueprint document, TTS audio, storyboard scene assets,
-animation scene assets, music selection, caption document—inside one versioned result envelope with
+animation scene assets—inside one versioned result envelope with
 provider/domain/version, artifact refs, metadata, warnings, and provenance. Standardize async job
 handles/status/progress and terminal states. Define `ProviderError` with stable code, safe message,
 retryable flag, redacted details, provider/domain, and optional recovery suggestion; unknown exceptions
 must be wrapped at the registry boundary.
 
-**Done when:** all seven domains have exact request/result schemas and artifact rules; synchronous and
+**Done when:** all five domains have exact request/result schemas and artifact rules; synchronous and
 asynchronous providers share terminal/error semantics; partial per-scene results are unambiguous;
 cancel/retry/timeout behavior is frozen; no raw provider exception, credential, arbitrary filesystem
 path, or provider-specific response can cross into workflow records or API responses.
@@ -957,7 +968,7 @@ list and resolve `(domain, provider_id)` while preserving the existing per-modul
 the request/result contract and provider search path once; individual provider registration must not
 touch `app.py` or the workflow registry.
 
-**Done when:** all seven domains can register with the hub; existing TTS/Storyboard/Animator imports
+**Done when:** all five domains can register with the hub; existing TTS/Storyboard/Animator imports
 still work; duplicate domains/providers fail deterministically; discovery order is stable; and tests
 prove one broken or duplicate provider cannot hide healthy providers or stop application startup.
 
@@ -1059,36 +1070,43 @@ echoed; switching providers preserves each provider's unsaved non-secret draft i
 and validation feedback name the provider; and no provider ID appears in component control flow.
 
 ### 12.3 Provider-aware generic node configuration
-Add a generic provider field/schema primitive keyed only by `provider_domain`. Convert `story.generate`,
-`scenes.blueprint`, `tts.generate`, `storyboard.generate`, `animator.generate`, `music.select`, and
-`captions.generate` to the common persisted pair `provider` + `provider_options`; their node types,
+Add a generic provider field/schema primitive keyed only by `provider_domain`. Convert the **five**
+provider-backed nodes — `story.generate`, `scenes.blueprint`, `tts.generate`, `storyboard.generate`,
+`animator.generate` — to the common persisted pair `provider` + `provider_options`; their node types,
 ports, and executors remain stable. The inspector composes provider settings dynamically from the
 catalog. Remove Grok-, Gemini-, WaveSpeed-, Kokoro-, and other provider-specific fields and
 `display_options` from the node registry, moving them into provider settings schemas. Server
 validation resolves the selected provider/schema authoritatively and fails open only for explicitly
 documented unavailable-provider recovery cases.
 
-**Bridging rule — this step runs ahead of the domain migrations.** Only `tts`, `storyboard`, and
-`animator` have provider packages today; `script`, `scene_blueprint`, `music`, and `captions` get theirs
-in Phases 13–15. Converting their nodes to `provider` + `provider_options` first would leave four nodes
-selecting from an empty catalog. So each un-migrated domain must, in this step, register a single
-`builtin` provider that is a thin passthrough to today's concrete service, with a manifest and a settings
-schema carrying exactly the fields being removed from the node definition. Phases 13–15 then split,
-rename, or extend that `builtin` provider behind the interface it already satisfies. A domain's node is
-never converted before its domain has at least one registered provider.
+`music.select` and `captions.generate` are **not** converted and must be left byte-identical: they are
+local, single-implementation services with no provider dimension (owner decision — see the audit
+header). Their `mode`/`tone`/`preset` fields are domain configuration, not provider selection, and must
+not be mistaken for provider-specific fields during the registry cleanup.
 
-**Done when:** the seven nodes contain no provider IDs or provider-specific settings in their node
-definitions; every one of the seven domains resolves at least one registered provider and the four
-`builtin` passthroughs produce byte-identical artifacts to their pre-conversion services; each existing
-saved config migrates to the new shape through `type_version` migrations; future-version/
-unavailable-provider workflows remain safely inspectable; and pytest/Vitest prove provider-specific
-forms and validation are driven entirely by catalog metadata.
+**Bridging rule — this step runs ahead of the domain migrations.** Only `tts`, `storyboard`, and
+`animator` have provider packages today; `script` and `scene_blueprint` get theirs in Phase 13.
+Converting their nodes to `provider` + `provider_options` first would leave two nodes selecting from an
+empty catalog. So each un-migrated domain must, in this step, register a single `builtin` provider that
+is a thin passthrough to today's concrete service, with a manifest and a settings schema carrying
+exactly the fields being removed from the node definition. Phase 13 then splits, renames, or extends
+that `builtin` provider behind the interface it already satisfies. A domain's node is never converted
+before its domain has at least one registered provider.
+
+**Done when:** the five converted nodes contain no provider IDs or provider-specific settings in their
+node definitions; every one of the five domains resolves at least one registered provider and the two
+`builtin` passthroughs produce byte-identical artifacts to their pre-conversion services;
+`music.select` and `captions.generate` are provably unchanged; each existing saved config migrates to
+the new shape through `type_version` migrations; future-version/unavailable-provider workflows remain
+safely inspectable; and pytest/Vitest prove provider-specific forms and validation are driven entirely
+by catalog metadata.
 
 ### 12.4 Adopt the shared provider UI on legacy pages
 Replace domain-specific provider dropdowns/settings forms in the TTS, Story/Script, Scene Blueprint,
-Storyboard, Animator, Music, and Captions legacy surfaces with the shared selector/renderer while
+Storyboard, and Animator legacy surfaces with the shared selector/renderer while
 preserving each page's layout, request payload compatibility, defaults, and project hand-offs. Static
-lists may remain only for non-provider concepts such as workflow styles or export profiles.
+lists may remain only for non-provider concepts such as workflow styles, export profiles, caption
+presets, and music tones. The Music and Captions pages keep their current forms untouched.
 
 **Done when:** every listed legacy page selects and configures providers from the same catalog as the
 workflow inspector; existing defaults and user settings load correctly; legacy requests still pass
@@ -1223,7 +1241,13 @@ smoke checks are green.
 
 ---
 
-## Phase 15 — TTS, Music, and Captions provider migration
+## Phase 15 — TTS provider migration
+
+Music and Captions were removed from this phase by owner decision (2026-08-08): both are local,
+single-implementation services with no provider dimension — music picks a file from
+`resources/sounds/`, captions group words from the alignment output using local presets. They keep
+their current nodes, adapters, services, APIs, and legacy pages unchanged. This phase is TTS only,
+plus the integration gate that proves music and captions still work alongside the migrated providers.
 
 ### 15.1 Bring TTS providers onto Provider Contract v2
 Adapt Kokoro and Inworld to the common manifest, settings, invocation, result, error, lifecycle, and
@@ -1253,37 +1277,18 @@ Inworld is selected and Kokoro voices when Kokoro is; both branches emit one rec
 shape; another fixture TTS provider appears and runs without node/UI edits; and mocked plus local
 Kokoro tests pass.
 
-### 15.3 Music provider interface and local-library provider
-Create the `music` domain contract and wrap current `select_music`, `select_random_music`, specific
-track selection, project history, tone matching, managed-library checks, volume, fades, looping, and
-ducking as a `local_library` provider. The provider returns a standardized managed music-track result;
-future generated/streaming sources can implement the same contract without altering `music.select`.
+### 15.3 Audio/text-output integration gate
+Exercise Narration Only and Full Video templates plus the legacy TTS, Timeline, and Export pages
+through the generic providers. Verify provider version/options affect cache fingerprints, standard
+artifacts still assemble/export, and provider errors remain isolated to their node/run. Prove the
+untouched Music and Captions nodes still execute and that their output is still accepted downstream —
+they are the regression risk of this phase, not its subject. Run local Kokoro and FFmpeg media
+assertions; keep cloud calls mocked unless the live flag is enabled.
 
-**Done when:** all current tone/random/specific modes and history behavior are preserved through the
-provider; unmanaged/missing tracks fail with stable safe errors; legacy music APIs and the generic
-node remain compatible; and a fixture provider supplies a track without adapter/node/UI changes.
-
-### 15.4 Captions provider interface and built-in caption provider
-Create the `captions` domain contract and wrap current word grouping, preset lookup, style expansion,
-disabled-caption behavior, timestamp validation, and `captions.json` persistence as a `word_groups`
-provider. Provider metadata supplies supported modes/presets/options while the central result contract
-freezes caption timing/style/artifact shape. Keep presets as data/options, not hard-coded node fields.
-
-**Done when:** every existing caption preset and grouping behavior produces compatible output through
-the provider; invalid alignment/preset failures are standardized; legacy caption APIs and export
-consumers remain unchanged; and a fixture captions provider can emit an alternate caption document
-without node, adapter, export, or UI edits.
-
-### 15.5 Audio/text-output integration gate
-Exercise Narration Only and Full Video templates plus legacy TTS, Music, Captions, Timeline, and Export
-pages through the generic providers. Verify provider version/options affect cache fingerprints,
-standard artifacts still assemble/export, and provider errors remain isolated to their node/run.
-Run local Kokoro and FFmpeg media assertions; keep cloud calls mocked unless the live flag is enabled.
-
-**Done when:** old workflows run without edits, generated audio/music/captions are accepted by existing
-assembly/export code, no route/adapter branches on a concrete TTS/Music/Captions provider ID, all
-deterministic suites and production build pass, and a playable fixture export proves end-to-end
-compatibility.
+**Done when:** old workflows run without edits, generated audio plus unchanged music/captions output is
+accepted by existing assembly/export code, no route/adapter branches on a concrete TTS provider ID,
+`music.select` and `captions.generate` remain unmodified and green, all deterministic suites and the
+production build pass, and a playable fixture export proves end-to-end compatibility.
 
 ---
 
@@ -1344,8 +1349,9 @@ verify catalog-driven selection/settings/health for every domain and inspect exe
 success, partial failure, retry, and unavailable provider cases. Record exact results and remaining
 external credential/browser limitations.
 
-**Done when:** Script, Scene Blueprint, TTS, Storyboard, Animator, Music, and Captions all dispatch only
-through registered providers; nodes and UI are provider-agnostic; adding a conforming provider requires
+**Done when:** Script, Scene Blueprint, TTS, Storyboard, and Animator all dispatch only
+through registered providers; Music and Captions still run unchanged through their local services;
+nodes and UI are provider-agnostic; adding a conforming provider requires
 only its provider package/registration and tests; standardized results/errors are enforced; old
 workflows/APIs/settings/artifacts remain compatible; docs are current; and every deterministic gate is
 green before Phase 17 begins.
@@ -1401,13 +1407,17 @@ authoritative validation, and only offers valid results for insertion — never 
 | 12 — Generic provider UI/nodes | 12.1–12.5 (5) | 12.1/12.2 before node conversion; 12.5 is the extensibility gate |
 | 13 — Script/story/scene AI | 13.1–13.4 (4) | 13.1/13.2 can parallel; 13.3 joins them; 13.4 independent after Phase 12 |
 | 14 — Storyboard & Animator | 14.1–14.5 (5) | async service first; 14.2/14.3 parallel; compatibility gate last |
-| 15 — TTS, Music & Captions | 15.1–15.5 (5) | TTS steps sequential; Music/Captions parallel; integration gate last |
+| 15 — TTS provider migration | 15.1–15.3 (3) | TTS steps sequential; integration gate last |
 | 16 — SDK, cleanup & final gate | 16.1–16.5 (5) | cleanup after all migrations; docs/scaffolder can parallel; final gate last |
 | 17 — Distribution & assistant | 17.1–17.4 (4) | 17.1/17.2 first; 17.3 builds on 9.4; 17.4 uses provider-driven AI |
 
-88 steps total. Phases 0–9 are the delivered Workflow Builder foundation. Phases 10–16 are the
-provider-platform migration and become the next work: audit/contracts (10), shared runtime (11),
-generic UI and nodes (12), domain migrations (13–15), then SDK/cleanup/final compatibility gate (16).
+86 steps total. Phases 0–9 are the delivered Workflow Builder foundation (51 steps, complete).
+Phases 10–16 are the provider-platform migration and become the next work — 31 steps:
+audit/contracts (10), shared runtime (11), generic UI and nodes (12), domain migrations (13–15),
+then SDK/cleanup/final compatibility gate (16). The platform covers **five** domains: `script`,
+`scene_blueprint`, `tts`, `storyboard`, `animator`. Music and Captions are deliberately excluded
+(owner decision, 2026-08-08) because they are local single-implementation services with no provider
+dimension; they keep their existing nodes and code, and the plan's job is to prove they still work.
 Distribution moves to Phase 17 so releases and the Workflow Copilot build on the stable plugin
 platform. The provider critical path is **10.1 → 10.2 → 10.3 → 10.4 → 11.1 → 11.3 → 11.4 →
 11.5 → 12.1 → 12.2 → 12.3 → 12.5**, after which domain migrations can proceed in parallel before
@@ -1423,6 +1433,10 @@ Three risks are specific to this codebase and are easy to underestimate:
 - **12.2 gates 15.2.** Provider-dependent dropdowns are impossible until
   `GET /api/workflow/options/<source>` accepts context. If 12.2 ships without it, 15.2 cannot deliver
   per-provider voices and will either stall or smuggle a provider ID back into the UI.
-- **12.3 converts four nodes whose domains have no providers yet.** The `builtin` passthrough rule in
-  that step is what keeps the app working between Phase 12 and Phase 15; dropping it strands
-  Script, Scene Blueprint, Music, and Captions on an empty catalog.
+- **12.3 converts two nodes whose domains have no providers yet.** The `builtin` passthrough rule in
+  that step is what keeps the app working between Phase 12 and Phase 13; dropping it strands
+  Script and Scene Blueprint on an empty catalog.
+- **Music and Captions are out of scope and must stay that way.** Their `mode`/`tone`/`preset` fields
+  look like provider selection but are not. An agent doing a thorough job on 12.3 or 16.1 will be
+  tempted to "finish" them; every step that touches those two nodes must instead prove they are
+  byte-identical.

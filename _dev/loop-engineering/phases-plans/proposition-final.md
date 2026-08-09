@@ -511,7 +511,7 @@ The upgrade is complete only when a user can:
 ## Objective
 
 Make every AI module provider-driven. Script generation (random template and AI), Scene Blueprint,
-TTS, Storyboard, Animator, Music, and Captions each get a provider interface and a registry entry.
+TTS, Storyboard, and Animator each get a provider interface and a registry entry.
 Workflow nodes stay generic: they declare `provider` + `provider_options` and nothing provider-specific.
 The UI populates itself from provider metadata and settings schemas. Adding a provider means writing and
 registering a provider package — no edit to a node definition, adapter, route dispatcher, or Vue
@@ -522,8 +522,15 @@ component.
 1. **Extend, do not replace.** `studio/shared/providers_common/` already provides discovery, manifests,
    settings, health, and broken-provider isolation. The platform generalizes it; it does not introduce a
    parallel framework.
-2. **Domains are data.** A domain catalog replaces every hardcoded domain set. The seven supported
-   domains are `script`, `scene_blueprint`, `tts`, `storyboard`, `animator`, `music`, `captions`.
+2. **Domains are data.** A domain catalog replaces every hardcoded domain set. The five supported
+   domains are `script`, `scene_blueprint`, `tts`, `storyboard`, `animator`. Adding a sixth must be a
+   data change, not a redesign.
+2b. **Music and Captions are out of scope** (owner decision, 2026-08-08). Neither is an AI module:
+   `music.select` picks a file from the local `resources/sounds/` library, and `captions.generate`
+   groups words from the alignment output using local presets. Neither has a second implementation,
+   a remote call, or a provider dimension in its node configuration, so a provider layer would add
+   indirection and buy nothing. They keep their current nodes, adapters, services, APIs, and legacy
+   pages. The requirement on them is *no regression*, not migration.
 3. **One registry hub, module-owned provider folders.** Providers live beside the module they serve;
    one hub resolves `(domain, provider_id)` for the whole process.
 4. **One versioned result envelope.** Every domain returns typed content inside a common envelope with
@@ -566,7 +573,8 @@ domain/provider/job/project, idempotent, bounded, and redacted.
 
 The provider platform is complete only when:
 
-1. All seven domains dispatch exclusively through registered providers.
+1. All five domains dispatch exclusively through registered providers, and Music and Captions still
+   run unchanged through their local services.
 2. No generic node definition, workflow adapter, shared dispatcher, or Vue component contains a
    concrete provider ID — proven by an allowlist scan, not by inspection.
 3. A conforming provider can be added to any domain by creating and registering its package alone,
