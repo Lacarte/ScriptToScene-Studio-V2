@@ -149,11 +149,23 @@ function _ttsProvider() {
   return ttsDomain().providerId.value
 }
 
+/**
+ * `/api/tts/voices` answers with one reconciled `{id, label, …}` shape for
+ * every provider since step 15.2; it used to answer with bare ids for the
+ * local engine and objects for the cloud one, so the page rendered the cloud
+ * list as `[object Object]`. Both shapes are accepted, because the page keeps
+ * a flat list of ids.
+ */
+function voiceIds(data) {
+  if (!Array.isArray(data)) return []
+  return data.map((v) => (typeof v === 'string' ? v : v?.id)).filter(Boolean)
+}
+
 async function loadVoices() {
   const provider = _ttsProvider()
   try {
     const data = await api.get(`/api/tts/voices?provider=${provider}`)
-    voices.value = data
+    voices.value = voiceIds(data)
   } catch (e) {
     console.warn('[TTS] Failed to load voices:', e.message)
     // use defaults from VOICE_META
@@ -396,11 +408,11 @@ async function stream() {
   progressText.value = ''
 
   try {
-    const provider = _ttsProvider()
-
-    // ── Inworld: generate WAV and play it (no streaming) ──
-    if (provider === 'inworld') {
-      progressText.value = 'Generating (Inworld)...'
+    // ── No streaming: generate the whole WAV and play it ──
+    // Asked of the manifest, not of the provider id (step 15.2): the backend
+    // refuses `/api/tts/stream` on the same capability, so the two agree.
+    if (!ttsDomain().supports('streaming')) {
+      progressText.value = `Generating (${ttsDomain().label.value})...`
       const payload = buildPayload()
       const d = await api.post('/api/tts/generate', { body: payload })
       if (d.error) throw new Error(d.error)
@@ -411,7 +423,7 @@ async function stream() {
       return
     }
 
-    // ── Kokoro: stream PCM chunks ──
+    // ── Streaming provider: play PCM chunks as they arrive ──
     if (!modelReady.value) {
       progressText.value = 'Downloading model...'
       await downloadModel()

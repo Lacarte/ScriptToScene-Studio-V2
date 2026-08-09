@@ -741,6 +741,8 @@ def serialize_registry():
     for key, definition in _NODE_TYPES.items():
         public = deepcopy({k: v for k, v in definition.items() if k not in _INTERNAL_FIELDS})
         public["type"] = key
+        for field in public.get("config_schema") or ():
+            _annotate_option_context(field)
         node_types[key] = public
     return {
         "registry_version": REGISTRY_VERSION,
@@ -748,3 +750,18 @@ def serialize_registry():
         "categories": deepcopy(CATEGORIES),
         "node_types": node_types,
     }
+
+
+def _annotate_option_context(field):
+    """Tell the client which context parameters this field's source accepts.
+
+    The editor cannot guess: a source rejects a parameter it does not declare
+    (§23.1), so sending `provider` to every dropdown would answer
+    `OPTION_CONTEXT_INVALID`, and sending it to none is why the `voice`
+    dropdown could not follow the node's provider before step 15.2. Derived
+    from `ASYNC_OPTION_SOURCES`, so a new context-sensitive source needs no
+    frontend edit.
+    """
+    spec = ASYNC_OPTION_SOURCES.get(field.get("options_source"))
+    if spec is not None and spec.context:
+        field["options_context"] = list(spec.context)

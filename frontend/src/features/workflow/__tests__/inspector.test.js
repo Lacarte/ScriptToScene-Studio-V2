@@ -80,6 +80,73 @@ describe('ConfigField widgets', () => {
     vi.restoreAllMocks()
   })
 
+  it('scopes an option source to the node provider it declares a context for', async () => {
+    // Step 15.2: the `voice` dropdown used to resolve context-free, so it
+    // always answered with the default engine's voices however the node's
+    // provider was set. `options_context` comes from the registry, which reads
+    // it off the source's own spec.
+    clearOptionSourceCache()
+    vi.spyOn(api, 'get').mockResolvedValue({
+      source: 'tts_voices',
+      options: [{ value: 'Ashley', label: 'Ashley' }],
+    })
+    const wrapper = mount(ConfigField, {
+      props: {
+        field: {
+          name: 'voice',
+          label: 'Voice',
+          type: 'options',
+          options_source: 'tts_voices',
+          options_context: ['domain', 'provider'],
+          default: 'Ashley',
+        },
+        value: 'Ashley',
+        providerId: 'inworld',
+        providerDomain: 'tts',
+      },
+    })
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith(
+      '/api/workflow/options/tts_voices?domain=tts&provider=inworld',
+    )
+
+    // Switching the node's provider re-resolves rather than reusing the answer.
+    api.get.mockResolvedValue({
+      source: 'tts_voices',
+      options: [{ value: 'af_heart', label: 'af_heart' }],
+    })
+    await wrapper.setProps({ providerId: 'kokoro' })
+    await flushPromises()
+    expect(api.get).toHaveBeenLastCalledWith(
+      '/api/workflow/options/tts_voices?domain=tts&provider=kokoro',
+    )
+    expect(wrapper.findAll('option').map((o) => o.element.value)).toContain('af_heart')
+    vi.restoreAllMocks()
+  })
+
+  it('sends no context to a source that declares none', async () => {
+    clearOptionSourceCache()
+    vi.spyOn(api, 'get').mockResolvedValue({ source: 'tts_providers', options: [] })
+    mount(ConfigField, {
+      props: {
+        field: {
+          name: 'provider_id',
+          label: 'Provider',
+          type: 'provider',
+          provider_domain: 'tts',
+          options_source: 'tts_providers',
+          default: 'kokoro',
+        },
+        value: 'kokoro',
+        providerId: 'kokoro',
+        providerDomain: 'tts',
+      },
+    })
+    await flushPromises()
+    expect(api.get).toHaveBeenCalledWith('/api/workflow/options/tts_providers')
+    vi.restoreAllMocks()
+  })
+
   it('keeps an unavailable stored value visible instead of showing option 0', async () => {
     clearOptionSourceCache()
     vi.spyOn(api, 'get').mockResolvedValue({

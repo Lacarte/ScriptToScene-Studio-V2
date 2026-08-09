@@ -13,7 +13,10 @@ def manifest() -> ProviderManifest:
         requires=[],
         capabilities={
             "test_connection": True,
-            "streaming": False,
+            # `/api/tts/stream` has always streamed Kokoro; the manifest said
+            # otherwise, so the route could only know by comparing the provider
+            # id. Declared here, the route asks instead (step 15.2).
+            "streaming": True,
             "model_download": True,
             "single_scene": True,
             "batch": True,

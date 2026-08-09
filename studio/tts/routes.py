@@ -1,10 +1,17 @@
-"""TTS Module — Kokoro TTS Routes
+"""TTS Module — text-to-speech routes
 
-Provides text-to-speech generation, streaming, model management,
-voice blending, and generation history.
+Text-to-speech generation, streaming, model management, voice blending, and
+generation history for the standalone TTS page.
+
+Step 15.2 removed the three provider-id comparisons this module used to make
+(`voices`, `generate`, and `stream_audio` each branched on
+`provider == "inworld"`). Generation goes through `studio.tts.dispatch`, voice
+and model lists come from the selected provider's own hooks, and streaming is
+gated on the `streaming` capability. The multi-voice and chunked jobs below
+still drive the Kokoro engine directly: they are page features built on voice
+blending and internal chunking, and they are 16.1's to generalize.
 """
 
-import asyncio
 import base64
 import gc
 import json
@@ -23,16 +30,22 @@ import soundfile as sf
 import urllib.request
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 from loguru import logger
-
-import hashlib
+from pydantic import ValidationError
 
 from config import TTS_DIR, TTS_CACHE_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR, generate_project_id
 from studio.io_utils import move_to_unique_path, safe_json_write
 from studio.shared.providers_common.concurrency import exclusive_execution, exclusive_lock
+from studio.shared.providers_common.errors import (
+    PROVIDER_NOT_CONFIGURED,
+    PROVIDER_NOT_FOUND,
+    PROVIDER_REQUEST_INVALID,
+    ProviderError,
+)
 from studio.security import safe_join, sanitize_project_id
 from studio.validation import validate_json
 from studio.ffmpeg_utils import find_ffmpeg
-from .schemas import TtsGenerateRequest, TtsMultivoiceRequest
+from studio.tts import dispatch
+from .schemas import BlendConfig, TtsGenerateRequest, TtsMultivoiceRequest
 from .normalize import (
     normalize_for_tts, clean_for_tts,
     format_breathing_blocks, validate_brackets,
@@ -45,6 +58,29 @@ from .audio import pad_audio, concatenate_chunks, run_loudnorm
 # ---------------------------------------------------------------------------
 
 tts_bp = Blueprint("tts", __name__)
+
+
+def _selected_provider(provider_id=None):
+    """`(ProviderInstance, provider object)` for a request, or `ProviderError`.
+
+    An empty `provider_id` follows the domain selection (§24.1), which is what
+    lets every route below answer for whichever provider the operator picked
+    without naming one.
+    """
+    instance, _reason = dispatch.resolve_provider({"provider": provider_id or ""})
+    return instance, instance.create()
+
+
+# Provider error codes the legacy page reports as something other than a 500.
+_ERROR_STATUS = {
+    PROVIDER_NOT_CONFIGURED: 503,
+    PROVIDER_REQUEST_INVALID: 400,
+    PROVIDER_NOT_FOUND: 404,
+}
+
+
+def _status_for(exc: ProviderError) -> int:
+    return _ERROR_STATUS.get(exc.code, 502)
 
 # ---------------------------------------------------------------------------
 # Kokoro engine — owned by the provider package (contracts.md B5 / K1)
@@ -251,107 +287,6 @@ def _download_file_with_progress(url: str, dest_path: str, queue: Queue, label: 
         raise
 
 
-# ---------------------------------------------------------------------------
-# Chunked generation background worker
-# ---------------------------------------------------------------------------
-
-def _background_chunked_generate(job_id, voice_param, voice_name, sentences, speed,
-                                  max_silence_ms, prompt, basename,
-                                  voice_for_metadata=None, blend_meta=None):
-    with generation_jobs_lock:
-        job = generation_jobs[job_id]
-    q = job["queue"]
-    if voice_for_metadata is None:
-        voice_for_metadata = voice_name
-    try:
-        kokoro = load_model()
-        lang = _voice_to_lang(voice_name)
-
-        audio_chunks = []
-        total = len(sentences)
-        total_inference = 0.0
-
-        for i, block in enumerate(sentences):
-            if job.get("abort"):
-                q.put({"phase": "aborted"})
-                with generation_jobs_lock:
-                    job["status"] = "aborted"
-                return
-
-            q.put({"phase": "generating", "chunk": i + 1, "total": total,
-                    "sentence": block})
-
-            phonemes, is_ph = _phonemize_with_misaki(block, lang)
-            start = time.perf_counter()
-            with _inference_lock():
-                chunk_audio, _sr = kokoro.create(
-                    text=phonemes, voice=voice_param, speed=speed,
-                    lang=lang, is_phonemes=is_ph,
-                )
-            elapsed = time.perf_counter() - start
-            total_inference += elapsed
-            audio_chunks.append(chunk_audio)
-
-        q.put({"phase": "concatenating"})
-        audio = concatenate_chunks(audio_chunks, sample_rate=24000, gap_ms=80, crossfade_ms=20)
-        del audio_chunks
-        audio = pad_audio(audio, sample_rate=24000)
-
-        job_dir = _tts_job_dir(basename)
-        os.makedirs(job_dir, exist_ok=True)
-        wav_path = os.path.join(job_dir, basename + ".wav")
-        sf.write(wav_path, audio, 24000)
-        del audio
-        gc.collect()
-
-        q.put({"phase": "normalizing"})
-        run_loudnorm(wav_path)
-
-        info = sf.info(wav_path)
-        duration_generated = info.duration
-        rtf = total_inference / duration_generated if duration_generated > 0 else 0
-        logger.success("Generated  {:.1f}s audio in {:.2f}s | RTF {:.2f} | {} chunks",
-                       duration_generated, total_inference, rtf, total)
-
-        clean_prompt = re.sub(r'[\[\]]', '', prompt).strip()
-        words = len(clean_prompt.split())
-
-        metadata = {
-            "filename": basename + ".wav",
-            "folder": basename,
-            "prompt": clean_prompt,
-            "model": "kokoro-v1.0",
-            "model_id": "kokoro",
-            "voice": voice_for_metadata,
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "inference_time": round(total_inference, 3),
-            "rtf": round(rtf, 4),
-            "duration_seconds": round(duration_generated, 2),
-            "sample_rate": 24000,
-            "speed": speed,
-            "max_silence_ms": max_silence_ms,
-            "words": words,
-            "approx_tokens": int(words * 1.3),
-            "chunked": True,
-            "num_chunks": total,
-        }
-        if blend_meta:
-            metadata["blend"] = blend_meta
-
-        safe_json_write(os.path.join(job_dir, basename + ".json"), metadata, indent=2)
-
-        q.put({"phase": "done", "metadata": metadata})
-        with generation_jobs_lock:
-            job["status"] = "done"
-            job["metadata"] = metadata
-
-    except Exception as e:
-        logger.exception("Chunked generation failed")
-        q.put({"phase": "error", "message": str(e)})
-        with generation_jobs_lock:
-            job["status"] = "error"
-
-
 def _cleanup_old_jobs(max_age_s=300):
     now = time.time()
     with generation_jobs_lock:
@@ -400,35 +335,36 @@ def normalize_text():
 # --- Models ---
 @tts_bp.route("/api/tts/models")
 def models():
-    out = []
-    for mid, m in _models().items():
-        out.append({"id": mid, "name": m["name"], "size": m["size"]})
-    return jsonify(out)
+    """The selected provider's own model list, via its optional hook (§22.4)."""
+    try:
+        instance, provider = _selected_provider()
+    except ProviderError as exc:
+        return jsonify({"error": exc.message}), _status_for(exc)
+    models_hook = getattr(provider, "list_models", None)
+    if not callable(models_hook):
+        return jsonify([])
+    settings = dispatch.resolved_settings(instance)
+    return jsonify([
+        {"id": m.get("id"), "name": m.get("name") or m.get("id"), "size": m.get("size", "")}
+        for m in models_hook(settings) or ()
+        if isinstance(m, dict) and m.get("id")
+    ])
 
 
 # --- Voices ---
 @tts_bp.route("/api/tts/voices")
 def voices():
-    provider = request.args.get("provider", "kokoro")
-    if provider == "inworld":
-        from studio.tts.inworld import list_voices, is_available
-        if not is_available():
-            return jsonify({"error": "Inworld API key not configured"}), 503
-        try:
-            iw_voices = list_voices()
-            return jsonify([
-                {
-                    "id": v.get("voiceId", ""),
-                    "label": v.get("voiceId", ""),
-                    "description": v.get("description", ""),
-                    "tags": v.get("tags", []),
-                }
-                for v in iw_voices if v.get("voiceId")
-            ])
-        except Exception as e:
-            logger.error("Inworld voices fetch failed: {}", e)
-            return jsonify({"error": str(e)}), 502
-    return jsonify(_voices())
+    """One reconciled voice list for whichever provider is asked for.
+
+    Answered by `dispatch.list_voices` — the provider's own hook, falling back
+    to what it declares — so a provider that ships tomorrow populates this list
+    without an edit here, and the canvas dropdown resolves the same catalog.
+    """
+    try:
+        instance, _provider = _selected_provider(request.args.get("provider"))
+    except ProviderError as exc:
+        return jsonify({"error": exc.message}), _status_for(exc)
+    return jsonify(dispatch.list_voices(instance))
 
 
 # --- Model status ---
@@ -519,50 +455,13 @@ def download_model(model_id):
 @tts_bp.route("/api/tts/generate", methods=["POST"])
 @validate_json(TtsGenerateRequest)
 def generate(data: TtsGenerateRequest):
-    provider = data.provider or "kokoro"
+    """Synthesize one standalone generation through the selected provider.
 
-    # ── Inworld provider ──
-    if provider == "inworld":
-        return _generate_inworld(data)
-
-    # ── Kokoro provider (default) ──
-    model_id = data.model
-    voice = data.voice
-    prompt = data.prompt
-    speed = data.speed
-    max_silence_ms = data.max_silence_ms
-    blend = data.blend
-
-    if model_id not in _models():
-        return jsonify({"error": "Unknown model"}), 404
-
-    voice_for_metadata = voice
-    voice_param = voice
-    blend_meta = None
-
-    if blend:
-        voice_a = blend.voice_a
-        voice_b = blend.voice_b
-        ratio = blend.ratio
-        method = blend.method
-        if method not in ("slerp", "lerp"):
-            method = "slerp"
-        if voice_a not in _voices():
-            return jsonify({"error": f"Unknown voice_a: {voice_a}"}), 400
-        if voice_b not in _voices():
-            return jsonify({"error": f"Unknown voice_b: {voice_b}"}), 400
-
-        kokoro_inst = load_model()
-        voice_param = _blend_voices(kokoro_inst, voice_a, voice_b, ratio, method)
-        pct = int(round(ratio * 100))
-        voice_for_metadata = f"{voice_a} + {voice_b} ({pct}% {method.upper()})"
-        voice = voice_a
-        blend_meta = {"voice_a": voice_a, "voice_b": voice_b,
-                      "ratio": ratio, "method": method}
-    else:
-        if voice not in _voices():
-            return jsonify({"error": f"Unknown voice. Choose from: {_voices()}"}), 400
-
+    One path for every provider. The Kokoro/Inworld fork this replaces also
+    produced two different metadata dicts; the reconciled one comes from
+    `studio.tts.dispatch`, so a history entry has the same keys whichever
+    provider wrote it.
+    """
     if _stream_active.is_set():
         return jsonify({"error": "A stream is already in progress. Please wait."}), 429
     with generation_jobs_lock:
@@ -570,127 +469,53 @@ def generate(data: TtsGenerateRequest):
             if job.get("status") == "running":
                 return jsonify({"error": "A generation is already in progress. Please wait or abort."}), 429
 
-    kokoro = load_model()
-    lang = _voice_to_lang(voice)
-    logger.info("Generate  \033[1m{}\033[0m | {} | {} chars", model_id, voice_for_metadata, len(prompt))
-
-    skip_clean = data.skip_clean
-    tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
-
-    # Kokoro handles internal chunking via _split_phonemes() — no need for breathing blocks
-    phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
-    start = time.perf_counter()
-    try:
-        with _inference_lock():
-            audio, _sr = kokoro.create(
-                text=phonemes, voice=voice_param, speed=speed,
-                lang=lang, is_phonemes=is_ph,
-            )
-    except Exception as e:
-        logger.exception("TTS inference failed")
-        return jsonify({"error": f"Generation failed: {e}"}), 500
-    end = time.perf_counter()
-
-    audio = pad_audio(audio, sample_rate=24000)
-    duration_generated = len(audio) / 24000
-    inference_time = end - start
-    rtf = inference_time / duration_generated
-
-    basename = generate_filename(prompt)
-    job_dir = _tts_job_dir(basename)
-    os.makedirs(job_dir, exist_ok=True)
-    wav_name = f"{basename}.wav"
-    json_name = f"{basename}.json"
-
-    sf.write(os.path.join(job_dir, wav_name), audio, 24000)
-    del audio  # free numpy array before gc
-    gc.collect()
-    logger.success("Generated  {:.1f}s audio in {:.2f}s | RTF {:.2f}", duration_generated, inference_time, rtf)
-
-    clean_prompt = re.sub(r'[\[\]]', '', prompt).strip()
-    metadata = {
-        "filename": wav_name,
-        "folder": basename,
-        "prompt": clean_prompt,
-        "model": "kokoro-v1.0",
-        "model_id": "kokoro",
-        "provider": "kokoro",
-        "voice": voice_for_metadata,
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "inference_time": round(inference_time, 3),
-        "rtf": round(rtf, 4),
-        "duration_seconds": round(duration_generated, 2),
-        "sample_rate": 24000,
-        "speed": speed,
-        "max_silence_ms": max_silence_ms,
-        "words": len(clean_prompt.split()),
-        "approx_tokens": int(len(clean_prompt.split()) * 1.3),
-    }
-    if blend_meta:
-        metadata["blend"] = blend_meta
-    safe_json_write(os.path.join(job_dir, json_name), metadata, indent=2)
-
-    return jsonify(metadata)
-
-
-def _generate_inworld(data: TtsGenerateRequest):
-    """Generate TTS audio via Inworld cloud API."""
-    from studio.tts.inworld import synthesize_to_wav, is_available
-
-    if not is_available():
-        return jsonify({"error": "Inworld API key not configured. Set INWORLD_API_KEY in .env"}), 503
-
     prompt = data.prompt
-    voice = data.voice
-    speed = data.speed
-
-    skip_clean = data.skip_clean
-    tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
-
+    tts_prompt = prompt.strip() if data.skip_clean else clean_for_tts(prompt)
     basename = generate_filename(prompt)
-    job_dir = _tts_job_dir(basename)
-    os.makedirs(job_dir, exist_ok=True)
-    wav_name = f"{basename}.wav"
-    json_name = f"{basename}.json"
-    wav_path = os.path.join(job_dir, wav_name)
 
-    logger.info("Generate  \033[1mInworld\033[0m | {} | {} chars", voice, len(prompt))
-
-    try:
-        result = synthesize_to_wav(
-            text=tts_prompt,
-            wav_path=wav_path,
-            voice_id=voice,
-            speed=speed,
-        )
-    except Exception as e:
-        logger.exception("Inworld TTS failed")
-        return jsonify({"error": f"Inworld generation failed: {e}"}), 500
-
-    run_loudnorm(wav_path)
-
-    clean_prompt = re.sub(r'[\[\]]', '', prompt).strip()
-    metadata = {
-        "filename": wav_name,
-        "folder": basename,
-        "prompt": clean_prompt,
-        "model": result["model_id"],
-        "model_id": "inworld",
-        "provider": "inworld",
-        "voice": voice,
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "inference_time": result["inference_time"],
-        "rtf": round(result["inference_time"] / result["duration_seconds"], 4) if result["duration_seconds"] > 0 else 0,
-        "duration_seconds": result["duration_seconds"],
-        "sample_rate": result["sample_rate"],
-        "speed": speed,
-        "words": len(clean_prompt.split()),
-        "approx_tokens": int(len(clean_prompt.split()) * 1.3),
-        "characters_billed": result["characters"],
+    config = {
+        "text": tts_prompt,
+        "provider": data.provider,
+        "voice": data.voice,
+        "tts_voice": getattr(data, "tts_voice", "") or "",
+        "speed": data.speed,
+        "tts_provider_options": _blend_options(data.blend),
     }
-    safe_json_write(os.path.join(job_dir, json_name), metadata, indent=2)
 
-    return jsonify(metadata)
+    logger.info("Generate  \033[1mTTS\033[0m | {} | {} chars", data.voice, len(prompt))
+    try:
+        metadata = dispatch.synthesize(
+            config,
+            project_id=basename,
+            basename=basename,
+            # The history page reads `{folder}/{folder}.json`, so the standalone
+            # layout keeps its own sidecar name rather than the managed one.
+            sidecar_name=f"{basename}.json",
+            extra_metadata={"max_silence_ms": data.max_silence_ms},
+        )
+    except ProviderError as exc:
+        return jsonify({"error": exc.message}), _status_for(exc)
+
+    return jsonify({k: v for k, v in metadata.items() if k != "wav_path"})
+
+
+def _blend_options(blend) -> dict:
+    """The route's blend request as the per-run options a provider declares.
+
+    Named settings, not a special case: a provider that declares no blending
+    receives keys it ignores, and `provider_run_options`-style validation is
+    the same one every other per-run option goes through.
+    """
+    if blend is None:
+        return {}
+    method = blend.method if blend.method in ("slerp", "lerp") else "slerp"
+    return {
+        "blend": True,
+        "blendA": blend.voice_a,
+        "blendB": blend.voice_b,
+        "blendRatio": round(float(blend.ratio) * 100, 4),
+        "blendMethod": method,
+    }
 
 
 # --- Chunked generation SSE progress ---
@@ -747,14 +572,14 @@ def abort_generation(job_id):
 
 
 # --- TTS preview cache ---
-def _cache_key(text: str, voice: str, speed: float) -> str:
-    """Deterministic hash from (text, voice, speed)."""
-    raw = f"{text}|{voice}|{speed:.2f}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+# The key lives in `studio.tts.dispatch` and carries the provider id, so the
+# same (text, voice, speed) triple no longer collides across providers.
+_cache_path = dispatch.cache_path
 
 
-def _cache_path(key: str) -> str:
-    return os.path.join(TTS_CACHE_DIR, f"{key}.wav")
+def _preview_key(text: str, voice: str, speed: float, provider: str = "") -> str:
+    instance, _reason = dispatch.resolve_provider({"provider": provider})
+    return dispatch.cache_key(text, voice, speed, instance.id)
 
 
 @tts_bp.route("/api/tts/cache/check", methods=["POST"])
@@ -762,16 +587,18 @@ def cache_check():
     """Check if a cached preview WAV exists for (text, voice, speed)."""
     data = request.get_json(silent=True) or {}
     text = (data.get("prompt") or "").strip()
-    voice = data.get("voice", "af_bella")
+    voice = data.get("voice", "")
     try:
         speed = round(max(0.5, min(2.0, float(data.get("speed", 1.0)))), 2)
     except (TypeError, ValueError):
         speed = 1.0
     if not text:
         return jsonify({"cached": False})
-    key = _cache_key(text, voice, speed)
-    path = _cache_path(key)
-    if os.path.isfile(path):
+    try:
+        key = _preview_key(text, voice, speed, data.get("provider", ""))
+    except ProviderError:
+        return jsonify({"cached": False})
+    if os.path.isfile(_cache_path(key)):
         return jsonify({"cached": True, "key": key})
     return jsonify({"cached": False})
 
@@ -787,56 +614,46 @@ def cache_serve(key):
 
 
 # --- Stream audio (listen-only, no save) ---
-# NOTE: Streaming is Kokoro-only. Inworld uses /api/tts/generate instead.
 @tts_bp.route("/api/tts/stream", methods=["POST"])
 def stream_audio():
+    """Stream audio from a provider that declares the `streaming` capability.
+
+    The route used to reject Inworld by name and then drive the Kokoro engine
+    directly. It asks the manifest instead and calls `provider.stream()`, so a
+    second streaming provider works here with no edit — and a non-streaming one
+    is refused for a reason the catalog can explain (step 15.2).
+    """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be JSON"}), 400
 
-    provider = data.get("provider", "kokoro")
-    if provider == "inworld":
-        return jsonify({"error": "Inworld does not support streaming. Use /api/tts/generate instead."}), 400
-
-    model_id = data.get("model", "kokoro")
-    voice = data.get("voice", "af_bella")
     prompt = data.get("prompt", "")
-    try:
-        speed = max(0.5, min(2.0, float(data.get("speed", 1.0))))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Speed must be a number between 0.5 and 2.0"}), 400
-    blend = data.get("blend")
-
     if not isinstance(prompt, str):
         return jsonify({"error": "Prompt must be a string"}), 400
     if not prompt.strip():
         return jsonify({"error": "Prompt is required"}), 400
-    if model_id not in _models():
-        return jsonify({"error": "Unknown model"}), 404
+    try:
+        speed = max(0.5, min(2.0, float(data.get("speed", 1.0))))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Speed must be a number between 0.5 and 2.0"}), 400
 
-    voice_param = voice
-    if blend:
-        if not isinstance(blend, dict):
-            return jsonify({"error": "Blend must be an object"}), 400
-        voice_a = blend.get("voice_a", "")
-        voice_b = blend.get("voice_b", "")
-        try:
-            ratio = max(0.0, min(1.0, float(blend.get("ratio", 0.5))))
-        except (TypeError, ValueError):
-            return jsonify({"error": "Blend ratio must be between 0.0 and 1.0"}), 400
-        method = blend.get("method", "slerp")
-        if method not in ("slerp", "lerp"):
-            method = "slerp"
-        if voice_a not in _voices():
-            return jsonify({"error": f"Unknown voice_a: {voice_a}"}), 400
-        if voice_b not in _voices():
-            return jsonify({"error": f"Unknown voice_b: {voice_b}"}), 400
-        kokoro_inst = load_model()
-        voice_param = _blend_voices(kokoro_inst, voice_a, voice_b, ratio, method)
-        voice = voice_a
-    else:
-        if voice not in _voices():
-            return jsonify({"error": f"Unknown voice. Choose from: {_voices()}"}), 400
+    blend = data.get("blend")
+    if blend is not None and not isinstance(blend, dict):
+        return jsonify({"error": "Blend must be an object"}), 400
+    try:
+        options = _blend_options(BlendConfig(**blend) if blend else None)
+    except ValidationError:
+        return jsonify({"error": "Blend ratio must be between 0.0 and 1.0"}), 400
+
+    try:
+        instance, provider = _selected_provider(data.get("provider"))
+    except ProviderError as exc:
+        return jsonify({"error": exc.message}), _status_for(exc)
+    if not instance.capabilities.get("streaming"):
+        return jsonify({
+            "error": f"{instance.label} does not support streaming. "
+                     "Use /api/tts/generate instead."
+        }), 400
 
     if _stream_active.is_set():
         return jsonify({"error": "A stream is already in progress."}), 429
@@ -845,55 +662,46 @@ def stream_audio():
             if job.get("status") == "running":
                 return jsonify({"error": "A generation is already in progress. Please wait or abort."}), 429
 
-    kokoro = load_model()
-    lang = _voice_to_lang(voice)
-    skip_clean = data.get("skip_clean", False)
-    tts_prompt = clean_for_tts(prompt) if not skip_clean else prompt.strip()
+    settings = dispatch.resolved_settings(instance, options)
+    voice = dispatch.resolve_voice(instance, data, settings=settings)
+    tts_prompt = prompt.strip() if data.get("skip_clean") else clean_for_tts(prompt)
 
-    # Cache key for this exact (text, voice, speed) combo
-    cache_k = _cache_key(prompt, voice, speed)
+    cache_k = dispatch.cache_key(prompt, voice, speed, instance.id)
     cache_p = _cache_path(cache_k)
 
-    logger.info("Stream  \033[1m{}\033[0m | {} | {} chars", model_id, voice, len(prompt))
+    logger.info("Stream  \033[1m{}\033[0m | {} | {} chars", instance.id, voice, len(prompt))
 
     q = Queue()
 
-    stream_phonemes, stream_is_ph = _phonemize_with_misaki(tts_prompt, lang)
-
     def _run_stream():
         _stream_active.set()
-        loop = asyncio.new_event_loop()
         all_samples = []
         final_sr = 24000
         try:
-            async def _produce():
-                nonlocal final_sr
-                with _inference_lock():
-                    stream = kokoro.create_stream(
-                        text=stream_phonemes, voice=voice_param,
-                        speed=speed, lang=lang, is_phonemes=stream_is_ph,
-                    )
-                    async for samples, sr in stream:
-                        all_samples.append(samples)
-                        final_sr = sr
-                        q.put(("audio", samples, sr))
-                q.put(("done", None, None))
-
-            loop.run_until_complete(_produce())
+            for chunk in provider.stream(tts_prompt, settings, voice=voice, speed=speed):
+                if chunk.is_final:
+                    break
+                final_sr = chunk.sample_rate
+                all_samples.append(chunk.samples)
+                q.put(("audio", chunk.samples, chunk.sample_rate))
+            q.put(("done", None, None))
 
             # Save to cache as WAV
             if all_samples:
                 try:
+                    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
                     combined = np.concatenate(all_samples)
                     sf.write(cache_p, combined, final_sr, format="WAV")
                     logger.debug("Cached preview → {}", cache_k)
                 except Exception:
                     logger.opt(exception=True).debug("Cache write failed")
+        except ProviderError as exc:
+            logger.error("Stream failed for {}: {}", instance.id, exc.code)
+            q.put(("error", exc.message, None))
         except Exception as e:
             logger.exception("Stream generation failed")
             q.put(("error", str(e), None))
         finally:
-            loop.close()
             _stream_active.clear()
 
     t = threading.Thread(target=_run_stream, daemon=True)

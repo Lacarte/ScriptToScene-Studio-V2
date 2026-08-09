@@ -28,6 +28,10 @@ from pydantic import BaseModel, Field, field_validator
 
 
 DEFAULT_BASENAME = "voice"
+# §32.3 names the sidecar written beside the audio. The standalone TTS page asks
+# for `{basename}.json` instead, which is what its history has always read, so
+# the name is a request field rather than something a provider infers.
+DEFAULT_SIDECAR = "tts.json"
 MIN_SPEED = 0.5
 MAX_SPEED = 2.0
 
@@ -45,6 +49,8 @@ class TTSRequest(BaseModel):
     speed: float = Field(default=1.0, ge=MIN_SPEED, le=MAX_SPEED)
     language: str = ""
     output_basename: str = DEFAULT_BASENAME
+    # `""` means "beside the audio, named `{output_basename}.json`".
+    output_sidecar: str = DEFAULT_SIDECAR
 
     model_config = {"extra": "forbid"}
 
@@ -73,6 +79,21 @@ class TTSRequest(BaseModel):
             raise ValueError("output_basename must be a bare, safe file stem")
         return basename
 
+    @field_validator("output_sidecar", mode="before")
+    @classmethod
+    def _safe_sidecar(cls, value: Any) -> str:
+        name = str(value if value is not None else DEFAULT_SIDECAR).strip()
+        if not name:
+            return ""
+        if not _BASENAME_RE.match(name):
+            raise ValueError("output_sidecar must be a bare, safe file name")
+        return name
+
+    @property
+    def sidecar_name(self) -> str:
+        """The sidecar file name, with the empty request meaning `{stem}.json`."""
+        return self.output_sidecar or f"{self.output_basename}.json"
+
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "TTSRequest":
         """Build a request from the historical pipeline/node configuration keys.
@@ -90,6 +111,7 @@ class TTSRequest(BaseModel):
             speed=data.get("speed", 1.0),
             language=data.get("language", "") or data.get("lang", "") or "",
             output_basename=data.get("output_basename", DEFAULT_BASENAME),
+            output_sidecar=data.get("output_sidecar", DEFAULT_SIDECAR),
         )
 
 
@@ -139,6 +161,7 @@ class TTSResultPayload(BaseModel):
 
 __all__ = [
     "DEFAULT_BASENAME",
+    "DEFAULT_SIDECAR",
     "MAX_SPEED",
     "MIN_SPEED",
     "TTSRequest",

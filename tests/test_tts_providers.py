@@ -180,16 +180,21 @@ class TTSProviderContractSuite:
         self.output_root = tempfile.mkdtemp(prefix="sts_tts_out_")
         self.addCleanup(_rmtree, self.output_root)
         self.provider = self.make_provider()
-        # `job_dir()` resolves against the real TTS_DIR; point it at the sandbox.
-        self._patched = mock.patch(
-            "config.TTS_DIR", os.path.join(self.output_root, "tts")
-        )
-        self._patched.start()
-        self.addCleanup(self._patched.stop)
+        # `job_dir()` resolves against the real TTS_DIR and a ref is relative to
+        # the managed root (§31.2, corrected in 15.2); point both at the sandbox.
+        for target, value in (
+            ("config.TTS_DIR", os.path.join(self.output_root, "tts")),
+            ("studio.shared.providers_common.results.OUTPUT_DIR", self.output_root),
+        ):
+            patcher = mock.patch(target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def invoke(self, request=None, **kwargs):
         invocation = tts_invocation(
-            self.provider_id, output_dir=self.output_root, **kwargs
+            self.provider_id,
+            output_dir=os.path.join(self.output_root, "tts", PROJECT_ID),
+            **kwargs,
         )
         request = request or TTSRequest(text="hello world", voice=self.voice)
         with self.synthesizing():
@@ -416,7 +421,13 @@ class KokoroVoiceAudioTests(unittest.TestCase):
         sf.info.return_value = FakeAudio()
         sf.write.side_effect = _write
 
-        merged = {"output_dir": self.job_dir, "output_basename": "voice"}
+        # The sidecar name is the caller's since 15.2; `invoke()` fills it from
+        # the request, and a direct `synthesize()` says so itself.
+        merged = {
+            "output_dir": self.job_dir,
+            "output_basename": "voice",
+            "output_sidecar": "tts.json",
+        }
         merged.update(settings or {})
         with _stack(
             mock.patch.object(self.module, "_model_files_present", return_value=True),

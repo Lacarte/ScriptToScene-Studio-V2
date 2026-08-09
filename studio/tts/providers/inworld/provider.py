@@ -136,12 +136,19 @@ class InworldTTSProvider(TTSProvider):
         usage = data.get("usage") or {}
         characters = usage.get("processedCharactersCount", len(text))
 
-        job_dir, basename, is_managed_job = _resolve_output(settings)
+        job_dir, basename, sidecar_name = _resolve_output(settings)
         os.makedirs(job_dir, exist_ok=True)
         wav_path = os.path.join(job_dir, basename + ".wav")
 
         audio, sr = sf.read(io.BytesIO(audio_bytes))
         sf.write(wav_path, audio, sr)
+        # Loudness normalization used to sit in the two Inworld *call sites*
+        # (`/api/tts/generate` and the pipeline branch), so a third caller got
+        # audio several LU quieter than Kokoro's. It belongs to whoever produces
+        # the audio (step 15.2).
+        from studio.tts.audio import run_loudnorm
+
+        run_loudnorm(wav_path)
 
         info = sf.info(wav_path)
         duration = round(info.duration, 2)
@@ -160,9 +167,7 @@ class InworldTTSProvider(TTSProvider):
             "characters_billed": characters,
         }
 
-        # §32.3 names the sidecar `tts.json` next to the audio; the standalone
-        # layout keeps its historical `{basename}.json` so old history pages read.
-        sidecar = os.path.join(job_dir, "tts.json" if is_managed_job else basename + ".json")
+        sidecar = os.path.join(job_dir, sidecar_name)
         safe_json_write(sidecar, metadata, indent=2)
         metadata["metadata_path"] = sidecar
 
@@ -217,20 +222,22 @@ def _as_voices(raw) -> list[Voice]:
     ]
 
 
-def _resolve_output(settings: dict) -> tuple[str, str, bool]:
-    """Where this synthesis writes: `(job_dir, basename, is_managed_job)`.
+def _resolve_output(settings: dict) -> tuple[str, str, str]:
+    """Where this synthesis writes: `(job_dir, basename, sidecar_name)`.
 
-    A v2 invocation supplies `output_dir` (the project's `tts/{pid}` directory)
-    and `output_basename`; the standalone legacy path supplies neither and keeps
-    the historical timestamped folder.
+    A v2 invocation supplies `output_dir` (the project's `tts/{pid}` directory),
+    `output_basename`, and the sidecar name the caller wants; a direct
+    `synthesize()` call supplies none of them and keeps the historical
+    timestamped folder.
     """
     output_dir = str(settings.get("output_dir") or "").strip()
     if output_dir:
         basename = str(settings.get("output_basename") or "voice").strip() or "voice"
-        return output_dir, basename, True
+        sidecar = str(settings.get("output_sidecar") or "").strip()
+        return output_dir, basename, sidecar or f"{basename}.json"
     os.makedirs(TTS_DIR, exist_ok=True)
     basename = f"{_PROVIDER_ID}_{int(time.time() * 1000)}"
-    return os.path.join(TTS_DIR, basename), basename, False
+    return os.path.join(TTS_DIR, basename), basename, f"{basename}.json"
 
 
 def validate_settings(settings: dict) -> list[dict]:

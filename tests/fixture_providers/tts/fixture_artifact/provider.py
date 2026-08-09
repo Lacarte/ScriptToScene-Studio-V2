@@ -25,9 +25,12 @@ class FixtureArtifactProvider:
         )
 
         options = {**dict(invocation.settings), **dict(invocation.options)}
-        text = str((request or {}).get("text", ""))
-        voice = str((request or {}).get("voice") or options.get("voice") or "fx_calm")
-        speed = float(options.get("speed") or 1.0)
+        # Either the domain request model (§32.3) or the plain mapping a caller
+        # built by hand: a provider reads fields, not a concrete class.
+        fields = request if isinstance(request, dict) else request.model_dump()
+        text = str(fields.get("text", ""))
+        voice = str(fields.get("voice") or options.get("voice") or "fx_calm")
+        speed = float(fields.get("speed") or options.get("speed") or 1.0)
         sample_rate = int(options.get("sample_rate") or 24000)
 
         ref = self._write(invocation, f"{voice}.wav")

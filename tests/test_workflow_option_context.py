@@ -122,8 +122,22 @@ class OptionContextTestCase(unittest.TestCase):
         self.client = app.test_client()
 
     def _fixture_resolver(self, ctx):
+        """A context-sensitive resolver, written the way a new one would be.
+
+        Reads the provider's own declared voices rather than calling a private
+        helper of `options.py`, so this fixture keeps testing the *envelope* —
+        validation, caching, invalidation — however the shipped resolvers are
+        rewritten.
+        """
         self.resolver_calls.append(dict(ctx.values))
-        return workflow_options._provider_voice_options(ctx.domain, ctx.provider) or []
+        provider = self.hub.get(ctx.domain, ctx.provider) if ctx.provider else None
+        if provider is None:
+            return []
+        voice = (provider.settings_schema() or {}).get('properties', {}).get('voice') or {}
+        return [
+            {'value': option, 'label': option}
+            for option in (voice.get('ui') or {}).get('options') or []
+        ]
 
     def _save(self, data):
         self.settings = json.loads(json.dumps(data))
@@ -438,18 +452,17 @@ class ShippedSourceTests(unittest.TestCase):
         self.addCleanup(workflow_options.clear_option_cache)
 
     def test_the_shipped_tts_source_resolves_per_provider(self):
-        # Each TTS provider declares its own voices in its settings schema, so
-        # 15.2 inherits a working per-provider list rather than building one.
         kokoro = allowed_option_values('tts_voices', {'provider': 'kokoro'})
         inworld = allowed_option_values('tts_voices', {'provider': 'inworld'})
         self.assertTrue(kokoro)
         self.assertTrue(inworld)
         self.assertFalse(kokoro & inworld)
 
-    def test_a_provider_without_declared_voices_falls_back_to_the_local_engine(self):
+    def test_a_provider_without_any_voices_falls_back_to_the_local_engine(self):
+        from studio.tts import dispatch
         from studio.tts.routes import VOICES
 
-        with patch.object(workflow_options, '_provider_voice_options', return_value=None):
+        with patch.object(dispatch, 'list_voices', return_value=[]):
             options, _ = resolve_options('tts_voices', {'provider': 'inworld'})
         self.assertEqual([opt['value'] for opt in options], list(VOICES))
 

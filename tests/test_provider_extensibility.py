@@ -764,6 +764,13 @@ AUDITED_SURFACES = (
     "studio/workflows/adapters/tts.py",
     "studio/workflows/adapters/storyboard.py",
     "studio/workflows/adapters/animator.py",
+    # Step 15.2 made both of these generic: `_step_tts` dispatches through the
+    # registry, and `studio/tts/dispatch.py` is now the one place that resolves
+    # a TTS provider, a voice, and a `job_meta` block. `studio/tts/routes.py`
+    # is deliberately not here yet — the model download and the multi-voice job
+    # still drive the local engine by name (owner 16.1).
+    "studio/pipeline/services.py",
+    "studio/tts/dispatch.py",
     "studio/shared/providers_common/domains.py",
     "studio/shared/providers_common/hub.py",
     "studio/shared/providers_common/registry.py",

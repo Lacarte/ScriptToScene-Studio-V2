@@ -1263,22 +1263,6 @@ def _step_tts(config, project_id):
     return _pipeline_services._step_tts(config, project_id)
 
 
-def _step_tts_inworld_pipeline(config, project_id, text, voice, speed, job_dir, wav_path,
-                               provider_id, provider_version, provider_kind, provider_settings):
-    return _pipeline_services._step_tts_inworld_pipeline(
-        config, project_id, text, voice, speed, job_dir, wav_path,
-        provider_id, provider_version, provider_kind, provider_settings,
-    )
-
-
-def _step_tts_kokoro_pipeline(config, project_id, text, voice, speed, job_dir, wav_path,
-                              provider_id, provider_version, provider_kind, provider_settings):
-    return _pipeline_services._step_tts_kokoro_pipeline(
-        config, project_id, text, voice, speed, job_dir, wav_path,
-        provider_id, provider_version, provider_kind, provider_settings,
-    )
-
-
 def _step_timing(tts_result, config, project_id):
     return _pipeline_services._step_timing(tts_result, config, project_id)
 

@@ -69,20 +69,26 @@ function isFavorite(voiceId) {
   return favorites.value.includes(voiceId)
 }
 
+/** `{id, label}` from either the reconciled shape or the historical bare ids. */
+function asChoices(voices) {
+  if (!Array.isArray(voices)) return []
+  return voices
+    .map(v => (typeof v === 'string' ? { id: v, label: v } : { ...v, label: v?.label || v?.id }))
+    .filter(v => v.id)
+}
+
 // Load Kokoro voices on init
-api.get('/api/tts/voices').then(voices => {
-  if (Array.isArray(voices) && voices.length) {
-    kokoroVoices.value = voices.map(v => ({ id: v, label: v }))
-  }
+api.get('/api/tts/voices?provider=kokoro').then(voices => {
+  const choices = asChoices(voices)
+  if (choices.length) kokoroVoices.value = choices
 }).catch(() => {})
 
 function loadInworldVoices() {
   if (inworldVoicesLoaded.value) return
   inworldVoicesLoaded.value = true
   api.get('/api/tts/voices?provider=inworld').then(voices => {
-    if (Array.isArray(voices) && voices.length) {
-      inworldVoices.value = voices
-    }
+    const choices = asChoices(voices)
+    if (choices.length) inworldVoices.value = choices
   }).catch(() => {
     inworldVoicesLoaded.value = false
   })

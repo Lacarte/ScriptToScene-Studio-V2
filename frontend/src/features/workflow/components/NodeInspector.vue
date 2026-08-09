@@ -39,12 +39,19 @@ const visibleFields = computed(() =>
  * no `provider_id` and must still show the options of the provider it will
  * actually run (§41.3 M4). This mirrors `options.configured_provider()`.
  */
+const providerField = computed(
+  () => (def.value?.config_schema || []).find((f) => f.type === 'provider') || null,
+)
+
 const selectedProviderId = computed(() => {
-  const field = (def.value?.config_schema || []).find((f) => f.type === 'provider')
+  const field = providerField.value
   if (!field) return ''
   const stored = node.value?.configuration?.[field.name]
   return (typeof stored === 'string' && stored) || field.default || ''
 })
+
+/** The domain that provider belongs to, so sibling dropdowns can scope to it. */
+const providerDomain = computed(() => providerField.value?.provider_domain || '')
 
 const issues = computed(() => store.issuesByNode[node.value?.id] || [])
 const mappingOptions = computed(() => expressionOptions(
@@ -201,6 +208,7 @@ function updateErrorPolicy(patch) {
         :value="node.configuration[field.name]"
         :expression-options="mappingOptions"
         :provider-id="selectedProviderId"
+        :provider-domain="providerDomain"
         @update="(value) => onUpdate(field.name, value)"
         @invalid="(message) => onFieldInvalid(field, message)"
       />

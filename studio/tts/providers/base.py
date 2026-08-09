@@ -61,8 +61,16 @@ class TTSResult:
 
 @dataclass
 class TTSStreamChunk:
-    """A chunk of streamed audio."""
-    data: bytes
+    """A chunk of streamed audio.
+
+    `samples` carries the raw frames when the provider has them — that is what
+    `/api/tts/stream` base64-encodes for the browser's AudioContext — and
+    `data` the same audio already encoded. `sample_rate` travels with the chunk
+    because the provider, not the route, knows what it produced (step 15.2).
+    """
+    data: bytes = b""
+    samples: Any = None
+    sample_rate: int = 24000
     is_final: bool = False
 
 
@@ -159,6 +167,11 @@ class TTSProvider(ABC):
             # lands in the same place and the refs are managed by construction.
             "output_dir": job_dir(invocation.project_id),
             "output_basename": request.output_basename,
+            # Which sidecar the caller wants beside the audio. The provider used
+            # to infer it from "was I given an output directory", which meant a
+            # legacy caller could not ask for its historical `{basename}.json`
+            # while still using the managed layout (step 15.2).
+            "output_sidecar": request.sidecar_name,
         }
         if request.language:
             settings.setdefault("lang_override", request.language)
@@ -178,7 +191,11 @@ class TTSProvider(ABC):
             )
 
         metadata = dict(result.metadata or {})
-        audio_ref = normalize_ref(result.audio_path, output_dir=invocation.output_dir or None)
+        # Refs are relative to the *managed root*, never to the invocation's own
+        # output directory (§31.2): `resolve_ref()` and the boundary's artifact
+        # check both resolve against the root, so a job-dir-relative ref would
+        # resolve to a path that does not exist.
+        audio_ref = normalize_ref(result.audio_path)
         payload = TTSResultPayload(
             audio_ref=audio_ref,
             duration_seconds=result.duration_seconds,
@@ -191,7 +208,7 @@ class TTSProvider(ABC):
         refs = [audio_ref]
         sidecar = metadata.pop("metadata_path", "")
         if sidecar:
-            refs.append(normalize_ref(sidecar, output_dir=invocation.output_dir or None))
+            refs.append(normalize_ref(sidecar))
 
         invocation.progress(ready=1, total=1, state="succeeded")
         return ProviderResult(

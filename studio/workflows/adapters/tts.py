@@ -1,6 +1,19 @@
+"""Workflow adapter for the Text to Speech node (`tts.generate`).
+
+Dispatches generically through the `tts` provider hub (step 15.2). The adapter
+resolves which provider the node runs on and hands the request to
+`studio.tts.dispatch` via `_step_tts`; it knows nothing about voices, models,
+streaming, or audio formats, so a TTS provider that ships tomorrow runs on this
+node with no edit here and none in the registry.
+"""
+
+from __future__ import annotations
+
 import os
 
 from studio.pipeline.services import _step_tts
+from studio.shared.providers_common.errors import ProviderError
+
 from .common import (
     inherited_config,
     outputs,
@@ -23,7 +36,10 @@ def generate(inputs, config, context):
     selected = provider_id(DOMAIN, merged)
     merged["tts_provider_override"] = selected
     merged["tts_provider_options"] = provider_run_options(DOMAIN, selected, merged)
-    result = _step_tts(merged, pid)
+    try:
+        result = _step_tts(merged, pid, context)
+    except ProviderError as exc:
+        raise exc.as_adapter_error() from exc
     metadata = with_artifacts(result, result["wav_path"], os.path.join(os.path.dirname(result["wav_path"]), "tts.json"))
     audio = with_artifacts({"project_id": pid, "path": result["wav_path"], "filename": result["filename"], "duration_seconds": result.get("duration_seconds")}, result["wav_path"])
     return outputs(audio=audio, metadata=metadata)

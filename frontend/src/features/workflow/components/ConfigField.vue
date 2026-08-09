@@ -19,8 +19,10 @@ const props = defineProps({
   value: { required: false, default: undefined },
   expressionOptions: { type: Array, default: () => [] },
   // The provider this node selected, resolved by the inspector from the node's
-  // own `provider` field. Only the `provider_options` widget reads it.
+  // own `provider` field, and that field's domain. Read by the
+  // `provider_options` widget and by any option source that accepts them.
   providerId: { type: String, default: '' },
+  providerDomain: { type: String, default: '' },
 })
 const emit = defineEmits(['update', 'invalid'])
 
@@ -29,12 +31,32 @@ const emit = defineEmits(['update', 'invalid'])
 // id alone (step 12.3). No provider is named here either.
 const SELECT_TYPES = ['options', 'provider']
 
+/**
+ * The context this field's option source accepts, filled in from the node.
+ *
+ * `options_context` comes from the registry, which reads it off the source's
+ * own spec: a source rejects a parameter it does not declare (§23.1), so the
+ * editor may not simply send everything. Sending nothing — what shipped before
+ * step 15.2 — is why the `voice` dropdown always answered with the default
+ * engine's voices however the node's provider was set.
+ */
+const optionContext = computed(() => {
+  const available = { domain: props.providerDomain, provider: props.providerId }
+  const context = {}
+  for (const name of props.field.options_context || []) {
+    if (available[name]) context[name] = available[name]
+  }
+  return context
+})
+
 // Async sources resolve through the backend allowlist; the composable caches
-// one fetch per (source, context) for the whole session. No context is sent:
-// the `*_providers` sources accept none and imply their domain (§23.1).
-const asyncOptions = SELECT_TYPES.includes(props.field.type) && props.field.options_source
-  ? useOptionSource(props.field.options_source)
-  : null
+// one fetch per (source, context) for the whole session. Computed, so changing
+// the node's provider re-resolves instead of reusing the first answer.
+const asyncOptions = computed(() =>
+  SELECT_TYPES.includes(props.field.type) && props.field.options_source
+    ? useOptionSource(props.field.options_source, optionContext.value).value
+    : null,
+)
 
 const jsonText = ref('')
 const jsonError = ref('')
@@ -92,7 +114,7 @@ function onNumberInput(event) {
 }
 
 const selectOptions = computed(() => {
-  const listed = asyncOptions
+  const listed = asyncOptions.value
     ? asyncOptions.value.options
     : (props.field.options || []).map((opt) => ({ value: opt, label: opt === '' ? '—' : String(opt) }))
   const current = props.value ?? props.field.default ?? ''
@@ -104,8 +126,8 @@ const selectOptions = computed(() => {
   return listed
 })
 
-const optionsLoading = computed(() => Boolean(asyncOptions?.value.loading))
-const optionsError = computed(() => asyncOptions?.value.error || '')
+const optionsLoading = computed(() => Boolean(asyncOptions.value?.loading))
+const optionsError = computed(() => asyncOptions.value?.error || '')
 const expressionActive = computed(() => isExpressionValue(props.value))
 
 function restoreLiteral() {

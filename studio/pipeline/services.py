@@ -9,11 +9,9 @@ import os
 import re
 import shutil
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
-import numpy as np
 import requests as http_requests
-import soundfile as sf
 from loguru import logger
 
 from config import (
@@ -56,239 +54,27 @@ class PipelineStopped(RuntimeError):
 # Step implementations
 # ===================================================================
 
-def _step_tts(config, project_id):
-    """Generate TTS audio and return metadata dict (includes wav_path).
+def _step_tts(config, project_id, context=None):
+    """Generate TTS audio and return the reconciled metadata dict.
 
-    Uses provider registry to resolve provider, load settings, and dispatch.
-    Resolution order:
-      1. config.provider_override if set
-      2. settings.json → domains.tts.selected_provider
-      3. default: kokoro
+    Step 15.2 replaced the two provider branches this function used to pick
+    between with one dispatch through the registry. Voice selection,
+    exclusivity, the preview cache, and the `job_meta` block are all
+    provider-agnostic now, so a TTS provider nobody has written yet runs here
+    without an edit.
     """
-    from studio.tts.routes import _tts_job_dir
+    from studio.tts import dispatch
     from studio.tts.normalize import clean_for_tts
-    from studio.tts.audio import run_loudnorm
-    from studio.tts.providers import registry as tts_registry
-    from studio.shared.providers_common import settings_manager, redact_settings
 
-    text = config["text"]
-    speed = float(config.get("speed", 1.0))
-
-    provider_id = (
-        config.get("tts_provider_override")
-        or config.get("tts_provider")
-        or settings_manager.get_domain_settings("tts").get("selected_provider")
-        or "kokoro"
+    return dispatch.synthesize(
+        {**dict(config or {}), "text": clean_for_tts(config["text"])},
+        project_id=project_id,
+        context=context,
+        use_cache=True,
+        # `_step_timing` copies this file out by name and every recorded
+        # `tts.json` names it, so the managed layout stays `voice.wav`.
+        basename="voice",
     )
-
-    provider = tts_registry.get(provider_id)
-    if provider is None:
-        raise ValueError(f"TTS provider '{provider_id}' not found. Available: {tts_registry.list_ids()}")
-
-    # Pick the voice that matches the resolved provider — the frontend sends
-    # both `voice` (kokoro) and `tts_voice` (inworld) so the wrong one must be
-    # ignored, otherwise Inworld rejects kokoro voice IDs like 'am_fenrir'.
-    if provider_id == "inworld":
-        voice = config.get("tts_voice") or config.get("voice") or "Carter"
-    else:
-        voice = config.get("voice") or "af_bella"
-
-    provider_settings = settings_manager.get_provider_settings("tts", provider_id)
-    merged_settings = {**provider_settings, **config.get("tts_provider_options", {})}
-
-    job_dir = _tts_job_dir(project_id)
-    os.makedirs(job_dir, exist_ok=True)
-    wav_path = os.path.join(job_dir, "voice.wav")
-
-    if provider_id == "inworld":
-        return _step_tts_inworld_pipeline(
-            config, project_id, text, voice, speed, job_dir, wav_path,
-            provider_id, provider_version=provider.version, provider_kind=provider.kind,
-            provider_settings=merged_settings,
-        )
-
-    return _step_tts_kokoro_pipeline(
-        config, project_id, text, voice, speed, job_dir, wav_path,
-        provider_id, provider_version=provider.version, provider_kind=provider.kind,
-        provider_settings=merged_settings,
-    )
-
-
-def _step_tts_inworld_pipeline(config, project_id, text, voice, speed, job_dir, wav_path,
-                               provider_id, provider_version, provider_kind, provider_settings):
-    """Pipeline TTS via Inworld cloud API."""
-    from studio.tts.inworld import synthesize_to_wav
-    from studio.tts.normalize import clean_for_tts
-    from studio.tts.audio import run_loudnorm
-    from studio.shared.providers_common import settings_manager
-
-    tts_prompt = clean_for_tts(text)
-
-    result = synthesize_to_wav(
-        text=tts_prompt,
-        wav_path=wav_path,
-        voice_id=voice,
-        speed=speed,
-    )
-    run_loudnorm(wav_path)
-
-    clean_prompt = re.sub(r'[\[\]]', '', text).strip()
-    metadata = {
-        "filename": "voice.wav",
-        "folder": project_id,
-        "prompt": clean_prompt,
-        "model": result["model_id"],
-        "model_id": provider_id,
-        "provider": provider_id,
-        "voice": voice,
-        "project_id": project_id,
-        "visual_style": config.get("visual_style"),
-        "story_tone": config.get("story_tone"),
-        "category": config.get("category"),
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "inference_time": result["inference_time"],
-        "rtf": round(result["inference_time"] / result["duration_seconds"], 4) if result["duration_seconds"] > 0 else 0,
-        "duration_seconds": result["duration_seconds"],
-        "sample_rate": result["sample_rate"],
-        "speed": speed,
-        "words": len(clean_prompt.split()),
-        "approx_tokens": int(len(clean_prompt.split()) * 1.3),
-        "wav_path": wav_path,
-        "cache_hit": False,
-        "characters_billed": result["characters"],
-    }
-
-    settings = settings_manager.load_settings()
-    metadata["job_meta"] = {
-        "provider_id": provider_id,
-        "provider_version": provider_version,
-        "provider_kind": provider_kind,
-        "resolved_settings_redacted": settings_manager.redact_settings(provider_settings),
-        "provider_options": config.get("tts_provider_options", {}),
-        "resolved_at": datetime.now(timezone.utc).isoformat(),
-        "settings_version": settings.get("version", 1),
-    }
-
-    safe_json_write(
-        os.path.join(job_dir, "tts.json"),
-        {k: v for k, v in metadata.items() if k != "wav_path"},
-        indent=2,
-    )
-    return metadata
-
-
-def _step_tts_kokoro_pipeline(config, project_id, text, voice, speed, job_dir, wav_path,
-                              provider_id, provider_version, provider_kind, provider_settings):
-    """Pipeline TTS via local Kokoro ONNX with caching."""
-    # The engine comes from its owning provider package, not from the routes
-    # module that used to keep a second copy of it (contracts.md B5 / K1).
-    from studio.shared.providers_common.concurrency import exclusive_execution
-    from studio.tts.providers import kokoro_engine
-    from studio.tts.routes import _cache_key, _cache_path
-
-    engine = kokoro_engine()
-    load_model = engine.load_model
-    _voice_to_lang = engine._voice_to_lang
-    _phonemize_with_misaki = engine._phonemize_with_misaki
-
-    from studio.tts.normalize import clean_for_tts
-    from studio.tts.audio import pad_audio, run_loudnorm
-    from studio.shared.providers_common import settings_manager
-    import shutil
-
-    cache_hit = False
-    cache_key = _cache_key(text, voice, speed)
-    cached_wav = _cache_path(cache_key)
-
-    if os.path.isfile(cached_wav):
-        try:
-            info = sf.info(cached_wav)
-            if info.duration >= 0.5:
-                shutil.copy2(cached_wav, wav_path)
-                run_loudnorm(wav_path)
-                cache_hit = True
-                logger.success(
-                    "Pipeline TTS: cache hit ({}) — {:.1f}s audio, 0s inference",
-                    cache_key, info.duration,
-                )
-        except Exception:
-            logger.opt(exception=True).debug("Cache read failed, regenerating")
-
-    total_inference = 0.0
-    if not cache_hit:
-        kokoro = load_model()
-        lang = _voice_to_lang(voice)
-        tts_prompt = clean_for_tts(text)
-        phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
-
-        start = time.perf_counter()
-        # Serialization is declared by the manifest, not assumed here (§20.4).
-        with exclusive_execution("tts", provider_id):
-            audio, _sr = kokoro.create(
-                text=phonemes, voice=voice, speed=speed,
-                lang=lang, is_phonemes=is_ph,
-            )
-        total_inference = time.perf_counter() - start
-        audio = pad_audio(audio, sample_rate=24000)
-        sf.write(wav_path, audio, 24000)
-        run_loudnorm(wav_path)
-
-        try:
-            shutil.copy2(wav_path, cached_wav)
-            logger.debug("Cached pipeline TTS → {}", cache_key)
-        except Exception:
-            pass
-
-        logger.success("Pipeline TTS: {:.1f}s audio in {:.2f}s",
-                       sf.info(wav_path).duration, total_inference)
-
-    info = sf.info(wav_path)
-    duration = info.duration
-    rtf = total_inference / duration if duration > 0 else 0
-    clean_prompt = re.sub(r'[\[\]]', '', text).strip()
-
-    metadata = {
-        "filename": "voice.wav",
-        "folder": project_id,
-        "prompt": clean_prompt,
-        "model": "kokoro-v1.0",
-        "model_id": provider_id,
-        "provider": provider_id,
-        "voice": voice,
-        "project_id": project_id,
-        "visual_style": config.get("visual_style"),
-        "story_tone": config.get("story_tone"),
-        "category": config.get("category"),
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "inference_time": round(total_inference, 3),
-        "rtf": round(rtf, 4),
-        "duration_seconds": round(duration, 2),
-        "sample_rate": 24000,
-        "speed": speed,
-        "words": len(clean_prompt.split()),
-        "approx_tokens": int(len(clean_prompt.split()) * 1.3),
-        "wav_path": wav_path,
-        "cache_hit": cache_hit,
-    }
-
-    settings = settings_manager.load_settings()
-    metadata["job_meta"] = {
-        "provider_id": provider_id,
-        "provider_version": provider_version,
-        "provider_kind": provider_kind,
-        "resolved_settings_redacted": settings_manager.redact_settings(provider_settings),
-        "provider_options": config.get("tts_provider_options", {}),
-        "resolved_at": datetime.now(timezone.utc).isoformat(),
-        "settings_version": settings.get("version", 1),
-    }
-
-    safe_json_write(
-        os.path.join(job_dir, "tts.json"),
-        {k: v for k, v in metadata.items() if k != "wav_path"},
-        indent=2,
-    )
-
-    return metadata
 
 
 def _step_timing(tts_result, config, project_id):

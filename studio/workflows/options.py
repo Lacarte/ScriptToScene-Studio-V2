@@ -201,44 +201,29 @@ def build_context(source: str, params: dict | None = None) -> OptionContext:
 # ---------------------------------------------------------------------------
 
 
-def _provider_voice_options(domain: str, provider_id: str) -> list[dict] | None:
-    """Voices a provider declares in its own settings schema, or None.
+def _tts_voices(ctx: OptionContext):
+    """Voices for the context's TTS provider (step 15.2).
 
-    Metadata only: no provider is constructed and no network call is made, so a
-    dropdown never pays for a model load. A provider owns its voice list by
-    declaring `voice.ui.options`, which is why adding a TTS provider needs no
-    edit here (contracts.md §26). 15.2 replaces this with the live per-provider
-    list for providers that can serve one.
+    The catalog comes from `studio.tts.dispatch`, the same helper
+    `GET /api/tts/voices` answers with, so the canvas dropdown and the legacy
+    page cannot disagree about what a provider offers. Before this the resolver
+    read a settings schema while the route asked one provider's API directly,
+    and a provider whose voices live behind that API — every cloud one — was
+    simply unreachable from a node.
+
+    The final fallback is load-bearing: with no provider resolved — an empty
+    catalog, a selection pointing at an uninstalled provider — the node must
+    still offer the voices the default engine accepts rather than an empty list.
     """
     from studio.shared.providers_common.hub import hub
-    from studio.shared.providers_common.settings_schema import properties
+    from studio.tts import dispatch
 
-    provider = hub.get(domain, provider_id)
-    if provider is None:
-        return None
-    voice = properties(provider.settings_schema()).get("voice")
-    options = ((voice or {}).get("ui") or {}).get("options")
-    if not isinstance(options, list) or not options:
-        return None
-    resolved = []
-    for option in options:
-        if isinstance(option, dict) and "value" in option:
-            resolved.append(_opt(option["value"], option.get("label")))
-        elif isinstance(option, str):
-            resolved.append(_opt(option))
-    return resolved or None
-
-
-def _tts_voices(ctx: OptionContext):
-    """Voices for the context's TTS provider, falling back to the local engine.
-
-    The fallback is load-bearing: with no provider resolved — an empty catalog, a
-    selection pointing at an uninstalled provider — the node must still offer the
-    voices the default engine actually accepts rather than an empty list.
-    """
-    if ctx.domain and ctx.provider:
-        options = _provider_voice_options(ctx.domain, ctx.provider)
-        if options is not None:
+    instance = hub.get(ctx.domain, ctx.provider) if ctx.domain and ctx.provider else None
+    if instance is not None:
+        options = [
+            _opt(voice["id"], voice["label"]) for voice in dispatch.list_voices(instance)
+        ]
+        if options:
             return options
     from studio.tts.routes import VOICES
 

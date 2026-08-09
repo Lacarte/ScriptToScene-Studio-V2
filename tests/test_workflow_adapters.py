@@ -25,7 +25,7 @@ def test_tts_adapter_translates_ports_and_inherited_defaults(monkeypatch, tmp_pa
     meta = tmp_path / "tts.json"
     wav.write_bytes(b"wav")
     meta.write_text("{}")
-    monkeypatch.setattr(tts, "_step_tts", lambda cfg, pid: {
+    monkeypatch.setattr(tts, "_step_tts", lambda cfg, pid, ctx=None: {
         "wav_path": str(wav), "filename": "voice.wav", "folder": pid,
         "duration_seconds": 1.2, "voice": cfg["voice"],
     })

@@ -44,7 +44,7 @@ from studio.shared.providers_common.errors import (
     PROVIDER_REQUEST_INVALID,
     ProviderError,
 )
-from studio.tts.providers.base import TTSProvider, TTSResult, Voice
+from studio.tts.providers.base import TTSProvider, TTSResult, TTSStreamChunk, Voice
 
 _DOMAIN = "tts"
 _PROVIDER_ID = "kokoro"
@@ -257,18 +257,17 @@ class KokoroTTSProvider(TTSProvider):
 
     provider_id = _PROVIDER_ID
 
-    def synthesize(
-        self,
-        text: str,
-        settings: dict,
-        voice: Optional[str] = None,
-        speed: float = 1.0,
-        on_progress: Optional[Callable] = None,
-    ) -> TTSResult:
+    def _prepare(self, text: str, settings: dict, voice: Optional[str], speed: float):
+        """Resolve everything one `kokoro.create*()` call needs.
+
+        Shared by `synthesize()` and `stream()` so the two entry points cannot
+        disagree about the voice, the blend recipe, the inferred language, or
+        the phonemization — before 15.2 the streaming half of that logic lived
+        in `tts/routes.py` and had already drifted.
+        """
         settings = dict(settings or {})
         voice = voice or settings.get("voice") or DEFAULT_VOICE
         speed = float(settings.get("speed", speed) or 1.0)
-        blend = settings.get("blend", False)
 
         kokoro = self._load()
         lang = settings.get("lang_override") or _voice_to_lang(voice)
@@ -276,11 +275,13 @@ class KokoroTTSProvider(TTSProvider):
         blend_meta = None
         voice_param: Any = voice
 
-        if blend:
+        if settings.get("blend", False):
             voice_a = settings.get("blendA", "af_heart")
             voice_b = settings.get("blendB", "am_adam")
             blend_ratio = float(settings.get("blendRatio", 50)) / 100.0
             blend_method = settings.get("blendMethod", "slerp")
+            if blend_method not in ("slerp", "lerp"):
+                blend_method = "slerp"
             blend_meta = {
                 "voiceA": voice_a,
                 "voiceB": voice_b,
@@ -300,6 +301,20 @@ class KokoroTTSProvider(TTSProvider):
             voice_param = (blended_embed, voice_a, voice_b)
 
         phonemes, is_ph = _phonemize_with_misaki(text, lang)
+        return kokoro, voice, voice_param, speed, lang, phonemes, is_ph, blend_meta
+
+    def synthesize(
+        self,
+        text: str,
+        settings: dict,
+        voice: Optional[str] = None,
+        speed: float = 1.0,
+        on_progress: Optional[Callable] = None,
+    ) -> TTSResult:
+        settings = dict(settings or {})
+        (
+            kokoro, voice, voice_param, speed, lang, phonemes, is_ph, blend_meta
+        ) = self._prepare(text, settings, voice, speed)
 
         if on_progress:
             on_progress("Synthesizing...")
@@ -326,7 +341,7 @@ class KokoroTTSProvider(TTSProvider):
                 raise _fail(PROVIDER_FAILED, "Kokoro synthesis failed", exc) from exc
         inference_time = time.perf_counter() - start
 
-        job_dir, basename, is_managed_job = _resolve_output(settings)
+        job_dir, basename, sidecar_name = _resolve_output(settings)
         os.makedirs(job_dir, exist_ok=True)
         wav_path = os.path.join(job_dir, basename + ".wav")
 
@@ -357,10 +372,15 @@ class KokoroTTSProvider(TTSProvider):
         }
         if blend_meta:
             metadata["blend"] = blend_meta
+            # The human-readable name of a blend is the blender's to compose;
+            # the caller only knows there may be a `voice_label` (step 15.2).
+            pct = int(round(blend_meta["ratio"] * 100))
+            metadata["voice_label"] = (
+                f"{blend_meta['voiceA']} + {blend_meta['voiceB']} "
+                f"({pct}% {blend_meta['method'].upper()})"
+            )
 
-        # §32.3 names the sidecar `tts.json` next to the audio; the standalone
-        # layout keeps its historical `{basename}.json` so old history pages read.
-        sidecar = os.path.join(job_dir, "tts.json" if is_managed_job else basename + ".json")
+        sidecar = os.path.join(job_dir, sidecar_name)
         safe_json_write(sidecar, metadata, indent=2)
         metadata["metadata_path"] = sidecar
 
@@ -371,6 +391,47 @@ class KokoroTTSProvider(TTSProvider):
             sample_rate=SAMPLE_RATE,
             metadata=metadata,
         )
+
+    def stream(
+        self,
+        text: str,
+        settings: dict,
+        voice: Optional[str] = None,
+        speed: float = 1.0,
+    ):
+        """Yield audio chunks as the model produces them (`streaming` capability).
+
+        A transport capability, not an invocation: it produces no
+        `ProviderResult` and writes no artifact (§32.3). The async generator
+        `kokoro-onnx` returns is driven one chunk at a time rather than
+        collected, so `/api/tts/stream` stays progressive.
+        """
+        import asyncio
+
+        (
+            kokoro, _voice, voice_param, speed, lang, phonemes, is_ph, _blend
+        ) = self._prepare(text, settings, voice, speed)
+
+        loop = asyncio.new_event_loop()
+        try:
+            with exclusive_execution(_DOMAIN, _PROVIDER_ID):
+                producer = kokoro.create_stream(
+                    text=phonemes, voice=voice_param, speed=speed,
+                    lang=lang, is_phonemes=is_ph,
+                )
+                while True:
+                    try:
+                        samples, rate = loop.run_until_complete(
+                            producer.__anext__()
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except Exception as exc:
+                        raise _fail(PROVIDER_FAILED, "Kokoro streaming failed", exc) from exc
+                    yield TTSStreamChunk(samples=samples, sample_rate=int(rate))
+            yield TTSStreamChunk(sample_rate=SAMPLE_RATE, is_final=True)
+        finally:
+            loop.close()
 
     def list_voices(self, settings: dict) -> list[Voice]:
         return [
@@ -413,20 +474,22 @@ class KokoroTTSProvider(TTSProvider):
             raise _fail(PROVIDER_FAILED, "The Kokoro model failed to load", exc) from exc
 
 
-def _resolve_output(settings: dict) -> tuple[str, str, bool]:
-    """Where this synthesis writes: `(job_dir, basename, is_managed_job)`.
+def _resolve_output(settings: dict) -> tuple[str, str, str]:
+    """Where this synthesis writes: `(job_dir, basename, sidecar_name)`.
 
-    A v2 invocation supplies `output_dir` (the project's `tts/{pid}` directory)
-    and `output_basename`; the standalone legacy path supplies neither and keeps
-    the historical timestamped folder.
+    A v2 invocation supplies `output_dir` (the project's `tts/{pid}` directory),
+    `output_basename`, and the sidecar name the caller wants; a direct
+    `synthesize()` call supplies none of them and keeps the historical
+    timestamped folder.
     """
     output_dir = str(settings.get("output_dir") or "").strip()
     if output_dir:
         basename = str(settings.get("output_basename") or "voice").strip() or "voice"
-        return output_dir, basename, True
+        sidecar = str(settings.get("output_sidecar") or "").strip()
+        return output_dir, basename, sidecar or f"{basename}.json"
     os.makedirs(TTS_DIR, exist_ok=True)
     basename = f"{_PROVIDER_ID}_{int(time.time() * 1000)}"
-    return _tts_job_dir(basename), basename, False
+    return _tts_job_dir(basename), basename, f"{basename}.json"
 
 
 def validate_settings(settings: dict) -> list[dict]:
