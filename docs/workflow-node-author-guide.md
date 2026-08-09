@@ -81,7 +81,7 @@ Regenerate and commit both documentation files. Restart the app (or confirm a su
 
 ## Registry-generated contracts
 
-Registry version **3**.
+Registry version **4**.
 
 ### Allowed port types
 

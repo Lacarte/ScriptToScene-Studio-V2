@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from .expressions import is_expression, validate_expressions
-from .options import allowed_option_values, config_option_context
+from .options import allowed_option_values, config_option_context, configured_provider
 from .registry import DYNAMIC_PORT_TYPES, get_node_type, is_supported
 from .sample_data import validate_stub_payload
 
@@ -216,6 +216,80 @@ def _field_is_visible(field: dict, configuration: dict) -> bool:
     return True
 
 
+def _validate_provider_options(
+    field: dict,
+    fields: dict,
+    config: dict,
+    value: Any,
+    field_path: str,
+    problems: list[dict],
+) -> None:
+    """Validate a per-run options patch against the *selected* provider's schema.
+
+    The provider is resolved authoritatively — from the node's own `provider`
+    field, never from the global selection — and its own `settings_schema()` is
+    the contract the patch is checked against, so a provider gets node-level
+    validation without a line of code here (step 12.3, contracts.md §22.5).
+
+    Two documented ways this fails open, both because a workflow must stay
+    saveable and inspectable on a machine where a provider is not installed
+    (§23.3): an unresolvable provider skips schema validation entirely, and a
+    provider with no `settings_schema.py` validates nothing.
+
+    Required-but-absent is *not* an error here. This is a patch over saved
+    provider settings, so an omitted key means "use the saved value", and only
+    the keys actually present are checked.
+    """
+    if not isinstance(value, dict):
+        problems.append(_problem("WORKFLOW_INVALID", "must be an object", field_path))
+        return
+    try:
+        _json_size(value)
+    except (TypeError, ValueError):
+        problems.append(_problem("WORKFLOW_INVALID", "must be JSON-serializable", field_path))
+        return
+
+    from studio.shared.providers_common.settings_schema import (
+        is_secret_field,
+        properties,
+        validate_against_schema,
+    )
+
+    domain = field.get("provider_domain")
+    _resolved_domain, provider_id = configured_provider(config, fields)
+
+    # A credential in a node configuration would be written to the workflow
+    # JSON, its exports, and its archives. That is never recoverable by failing
+    # open, so it is an error regardless of whether the provider resolves.
+    schema = None
+    if domain and provider_id:
+        from studio.shared.providers_common.hub import hub
+
+        provider = hub.get(domain, provider_id)
+        schema = provider.settings_schema() if provider is not None else None
+    props = properties(schema)
+    for key in sorted(value):
+        if is_secret_field(key, props.get(key)):
+            problems.append(_problem(
+                "WORKFLOW_INVALID",
+                f"'{key}' is a credential and must be set in provider settings, "
+                "not in a workflow",
+                f"{field_path}.{key}",
+            ))
+
+    if schema is None:
+        return
+    # `required` is dropped: an omitted key inherits the saved provider setting.
+    patch_schema = {**schema, "required": []}
+    for issue in validate_against_schema(patch_schema, value):
+        problems.append(_problem(
+            "WORKFLOW_INVALID",
+            issue["message"],
+            f"{field_path}.{issue['field']}",
+            severity="error" if issue["severity"] == "error" else "warning",
+        ))
+
+
 def _validate_config(
     node: dict,
     definition: dict,
@@ -274,7 +348,10 @@ def _validate_config(
                 problems.append(_problem("WORKFLOW_INVALID", "must be an integer", field_path))
         elif widget == "boolean" and not isinstance(value, bool):
             problems.append(_problem("WORKFLOW_INVALID", "must be a boolean", field_path))
-        elif widget == "options":
+        elif widget in ("options", "provider"):
+            # `provider` is an options field whose list is always the domain's
+            # registered providers, so it validates through the same allowlisted
+            # source and fails open the same way when the catalog cannot answer.
             options = field.get("options")
             source = field.get("options_source")
             if options:
@@ -296,6 +373,8 @@ def _validate_config(
                 _json_size(value)
             except (TypeError, ValueError):
                 problems.append(_problem("WORKFLOW_INVALID", "must be JSON-serializable", field_path))
+        elif widget == "provider_options":
+            _validate_provider_options(field, fields, config, value, field_path, problems)
         elif widget == "media_asset" and value is not None and not isinstance(value, dict):
             problems.append(_problem("WORKFLOW_INVALID", "must be a managed media reference", field_path))
 

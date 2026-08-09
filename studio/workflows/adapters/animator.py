@@ -7,7 +7,19 @@ from studio.shared.providers_common.errors import (
     ProviderCancelled,
     ProviderError,
 )
-from .common import AdapterError, context_value, inherited_config, outputs, project_id, with_artifacts
+from .common import (
+    AdapterError,
+    context_value,
+    inherited_config,
+    outputs,
+    project_id,
+    provider_id,
+    provider_option,
+    provider_run_options,
+    with_artifacts,
+)
+
+DOMAIN = "animator"
 
 
 def _step_assets(scenes_result, config, project_id, context):
@@ -37,6 +49,9 @@ def _step_assets(scenes_result, config, project_id, context):
             "resolution": options.get("resolution", "1"), "output_format": options.get("output_format", "jpg"),
             # Portable options only: the job manifest is written under output/ and
             # may be archived, so a credential must never reach it (§22.6).
+            # `options` already carries these, merged request-wins; re-applying
+            # them last keeps Kie AI's inverted precedence exactly as it is
+            # today (§40.2 O4 / §47 C4 — the correction belongs to 14.3).
             **settings_manager.portable_provider_settings("animator", "kie_ai"),
         }
     service._set_job(project_id, job)
@@ -46,7 +61,16 @@ def _step_assets(scenes_result, config, project_id, context):
         service._kie_ai_generate_all(project_id, job)
     else:
         from studio.animator.routes import add_job
-        add_job(project_id, scenes, options.get("mode", "video"), options.get("quality", "480p"), options.get("duration", "6s"))
+        # mode/quality/duration moved out of the node config into this
+        # provider's own settings (§41.3 M3), so their defaults now come from
+        # the schema that declares them rather than from literals here.
+        add_job(
+            project_id,
+            scenes,
+            provider_option(DOMAIN, provider, options, "mode"),
+            provider_option(DOMAIN, provider, options, "quality"),
+            provider_option(DOMAIN, provider, options, "duration"),
+        )
 
     manifest = os.path.join(ANIMATOR_DIR, project_id, "grabber_job.json")
     deadline = time.monotonic() + 2 * 60 * 60
@@ -79,11 +103,9 @@ def _step_assets(scenes_result, config, project_id, context):
 def generate(inputs, config, context):
     pid = project_id(context, inputs)
     merged = inherited_config(config, inputs.get("settings"))
-    merged["animator_provider_override"] = merged.get("provider", "grok_automa")
-    merged["animator_provider_options"] = {
-        "mode": merged.get("mode", "video"), "quality": merged.get("quality", "480p"),
-        "duration": merged.get("duration", "6s"),
-    }
+    selected = provider_id(DOMAIN, merged)
+    merged["animator_provider_override"] = selected
+    merged["animator_provider_options"] = provider_run_options(DOMAIN, selected, merged)
     result = _step_assets(inputs["scenes"], merged, pid, context)
     # Verified live (step 6.1): a provider that errors every scene still
     # completes the job manifest — zero produced assets must fail the node.

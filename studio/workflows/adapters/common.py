@@ -71,6 +71,108 @@ def inherited_config(config: Mapping[str, Any] | None, settings: Any, aliases=No
     return inherited
 
 
+def provider_id(domain: str, config: Mapping[str, Any] | None) -> str:
+    """The provider this node runs on: its saved `provider_id`, else the default.
+
+    The fallback is deliberately a *read*, never a write (contracts.md §41.3
+    M4): `setdefault` would change the fingerprinted configuration and
+    invalidate the cache the fallback exists to preserve. It is what keeps a
+    `story.generate` or `scenes.blueprint` saved before step 12.3 running the
+    same service it always did.
+    """
+    from studio.shared.providers_common.domains import DOMAINS
+
+    value = (config or {}).get("provider_id")
+    if isinstance(value, str) and value:
+        return value
+    return DOMAINS[domain].default_provider
+
+
+def resolve_provider(domain: str, provider: str):
+    """Construct the selected provider, or fail with a stable adapter error.
+
+    Execution does *not* fail open. Save-time validation tolerates a provider
+    that is not installed so a workflow stays inspectable (§23.3), but running
+    a node against a provider that cannot be built has no safe interpretation:
+    silently substituting another one would produce an artifact nobody asked
+    for.
+    """
+    from studio.shared.providers_common.hub import hub
+    from studio.shared.providers_common.registry import ProviderConstructionError
+
+    try:
+        instance = hub.create(domain, provider)
+    except ProviderConstructionError as exc:
+        raise AdapterError(
+            exc.code, f"The {domain} provider '{provider}' could not be started"
+        ) from exc
+    if instance is None:
+        raise AdapterError(
+            "PROVIDER_UNAVAILABLE",
+            f"No {domain} provider named '{provider}' is registered",
+        )
+    return instance
+
+
+def _provider_properties(domain: str, provider: str) -> dict:
+    """The selected provider's settings-schema properties, or `{}`."""
+    from studio.shared.providers_common.hub import hub
+    from studio.shared.providers_common.settings_schema import properties
+
+    instance = hub.get(domain, provider)
+    return properties(instance.settings_schema() if instance is not None else None)
+
+
+def provider_run_options(domain: str, provider: str, config: Mapping[str, Any] | None) -> dict:
+    """Merge a node's `provider_options` over the provider's saved settings.
+
+    `{**saved, **per_run}` — "request wins", the order §40.2 freezes for every
+    provider, and exactly the order the legacy services already apply.
+
+    Only the *portable* half of the saved settings is read, so a credential can
+    never reach a job manifest written under `output/` (§22.6). An unknown key
+    is dropped rather than forwarded — "accept, warn, drop before dispatch"
+    (§40.2); save-time validation already warned about it.
+
+    Schema defaults are deliberately **not** layered in. A key the operator
+    never set must stay absent so the downstream service applies its own
+    default; materializing every declared default here would rewrite recorded
+    artifacts such as `tts.json`'s `resolved_settings_redacted` for no gain.
+    Use `provider_option()` where a resolved value is actually needed.
+    """
+    props = _provider_properties(domain, provider)
+    resolved = dict(_portable_settings(domain, provider))
+    patch = (config or {}).get("provider_options")
+    for key, value in dict(patch if isinstance(patch, Mapping) else {}).items():
+        # With no schema there is nothing to check the key against, so the
+        # patch passes through whole rather than being silently emptied.
+        if not props or key in props:
+            resolved[key] = value
+    from studio.shared.providers_common.settings_schema import invocation_config
+
+    return invocation_config({"properties": props} if props else None, resolved)
+
+
+def _portable_settings(domain: str, provider: str) -> dict:
+    from studio.shared.providers_common import settings_manager
+
+    return settings_manager.portable_provider_settings(domain, provider)
+
+
+def provider_option(domain: str, provider: str, options: Mapping[str, Any], key: str):
+    """One option's effective value: the merged one, else the schema's default.
+
+    This is what replaced the per-provider literals the adapters used to carry
+    (`"480p"`, `"6s"`, `"video"`). The vocabulary and the defaults of a
+    provider's options now live only in that provider's settings schema, so a
+    new provider changes them without an edit here (contracts.md §26).
+    """
+    if key in options:
+        return options[key]
+    prop = _provider_properties(domain, provider).get(key)
+    return prop.get("default") if isinstance(prop, dict) else None
+
+
 def artifact_ref(path: str) -> str:
     absolute = os.path.abspath(path)
     root = os.path.abspath(OUTPUT_DIR)

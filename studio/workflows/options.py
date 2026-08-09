@@ -34,9 +34,11 @@ from .registry import ASYNC_OPTION_SOURCES, OptionSourceSpec
 EXPORT_PROFILES = ["yt_shorts", "tiktok", "reels", "yt_landscape", "square"]
 
 # Node config fields that name a provider, newest first (contracts.md §40.1).
-# 12.3 converts all five provider-backed nodes to `provider_id`; until then a
-# saved `engine`/`provider` still has to answer "which provider is this node
-# configured for?" during save-time validation.
+# 12.3 converted all five provider-backed nodes to a `provider`-widget field, so
+# a node's schema now answers "which provider is this configured for?" by
+# itself. These names stay as the fallback for a document that has not been
+# migrated: `POST /api/workflow/validate` accepts a client-supplied document
+# that never went through `migrate_workflow`.
 PROVIDER_CONFIG_FIELDS = ("provider_id", "provider", "engine")
 
 # §23.4 — at most this many context variations are cached per source, so query
@@ -462,6 +464,40 @@ def allowed_option_values(source: str, context: dict | None = None):
         return None
 
 
+def configured_provider(configuration: dict | None, fields: dict | None = None):
+    """Return `(domain, provider_id)` for the provider a node is configured with.
+
+    The `provider` widget is authoritative: it carries its own
+    `provider_domain`, so one lookup answers for every domain and a sixth domain
+    needs no edit here (step 12.3). `PROVIDER_CONFIG_FIELDS` is the fallback for
+    a document that has not been migrated, and it cannot name a domain — the
+    caller supplies one or gets `None`.
+
+    The field's schema default counts. A node that never wrote the key still
+    runs on that default, so resolving to the *global* selection instead would
+    make changing that selection reinterpret saved workflows, which §24.1 rule 2
+    forbids.
+    """
+    fields = fields or {}
+    configuration = configuration or {}
+    for name, field in fields.items():
+        if (field or {}).get("type") != "provider":
+            continue
+        value = configuration.get(name)
+        if not isinstance(value, str) or not value:
+            value = field.get("default")
+        if isinstance(value, str) and value:
+            return field.get("provider_domain"), value
+        return field.get("provider_domain"), None
+    for name in PROVIDER_CONFIG_FIELDS:
+        value = configuration.get(name)
+        if value is None:
+            value = ((fields.get(name) or {}).get("default"))
+        if isinstance(value, str) and value:
+            return None, value
+    return None, None
+
+
 def config_option_context(source: str, configuration: dict | None, fields: dict | None = None):
     """Context for validating one node configuration's value for `source`.
 
@@ -479,13 +515,8 @@ def config_option_context(source: str, configuration: dict | None, fields: dict 
     spec = ASYNC_OPTION_SOURCES.get(source)
     if spec is None or "provider" not in spec.context:
         return None
-    for field_name in PROVIDER_CONFIG_FIELDS:
-        value = (configuration or {}).get(field_name)
-        if value is None:
-            value = ((fields or {}).get(field_name) or {}).get("default")
-        if isinstance(value, str) and value:
-            return {"provider": value}
-    return None
+    _domain, provider_id = configured_provider(configuration, fields)
+    return {"provider": provider_id} if provider_id else None
 
 
 __all__ = [
@@ -496,6 +527,7 @@ __all__ = [
     "build_context",
     "clear_option_cache",
     "config_option_context",
+    "configured_provider",
     "invalidate_discovery_cache",
     "invalidate_settings_cache",
     "resolve_options",

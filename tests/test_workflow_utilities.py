@@ -125,7 +125,7 @@ def test_story_adapter_wraps_importable_service_and_emits_script(monkeypatch, tm
         "metadata": {},
         "path": str(artifact),
     })
-    monkeypatch.setattr(story, "generate_story", service)
+    monkeypatch.setattr(story_service, "generate_story", service)
     monkeypatch.setattr(story, "with_artifacts", lambda payload, *paths: {**payload, "artifact_refs": list(paths)})
     result = story.generate(
         {"settings": {"style": "cinematic", "tone": "dramatic"}},

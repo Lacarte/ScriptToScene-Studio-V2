@@ -12,7 +12,10 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-REGISTRY_VERSION = 3
+from studio.shared.providers_common.domains import DOMAINS
+
+# 4 adds the `provider` / `provider_options` config widgets (step 12.3).
+REGISTRY_VERSION = 4
 
 # contracts.md §3 — frozen v1 port vocabulary.
 PORT_TYPES = [
@@ -99,6 +102,53 @@ _CONTROL_OUT = _out("control", "control")
 
 
 # ---------------------------------------------------------------------------
+# The generic provider primitive (step 12.3)
+# ---------------------------------------------------------------------------
+
+# Two config widgets that a node parameterizes with nothing but a domain id.
+# `provider` selects one registered provider of `provider_domain`;
+# `provider_options` is that provider's per-run settings patch, validated
+# against whichever provider is selected (contracts.md §22, §40.2 O1).
+PROVIDER_FIELD = "provider_id"
+PROVIDER_OPTIONS_FIELD = "provider_options"
+PROVIDER_WIDGETS = frozenset({"provider", "provider_options"})
+
+
+def _provider_field(domain):
+    """The one provider-selection field, generated from a domain id alone.
+
+    Every provider-specific thing about it — the option list, the default —
+    comes from the domain catalog and the live registry, so no provider id is
+    written into a node definition and adding a provider needs no edit here
+    (contracts.md §26).
+    """
+    return {
+        "name": PROVIDER_FIELD,
+        "label": "Provider",
+        "type": "provider",
+        "provider_domain": domain,
+        "options_source": f"{domain}_providers",
+        "default": DOMAINS[domain].default_provider,
+        "required": True,
+    }
+
+
+def _provider_options_field(domain):
+    """Per-run overrides for the selected provider's own settings."""
+    return {
+        "name": PROVIDER_OPTIONS_FIELD,
+        "label": "Provider options",
+        "type": "provider_options",
+        "provider_domain": domain,
+        "default": {},
+        "description": (
+            "Overrides applied on top of this provider's saved settings for "
+            "this node only. Credentials belong in provider settings."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Node catalog — port IDs frozen per contracts.md §3.1.
 # ---------------------------------------------------------------------------
 
@@ -176,6 +226,10 @@ _NODE_TYPES = {
         "inputs": [_TRIGGER_IN, _in("settings", "project_settings")],
         "outputs": [_CONTROL_OUT, _out("script", "script")],
         "config_schema": [
+            # M4 (contracts.md §41.3): a new optional key with a default, so no
+            # `type_version` bump — a saved config that predates it keeps
+            # running the bridge provider without being rewritten.
+            _provider_field("script"),
             {"name": "preset_style", "label": "Visual style", "type": "options",
              "options_source": "style_templates", "default": "cinematic"},
             {"name": "story_category", "label": "Story category", "type": "string",
@@ -192,6 +246,7 @@ _NODE_TYPES = {
              "default": "", "max_length": 4000},
             {"name": "webhook_url", "label": "Webhook URL", "type": "string",
              "default": "", "max_length": 2048},
+            _provider_options_field("script"),
         ],
         "capabilities": {"retry": True, "cancel": False},
         "executor": "studio.workflows.adapters.story:generate",
@@ -212,7 +267,9 @@ _NODE_TYPES = {
         "executor": "studio.workflows.adapters.project:existing",
     },
     "tts.generate": {
-        "type_version": 1,
+        # v2: `engine` became `provider_id` (contracts.md §41.3 M1).
+        "type_version": 2,
+        "migrations": {1: "studio.workflows.config_migrations:tts_generate_1_to_2"},
         "display_name": "Text to Speech",
         "description": "Generate narration audio from the script.",
         "category": "audio",
@@ -220,13 +277,12 @@ _NODE_TYPES = {
         "inputs": [_TRIGGER_IN, _in("script", "script", required=True), _in("settings", "project_settings")],
         "outputs": [_CONTROL_OUT, _out("audio", "audio_file"), _out("metadata", "tts_metadata")],
         "config_schema": [
-            {"name": "engine", "label": "Engine", "type": "options",
-             "options": ["kokoro", "inworld"], "default": "kokoro"},
+            _provider_field("tts"),
             {"name": "voice", "label": "Voice", "type": "options",
              "options_source": "tts_voices", "default": "af_heart"},
             {"name": "speed", "label": "Speed", "type": "number",
              "default": 1.0, "min": 0.5, "max": 2.0, "step": 0.1},
-            {"name": "provider_options", "label": "Provider options", "type": "json", "default": {}},
+            _provider_options_field("tts"),
         ],
         # Kokoro owns a process-wide model singleton which is not safe to use
         # alongside another TTS adapter invocation.  The scheduler treats
@@ -271,18 +327,24 @@ _NODE_TYPES = {
                    _in("script", "script", required=True), _in("settings", "project_settings")],
         "outputs": [_CONTROL_OUT, _out("scenes", "scenes"), _out("image_prompts", "image_prompts")],
         "config_schema": [
+            # M4 (contracts.md §41.3): additive and optional, so no bump.
+            _provider_field("scene_blueprint"),
             {"name": "webhook_url", "label": "Webhook URL", "type": "string", "default": ""},
             {"name": "style", "label": "Visual style", "type": "options",
              "options_source": "style_templates", "default": "cinematic"},
             {"name": "style_prompt", "label": "Custom style notes", "type": "textarea", "default": ""},
             {"name": "story_tone", "label": "Story tone", "type": "options",
              "options_source": "story_tones", "default": ""},
+            _provider_options_field("scene_blueprint"),
         ],
         "capabilities": {"retry": True, "cancel": False},
         "executor": "studio.workflows.adapters.scenes:blueprint",
     },
     "storyboard.generate": {
-        "type_version": 1,
+        # v2: `provider` became `provider_id`; the two gemini_ws-gated fields
+        # moved into per-run provider options (contracts.md §41.3 M2).
+        "type_version": 2,
+        "migrations": {1: "studio.workflows.config_migrations:storyboard_generate_1_to_2"},
         "display_name": "Storyboard",
         "description": "Reference images per scene (never timeline media — see contracts D4).",
         "category": "assets",
@@ -290,23 +352,22 @@ _NODE_TYPES = {
         "inputs": [_TRIGGER_IN, _in("scenes", "scenes", required=True), _in("settings", "project_settings")],
         "outputs": [_CONTROL_OUT, _out("images", "storyboard_images")],
         "config_schema": [
-            {"name": "provider", "label": "Provider", "type": "options",
-             "options_source": "storyboard_providers", "default": "wavespeed_webhook"},
+            _provider_field("storyboard"),
             {"name": "aspect_ratio", "label": "Aspect ratio", "type": "options",
              "options": _ASPECT_RATIOS, "default": "9:16"},
             {"name": "style", "label": "Visual style", "type": "options",
              "options_source": "style_templates", "default": "cinematic"},
             {"name": "image_model", "label": "Image model", "type": "string", "default": ""},
-            {"name": "prompt_prefix", "label": "Prompt prefix", "type": "string", "default": "",
-             "display_options": {"show": {"provider": ["gemini_ws"]}}},
-            {"name": "auto_type", "label": "Auto-type prompts", "type": "boolean", "default": True,
-             "display_options": {"show": {"provider": ["gemini_ws"]}}},
+            _provider_options_field("storyboard"),
         ],
         "capabilities": {"retry": True, "cancel": False},
         "executor": "studio.workflows.adapters.storyboard:generate",
     },
     "animator.generate": {
-        "type_version": 1,
+        # v2: `provider` became `provider_id`; the gated mode/quality/duration/
+        # auto_type fields moved into per-run provider options (§41.3 M3).
+        "type_version": 2,
+        "migrations": {1: "studio.workflows.config_migrations:animator_generate_1_to_2"},
         "display_name": "Animator",
         "description": "Timeline media (video/image) per scene via the asset grabber.",
         "category": "assets",
@@ -315,21 +376,11 @@ _NODE_TYPES = {
                    _in("storyboard", "storyboard_images"), _in("settings", "project_settings")],
         "outputs": [_CONTROL_OUT, _out("assets", "animation_assets")],
         "config_schema": [
-            {"name": "provider", "label": "Provider", "type": "options",
-             "options_source": "animator_providers", "default": "grok_automa"},
+            _provider_field("animator"),
             {"name": "aspect_ratio", "label": "Aspect ratio", "type": "options",
              "options": _ASPECT_RATIOS, "default": "9:16"},
-            {"name": "mode", "label": "Asset mode", "type": "options",
-             "options": ["video", "image"], "default": "video"},
-            {"name": "quality", "label": "Quality", "type": "options",
-             "options": ["360p", "480p", "720p"], "default": "480p",
-             "display_options": {"show": {"provider": ["grok_automa"]}}},
-            {"name": "duration", "label": "Clip duration", "type": "options",
-             "options": ["6s"], "default": "6s",
-             "display_options": {"show": {"provider": ["grok_automa"]}}},
             {"name": "arguments", "label": "Extra arguments", "type": "string", "default": ""},
-            {"name": "auto_type", "label": "Auto-type prompts", "type": "boolean", "default": True,
-             "display_options": {"show": {"provider": ["grok_automa"]}}},
+            _provider_options_field("animator"),
         ],
         "capabilities": {"retry": True, "cancel": False},
         "executor": "studio.workflows.adapters.animator:generate",

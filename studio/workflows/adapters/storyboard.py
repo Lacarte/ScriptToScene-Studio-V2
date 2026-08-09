@@ -7,7 +7,19 @@ from studio.shared.providers_common.errors import (
     ProviderCancelled,
     ProviderError,
 )
-from .common import AdapterError, context_value, inherited_config, outputs, project_id, with_artifacts
+from .common import (
+    AdapterError,
+    context_value,
+    inherited_config,
+    outputs,
+    project_id,
+    provider_id,
+    provider_option,
+    provider_run_options,
+    with_artifacts,
+)
+
+DOMAIN = "storyboard"
 
 
 def _step_storyboard(scenes_result, config, project_id, context):
@@ -22,10 +34,18 @@ def _step_storyboard(scenes_result, config, project_id, context):
     if not scenes:
         raise AdapterError("SCENES_EMPTY", "No scenes have image prompts for storyboard")
     provider = config.get("storyboard_provider_override", "wavespeed_webhook")
+    options = config.get("storyboard_provider_options") or {}
     manifest = os.path.join(STORYBOARD_DIR, project_id, "storyboard.json")
     if provider == "gemini_ws":
         from studio.storyboard.gemini_ws import add_job
-        add_job(project_id, [{"index": s["scene"], "prompt": s["prompt"]} for s in scenes], config.get("auto_type", True))
+        # `auto_type` moved out of the node config into this provider's own
+        # settings (§41.3 M2), so its default now comes from the schema that
+        # declares it rather than from a literal here.
+        add_job(
+            project_id,
+            [{"index": s["scene"], "prompt": s["prompt"]} for s in scenes],
+            provider_option(DOMAIN, provider, options, "auto_type"),
+        )
     else:
         job = {
             "project_id": project_id, "status": "running", "total": len(scenes),
@@ -71,7 +91,9 @@ def _step_storyboard(scenes_result, config, project_id, context):
 def generate(inputs, config, context):
     pid = project_id(context, inputs)
     merged = inherited_config(config, inputs.get("settings"))
-    merged["storyboard_provider_override"] = merged.get("provider", "wavespeed_webhook")
+    selected = provider_id(DOMAIN, merged)
+    merged["storyboard_provider_override"] = selected
+    merged["storyboard_provider_options"] = provider_run_options(DOMAIN, selected, merged)
     result = _step_storyboard(inputs["scenes"], merged, pid, context)
     # Verified live (step 6.1): provider failures (e.g. a rejected WaveSpeed
     # key) complete the manifest with only errors — that is a node failure,

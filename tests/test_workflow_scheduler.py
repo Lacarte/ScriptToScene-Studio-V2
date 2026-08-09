@@ -21,8 +21,10 @@ from studio.workflows.registry import get_node_type
 def _node(node_id, node_type="trigger.manual", *, disabled=False, port_type=None, config=None):
     if config is None:
         config = {} if port_type is None else {"port_type": port_type, "payload": {}}
+    defn = get_node_type(node_type)
+    ver = defn["type_version"] if defn else 1
     return {
-        "id": node_id, "type": node_type, "type_version": 1, "name": node_id,
+        "id": node_id, "type": node_type, "type_version": ver, "name": node_id,
         "position": {"x": 0, "y": 0}, "configuration": config, "disabled": disabled,
     }
 

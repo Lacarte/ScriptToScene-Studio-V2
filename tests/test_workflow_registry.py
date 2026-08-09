@@ -66,14 +66,14 @@ class RegistryContractTests(unittest.TestCase):
 
     def test_config_schema_integrity(self):
         widget_types = {"string", "textarea", "number", "boolean", "options",
-                        "json", "media_asset"}
+                        "json", "media_asset", "provider", "provider_options"}
         for key, node in all_node_types().items():
             names = [f["name"] for f in node["config_schema"]]
             self.assertEqual(len(names), len(set(names)), f"{key} duplicate config names")
             for field in node["config_schema"]:
                 self.assertIn(field["type"], widget_types, f"{key}.{field['name']}")
                 self.assertIn("default", field, f"{key}.{field['name']}")
-                if field["type"] == "options":
+                if field["type"] in ("options", "provider"):
                     has_static = bool(field.get("options"))
                     source = field.get("options_source")
                     self.assertTrue(has_static or source, f"{key}.{field['name']}")
@@ -91,8 +91,8 @@ class RegistryContractTests(unittest.TestCase):
             self.assertIn("control", [p["id"] for p in node["outputs"]], key)
 
     def test_version_lookup(self):
-        self.assertTrue(is_supported("tts.generate", 1))
-        self.assertFalse(is_supported("tts.generate", 2))
+        self.assertTrue(is_supported("tts.generate", 2))
+        self.assertFalse(is_supported("tts.generate", 1))
         self.assertFalse(is_supported("nope.missing", 1))
         self.assertIsNone(get_node_type("nope.missing"))
 

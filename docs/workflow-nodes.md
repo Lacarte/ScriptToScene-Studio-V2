@@ -4,7 +4,7 @@
 
 # Workflow Node Reference
 
-Registry version **3** — 24 node types across 9 categories.
+Registry version **4** — 24 node types across 9 categories.
 
 Connections require the source and target port to have the **same** type; there are no implicit conversions. `control` ports carry execution order only and never data. Dynamic ports (`stub.input`, `stub.output`, `workflow.output`) take the type chosen in the node's `port_type` setting.
 
@@ -163,7 +163,7 @@ Select an existing project (WIP preferred over initial) without rewriting it.
 
 Generate narration audio from the script.
 
-- **Type version:** 1
+- **Type version:** 2
 - **Capabilities:** supports retry, error output, skip-optional; no cancel
 
 **Inputs**
@@ -187,10 +187,10 @@ Generate narration audio from the script.
 
 | Field | Label | Widget | Default | Required | Constraints |
 |---|---|---|---|---|---|
-| `engine` | Engine | `options` | `"kokoro"` | no | one of `kokoro`, `inworld` |
+| `provider_id` | Provider | `provider` | `"kokoro"` | yes | options from `tts_providers` |
 | `voice` | Voice | `options` | `"af_heart"` | no | options from `tts_voices` |
 | `speed` | Speed | `number` | `1.0` | no | range 0.5–2.0 |
-| `provider_options` | Provider options | `json` | `{}` | no | — |
+| `provider_options` | Provider options | `provider_options` | `{}` | no | — |
 
 ### Background Music (`music.select`)
 
@@ -312,6 +312,7 @@ Generate a structured narration script with the existing story service.
 
 | Field | Label | Widget | Default | Required | Constraints |
 |---|---|---|---|---|---|
+| `provider_id` | Provider | `provider` | `"builtin"` | yes | options from `script_providers` |
 | `preset_style` | Visual style | `options` | `"cinematic"` | no | options from `style_templates` |
 | `story_category` | Story category | `string` | `"motivation"` | yes | max length 80 |
 | `duration` | Target duration (seconds) | `number` | `45` | no | range 15–180; integer |
@@ -320,6 +321,7 @@ Generate a structured narration script with the existing story service.
 | `story_tone` | Story tone | `options` | `""` | no | options from `story_tones` |
 | `idea` | Idea or prompt | `textarea` | `""` | no | max length 4000 |
 | `webhook_url` | Webhook URL | `string` | `""` | no | max length 2048 |
+| `provider_options` | Provider options | `provider_options` | `{}` | no | — |
 
 ### Scene Blueprint (`scenes.blueprint`)
 
@@ -350,10 +352,12 @@ AI scene descriptions and image prompts for each segment.
 
 | Field | Label | Widget | Default | Required | Constraints |
 |---|---|---|---|---|---|
+| `provider_id` | Provider | `provider` | `"builtin"` | yes | options from `scene_blueprint_providers` |
 | `webhook_url` | Webhook URL | `string` | `""` | no | — |
 | `style` | Visual style | `options` | `"cinematic"` | no | options from `style_templates` |
 | `style_prompt` | Custom style notes | `textarea` | `""` | no | — |
 | `story_tone` | Story tone | `options` | `""` | no | options from `story_tones` |
+| `provider_options` | Provider options | `provider_options` | `{}` | no | — |
 
 ## Assets nodes
 
@@ -361,7 +365,7 @@ AI scene descriptions and image prompts for each segment.
 
 Reference images per scene (never timeline media — see contracts D4).
 
-- **Type version:** 1
+- **Type version:** 2
 - **Capabilities:** supports retry, error output, skip-optional; no cancel
 
 **Inputs**
@@ -384,18 +388,17 @@ Reference images per scene (never timeline media — see contracts D4).
 
 | Field | Label | Widget | Default | Required | Constraints |
 |---|---|---|---|---|---|
-| `provider` | Provider | `options` | `"wavespeed_webhook"` | no | options from `storyboard_providers` |
+| `provider_id` | Provider | `provider` | `"gemini_ws"` | yes | options from `storyboard_providers` |
 | `aspect_ratio` | Aspect ratio | `options` | `"9:16"` | no | one of `9:16`, `16:9`, `1:1` |
 | `style` | Visual style | `options` | `"cinematic"` | no | options from `style_templates` |
 | `image_model` | Image model | `string` | `""` | no | — |
-| `prompt_prefix` | Prompt prefix | `string` | `""` | no | shown when `provider` is `"gemini_ws"` |
-| `auto_type` | Auto-type prompts | `boolean` | `true` | no | shown when `provider` is `"gemini_ws"` |
+| `provider_options` | Provider options | `provider_options` | `{}` | no | — |
 
 ### Animator (`animator.generate`)
 
 Timeline media (video/image) per scene via the asset grabber.
 
-- **Type version:** 1
+- **Type version:** 2
 - **Capabilities:** supports retry, error output, skip-optional; no cancel
 
 **Inputs**
@@ -419,13 +422,10 @@ Timeline media (video/image) per scene via the asset grabber.
 
 | Field | Label | Widget | Default | Required | Constraints |
 |---|---|---|---|---|---|
-| `provider` | Provider | `options` | `"grok_automa"` | no | options from `animator_providers` |
+| `provider_id` | Provider | `provider` | `"grok_automa"` | yes | options from `animator_providers` |
 | `aspect_ratio` | Aspect ratio | `options` | `"9:16"` | no | one of `9:16`, `16:9`, `1:1` |
-| `mode` | Asset mode | `options` | `"video"` | no | one of `video`, `image` |
-| `quality` | Quality | `options` | `"480p"` | no | one of `360p`, `480p`, `720p`; shown when `provider` is `"grok_automa"` |
-| `duration` | Clip duration | `options` | `"6s"` | no | one of `6s`; shown when `provider` is `"grok_automa"` |
 | `arguments` | Extra arguments | `string` | `""` | no | — |
-| `auto_type` | Auto-type prompts | `boolean` | `true` | no | shown when `provider` is `"grok_automa"` |
+| `provider_options` | Provider options | `provider_options` | `{}` | no | — |
 
 ## Video nodes
 
