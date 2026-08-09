@@ -1758,8 +1758,11 @@ class CancellationToken:
 - Cancellation is **not** an error condition to be retried. It maps to `ProviderCancelled` →
   workflow code `CANCELLED` → node status `cancelled` (`scheduler.py:754-766`), never to
   `failed`.
-- `on_cancel` callbacks run on the cancelling thread, must not block, and must not raise;
-  exceptions are logged and swallowed.
+- `on_cancel` callbacks run once, on the thread that first observes cancellation through
+  `is_cancelled()` / `raise_if_cancelled()`. The existing scheduler exposes only
+  `threading.Event.is_set` as a callable, so a callback cannot run on the thread that calls
+  `Event.set` without inventing a second cancellation mechanism. Callbacks must not block or
+  raise; exceptions are logged and swallowed.
 
 ### 30.4 Progress reporter (frozen)
 
@@ -1802,8 +1805,10 @@ class ProviderLogger:
   `node_id`, `invocation_id`. A provider never formats those into its message.
 - `error(...)` writes a log line; it does not fail the invocation. Failure is raising a
   `ProviderError` (§34).
-- Only `warning` and `error` records are eligible to become execution-record log entries; the
-  node record already caps them (§5).
+- Only provider-authored `warning` and `error` records are eligible to become execution-record
+  log entries; the node record already caps them (§5). The registry boundary's diagnostic
+  traceback is explicitly internal-only even though it is emitted at error level: it must
+  never be copied into a `ProviderResult`, execution-record log, SSE frame, or API response.
 
 ### 30.6 Relationship to `AdapterContext` (frozen)
 
@@ -1920,9 +1925,9 @@ Multi-unit domains (`storyboard`, `animator`; any provider declaring `batch`) re
 
 ```jsonc
 { "unit_index": 3,                 // the scene index from the request; stable, not positional
-  "state": "succeeded",            // succeeded | failed | skipped | cancelled
-  "artifact_refs": ["storyboard/pm_X/3/image.png"],
-  "metadata": {"width": 1080, "height": 1920},
+  "state": "failed",               // succeeded | failed | skipped | cancelled
+  "artifact_refs": [],
+  "metadata": {},
   "error": {"code": "PROVIDER_UNIT_FAILED", "message": "…", "retryable": true} }
 ```
 
@@ -1934,10 +1939,11 @@ Frozen rules:
    (`pending = total - ready - errors`, `pipeline/services.py:593`).
 2. `unit_index` is the caller's index (the scene `index`), so a partial re-run addresses the
    same units. Positional inference is forbidden.
-3. Envelope `status` is derived, never provider-declared:
-   all succeeded → `succeeded`; at least one succeeded and at least one not → `partial`;
-   none succeeded → `failed` (raised, §31.4); any unit `cancelled` with none failed →
-   the invocation is cancelled.
+3. Envelope `status` is derived, never provider-declared, in this precedence order:
+   any unit `cancelled` and no unit failed → cancel the invocation (even if an earlier unit
+   succeeded); otherwise all succeeded → `succeeded`; otherwise at least one succeeded →
+   `partial`; otherwise → `failed` (raised, §31.4). This ordering prevents a cancellation
+   arriving after one completed scene from being misreported as ordinary partial success.
 4. `artifact_refs` at envelope level is the ordered union of unit refs plus domain-level
    artifacts (the manifest JSON). No unit-level ref may be missing from it.
 5. A `failed` unit must carry `error`; a `succeeded` unit must carry at least one
@@ -2082,7 +2088,6 @@ StoryboardRequest:
     scenes: list[{index: int, prompt: str}]   # non-empty; index is the unit_index
     aspect_ratio: str = "9:16"
     style: str = ""
-    image_model: str = ""                     # "" = provider default
 ```
 
 ```python
@@ -2098,7 +2103,9 @@ third-party CDN (`storyboard/routes.py:233`) is **provider-specific response dat
 dropped from the result; the downloaded file is the output. `scene_statuses` is retired as a
 provider-facing shape — it stays inside `storyboard.json` for the legacy status route
 (`routes.py:387-401`, public compatibility surface §17.1) and 14.2 derives it from `units[]`.
-`prompt_prefix` and `auto_type` are provider settings, not request fields (§26, P27).
+`image_model`, `prompt_prefix`, and `auto_type` are provider settings, not request fields
+(§26, P27). This keeps the request provider-neutral and avoids freezing `image_model` both as
+a durable setting and as a per-run option.
 
 ### 32.5 `animator`
 
@@ -2107,8 +2114,6 @@ AnimatorRequest:
     scenes: list[{index: int, prompt: str, reference_ref: str | None}]
     aspect_ratio: str = "9:16"
     mode: str = "video"            # video | image
-    duration_s: float | None = None
-    resolution: str = ""
 ```
 
 ```python
@@ -2121,7 +2126,8 @@ Units carry `artifact_refs` for every produced media file plus
 `metadata: {"kind": "video"|"image", "thumbnail_ref": …, "duration_s": …}`. `reference_ref`
 is how the declared-but-unused `storyboard` input port (`registry.py:277`) becomes meaningful
 for `image_to_video` providers. `quality`, `duration`, `auto_type`, and Kie's
-`resolution`/`output_format` are provider settings (P27, §26); `arguments`
+`resolution`/`output_format` are provider settings (P27, §26), not duplicate fields in
+`AnimatorRequest`; `arguments`
 (`adapters/animator.py:23`) is a free-text passthrough that 14.3 must either type or delete —
 it is not part of the frozen request. The remote `urls` list (`animator/routes.py:457`,
 `:532`) is provider-specific response data and is dropped, same rule as storyboard's
@@ -2143,7 +2149,6 @@ class JobHandle:
     provider_id: str
     project_id: str
     invocation_id: str   # correlates the handle to its ProviderInvocation
-    state: str           # a JobState value
     created_at: str      # ISO
 
 @dataclass(frozen=True)
@@ -2154,14 +2159,18 @@ class JobStatus:
     total: int = 0
     fraction: float | None = None
     message: str | None = None   # ≤ 200 chars, redacted
-    units: list[UnitResult] = ()  # §31.5, may be partial while running
+    units: tuple[UnitResult, ...] = ()  # §31.5; serialized as a JSON array
+                                     # and may be partial while running
     error: ProviderErrorPayload | None = None   # §34.1; set only in state="failed"
     updated_at: str = ""
 ```
 
-Two deliberate changes from the duplicated dataclasses: `status: str` becomes `state` with a
+`JobHandle` contains stable identity only; live state belongs exclusively to `JobStatus`.
+Putting `state` on the frozen handle would either become stale at the first transition or
+require replacing the identity object on every poll. Two deliberate changes from the
+duplicated dataclasses: `status: str` becomes `state` with a
 closed vocabulary (the old field held provider-defined strings), and `result: dict | None`
-becomes `units: list[UnitResult]` so a partial result is expressible while the job is still
+becomes `units: tuple[UnitResult, ...]` so a partial result is expressible while the job is still
 running. `SceneResult` (`image_url/image_path` vs `video_url/video_path`) is replaced by the
 one media-neutral `UnitResult` of §31.5; 11.4 keeps thin domain aliases so 14.2/14.3 can diff
 against the old shape.
@@ -2306,7 +2315,8 @@ may not mark `PROVIDER_AUTH_FAILED` retryable to force retries.
 Exactly one place wraps provider exceptions: the registry/hub invocation boundary in
 `providers_common`. Frozen behavior for any exception that is not already a `ProviderError`:
 
-1. Log the full traceback through the redacted logger, tagged with the invocation identity.
+1. Log the full traceback through the redacted logger, tagged with the invocation identity
+   and marked internal-only so §30.5 cannot promote it into an execution-record log entry.
 2. Return `ProviderError(code="PROVIDER_FAILED", retryable=False, cause_type=type(exc).__name__,
    message=<generic per-domain sentence>, recovery_suggestion=…)`.
 3. **The original exception's `str(exc)` is never copied into `message` or `details`.**
@@ -2362,8 +2372,11 @@ Owner: **11.4**, with a regression test that cancels each visual node and assert
 ### 35.2 Retry and idempotency (frozen)
 
 - **The platform retries invocations; providers do not.** A provider may retry an internal
-  HTTP request (as `call_webhook` does, 3 attempts / 2-4-8 s, `webhooks.py:9-10`) but must not
-  re-run the whole generation.
+  HTTP request only when it is read-only or carries a provider-supported idempotency key; it
+  must not blindly retry a generation `POST`, because a lost response can otherwise create
+  two remote jobs. Today's `call_webhook` retries every request 3 times / 2-4-8 s
+  (`webhooks.py:9-10`); 13.2/13.4 must either add an idempotency key for generation calls or
+  disable those internal retries before dispatch moves behind this boundary.
 - A retried invocation gets a **new** `invocation_id` and an incremented `attempt`. Any job
   submitted by the failed attempt must be cancelled or abandoned before the retry; two live
   jobs for one `(domain, project_id)` are a contract violation.
@@ -2449,6 +2462,7 @@ Continues §28. Nothing below exists today.
 | D37 | one voice field in the TTS request | `voice` vs `tts_voice` chosen by a provider-id branch (P5) | 15.2 |
 | D38 | remote URLs dropped from storyboard/animator results | `image_url` / `urls` cross into ports | 14.2 / 14.3 |
 | D39 | `provenance` replaces the TTS-only `job_meta` and the hardcoded `"provider": "gemini"` (P33) | `job_meta` in TTS only; literal in story metadata | 11.4 / 13.3 |
+| D40 | generation POSTs are not transport-retried without provider idempotency support | `call_webhook` retries every request and can duplicate remote work after a lost response | 13.2 / 13.4 |
 
 ## 38. Phase 10.3 coverage assertion
 
@@ -2469,7 +2483,8 @@ workflow codes that adds none, and a single wrapping boundary that never copies 
 text.
 
 Cancel, retry, and timeout are frozen end to end, including the six domain deadlines taken
-from today's values, the rule that a non-retryable error stops the attempt loop, and one
+from today's values, the rule that a non-retryable error stops the attempt loop, the rule that
+a generation POST is retried only with provider-supported idempotency, and one
 defect found while freezing the contract: the visual adapters raise `EXECUTION_CANCELLED`,
 which the scheduler does not recognize as cancellation, so a cancelled Storyboard or Animator
 node is currently recorded as `failed` inside an execution the same scheduler marks
