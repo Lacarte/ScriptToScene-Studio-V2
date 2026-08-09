@@ -1748,6 +1748,9 @@ gate passes.
   context, disabling the `provider_options` widget, leaking a fixture id into
   `studio/providers/catalog.py`, and reintroducing `if selected == "kokoro"` in
   `adapters/tts.py` each fail their tests.
+- **Re-verified 2026-08-09 (step gate):** full suite still green at the same counts —
+  645 passed / 10 skipped / 256 subtests backend, 280 frontend tests across 37 files,
+  `npm run build`, and `python -m studio.workflows.docs --check`. Phase 12 is closed.
 
 ---
 
