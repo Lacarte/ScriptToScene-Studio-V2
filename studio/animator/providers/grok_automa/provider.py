@@ -1,86 +1,156 @@
-"""Grok Automa Animator Provider — Phase 7.
+"""Grok Automa Animator Provider — Provider Contract v2 (step 14.3).
 
-Bridges to studio.animator for WebSocket handling.
+Owns everything the routes and the workflow adapter used to branch on for this
+provider:
+
+  * seeding `grabber_job.json` and dispatching `GRABBER_START` over the WebSocket;
+  * mode / quality / duration / auto_type, which are this provider's own
+    settings (§26 / §41.3 M3) rather than node fields;
+  * attaching storyboard reference images as base64 for the extension.
+
+`poll` reads the manifest the upload/results handlers write. The v1 body read
+`animator_routes._jobs` (a different store) with the wrong status vocabulary.
 """
+
+from __future__ import annotations
+
+import base64
+import os
 
 from loguru import logger
 
-from studio.animator.providers.base import (
-    AnimatorProvider,
-    JobHandle,
-    JobStatus,
-    SceneResult,
-)
-from studio.shared.providers_common.jobs import status_from_scenes, unknown_job_status
+from config import STORYBOARD_DIR
+from studio.animator import jobs
+from studio.animator.providers.base import AnimatorProvider, AnimatorRequest
+from studio.shared.providers_common.jobs import JobHandle, JobStatus
+
+PROVIDER_ID = "grok_automa"
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 class GrokAutomaProvider(AnimatorProvider):
-    """Animator provider using Grok Chrome extension via WebSocket."""
+    """Animator takes driven by the Grok Chrome extension via WebSocket."""
 
-    def __init__(self):
-        self._animator = None
+    def _runtime(self):
+        from studio.animator import routes as animator_routes
 
-    def _get_animator(self):
-        if self._animator is None:
-            from studio.animator import routes as animator_routes
-            self._animator = animator_routes
-        return self._animator
+        return animator_routes
 
-    def submit(
-        self,
-        project_id: str,
-        scenes: list[dict],
-        settings: dict,
-        on_progress=None,
-    ) -> JobHandle:
-        animator = self._get_animator()
-        
-        mode = settings.get("mode", "video")
-        quality = settings.get("quality", "480p")
-        duration = settings.get("duration", "6s")
-        
-        # Queue the job via animator routes
-        animator.add_job(
-            project_id=project_id,
-            scenes=scenes,
-            grok_mode=mode,
-            quality=quality,
-            duration=duration,
+    def submit(self, request: AnimatorRequest, invocation) -> JobHandle:
+        options = {**dict(invocation.settings), **dict(invocation.options)}
+        mode = str(options.get("mode") or request.mode or "video")
+        quality = str(options.get("quality") or "480p")
+        duration = str(options.get("duration") or "6s")
+        auto_type = bool(options.get("auto_type", False))
+
+        scene_list = self._scenes_with_references(
+            invocation.project_id, request.legacy_scenes()
         )
-        
+        payload = {
+            "projectId": invocation.project_id,
+            "arguments": "",
+            "aspect_ratio": request.aspect_ratio,
+            "scenes": scene_list,
+            "grok_mode": mode,
+            "grok_quality": quality,
+            "grok_duration": duration,
+            "auto_type": auto_type,
+        }
+
+        jobs.seed(
+            invocation.project_id,
+            request,
+            provider_id=PROVIDER_ID,
+            payload=payload,
+            status="waiting",
+        )
+
+        runtime = self._runtime()
+        connected = False
+        try:
+            connected = bool(runtime.is_extension_connected())
+        except Exception:
+            connected = False
+
+        runtime.queue_grabber_start({
+            "type": "GRABBER_START",
+            "projectId": invocation.project_id,
+            "scenes": scene_list,
+            "aspectRatio": request.aspect_ratio,
+            "grokMode": mode,
+            "grokDuration": duration,
+            "autoType": auto_type,
+        })
+        # A disconnected extension is not a submit failure: the job stays queued
+        # and is flushed on the next handshake (§21.5).
+        invocation.log.info(
+            "queued animator job for the extension",
+            scenes=len(scene_list), extension_connected=connected,
+        )
+        if not connected:
+            invocation.progress(
+                total=request.unit_count,
+                message="waiting for the browser extension",
+            )
+
         return JobHandle(
-            job_id=f"{project_id}",
-            domain="animator",
-            provider_id="grok_automa",
-            project_id=project_id,
+            job_id=invocation.project_id,
+            domain=invocation.domain,
+            provider_id=PROVIDER_ID,
+            project_id=invocation.project_id,
+            invocation_id=invocation.invocation_id,
         )
 
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
-        animator = self._get_animator()
-        # Two defects found by first-time test in step 11.4: this read
-        # `animator._asset_jobs`, an attribute `studio.animator.routes` has
-        # never defined, and then counted `status == "complete"`, which the
-        # route has never written — it writes ready/error under `scenes`
-        # (`routes.py:365-410`, `:575-592`).
-        job = animator._jobs.get(job_id)
-        if not job:
-            return unknown_job_status(job_id)
-        return status_from_scenes(job_id, job.get("scenes", {}))
+    def poll(self, job_id: str, invocation) -> JobStatus:
+        return jobs.status(invocation.project_id or job_id, job_id)
+
+    def open_url(self, settings: dict | None = None) -> str | None:
+        return "https://grok.com/imagine"
 
     def shutdown(self) -> None:
         pass
 
+    def _scenes_with_references(self, project_id: str, scenes: list[dict]) -> list[dict]:
+        """Attach storyboard stills as base64 for the extension UI."""
+        result = []
+        for scene in scenes:
+            entry = {"prompt": scene["prompt"], "scene": scene["scene"]}
+            image = self._storyboard_image(project_id, scene["scene"])
+            if image:
+                entry["image"] = image
+            result.append(entry)
+        return result
+
+    def _storyboard_image(self, project_id: str, index) -> str | None:
+        directory = os.path.join(STORYBOARD_DIR, project_id, str(index))
+        if not os.path.isdir(directory):
+            return None
+        for name in os.listdir(directory):
+            if not (name.startswith("image") and name.lower().endswith(IMAGE_EXTS)):
+                continue
+            path = os.path.join(directory, name)
+            try:
+                with open(path, "rb") as handle:
+                    raw = handle.read()
+            except OSError:
+                return None
+            ext = os.path.splitext(name)[1].lstrip(".").lower()
+            mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(
+                ext, "jpeg"
+            )
+            return f"data:image/{mime};base64,{base64.b64encode(raw).decode()}"
+        return None
+
+
+def create() -> GrokAutomaProvider:
+    return GrokAutomaProvider()
+
 
 def register_runtime(app, sock=None):
-    """Register WebSocket routes for the Grok extension."""
+    """Register the extension's WebSocket route (`manifest.kind == "extension"`)."""
     from studio.animator import routes as animator_routes
-    
-    # Rename function to match contract
-    def _register_wrapper(sock):
-        animator_routes.init_animator_ws(sock)
-    
-    # Call with the sock instance
-    _register_wrapper(sock)
+
+    animator_routes.init_animator_ws(sock)
 
 
 def validate_settings(settings: dict) -> list[dict]:
@@ -88,21 +158,17 @@ def validate_settings(settings: dict) -> list[dict]:
 
 
 def health_check(settings: dict) -> dict:
+    """Extension connectivity, isolated from generation errors (§21.5)."""
     from studio.animator import routes as animator_routes
-    
-    has_clients = len(animator_routes._ws_clients) > 0
+
+    clients = len(animator_routes._ws_clients)
     return {
-        "status": "ok" if has_clients else "warn",
-        "message": "Extension connected" if has_clients else "No extension connected",
-        "details": {"clients": len(animator_routes._ws_clients)},
+        "status": "ok" if clients else "warn",
+        "latency_ms": 0,
+        "message": (
+            "Browser extension connected"
+            if clients
+            else "No browser extension is connected"
+        ),
+        "details": {"clients": clients},
     }
-
-
-_provider_instance = None
-
-
-def get_provider():
-    global _provider_instance
-    if _provider_instance is None:
-        _provider_instance = GrokAutomaProvider()
-    return _provider_instance

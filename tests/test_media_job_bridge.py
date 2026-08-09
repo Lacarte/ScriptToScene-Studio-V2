@@ -242,18 +242,30 @@ class StoryboardHarness(Harness):
 
 
 class AnimatorHarness(Harness):
+    """Step 14.3 moved the animator seam: the adapter hands the real provider
+    to the service, so the script is installed under the provider's transport
+    rather than under a route helper."""
+
     def _install_domain(self):
-        from studio.animator import animation_routes, routes as animator_routes
+        from studio.animator import jobs as anim_jobs
+        from studio.animator import routes as animator_routes
+        from studio.shared.providers_common.hub import hub
 
         self._monkeypatch.setattr(animator_adapter, "ANIMATOR_DIR", str(self.root))
-        self._monkeypatch.setattr(animation_routes, "_set_job", lambda *a, **k: None)
-        self._monkeypatch.setattr(animation_routes, "_save_job", lambda *a, **k: None)
+        self._monkeypatch.setattr(anim_jobs, "ANIMATOR_DIR", str(self.root))
+        # Seed becomes a no-op; the scripted statuses on disk are authoritative.
+        self._monkeypatch.setattr(anim_jobs, "seed", lambda *a, **k: self._started() or {})
         self._monkeypatch.setattr(
-            animation_routes, "_get_job", lambda *a, **k: self._live()
+            animator_routes, "queue_grabber_start", lambda *a, **k: None
         )
         self._monkeypatch.setattr(
-            animator_routes, "add_job", lambda *a, **k: self._started()
+            animator_routes, "is_extension_connected", lambda: True
         )
+        # poll reads through jobs.status → jobs.read; point read at the script.
+        self._monkeypatch.setattr(anim_jobs, "read", lambda *a, **k: self._live())
+        # Ensure the provider module is constructible without side effects.
+        module = hub.get("animator", "grok_automa").provider_module
+        self._monkeypatch.setattr(module, "STORYBOARD_DIR", str(self.root))
 
     def _started(self):
         self.starts += 1
@@ -267,8 +279,6 @@ class AnimatorHarness(Harness):
         return MANIFEST["animator"](states, job_status="done" if done else "waiting")
 
     def _publish(self):
-        # The animator store keeps its manifest on disk too; the in-memory copy
-        # is what the adapter reads first.
         live = self._live()
         if live is not None:
             safe_json_write(self.manifest, live)
@@ -349,11 +359,11 @@ def test_a_store_that_declares_itself_done_settles_instead_of_waiting(harness, d
         job.manifest, MANIFEST[domain](job.current(), job_status="done")
     )
     if domain == "animator":
-        from studio.animator import animation_routes
+        from studio.animator import jobs as anim_jobs
 
         job._monkeypatch.setattr(
-            animation_routes,
-            "_get_job",
+            anim_jobs,
+            "read",
             lambda *a, **k: MANIFEST[domain](job.current(), job_status="done")
             if job.starts
             else None,

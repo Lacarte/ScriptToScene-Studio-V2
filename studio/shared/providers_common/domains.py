@@ -116,6 +116,8 @@ DOMAINS: dict[str, DomainSpec] = {
                 "image_to_video", "duration_control", "resolution_select"
             ),
             legacy_selection_key="sts-asset-provider",
+            request_model="studio.animator.providers.contract:AnimatorRequest",
+            result_model="studio.animator.providers.contract:AnimatorResultPayload",
         ),
     )
 }

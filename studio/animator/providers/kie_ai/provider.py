@@ -1,30 +1,35 @@
-"""Kie AI Animator Provider — Phase 7.
+"""Kie AI Animator Provider — Provider Contract v2 (step 14.3).
 
-Uses direct Kie AI API for image generation.
-API flow:
+Uses the direct Kie AI API for image generation:
+
   1. POST /jobs/createTask  -> returns taskId
   2. GET  /jobs/recordInfo?taskId=...  -> poll until resultJson populated
   3. Download image from resultJson.resultUrls[0]
+
+The v1 body wrote into `animator_routes._jobs` (the WebSocket store, not the
+grabber store) and was never called from a route. Step 14.3 is the first real
+execution path: `submit` seeds `grabber_job.json`, starts the batch worker, and
+`poll` reports from the same manifest the status route reads.
+
+Request options win over durable settings for every key (§40.2 O4) — the legacy
+`_kie_ai_options.update(provider_settings)` inversion is gone.
 """
 
-import time
-import os
+from __future__ import annotations
+
+import json
 import threading
+import time
 
 import requests as http_requests
 from loguru import logger
 
 from config import KIE_AI_API_KEY, KIE_AI_BASE_URL, KIE_AI_MODEL
-from studio.animator.providers.base import (
-    AnimatorProvider,
-    JobHandle,
-    JobStatus,
-    SceneResult,
-)
-from studio.shared.providers_common.jobs import status_from_scenes, unknown_job_status
-from studio.shared.providers_common.validation import sanitize_message
+from studio.animator import generation, jobs
+from studio.animator.providers.base import AnimatorProvider, AnimatorRequest
+from studio.shared.providers_common.jobs import JobHandle, JobStatus
 
-
+PROVIDER_ID = "kie_ai"
 POLL_INTERVAL = 3
 POLL_TIMEOUT = 180
 
@@ -87,19 +92,31 @@ def _poll_result(task_id, api_key):
         result_json = record.get("resultJson")
         if result_json:
             if isinstance(result_json, str):
-                import json
                 result_json = json.loads(result_json)
             result_urls = result_json.get("resultUrls", [])
             if result_urls:
-                logger.success("Kie AI task {} complete: {} image(s)", task_id, len(result_urls))
-                return {"url": result_urls[0], "task_id": task_id, "all_urls": result_urls}
+                logger.success(
+                    "Kie AI task {} complete: {} image(s)", task_id, len(result_urls)
+                )
+                return {
+                    "url": result_urls[0],
+                    "task_id": task_id,
+                    "all_urls": result_urls,
+                }
 
         time.sleep(POLL_INTERVAL)
 
     raise TimeoutError(f"Kie AI task {task_id} timed out after {POLL_TIMEOUT}s")
 
 
-def generate_image(prompt, aspect_ratio="9:16", resolution="1", output_format="jpg", model=None, api_key=None):
+def generate_image(
+    prompt,
+    aspect_ratio="9:16",
+    resolution="1",
+    output_format="jpg",
+    model=None,
+    api_key=None,
+):
     """Generate an image via Kie AI API. Returns {"url": ..., "task_id": ...}."""
     key = api_key or KIE_AI_API_KEY
     if not key:
@@ -117,105 +134,79 @@ def generate_image(prompt, aspect_ratio="9:16", resolution="1", output_format="j
 
 
 class KieAIProvider(AnimatorProvider):
-    """Animator provider using direct Kie AI API."""
+    """Animator provider using the direct Kie AI API."""
 
-    def submit(
-        self,
-        project_id: str,
-        scenes: list[dict],
-        settings: dict,
-        on_progress=None,
-    ) -> JobHandle:
-        from studio.animator import routes as animator_routes
-        
-        api_key = settings.get("api_key") or KIE_AI_API_KEY
-        model = settings.get("model") or KIE_AI_MODEL
-        resolution = settings.get("resolution", "1")
-        
+    def submit(self, request: AnimatorRequest, invocation) -> JobHandle:
+        # Request options win over durable settings (§40.2 O4).
+        options = {**dict(invocation.settings), **dict(invocation.options)}
+        api_key = (
+            str(options.get("api_key") or "").strip()
+            or str(invocation.settings.get("api_key") or "").strip()
+            or KIE_AI_API_KEY
+        )
         if not api_key:
             raise ValueError("KIE_AI_API_KEY not configured")
-        
-        job_id = f"{project_id}"
 
-        # Set up job tracking. This wrote to `animator_routes._asset_jobs`,
-        # an attribute the module has never defined; the real store is the
-        # `_jobs` dict guarded by `_jobs_lock` (`routes.py:38-39`, `:676`).
-        # Found by first-time test in step 11.4.
-        with animator_routes._jobs_lock:
-            animator_routes._jobs[job_id] = {
-                "project_id": project_id,
-                "status": "running",
-                "scenes": {},
-            }
+        # Credentials never reach the job file (§22.6). Only portable options.
+        portable = {
+            key: value
+            for key, value in options.items()
+            if key not in {"api_key"}
+        }
+        portable.setdefault("aspect_ratio", request.aspect_ratio)
+        portable.setdefault("model", KIE_AI_MODEL)
+        portable.setdefault("resolution", "1")
+        portable.setdefault("output_format", "jpg")
 
+        jobs.seed(
+            invocation.project_id,
+            request,
+            provider_id=PROVIDER_ID,
+            payload={
+                "projectId": invocation.project_id,
+                "aspect_ratio": request.aspect_ratio,
+                "scenes": request.legacy_scenes(),
+            },
+            status="generating",
+        )
 
-        # Start background generation
-        t = threading.Thread(
-            target=self._generate_images,
-            args=(project_id, scenes, api_key, model, resolution),
+        def transport(**kwargs):
+            return generate_image(api_key=api_key, **kwargs)
+
+        project_id = invocation.project_id
+        threading.Thread(
+            target=generation.run_batch,
+            args=(project_id, request, transport),
+            kwargs={
+                "options": portable,
+                "is_cancelled": invocation.cancel.is_cancelled,
+            },
+            name=f"animator-kie-{project_id}",
             daemon=True,
-        )
-        t.start()
-        
+        ).start()
+
         return JobHandle(
-            job_id=job_id,
-            domain="animator",
-            provider_id="kie_ai",
+            job_id=project_id,
+            domain=invocation.domain,
+            provider_id=PROVIDER_ID,
             project_id=project_id,
+            invocation_id=invocation.invocation_id,
         )
 
-    def _generate_images(self, project_id, scenes, api_key, model, resolution):
-        from studio.animator import routes as animator_routes
-
-        with animator_routes._jobs_lock:
-            job = animator_routes._jobs.get(project_id)
-        if not job:
-            return
-
-        for scene in scenes:
-            scene_key = str(scene.get("scene", scene.get("index", 0)))
-            with animator_routes._jobs_lock:
-                job["scenes"][scene_key] = {
-                    "status": "generating", "urls": [], "local_files": []
-                }
-
-            try:
-                result = generate_image(
-                    prompt=scene.get("prompt", ""),
-                    resolution=resolution,
-                    model=model,
-                    api_key=api_key,
-                )
-                entry = {
-                    # `ready` is the vocabulary the animator route persists;
-                    # `complete` was written here and read nowhere.
-                    "status": "ready",
-                    "urls": [result.get("url", "")],
-                    "local_files": [],
-                }
-            except Exception as e:
-                logger.error("[{}] Kie AI failed: {}", project_id, e)
-                entry = {"status": "error", "error": sanitize_message(e)}
-
-            with animator_routes._jobs_lock:
-                job["scenes"][scene_key] = entry
-
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
-        from studio.animator import routes as animator_routes
-
-        with animator_routes._jobs_lock:
-            job = animator_routes._jobs.get(job_id)
-        if not job:
-            return unknown_job_status(job_id)
-        return status_from_scenes(job_id, job.get("scenes", {}))
+    def poll(self, job_id: str, invocation) -> JobStatus:
+        return jobs.status(invocation.project_id or job_id, job_id)
 
     def shutdown(self) -> None:
         pass
 
 
+def create() -> KieAIProvider:
+    return KieAIProvider()
+
+
 def validate_settings(settings: dict) -> list[dict]:
     issues = []
-    api_key = settings.get("api_key", "").strip() or KIE_AI_API_KEY
+    api_key = str((settings or {}).get("api_key") or "").strip() or KIE_AI_API_KEY
     if not api_key:
         issues.append({
             "field": "api_key",
@@ -226,29 +217,21 @@ def validate_settings(settings: dict) -> list[dict]:
 
 
 def health_check(settings: dict) -> dict:
-    api_key = settings.get("api_key", "").strip() or KIE_AI_API_KEY
+    api_key = str((settings or {}).get("api_key") or "").strip() or KIE_AI_API_KEY
     if not api_key:
         return {"status": "warn", "message": "No API key configured"}
-    
-    import requests as http_requests
+
     url = f"{KIE_AI_BASE_URL}/jobs/recordInfo?taskId=test"
     try:
         start = time.perf_counter()
         resp = http_requests.get(url, timeout=5)
         elapsed = int((time.perf_counter() - start) * 1000)
-        
-        if resp.status_code == 404:
-            return {"status": "ok", "latency_ms": elapsed, "message": "Kie AI API reachable"}
+        if resp.status_code in (200, 404):
+            return {
+                "status": "ok",
+                "latency_ms": elapsed,
+                "message": "Kie AI API reachable",
+            }
         return {"status": "warn", "message": f"Unexpected status {resp.status_code}"}
-    except Exception as e:
-        return {"status": "fail", "message": str(e)}
-
-
-_provider_instance = None
-
-
-def get_provider():
-    global _provider_instance
-    if _provider_instance is None:
-        _provider_instance = KieAIProvider()
-    return _provider_instance
+    except Exception as exc:
+        return {"status": "fail", "message": str(exc)}

@@ -155,10 +155,9 @@ def run_manifest_job(
     the `AdapterError` the scheduler already understands: `CANCELLED` on stop,
     `POLL_TIMEOUT` on deadline, and `failure_code` when nothing was produced.
 
-    `job_provider` is a real `AsyncMediaProvider`, used once a domain's
-    providers implement `submit`/`poll` themselves (storyboard, step 14.2). Pass
-    `start` instead while a domain is still driven through its legacy job store
-    and this module has to synthesize a provider for it (animator, until 14.3).
+    `job_provider` is a real `AsyncMediaProvider` — storyboard (14.2) and
+    animator (14.3) both pass one. The `start`/`read` path remains for tests
+    that synthesize a legacy store without constructing a provider package.
     """
     if job_provider is None:
         if start is None:

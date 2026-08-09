@@ -773,16 +773,11 @@ AUDITED_SURFACES = (
     "app.py",
 )
 
-# The subset that must contain no provider-id *comparison* at all. The two
-# visual adapters and `app.py` are deliberately absent: their dispatch branches
-# (P13–P16, P24, P25) are what steps 14.2, 14.3, and 16.1 exist to remove, and
-# pretending otherwise here would either fail every run or quietly excuse them.
-# Everything else is clean today and must stay clean.
+# The subset that must contain no provider-id *comparison* at all. Both visual
+# adapters are clean after 14.2/14.3; only `app.py` is still excused (16.1).
 BRANCH_FREE_SURFACES = tuple(
     surface for surface in AUDITED_SURFACES
     if surface not in {
-        "studio/workflows/adapters/storyboard.py",
-        "studio/workflows/adapters/animator.py",
         "app.py",
     }
 )
@@ -818,10 +813,8 @@ KNOWN_PROVIDER_LITERALS = {
     ("studio/workflows/config_migrations.py", "gemini"),
     # A comment about the removed C1 environment side effect. Owner 16.1.
     ("studio/shared/providers_common/settings_manager.py", "inworld"),
-    # Step 14.2 cleared the storyboard adapter: it names no provider at all
-    # now, in a comment or otherwise. The animator branch is 14.3's.
-    ("studio/workflows/adapters/animator.py", "kie_ai"),
-    ("studio/workflows/adapters/animator.py", "grok_automa"),
+    # Step 14.2 cleared the storyboard adapter; step 14.3 cleared the animator
+    # adapter: neither names a provider at all now, in a comment or otherwise.
     # The extension routes P13–P16/P24/P25 own. Owners 14.2, 14.3, 16.1.
     ("app.py", "inworld"),
     ("app.py", "gemini_ws"),

@@ -1,14 +1,13 @@
 """Kie AI provider package.
 
-Re-exports generate_image so legacy callers like animation_routes can keep
-using `from .providers.kie_ai import generate_image` after the file→folder
-migration in Phase 7.
+`generate_image` remains importable for tests and recorded-fixture tooling.
+Routes and adapters never import it — they go through the registry (B8).
 """
 
 from studio.animator.providers.kie_ai.provider import (
     KieAIProvider,
+    create,
     generate_image,
-    get_provider,
 )
 
-__all__ = ["KieAIProvider", "generate_image", "get_provider"]
+__all__ = ["KieAIProvider", "create", "generate_image"]

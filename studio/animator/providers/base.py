@@ -1,83 +1,89 @@
-"""Animator Provider Base Contract — Phase 3.
+"""Animator Provider Base Contract — Provider Contract v2 (step 14.3).
 
-Abstract base class defining the animator provider interface.
-All animator providers must implement these methods.
+Animator generation is asynchronous and multi-unit for every provider, so the
+interface is the shared `AsyncMediaProvider` shape from step 14.1: `submit`
+returns a `JobHandle`, `poll` reports a `JobStatus`, and the media-job service
+owns the deadline, cadence, cancellation, progress, retry, and aggregation.
 
-Step 11.4 deleted this module's copies of `JobHandle`, `JobStatus`, and
-`SceneResult` — the storyboard copies were field-for-field identical
-(contracts.md §14.6). The one shared definition lives in
-`providers_common.jobs`; `SceneResult`'s `video_url`/`video_path` split is
-replaced by the media-neutral `UnitResult` that both visual domains now produce
-(§33.1).
+Two changes from the v1 shape this replaces:
+
+  * `submit(project_id, scenes, settings, on_progress)` becomes
+    `submit(request, invocation)`. The three loose arguments were why every
+    caller had to know which provider it was talking to — `settings` was
+    provider-shaped, `scenes` had two incompatible spellings, and `on_progress`
+    duplicated `ProviderInvocation.progress`;
+  * `poll(job_id, settings)` becomes `poll(job_id, invocation)`, so a poll can
+    observe cancellation and report progress like any other call.
+
+Providers own only remote/local generation mechanics. The manifest, per-scene
+metadata, thumbnails, and video filtering belong to `studio.animator.jobs` and
+are applied identically whichever provider produced the asset.
+
+`JobHandle`, `JobStatus`, and `SceneResult` are re-exported so existing
+`from studio.animator.providers.base import JobHandle` imports keep resolving;
+`SceneResult` is the media-neutral `UnitResult` (§33.1).
 """
 
 from abc import ABC, abstractmethod
-from typing import Callable
 
+from studio.shared.providers_common.invocation import ProviderInvocation
 from studio.shared.providers_common.jobs import (  # noqa: F401  (re-exported)
     JobHandle,
     JobStatus,
     SceneResult,
     UnitResult,
 )
+from studio.animator.providers.contract import (  # noqa: F401  (re-exported)
+    AnimatorRequest,
+    AnimatorResultPayload,
+)
 
 
 class AnimatorProvider(ABC):
-    """Base class for all animator providers.
-    
-    Providers must implement:
-    - submit(): Submit an animation job
-    - poll(): Check job status
-    
-    Optional:
-    - open_url(): Open the provider's UI
-    """
-    
+    """Base class for all animator providers (contracts.md §32.5, §33)."""
+
     @abstractmethod
     def submit(
-        self,
-        project_id: str,
-        scenes: list[dict],
-        settings: dict,
-        on_progress: Callable[[dict], None] | None = None,
+        self, request: AnimatorRequest, invocation: ProviderInvocation
     ) -> JobHandle:
-        """Submit an animation job.
-        
-        Args:
-            project_id: Project identifier
-            scenes: List of scene dicts with 'index', 'image_url', 'prompt', 'duration'
-            settings: Provider settings from settings.json
-            on_progress: Optional callback for progress updates
-            
-        Returns:
-            JobHandle with job_id and initial status
+        """Start an animator job and return its handle.
+
+        The handle's `job_id` is the public identity; the shipped providers keep
+        using the project ID, so existing status URLs and job records stay
+        valid. Durable provider settings arrive on `invocation.settings`, per-run
+        node or request values on `invocation.options`.
         """
-        pass
-    
+
     @abstractmethod
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
-        """Poll status of an animator job.
-        
-        Args:
-            job_id: Job identifier from submit()
-            settings: Provider settings
-            
-        Returns:
-            JobStatus with current state
+    def poll(self, job_id: str, invocation: ProviderInvocation) -> JobStatus:
+        """Report the current state of a submitted job.
+
+        A provider that pushes its results still implements this: it is the
+        §33.3 watchdog, and answering from the manifest is what stops a lost
+        callback hanging the job for a whole deadline.
         """
-        pass
-    
-    def open_url(self, settings: dict) -> str | None:
-        """Open the provider's UI URL. Optional.
-        
-        Args:
-            settings: Provider settings
-            
-        Returns:
-            URL to open, or None
+
+    def cancel_job(self, job_id: str, invocation: ProviderInvocation) -> None:
+        """Best-effort remote cancellation. Optional; the default is a no-op."""
+
+    def open_url(self, settings: dict | None = None) -> str | None:
+        """Optional browser URL for providers that need a human-driven UI.
+
+        The manifest's `open_url` is authoritative for the Assets page and the
+        pipeline; this hook remains for callers that hold a live instance.
         """
         return None
-    
+
     def shutdown(self) -> None:
         """Clean up resources. Called on app shutdown."""
-        pass
+
+
+__all__ = [
+    "AnimatorProvider",
+    "AnimatorRequest",
+    "AnimatorResultPayload",
+    "JobHandle",
+    "JobStatus",
+    "SceneResult",
+    "UnitResult",
+]

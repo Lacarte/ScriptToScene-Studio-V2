@@ -192,6 +192,7 @@ class GrabberPerRunOptionTests(unittest.TestCase):
         self.client = app.test_client()
 
     def _start(self, body):
+        import tempfile
         payload = {
             'project_id': 'legacy_adoption_probe',
             'scenes': [{'prompt': 'a castle', 'scene': 0}],
@@ -199,14 +200,18 @@ class GrabberPerRunOptionTests(unittest.TestCase):
         }
         payload.update(body)
         # The job record is written under `output/`; this test is about what the
-        # extension receives, not about persistence.
+        # extension receives, not about persistence. Point the manifest root at
+        # a private directory so a real write never touches the live tree.
+        tmp = tempfile.mkdtemp(prefix='sts_legacy_anim_')
         with patch('studio.animator.routes.queue_grabber_start'), \
-                patch('studio.animator.animation_routes._save_job'):
+                patch('studio.animator.jobs.ANIMATOR_DIR', tmp):
             resp = self.client.post('/api/animator/grabber/start', json=payload)
         self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
-        from studio.animator.animation_routes import grabber_jobs
+        from studio.animator import jobs as anim_jobs
 
-        return grabber_jobs.get('legacy_adoption_probe')['payload']
+        job = anim_jobs.get('legacy_adoption_probe')
+        self.assertIsNotNone(job)
+        return job['payload']
 
     def test_options_arrive_under_the_provider_settings_key_names(self):
         payload = self._start({

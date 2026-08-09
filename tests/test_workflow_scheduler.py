@@ -573,14 +573,16 @@ def test_a_cancelled_storyboard_node_is_recorded_as_cancelled(tmp_path, monkeypa
 
 
 def test_a_cancelled_animator_node_is_recorded_as_cancelled(tmp_path, monkeypatch):
-    from studio.animator import animation_routes, routes as animator_routes
+    from studio.animator import jobs as anim_jobs
+    from studio.animator import routes as animator_routes
     from studio.workflows.adapters import animator
 
     monkeypatch.setattr(animator, "ANIMATOR_DIR", str(tmp_path / "animator"))
-    monkeypatch.setattr(animation_routes, "_set_job", lambda *a, **k: None)
-    monkeypatch.setattr(animation_routes, "_save_job", lambda *a, **k: None)
-    monkeypatch.setattr(animation_routes, "_get_job", lambda *a, **k: None)
-    monkeypatch.setattr(animator_routes, "add_job", lambda *a, **k: None)
+    monkeypatch.setattr(anim_jobs, "ANIMATOR_DIR", str(tmp_path / "animator"))
+    monkeypatch.setattr(anim_jobs, "seed", lambda *a, **k: {})
+    monkeypatch.setattr(anim_jobs, "read", lambda *a, **k: None)
+    monkeypatch.setattr(animator_routes, "queue_grabber_start", lambda *a, **k: None)
+    monkeypatch.setattr(animator_routes, "is_extension_connected", lambda: True)
 
     with pytest.raises(Exception) as caught:
         animator._step_assets(

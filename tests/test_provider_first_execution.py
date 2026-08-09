@@ -290,129 +290,13 @@ class InworldProviderTests(ShippedProviderCase):
 
 
 # -- animator ----------------------------------------------------------------
-
-
-class AnimatorProviderTests(unittest.TestCase):
-    def test_grok_automa_submit_and_poll(self):
-        """`poll` read `_asset_jobs`, which `studio.animator.routes` never had."""
-        instance = hub.create("animator", "grok_automa")
-        self.assertIsInstance(instance, AnimatorProvider)
-        from studio.animator import routes as animator_routes
-
-        self.assertFalse(hasattr(animator_routes, "_asset_jobs"))
-
-        animator = mock.Mock()
-        animator._jobs = {}
-        with mock.patch.object(instance, "_get_animator", return_value=animator):
-            handle = instance.submit(
-                "pm_ABC123", [{"scene": 0, "prompt": "x"}],
-                {"mode": "video", "quality": "480p", "duration": "6s"},
-            )
-            missing = instance.poll("pm_ABC123", {})
-
-            animator._jobs["pm_ABC123"] = {
-                "scenes": {"0": {"status": "ready"}, "1": {"status": "ready"}}
-            }
-            done = instance.poll("pm_ABC123", {})
-
-        self.assertEqual(handle.provider_id, "grok_automa")
-        animator.add_job.assert_called_once()
-        self.assertEqual(missing.state, FAILED)
-        self.assertEqual(done.state, SUCCEEDED)
-        self.assertEqual(done.fraction, 1.0)
-
-    def test_grok_automa_runtime_and_health(self):
-        module = provider_module("animator", "grok_automa")
-        from studio.animator import routes as animator_routes
-
-        with mock.patch.object(animator_routes, "init_animator_ws") as init:
-            module.register_runtime(mock.Mock(), mock.Mock())
-        init.assert_called_once()
-
-        with mock.patch.object(animator_routes, "_ws_clients", []):
-            self.assertEqual(module.health_check({})["status"], "warn")
-        with mock.patch.object(animator_routes, "_ws_clients", [object()]):
-            self.assertEqual(module.health_check({})["status"], "ok")
-        self.assertEqual(module.validate_settings({}), [])
-
-    def test_kie_ai_submit_starts_a_background_generation(self):
-        module = provider_module("animator", "kie_ai")
-        instance = hub.create("animator", "kie_ai")
-        from studio.animator import routes as animator_routes
-
-        started = {}
-
-        class FakeThread:
-            def __init__(self, target=None, args=(), daemon=False):
-                started["target"], started["args"] = target, args
-
-            def start(self):
-                started["started"] = True
-
-        with mock.patch.object(module.threading, "Thread", FakeThread), \
-             mock.patch.object(animator_routes, "_jobs", {}) as jobs:
-            handle = instance.submit(
-                "pm_ABC123", [{"scene": 0, "prompt": "x"}], {"api_key": "fixture-key"}
-            )
-        self.assertEqual(handle.job_id, "pm_ABC123")
-        self.assertTrue(started["started"])
-        self.assertEqual(jobs["pm_ABC123"]["status"], "running")
-
-    def test_kie_ai_submit_without_a_key_never_starts_a_thread(self):
-        module = provider_module("animator", "kie_ai")
-        instance = hub.create("animator", "kie_ai")
-        with mock.patch.object(module, "KIE_AI_API_KEY", ""), \
-             mock.patch.object(module.threading, "Thread") as thread:
-            with self.assertRaises(ValueError):
-                instance.submit("pm_ABC123", [], {})
-        self.assertFalse(thread.called)
-
-    def test_kie_ai_generate_images_records_success_and_failure(self):
-        """The background worker `_generate_images`, first execution."""
-        module = provider_module("animator", "kie_ai")
-        instance = hub.create("animator", "kie_ai")
-        from studio.animator import routes as animator_routes
-
-        job = {"project_id": "pm_ABC123", "status": "running", "scenes": {}}
-        with mock.patch.object(animator_routes, "_jobs", {"pm_ABC123": job}), \
-             mock.patch.object(
-                 module, "generate_image",
-                 side_effect=[{"url": "https://cdn.invalid/a.png"},
-                              RuntimeError("kie failed at C:\\jobs\\kie.json")]):
-            instance._generate_images(
-                "pm_ABC123",
-                [{"scene": 0, "prompt": "a"}, {"scene": 1, "prompt": "b"}],
-                "fixture-key", "model", "1",
-            )
-        self.assertEqual(job["scenes"]["0"]["status"], "ready")
-        self.assertEqual(job["scenes"]["1"]["status"], "error")
-        # `str(e)` used to be persisted verbatim into a file under output/ (§36 L3).
-        self.assertNotIn("C:\\jobs", job["scenes"]["1"]["error"])
-
-    def test_kie_ai_poll_and_health(self):
-        module = provider_module("animator", "kie_ai")
-        instance = hub.create("animator", "kie_ai")
-        from studio.animator import routes as animator_routes
-
-        with mock.patch.object(animator_routes, "_jobs", {}):
-            self.assertEqual(instance.poll("pm_ABC123", {}).state, FAILED)
-
-        running = {"pm_ABC123": {"scenes": {"0": {"status": "ready"},
-                                            "1": {"status": "generating"}}}}
-        with mock.patch.object(animator_routes, "_jobs", running):
-            status = instance.poll("pm_ABC123", {})
-        self.assertEqual(status.state, RUNNING)
-        self.assertEqual((status.ready, status.total), (1, 2))
-
-        with mock.patch.object(module, "KIE_AI_API_KEY", ""):
-            self.assertEqual(module.validate_settings({})[0]["field"], "api_key")
-        instance.shutdown()
-
-    def test_kie_ai_create_task_raises_a_typed_failure(self):
-        module = provider_module("animator", "kie_ai")
-        with mock.patch.object(module, "KIE_AI_API_KEY", ""):
-            with self.assertRaises(ValueError):
-                module.generate_image("a prompt")
+#
+# The two animator providers were first executed here against the v1
+# `submit(project_id, scenes, settings, on_progress)` signature. Step 14.3
+# replaced that with the Contract v2 async shape and moved the manifest,
+# transport, and metadata decisions into the providers, so their contract tests
+# moved to `tests/test_animator_dispatch.py`, beside the dispatch tests that
+# exercise them end to end.
 
 
 # -- the abstract base classes ----------------------------------------------
@@ -455,15 +339,22 @@ class AbstractBaseTests(unittest.TestCase):
         provider.shutdown()
 
     def test_animator_open_url_default(self):
-        class Minimal(AnimatorProvider):
-            def submit(self, project_id, scenes, settings, on_progress=None):
-                return JobHandle(job_id=project_id)
+        from studio.animator.providers.contract import AnimatorRequest
+        from studio.shared.providers_common.invocation import build_invocation
 
-            def poll(self, job_id, settings):
+        class Minimal(AnimatorProvider):
+            def submit(self, request, invocation):
+                return JobHandle(job_id=invocation.project_id)
+
+            def poll(self, job_id, invocation):
                 return JobStatus(job_id=job_id)
 
         provider = Minimal()
         self.assertIsNone(provider.open_url({}))
+        inv = build_invocation(
+            None, domain="animator", provider_id="x", project_id="pm_ABC123",
+        )
+        self.assertIsNone(provider.cancel_job("pm_ABC123", inv))
         provider.shutdown()
 
     def test_every_shipped_provider_constructs_and_reports_a_job_shape(self):

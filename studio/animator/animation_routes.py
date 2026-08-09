@@ -1,62 +1,80 @@
-"""Animator Module — Grabber-based Video/Image Generation & Management Routes"""
+"""Animator Module — Grabber-based Video/Image Generation & Management Routes.
+
+Step 14.3 removed every provider-ID branch from this module. The generating
+route resolves a provider through the registry and calls `submit`; the
+transport, mode/quality/duration handling, Kie batch loop, and Automa
+WebSocket push all belong to the provider that declares them. What did not
+change is the wire contract: the same fields are accepted, the same envelopes
+are returned, and `grabber_job.json` keeps the shape the status route and the
+Assets page read.
+
+Selection order: `provider_override` → legacy `provider` → saved selection →
+domain default. Legacy spellings (`grok` / `midjourney` / `kie-ai`) resolve
+through the registry's aliases. The direct import of
+`providers.kie_ai.generate_image` is gone (B8).
+"""
 
 import json
 import os
 import platform
 import subprocess
 import threading
-from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request, send_from_directory
+from flask import Blueprint, jsonify, request
 from loguru import logger
+from pydantic import ValidationError
 
-from config import ANIMATOR_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR, KIE_AI_MODEL, BIN_DIR
+from config import ANIMATOR_DIR, PROJECTS_DIR, SCENES_DIR, THUMBNAILS_DIR
 from studio.ffmpeg_utils import find_ffmpeg
-from studio.io_utils import safe_json_write, now_iso, JobStore
 from studio.security import is_loopback_remote, sanitize_project_id
-from studio.validation import validate_json
-from .schemas import GrabberStartRequest
-from .organizer import organize_grabber_assets, save_base64_assets, reconcile_project
-from .providers.kie_ai import generate_image as kie_ai_generate
 from studio.shared.providers_common import settings_manager
+from studio.shared.providers_common.boundary import wrap_exception
+from studio.shared.providers_common.domains import DOMAINS
+from studio.shared.providers_common.errors import ProviderError
+from studio.shared.providers_common.hub import hub
+from studio.shared.providers_common.invocation import build_invocation
+from studio.shared.providers_common.registry import ProviderConstructionError
+from studio.validation import validate_json
+from studio.animator import jobs
+from studio.animator.organizer import (
+    organize_grabber_assets,
+    save_base64_assets,
+    reconcile_project,
+)
+from studio.animator.providers.contract import AnimatorRequest
+from .schemas import GrabberStartRequest
 
-VIDEO_EXTS = (".mp4", ".webm", ".mov")
+animation_bp = Blueprint("animation", __name__)
+
+DOMAIN = "animator"
+VIDEO_EXTS = jobs.VIDEO_EXTS
+
+# Compatibility re-exports so external code and tests that imported these from
+# the route module keep resolving.
+grabber_jobs = jobs.grabber_jobs
 
 
-def _job_requires_video_assets(job) -> bool:
-    """Return True when the grabber job is expected to produce videos only."""
+def _get_job(project_id):
+    return jobs.get(project_id)
+
+
+def _set_job(project_id, job):
+    jobs.set_job(project_id, job)
+
+
+def _save_job(job):
     if not isinstance(job, dict):
-        return False
-    payload = job.get("payload", {}) or {}
-    return str(payload.get("grok_mode", "")).lower() == "video"
+        return
+    jobs.save(job.get("project_id", ""), job)
 
 
-def _looks_like_video_asset(value: str) -> bool:
-    """Best-effort check for video URLs / filenames coming back from Automa."""
-    clean = str(value or "").split("?", 1)[0].lower()
-    return clean.endswith(VIDEO_EXTS) or "/generated_video" in clean
-
-
-def _filter_video_urls(urls):
-    """Keep only video asset URLs."""
-    return [url for url in (urls or []) if _looks_like_video_asset(url)]
-
-
-def _filter_video_images(images):
-    """Keep only base64 upload entries that point to video assets."""
-    filtered = []
-    for image in images or []:
-        ext = str(image.get("ext", "")).lower()
-        source_url = image.get("source_url", "")
-        filename = image.get("filename", "")
-        if ext in VIDEO_EXTS or _looks_like_video_asset(source_url) or _looks_like_video_asset(filename):
-            filtered.append(image)
-    return filtered
+def _job_elapsed_seconds(job, *, include_running=False):
+    return jobs.elapsed_seconds(job, include_running=include_running)
 
 
 def _video_thumbnail(video_path):
-    """Extract a thumbnail jpg from a video file. Returns thumbnail path or None."""
+    """Extract a co-located thumbnail jpg from a video file."""
     thumb_path = video_path.rsplit(".", 1)[0] + "_thumb.jpg"
     if os.path.isfile(thumb_path):
         return thumb_path
@@ -75,356 +93,194 @@ def _video_thumbnail(video_path):
         pass
     return None
 
-animation_bp = Blueprint("animation", __name__)
-
-# In-memory grabber job tracking
-grabber_jobs = JobStore()
-
-
-def _get_job(project_id):
-    """Get a grabber job by project ID."""
-    return grabber_jobs.get(project_id)
-
-
-def _set_job(project_id, job):
-    """Set a grabber job by project ID."""
-    grabber_jobs.set(project_id, job)
-
-
-def _save_job(job):
-    """Persist grabber job state to disk."""
-    try:
-        job["updated_at"] = now_iso()
-        safe_json_write(os.path.join(ANIMATOR_DIR, job["project_id"], "grabber_job.json"), job, indent=2)
-    except Exception as e:
-        logger.error("Failed to persist job {}: {}", job.get("grabber_id", "?"), e)
-
-
-def _parse_iso_dt(value):
-    """Best-effort ISO timestamp parser."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _job_elapsed_seconds(job, *, include_running=False):
-    """Return elapsed wall-clock seconds for a grabber job."""
-    try:
-        existing = float(job.get("generation_time", 0) or 0)
-        if existing > 0:
-            return round(existing, 3)
-    except (TypeError, ValueError):
-        pass
-
-    start_dt = _parse_iso_dt(job.get("created_at"))
-    if not start_dt:
-        return 0
-
-    end_dt = _parse_iso_dt(job.get("completed_at"))
-    if end_dt is None and include_running:
-        end_dt = datetime.now().astimezone()
-    if end_dt is None:
-        end_dt = _parse_iso_dt(job.get("updated_at"))
-    if end_dt is None:
-        return 0
-
-    # Normalize both to naive datetimes to avoid offset-aware vs offset-naive errors
-    if start_dt.tzinfo is not None:
-        start_dt = start_dt.replace(tzinfo=None)
-    if end_dt.tzinfo is not None:
-        end_dt = end_dt.replace(tzinfo=None)
-
-    return round(max((end_dt - start_dt).total_seconds(), 0.0), 3)
-
-
-def _clear_job_completion(job):
-    """Clear stale completion fields before a new run or retry begins."""
-    job.pop("completed_at", None)
-    job.pop("generation_time", None)
-
-
-def _mark_job_done(job):
-    """Stamp completion fields for a finished grabber job."""
-    job["status"] = "done"
-    job["completed_at"] = now_iso()
-    job["generation_time"] = _job_elapsed_seconds(job)
-
-
-def _load_jobs_from_disk():
-    """Load existing grabber jobs from disk on startup."""
-    if not os.path.isdir(ANIMATOR_DIR):
-        return
-    for entry in os.scandir(ANIMATOR_DIR):
-        if not entry.is_dir():
-            continue
-        pid = entry.name
-        # Reconcile disk → JSON first (fixes missing scenes in metadata/job)
-        reconcile_project(ANIMATOR_DIR, pid)
-        # Now load the (possibly updated) job
-        job_path = os.path.join(entry.path, "grabber_job.json")
-        if not os.path.isfile(job_path):
-            continue
-        try:
-            with open(job_path, "r", encoding="utf-8") as f:
-                job = json.load(f)
-            grabber_jobs.set(pid, job)
-        except (json.JSONDecodeError, OSError, KeyError) as e:
-            logger.warning("Skipped loading job from {}: {}", pid, e)
-
 
 # Load existing jobs on module import
-_load_jobs_from_disk()
+jobs.load_from_disk()
+
+
+# ---------------------------------------------------------------------------
+# Generic provider dispatch
+# ---------------------------------------------------------------------------
+
+
+def resolve_provider(*candidates):
+    """The first candidate the registry resolves, by ID or by alias.
+
+    Order at the call sites is `provider_override` → the legacy `provider`
+    field → the saved selection → the domain default. Alias resolution is the
+    registry's (`grok`/`midjourney` → `grok_automa`, `kie-ai` → `kie_ai`).
+    """
+    for candidate in candidates:
+        if not candidate:
+            continue
+        instance = hub.get(DOMAIN, str(candidate))
+        if instance is not None:
+            return instance
+    return None
+
+
+def _selected_provider() -> str:
+    return settings_manager.get_domain_settings(DOMAIN).get("selected_provider") or ""
+
+
+def _invocation(instance, project_id: str, options: dict):
+    """Build the provider invocation for a legacy route call (§30.6)."""
+    saved = settings_manager.get_provider_settings(DOMAIN, instance.id)
+    return build_invocation(
+        None,
+        domain=DOMAIN,
+        provider_id=instance.id,
+        project_id=project_id,
+        output_dir=jobs.project_dir(project_id),
+        settings=instance.resolve_settings(saved),
+        options={key: value for key, value in options.items() if value is not None},
+        selection_reason="request",
+    )
+
+
+def _submit(instance, anim_request: AnimatorRequest, project_id: str, options: dict):
+    """Construct and run the provider. Raises `ProviderError` on failure."""
+    try:
+        provider = hub.create(DOMAIN, instance.id)
+    except ProviderConstructionError as exc:
+        raise ProviderError(
+            "PROVIDER_UNAVAILABLE",
+            f"The animator provider '{instance.id}' could not be started",
+            domain=DOMAIN,
+            provider_id=instance.id,
+        ) from exc
+    invocation = _invocation(instance, project_id, options)
+    try:
+        return provider.submit(anim_request, invocation)
+    except ProviderError:
+        raise
+    except BaseException as exc:
+        raise wrap_exception(
+            exc, domain=DOMAIN, provider_id=instance.id, log=invocation.log
+        ) from None
+
+
+def _request_from(scenes, *, aspect_ratio, mode) -> AnimatorRequest:
+    try:
+        return AnimatorRequest.from_scenes(
+            scenes, aspect_ratio=aspect_ratio, mode=mode
+        )
+    except ValidationError as exc:
+        raise ProviderError(
+            "PROVIDER_REQUEST_INVALID",
+            "No scenes with a usable prompt were supplied",
+            domain=DOMAIN,
+        ) from exc
+
+
+def _http_status(exc: ProviderError) -> int:
+    return 400 if exc.code == "PROVIDER_REQUEST_INVALID" else 502
+
+
+def _consistency_prefix(consistency) -> str:
+    if not consistency:
+        return ""
+    parts = []
+    for key in ("character", "setting", "mood"):
+        value = consistency.get(key)
+        if value:
+            parts.append(value)
+    if not parts:
+        return ""
+    return ", ".join(parts) + ". "
+
+
+def _run_options(data: GrabberStartRequest) -> dict:
+    """Per-run values a request may override on the selected provider.
+
+    Flat Grok keys (`grok_mode` / `grok_quality` / `grok_duration` / `auto_type`)
+    still win over `provider_options` so an un-migrated client is unaffected
+    (§40.2 O1). Top-level Kie fields (`model` / `resolution` / `output_format`)
+    lift the same way. Request options always beat stored settings once they
+    reach the provider (§40.2 O4).
+    """
+    options = dict(data.provider_options or {})
+    body = request.get_json(silent=True) or {}
+
+    flat_map = (
+        ("grok_mode", "mode"),
+        ("grok_quality", "quality"),
+        ("grok_duration", "duration"),
+        ("auto_type", "auto_type"),
+    )
+    for flat, key in flat_map:
+        if flat in body and body[flat] is not None:
+            options[key] = body[flat]
+
+    for name in ("model", "resolution", "output_format"):
+        value = getattr(data, name, None)
+        if value is not None and value != "":
+            options.setdefault(name, value)
+
+    if data.aspect_ratio:
+        options.setdefault("aspect_ratio", data.aspect_ratio)
+
+    return options
 
 
 # ---------------------------------------------------------------------------
 # Grabber Routes
 # ---------------------------------------------------------------------------
 
+
 @animation_bp.route("/api/animator/grabber/start", methods=["POST"])
 @validate_json(GrabberStartRequest)
 def grabber_start(data: GrabberStartRequest):
-    """Initialize a grabber job — prepares prompts for Automa to consume."""
-    # Resolve provider: override → settings → default
-    from studio.animator.providers import registry as anim_registry
-    from studio.shared.providers_common import settings_manager
-    
-    provider_id = data.provider_id
-    
-    provider = anim_registry.get(provider_id)
-    if provider is None:
-        # Fall back to grok_automa
-        provider_id = "grok_automa"
-        provider = anim_registry.get(provider_id)
-        if provider is None:
-            return jsonify({"error": f"Provider '{provider_id}' not found"}), 400
-    
-    logger.info("grabber_start request: {} scenes, provider={}", len(data.scenes), provider_id)
-
+    """Initialize a grabber job — prepares prompts for Automa / cloud providers."""
     project_id = sanitize_project_id(data.project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    
-    # Get provider settings
-    provider_settings = settings_manager.get_provider_settings("animator", provider_id)
-    arguments = data.arguments
-    scenes = [s.model_dump() for s in data.scenes]
-    consistency = data.consistency
 
-    grabber_id = f"grab_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{project_id}"
+    instance = resolve_provider(
+        data.provider_override,
+        data.provider,
+        _selected_provider(),
+        DOMAINS[DOMAIN].default_provider,
+    )
+    if instance is None:
+        return jsonify({"error": "No animator provider is registered"}), 503
 
-    # Build consistency prefix for visual consistency across all scenes
-    consistency_prefix = ""
-    if consistency:
-        parts = []
-        if consistency.get("character"):
-            parts.append(consistency["character"])
-        if consistency.get("setting"):
-            parts.append(consistency["setting"])
-        if consistency.get("mood"):
-            parts.append(consistency["mood"])
-        if parts:
-            consistency_prefix = ", ".join(parts) + ". "
-            logger.info("Applying consistency prefix to {} scene prompts", len(scenes))
-
-    # Build Automa-compatible payload (prepend consistency prefix to each prompt)
-    # Include storyboard images as base64 for display in Automa/extension
-    import base64 as b64_mod
-    from config import STORYBOARD_DIR
-    image_exts = (".jpg", ".jpeg", ".png", ".webp")
-    scene_list = []
-    for s in scenes:
-        if not s.get("prompt"):
-            continue
-        entry = {"prompt": consistency_prefix + s["prompt"], "scene": s["scene"]}
-        # Read storyboard image and encode as base64
-        scene_img_dir = os.path.join(STORYBOARD_DIR, project_id, str(s["scene"]))
-        if os.path.isdir(scene_img_dir):
-            for fname in os.listdir(scene_img_dir):
-                if fname.startswith("image") and fname.lower().endswith(image_exts):
-                    img_path = os.path.join(scene_img_dir, fname)
-                    try:
-                        with open(img_path, "rb") as img_f:
-                            raw = img_f.read()
-                        ext = os.path.splitext(fname)[1].lstrip(".")
-                        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(ext, "jpeg")
-                        entry["image"] = f"data:image/{mime};base64,{b64_mod.b64encode(raw).decode()}"
-                    except Exception:
-                        pass
-                    break
-        scene_list.append(entry)
-    automa_payload = {
-        "projectId": project_id,
-        "arguments": arguments if provider == "midjourney" else "",
-        "aspect_ratio": data.aspect_ratio or "9:16",
-        "scenes": scene_list,
-    }
-
-    # Per-run options, addressed by the provider's own settings-schema key names
-    # (contracts.md §40.2 O1). Step 12.4 made the Assets page render this form
-    # from provider metadata, so it now sends `provider_options` instead of the
-    # flat `grok_*` keys; a client still sending the flat keys keeps winning, so
-    # the endpoint contract is unchanged. Only what the request carries is read —
-    # saved settings never reach `automa_payload`, which is persisted under
-    # `output/` and may be archived (§22.6).
-    options = data.provider_options or {}
-
-    # Pass Grok-specific options for Automa to configure the UI
-    if provider_id == "grok_automa":
-        request_data = request.get_json(silent=True) or {}
-        automa_payload["grok_mode"] = request_data.get("grok_mode", options.get("mode", "video"))
-        automa_payload["grok_quality"] = request_data.get("grok_quality", options.get("quality", "480p"))
-        automa_payload["grok_duration"] = request_data.get("grok_duration", options.get("duration", "6s"))
-        automa_payload["auto_type"] = request_data.get("auto_type", options.get("auto_type", False))
-
-    # Per-scene status tracking — preserve existing statuses for scenes not
-    # being resent so that already-completed scenes keep their "ready" state.
-    prev_job = grabber_jobs.get(project_id)
-    scene_statuses = dict(prev_job["scene_statuses"]) if prev_job else {}
-    for s in automa_payload["scenes"]:
-        scene_statuses[str(s["scene"])] = {
-            "status": "pending",
-            "urls": [],
-            "local_files": [],
+    prefix = _consistency_prefix(data.consistency)
+    scenes = [
+        {
+            "scene": scene.scene,
+            "prompt": prefix + scene.prompt if prefix else scene.prompt,
         }
+        for scene in data.scenes
+        if scene.prompt
+    ]
+    options = _run_options(data)
+    mode = options.get("mode") or "video"
 
-    job = {
-        "grabber_id": grabber_id,
-        "project_id": project_id,
-        "provider": provider_id,  # Use new provider ID
-        "arguments": arguments,
-        "payload": automa_payload,
-        "scene_statuses": scene_statuses,
-        "status": "waiting",  # waiting | grabbing | generating | downloading | done | error
-        "created_at": now_iso(),
-        "updated_at": now_iso(),
-    }
-
-    # Store Kie AI generation options for the background thread
-    if provider_id == "kie_ai":
-        job["_kie_ai_options"] = {
-            "model": data.model or options.get("model") or KIE_AI_MODEL,
-            "aspect_ratio": data.aspect_ratio or "9:16",
-            "resolution": data.resolution or options.get("resolution") or "1",
-            "output_format": data.output_format or options.get("output_format") or "jpg",
-        }
-        # Merge the portable half of the provider settings only: this job is
-        # persisted to grabber_job.json under output/ and may be archived, so a
-        # credential must never reach it (contracts.md §22.6). `kie_ai_generate`
-        # resolves the API key itself.
-        job["_kie_ai_options"].update(
-            settings_manager.portable_provider_settings("animator", provider_id)
+    try:
+        anim_request = _request_from(
+            scenes,
+            aspect_ratio=data.aspect_ratio or options.get("aspect_ratio") or "9:16",
+            mode=mode,
         )
+        _submit(instance, anim_request, project_id, options)
+    except ProviderError as exc:
+        logger.error("[{}] animator submit failed: {}", project_id, exc.code)
+        return jsonify({"error": exc.message, "provider": instance.id}), _http_status(exc)
 
-    grabber_jobs.set(project_id, job)
-    _save_job(job)
-
-    logger.info("Grabber job created: {} ({} scenes, provider={})", grabber_id, len(automa_payload["scenes"]), provider)
-
-    # Push to connected WebSocket clients (Automa / STS extension)
-    # Payload already contains base64 images from the scene_list build above
-    if provider_id == "grok_automa":
-        try:
-            from .routes import queue_grabber_start
-            queue_grabber_start({
-                "type": "GRABBER_START",
-                "projectId": project_id,
-                "scenes": automa_payload["scenes"],
-                "aspectRatio": automa_payload.get("aspect_ratio", "9:16"),
-                "grokMode": automa_payload.get("grok_mode", "video"),
-                "grokDuration": automa_payload.get("grok_duration", "6s"),
-                "autoType": automa_payload.get("auto_type", False),
-            })
-            imgs = sum(1 for s in automa_payload["scenes"] if s.get("image"))
-            logger.info("Grabber data queued/pushed for {} ({} scenes, {} with images)",
-                        project_id, len(automa_payload["scenes"]), imgs)
-        except Exception as e:
-            logger.warning("WebSocket push failed: {}", e)
-
-    # Kie AI: fully server-side — spawn background thread to generate + download
-    if provider_id == "kie_ai":
-        job["status"] = "generating"
-        _save_job(job)
-        threading.Thread(
-            target=_kie_ai_generate_all,
-            args=(project_id, job),
-            daemon=True,
-        ).start()
-
+    job = jobs.read(project_id) or {}
+    grabber_id = job.get("grabber_id", "")
+    scene_count = len(anim_request.scenes)
+    logger.info(
+        "Grabber job created: {} ({} scenes, provider={})",
+        grabber_id, scene_count, instance.id,
+    )
     return jsonify({
         "grabber_id": grabber_id,
         "project_id": project_id,
-        "scene_count": len(automa_payload["scenes"]),
-        "provider": provider_id,
+        "scene_count": scene_count,
+        "provider": instance.id,
     })
-
-
-def _kie_ai_generate_all(project_id, job):
-    """Background thread: generate images via Kie AI for all scenes sequentially."""
-    scenes = job["payload"]["scenes"]
-    request_data = job.get("_kie_ai_options", {})
-    model = request_data.get("model", "google/nano-banana")
-    aspect_ratio = request_data.get("aspect_ratio", "9:16")
-    resolution = request_data.get("resolution", "1")
-    output_format = request_data.get("output_format", "jpg")
-
-    logger.info("Kie AI thread started: {} scenes, model={}, ar={}, res={}, fmt={}",
-                len(scenes), model, aspect_ratio, resolution, output_format)
-
-    for scene_entry in scenes:
-        scene_num = str(scene_entry["scene"])
-        prompt = scene_entry["prompt"]
-        logger.info("Kie AI scene {}: generating (prompt: {})", scene_num, prompt[:80])
-
-        if scene_num in job["scene_statuses"]:
-            job["scene_statuses"][scene_num]["status"] = "generating"
-        _save_job(job)
-
-        try:
-            result = kie_ai_generate(
-                prompt=prompt,
-                aspect_ratio=aspect_ratio,
-                resolution=resolution,
-                output_format=output_format,
-                model=model,
-            )
-            image_urls = result.get("all_urls", [result["url"]])
-            logger.info("Kie AI scene {} generated: {} URL(s)", scene_num, len(image_urls))
-
-            # Download to disk
-            if scene_num in job["scene_statuses"]:
-                job["scene_statuses"][scene_num]["status"] = "downloading"
-                job["scene_statuses"][scene_num]["urls"] = image_urls
-            _save_job(job)
-
-            local_files = organize_grabber_assets(
-                project_id=project_id,
-                scene_num=scene_num,
-                urls=image_urls,
-                assets_dir=ANIMATOR_DIR,
-            )
-            if scene_num in job["scene_statuses"]:
-                job["scene_statuses"][scene_num]["status"] = "ready"
-                job["scene_statuses"][scene_num]["local_files"] = local_files
-            logger.success("Kie AI scene {} ready: {} files", scene_num, len(local_files))
-
-        except Exception as e:
-            logger.error("Kie AI scene {} failed: {}", scene_num, e)
-            if scene_num in job["scene_statuses"]:
-                job["scene_statuses"][scene_num]["status"] = "error"
-
-        _save_job(job)
-
-    all_done = all(
-        s["status"] in ("ready", "error")
-        for s in job["scene_statuses"].values()
-    )
-    if all_done:
-        _mark_job_done(job)
-        _save_job(job)
-        logger.success("Kie AI generation complete for {}", project_id)
 
 
 @animation_bp.route("/api/animator/grabber/pending")
@@ -434,17 +290,15 @@ def grabber_pending():
         return jsonify({"error": "Forbidden"}), 403
 
     latest = None
-    jobs_snapshot = grabber_jobs.values()
-    for job in jobs_snapshot:
-        if job["status"] == "waiting":
-            if not latest or job["created_at"] > latest["created_at"]:
+    for job in grabber_jobs.values():
+        if job.get("status") == "waiting":
+            if not latest or job.get("created_at", "") > latest.get("created_at", ""):
                 latest = job
 
     if not latest:
         return jsonify({"error": "No pending grabber jobs"}), 404
 
-    latest["status"] = "grabbing"
-    _save_job(latest)
+    jobs.mark_status(latest["project_id"], "grabbing")
     return jsonify(latest["payload"])
 
 
@@ -458,47 +312,50 @@ def grabber_results():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    # data format: [{ projectId, scenes: [{ scene, url: [...] }] }]
     results = data if isinstance(data, list) else [data]
 
     for project in results:
         project_id = sanitize_project_id(project.get("projectId", ""))
         if not project_id:
             continue
-        job = grabber_jobs.get(project_id)
+        job = jobs.read(project_id)
         if not job:
             logger.warning("Grabber results for unknown project: {}", project_id)
             continue
 
-        _clear_job_completion(job)
-        job["status"] = "downloading"
+        jobs.clear_completion(project_id)
+        jobs.mark_status(project_id, "downloading")
         scenes = project.get("scenes", [])
         logger.info("Received results for {}: {} scenes", project_id, len(scenes))
 
-        # Download images in a background thread
-        def _download_all(pid, job_ref, scene_list):
+        def _download_all(pid, scene_list):
+            job_ref = jobs.read(pid) or {}
             for scene_entry in scene_list:
                 scene_num = str(scene_entry.get("scene", ""))
                 raw_urls = scene_entry.get("url", []) or scene_entry.get("urls", [])
-                urls = _filter_video_urls(raw_urls) if _job_requires_video_assets(job_ref) else raw_urls
+                urls = (
+                    jobs.filter_video_urls(raw_urls)
+                    if jobs.requires_video(job_ref)
+                    else raw_urls
+                )
                 if not urls:
-                    if _job_requires_video_assets(job_ref) and raw_urls:
-                        logger.error("Scene {} rejected non-video asset URLs for video job: {}", scene_num, raw_urls)
-                        if scene_num in job_ref["scene_statuses"]:
-                            job_ref["scene_statuses"][scene_num]["status"] = "error"
-                        _save_job(job_ref)
+                    if jobs.requires_video(job_ref) and raw_urls:
+                        logger.error(
+                            "Scene {} rejected non-video asset URLs for video job: {}",
+                            scene_num, raw_urls,
+                        )
+                        jobs.record_error(pid, scene_num)
                     else:
                         logger.warning("Scene {} has no URLs, skipping", scene_num)
                     continue
 
                 if len(urls) != len(raw_urls):
-                    logger.warning("Scene {} filtered {} non-video URL(s) from grabber payload", scene_num, len(raw_urls) - len(urls))
+                    logger.warning(
+                        "Scene {} filtered {} non-video URL(s) from grabber payload",
+                        scene_num, len(raw_urls) - len(urls),
+                    )
 
-                if scene_num in job_ref["scene_statuses"]:
-                    job_ref["scene_statuses"][scene_num]["status"] = "downloading"
-                    job_ref["scene_statuses"][scene_num]["urls"] = urls
-
-                _save_job(job_ref)
+                jobs.mark_scene(pid, scene_num, "downloading", urls=urls, local_files=[])
                 logger.info("Downloading scene {} ({} URLs)...", scene_num, len(urls))
 
                 try:
@@ -508,30 +365,23 @@ def grabber_results():
                         urls=urls,
                         assets_dir=ANIMATOR_DIR,
                     )
-                    if scene_num in job_ref["scene_statuses"]:
-                        job_ref["scene_statuses"][scene_num]["status"] = "ready"
-                        job_ref["scene_statuses"][scene_num]["local_files"] = local_files
-                    logger.success("Scene {} ready: {} files downloaded", scene_num, len(local_files))
-                except Exception as e:
-                    logger.error("Download failed for scene {}: {}", scene_num, e)
-                    if scene_num in job_ref["scene_statuses"]:
-                        job_ref["scene_statuses"][scene_num]["status"] = "error"
+                    kind = "video" if jobs.requires_video(job_ref) else "image"
+                    jobs.record_ready(
+                        pid, scene_num, local_files, urls=urls, kind=kind
+                    )
+                    logger.success(
+                        "Scene {} ready: {} files downloaded", scene_num, len(local_files)
+                    )
+                except Exception as exc:
+                    logger.error("Download failed for scene {}: {}", scene_num, exc)
+                    jobs.record_error(pid, scene_num)
 
-                _save_job(job_ref)
-
-            # Check if all scenes are done
-            all_done = all(
-                s["status"] in ("ready", "error")
-                for s in job_ref["scene_statuses"].values()
-            )
-            if all_done:
-                _mark_job_done(job_ref)
-                _save_job(job_ref)
+            if jobs.maybe_finish(pid):
                 logger.success("Grabber job complete for {}", pid)
 
         threading.Thread(
             target=_download_all,
-            args=(project_id, job, scenes),
+            args=(project_id, scenes),
             daemon=True,
         ).start()
 
@@ -540,22 +390,7 @@ def grabber_results():
 
 @animation_bp.route("/api/animator/grabber/upload", methods=["POST"])
 def grabber_upload():
-    """Receive base64 image data from Automa (for CDN URLs that require auth).
-
-    Expected format:
-    {
-      "projectId": "pm_XXX",
-      "scenes": [
-        {
-          "scene": 0,
-          "images": [
-            {"data": "base64...", "source_url": "https://cdn...", "ext": ".png"},
-            ...
-          ]
-        }
-      ]
-    }
-    """
+    """Receive base64 image/video data from Automa (for CDN URLs that require auth)."""
     if not is_loopback_remote(request.remote_addr):
         return jsonify({"error": "Forbidden"}), 403
 
@@ -568,33 +403,38 @@ def grabber_upload():
     if not project_id or not scenes:
         return jsonify({"error": "Missing projectId or scenes"}), 400
 
-    job = grabber_jobs.get(project_id)
+    job = jobs.read(project_id)
     if job:
-        _clear_job_completion(job)
-        job["status"] = "downloading"
+        jobs.clear_completion(project_id)
+        jobs.mark_status(project_id, "downloading")
 
     logger.info("Upload received for {}: {} scenes", project_id, len(scenes))
 
-    def _save_all(pid, job_ref, scene_list):
+    def _save_all(pid, scene_list):
+        job_ref = jobs.read(pid)
         for scene_entry in scene_list:
             scene_num = str(scene_entry.get("scene", ""))
             raw_images = scene_entry.get("images", [])
-            images = _filter_video_images(raw_images) if _job_requires_video_assets(job_ref) else raw_images
+            images = (
+                jobs.filter_video_images(raw_images)
+                if jobs.requires_video(job_ref)
+                else raw_images
+            )
             if not images:
-                if _job_requires_video_assets(job_ref) and raw_images:
-                    logger.error("Scene {} rejected non-video upload(s) for video job", scene_num)
-                    if job_ref and scene_num in job_ref["scene_statuses"]:
-                        job_ref["scene_statuses"][scene_num]["status"] = "error"
-                        _save_job(job_ref)
+                if jobs.requires_video(job_ref) and raw_images:
+                    logger.error(
+                        "Scene {} rejected non-video upload(s) for video job", scene_num
+                    )
+                    jobs.record_error(pid, scene_num)
                 continue
 
             if len(images) != len(raw_images):
-                logger.warning("Scene {} filtered {} non-video upload(s) from Automa", scene_num, len(raw_images) - len(images))
+                logger.warning(
+                    "Scene {} filtered {} non-video upload(s) from Automa",
+                    scene_num, len(raw_images) - len(images),
+                )
 
-            if job_ref and scene_num in job_ref["scene_statuses"]:
-                job_ref["scene_statuses"][scene_num]["status"] = "downloading"
-                _save_job(job_ref)
-
+            jobs.mark_scene(pid, scene_num, "downloading")
             logger.info("Saving scene {} ({} images)...", scene_num, len(images))
             try:
                 local_files = save_base64_assets(
@@ -603,34 +443,23 @@ def grabber_upload():
                     images=images,
                     assets_dir=ANIMATOR_DIR,
                 )
-                if job_ref and scene_num in job_ref["scene_statuses"]:
-                    job_ref["scene_statuses"][scene_num]["status"] = "ready"
-                    job_ref["scene_statuses"][scene_num]["local_files"] = local_files
-                    job_ref["scene_statuses"][scene_num]["urls"] = [
-                        img.get("source_url", "") for img in images
-                    ]
+                kind = "video" if jobs.requires_video(job_ref) else "image"
+                jobs.record_ready(
+                    pid, scene_num, local_files,
+                    urls=[img.get("source_url", "") for img in images],
+                    kind=kind,
+                )
                 logger.success("Scene {} saved: {} files", scene_num, len(local_files))
-            except Exception as e:
-                logger.error("Save failed for scene {}: {}", scene_num, e)
-                if job_ref and scene_num in job_ref["scene_statuses"]:
-                    job_ref["scene_statuses"][scene_num]["status"] = "error"
+            except Exception as exc:
+                logger.error("Save failed for scene {}: {}", scene_num, exc)
+                jobs.record_error(pid, scene_num)
 
-            if job_ref:
-                _save_job(job_ref)
-
-        if job_ref:
-            all_done = all(
-                s["status"] in ("ready", "error")
-                for s in job_ref["scene_statuses"].values()
-            )
-            if all_done:
-                _mark_job_done(job_ref)
-                _save_job(job_ref)
-                logger.success("Upload job complete for {}", pid)
+        if jobs.maybe_finish(pid):
+            logger.success("Upload job complete for {}", pid)
 
     threading.Thread(
         target=_save_all,
-        args=(project_id, job, scenes),
+        args=(project_id, scenes),
         daemon=True,
     ).start()
 
@@ -643,7 +472,7 @@ def grabber_status(project_id):
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    job = grabber_jobs.get(project_id)
+    job = jobs.read(project_id)
     if not job:
         return jsonify({"error": "No grabber job found"}), 404
 
@@ -651,7 +480,7 @@ def grabber_status(project_id):
         "grabber_id": job["grabber_id"],
         "project_id": project_id,
         "status": job["status"],
-        "generation_time": _job_elapsed_seconds(
+        "generation_time": jobs.elapsed_seconds(
             job, include_running=job.get("status") not in ("done", "error")
         ),
         "scene_statuses": job["scene_statuses"],
@@ -662,17 +491,17 @@ def grabber_status(project_id):
 # Re-download — retry downloading assets for scenes that failed or are pending
 # ---------------------------------------------------------------------------
 
+
 @animation_bp.route("/api/animator/redownload/<project_id>", methods=["POST"])
 def redownload_assets(project_id):
     """Re-attempt downloads for scenes with URLs but no local files."""
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    job = grabber_jobs.get(project_id)
+    job = jobs.read(project_id)
     if not job:
         return jsonify({"error": "No grabber job found"}), 404
 
-    # Also check metadata for URLs
     meta_path = os.path.join(ANIMATOR_DIR, project_id, "metadata.json")
     meta = {}
     if os.path.isfile(meta_path):
@@ -682,15 +511,13 @@ def redownload_assets(project_id):
     scenes_to_retry = []
     for scene_num, ss in job["scene_statuses"].items():
         has_local = ss.get("local_files") and len(ss["local_files"]) > 0
-        # Check actual files on disk
-        scene_dir = os.path.join(ANIMATOR_DIR, project_id, str(scene_num))
-        has_files = os.path.isdir(scene_dir) and any(
-            f.is_file() for f in Path(scene_dir).iterdir()
+        scene_directory = os.path.join(ANIMATOR_DIR, project_id, str(scene_num))
+        has_files = os.path.isdir(scene_directory) and any(
+            f.is_file() for f in Path(scene_directory).iterdir()
         )
         if has_local and has_files:
-            continue  # already downloaded
+            continue
 
-        # Get URLs from job or metadata
         urls = ss.get("urls", [])
         if not urls:
             scene_meta = meta.get("scenes", {}).get(str(scene_num), {})
@@ -699,19 +526,20 @@ def redownload_assets(project_id):
             scenes_to_retry.append({"scene": scene_num, "url": urls})
 
     if not scenes_to_retry:
-        return jsonify({"status": "nothing_to_retry", "message": "All scenes already downloaded"})
+        return jsonify({
+            "status": "nothing_to_retry",
+            "message": "All scenes already downloaded",
+        })
 
-    _clear_job_completion(job)
-    job["status"] = "downloading"
-    _save_job(job)
+    jobs.clear_completion(project_id)
+    jobs.mark_status(project_id, "downloading")
 
-    def _retry_downloads(pid, job_ref, scene_list):
+    def _retry_downloads(pid, scene_list):
+        job_ref = jobs.read(pid)
         for entry in scene_list:
             sn = str(entry["scene"])
             urls = entry["url"]
-            if sn in job_ref["scene_statuses"]:
-                job_ref["scene_statuses"][sn]["status"] = "downloading"
-            _save_job(job_ref)
+            jobs.mark_scene(pid, sn, "downloading")
             logger.info("Re-downloading scene {} ({} URLs)", sn, len(urls))
 
             try:
@@ -719,27 +547,21 @@ def redownload_assets(project_id):
                     project_id=pid, scene_num=sn,
                     urls=urls, assets_dir=ANIMATOR_DIR,
                 )
-                if sn in job_ref["scene_statuses"]:
-                    job_ref["scene_statuses"][sn]["status"] = "ready"
-                    job_ref["scene_statuses"][sn]["local_files"] = local_files
-                logger.success("Re-download scene {} done: {} files", sn, len(local_files))
-            except Exception as e:
-                logger.error("Re-download failed for scene {}: {}", sn, e)
-                if sn in job_ref["scene_statuses"]:
-                    job_ref["scene_statuses"][sn]["status"] = "error"
-            _save_job(job_ref)
+                kind = "video" if jobs.requires_video(job_ref) else "image"
+                jobs.record_ready(pid, sn, local_files, urls=urls, kind=kind)
+                logger.success(
+                    "Re-download scene {} done: {} files", sn, len(local_files)
+                )
+            except Exception as exc:
+                logger.error("Re-download failed for scene {}: {}", sn, exc)
+                jobs.record_error(pid, sn)
 
-        all_done = all(
-            s["status"] in ("ready", "error")
-            for s in job_ref["scene_statuses"].values()
-        )
-        if all_done:
-            _mark_job_done(job_ref)
-            _save_job(job_ref)
+        if jobs.maybe_finish(pid):
+            logger.success("Redownload complete for {}", pid)
 
     threading.Thread(
         target=_retry_downloads,
-        args=(project_id, job, scenes_to_retry),
+        args=(project_id, scenes_to_retry),
         daemon=True,
     ).start()
 
@@ -753,6 +575,7 @@ def redownload_assets(project_id):
 # History — list all asset projects
 # ---------------------------------------------------------------------------
 
+
 @animation_bp.route("/api/animator/history")
 def assets_history():
     """List all asset projects with metadata summary."""
@@ -761,9 +584,13 @@ def assets_history():
         return jsonify(projects)
 
     try:
-        entries = sorted(os.scandir(ANIMATOR_DIR), key=lambda e: e.stat().st_mtime, reverse=True)
+        entries = sorted(
+            os.scandir(ANIMATOR_DIR), key=lambda e: e.stat().st_mtime, reverse=True
+        )
     except OSError:
         return jsonify(projects)
+
+    from datetime import datetime
 
     for entry in entries:
         if not entry.is_dir():
@@ -775,7 +602,6 @@ def assets_history():
             "timestamp": datetime.fromtimestamp(entry.stat().st_mtime).isoformat(),
         }
 
-        # Read grabber job for status info
         job_path = os.path.join(entry.path, "grabber_job.json")
         if os.path.isfile(job_path):
             try:
@@ -787,19 +613,19 @@ def assets_history():
                 project_info["created_at"] = job.get("created_at", "")
                 project_info["updated_at"] = job.get("updated_at", "")
                 project_info["completed_at"] = job.get("completed_at", "")
-                project_info["generation_time"] = _job_elapsed_seconds(
+                project_info["generation_time"] = jobs.elapsed_seconds(
                     job, include_running=job.get("status") not in ("done", "error")
                 )
                 project_info["scene_count"] = len(job.get("scene_statuses", {}))
-                # Count ready/pending/error
-                statuses = [s["status"] for s in job.get("scene_statuses", {}).values()]
+                statuses = [
+                    s["status"] for s in job.get("scene_statuses", {}).values()
+                ]
                 project_info["ready_count"] = statuses.count("ready")
                 project_info["error_count"] = statuses.count("error")
                 project_info["pending_count"] = statuses.count("pending")
             except (json.JSONDecodeError, OSError, TypeError, ValueError, KeyError):
                 pass
 
-        # Read metadata for file counts
         meta_path = os.path.join(entry.path, "metadata.json")
         if os.path.isfile(meta_path):
             try:
@@ -813,20 +639,20 @@ def assets_history():
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Count actual files on disk
         total_disk_files = 0
         try:
             for sub in Path(entry.path).iterdir():
                 if sub.is_dir() and sub.name not in (".", ".."):
                     try:
-                        total_disk_files += sum(1 for f in sub.iterdir() if f.is_file())
+                        total_disk_files += sum(
+                            1 for f in sub.iterdir() if f.is_file()
+                        )
                     except OSError:
                         pass
         except OSError:
             pass
         project_info["disk_files"] = total_disk_files
 
-        # Get style from scenes.json
         scenes_json = os.path.join(SCENES_DIR, project_id, "scenes.json")
         if os.path.isfile(scenes_json):
             try:
@@ -836,10 +662,7 @@ def assets_history():
             except Exception:
                 pass
 
-        # Get a preview image — prefer generated thumbnails, fall back to assets
         project_info["preview"] = None
-
-        # 1) Check the thumbnails system first (editor cover, then assets/0)
         thumb_base = os.path.join(THUMBNAILS_DIR, project_id)
         editor_cover = os.path.join(thumb_base, "editor", "cover.jpg")
         assets_thumb_0 = os.path.join(thumb_base, "assets", "0.jpg")
@@ -848,7 +671,6 @@ def assets_history():
         elif os.path.isfile(assets_thumb_0):
             project_info["preview"] = f"/api/thumbnails/{project_id}/assets/0.jpg"
         else:
-            # 2) Fall back to scanning asset scene directories
             try:
                 scene_dirs = sorted(os.listdir(entry.path))
             except OSError:
@@ -867,22 +689,25 @@ def assets_history():
                         continue
                     lower = fname.lower()
                     if lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-                        project_info["preview"] = f"/output/animator/{project_id}/{scene_num}/{fname}"
+                        project_info["preview"] = (
+                            f"/output/animator/{project_id}/{scene_num}/{fname}"
+                        )
                         break
                     if lower.endswith(VIDEO_EXTS):
                         thumb = _video_thumbnail(fpath)
                         if thumb:
                             thumb_name = os.path.basename(thumb)
-                            project_info["preview"] = f"/output/animator/{project_id}/{scene_num}/{thumb_name}"
-                        # Don't set video URL as preview — <img> can't render it
+                            project_info["preview"] = (
+                                f"/output/animator/{project_id}/{scene_num}/{thumb_name}"
+                            )
                         break
                 if project_info["preview"]:
                     break
 
-        # Check if a build (initial.json) already exists for this project
         proj_dir = os.path.join(PROJECTS_DIR, project_id)
-        project_info["has_build"] = os.path.isfile(os.path.join(proj_dir, "initial.json"))
-
+        project_info["has_build"] = os.path.isfile(
+            os.path.join(proj_dir, "initial.json")
+        )
         projects.append(project_info)
 
     return jsonify(projects)
@@ -894,16 +719,15 @@ def reconcile_assets(project_id):
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    project_dir = os.path.join(ANIMATOR_DIR, project_id)
-    if not os.path.isdir(project_dir):
+    project_directory = os.path.join(ANIMATOR_DIR, project_id)
+    if not os.path.isdir(project_directory):
         return jsonify({"error": "Project not found"}), 404
     updated = reconcile_project(ANIMATOR_DIR, project_id)
-    # Reload job into memory if it was updated
     if updated > 0:
-        job_path = os.path.join(project_dir, "grabber_job.json")
+        job_path = os.path.join(project_directory, "grabber_job.json")
         if os.path.isfile(job_path):
             with open(job_path, "r", encoding="utf-8") as f:
-                grabber_jobs.set(project_id, json.load(f))
+                jobs.set_job(project_id, json.load(f))
     return jsonify({"updated": updated})
 
 
@@ -913,11 +737,10 @@ def get_asset_project(project_id):
     project_id = sanitize_project_id(project_id)
     if not project_id:
         return jsonify({"error": "Invalid project id"}), 400
-    project_dir = os.path.join(ANIMATOR_DIR, project_id)
-    if not os.path.isdir(project_dir):
+    project_directory = os.path.join(ANIMATOR_DIR, project_id)
+    if not os.path.isdir(project_directory):
         return jsonify({"error": "Project not found"}), 404
 
-    # Auto-reconcile: sync disk → JSON before returning
     reconcile_project(ANIMATOR_DIR, project_id)
 
     result = {
@@ -925,25 +748,21 @@ def get_asset_project(project_id):
         "scenes": {},
     }
 
-    # Load metadata
-    meta_path = os.path.join(project_dir, "metadata.json")
+    meta_path = os.path.join(project_directory, "metadata.json")
     if os.path.isfile(meta_path):
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
         result["scenes"] = meta.get("scenes", {})
 
-    # Load job info
-    job_path = os.path.join(project_dir, "grabber_job.json")
-    if os.path.isfile(job_path):
-        with open(job_path, "r", encoding="utf-8") as f:
-            job = json.load(f)
+    job = jobs.read(project_id)
+    if job:
         result["grabber_id"] = job.get("grabber_id", "")
         result["provider"] = job.get("provider", "")
         result["status"] = job.get("status", "unknown")
         result["created_at"] = job.get("created_at", "")
         result["updated_at"] = job.get("updated_at", "")
         result["completed_at"] = job.get("completed_at", "")
-        result["generation_time"] = _job_elapsed_seconds(
+        result["generation_time"] = jobs.elapsed_seconds(
             job, include_running=job.get("status") not in ("done", "error")
         )
         result["scene_statuses"] = job.get("scene_statuses", {})
@@ -952,13 +771,12 @@ def get_asset_project(project_id):
             for s in job.get("payload", {}).get("scenes", [])
         }
 
-    # Scan actual files on disk per scene
-    for scene_num_dir in sorted(os.listdir(project_dir)):
-        scene_path = os.path.join(project_dir, scene_num_dir)
+    for scene_num_dir in sorted(os.listdir(project_directory)):
+        scene_path = os.path.join(project_directory, scene_num_dir)
         if not os.path.isdir(scene_path):
             continue
         try:
-            int(scene_num_dir)  # only numeric subdirs are scenes
+            int(scene_num_dir)
         except ValueError:
             continue
 
@@ -983,7 +801,10 @@ def get_asset_project(project_id):
 # Asset serving
 # ---------------------------------------------------------------------------
 
-@animation_bp.route("/api/animator/open-folder/<project_id>/<int:scene_index>", methods=["POST"])
+
+@animation_bp.route(
+    "/api/animator/open-folder/<project_id>/<int:scene_index>", methods=["POST"]
+)
 def open_asset_scene_folder(project_id, scene_index):
     """Open a specific scene's asset folder in the OS file explorer."""
     if not is_loopback_remote(request.remote_addr):
@@ -1011,13 +832,13 @@ def open_asset_scene_folder(project_id, scene_index):
 def generate_video_thumbnails(project_id):
     """Generate _thumb.jpg for all video files in a project that lack one."""
     safe_id = "".join(c for c in project_id if c.isalnum() or c in ("_", "-"))
-    project_dir = os.path.join(ANIMATOR_DIR, safe_id)
-    if not os.path.isdir(project_dir):
+    project_directory = os.path.join(ANIMATOR_DIR, safe_id)
+    if not os.path.isdir(project_directory):
         return jsonify({"error": "Project not found"}), 404
 
     generated = []
-    for scene_dir in sorted(os.listdir(project_dir)):
-        scene_path = os.path.join(project_dir, scene_dir)
+    for scene_dir in sorted(os.listdir(project_directory)):
+        scene_path = os.path.join(project_directory, scene_dir)
         if not os.path.isdir(scene_path):
             continue
         for fname in os.listdir(scene_path):

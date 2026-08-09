@@ -535,66 +535,78 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
 
 
 def _step_assets(scenes_result, config, project_id, job_id):
-    """Step 6: Start asset grabber and poll until all scenes are ready."""
-    from studio.animator.animation_routes import grabber_start, _get_job, _set_job
-    from studio.animator.schemas import GrabberStartRequest
+    """Step 6: Start asset grabber and poll until all scenes are ready.
 
+    Provider-ID branching is gone (step 14.3). The route resolves the provider
+    generically; this step only packs the request and reads the manifest's
+    `open_url` for the frontend to open.
+    """
     scenes = scenes_result.get("scenes", [])
     if not scenes:
         raise RuntimeError("No scenes to grab assets for")
 
-    # Resolve provider: override → settings → default
     anim_override = config.get("animator_provider_override")
-    anim_options = config.get("animator_provider_options", {})
-    
-    # Map new IDs to legacy names for backward compat
-    id_to_legacy = {"grok_automa": "grok", "kie_ai": "kie-ai"}
-    provider = id_to_legacy.get(anim_override) if anim_override else config.get("provider", "grok")
-    
-    aspect_ratio = config.get("aspect_ratio", "9:16")
-    auto_type = config.get("auto_type", True)
+    anim_options = dict(config.get("animator_provider_options") or {})
+    # Legacy flat keys still win so an un-migrated pipeline config is unaffected.
+    if "mode" not in anim_options and config.get("grok_mode"):
+        anim_options["mode"] = config["grok_mode"]
+    if "quality" not in anim_options and config.get("grok_quality"):
+        anim_options["quality"] = config["grok_quality"]
+    if "duration" not in anim_options and config.get("grok_duration"):
+        anim_options["duration"] = config["grok_duration"]
+    if "auto_type" not in anim_options and "auto_type" in config:
+        anim_options["auto_type"] = config["auto_type"]
+
+    # Prefer the canonical override; fall back to the legacy wire spelling.
+    selected = anim_override or config.get("provider") or "grok"
 
     payload = {
         "project_id": project_id,
         "provider_override": anim_override,
+        "provider": None if anim_override else config.get("provider"),
         "provider_options": anim_options,
-        "arguments": config.get("arguments", ""),
-        "aspect_ratio": aspect_ratio,
-        "auto_type": auto_type,
+        "aspect_ratio": config.get("aspect_ratio", "9:16"),
         "scenes": [
             {"prompt": s.get("image_prompt", ""), "scene": s.get("index", i)}
             for i, s in enumerate(scenes)
             if s.get("image_prompt")
         ],
     }
-    # Add provider-specific options from new format or legacy
-    if anim_override == "grok_automa" or provider == "grok":
-        payload["grok_mode"] = anim_options.get("mode", config.get("grok_mode", "video"))
-        payload["grok_quality"] = anim_options.get("quality", config.get("grok_quality", "480p"))
-        payload["grok_duration"] = anim_options.get("duration", config.get("grok_duration", "6s"))
+    # Flat keys for un-migrated callers of the grabber route.
+    if anim_options.get("mode") is not None:
+        payload["grok_mode"] = anim_options["mode"]
+    if anim_options.get("quality") is not None:
+        payload["grok_quality"] = anim_options["quality"]
+    if anim_options.get("duration") is not None:
+        payload["grok_duration"] = anim_options["duration"]
+    if "auto_type" in anim_options:
+        payload["auto_type"] = anim_options["auto_type"]
 
-    # Start grabber via internal API call
     base_url = f"http://127.0.0.1:{os.environ.get('STS_PORT', '5050')}"
     if _stop_requested(job_id):
         raise PipelineStopped(step_name="assets")
-    resp = http_requests.post(f"{base_url}/api/animator/grabber/start",
-                              json=payload, timeout=30)
+    resp = http_requests.post(
+        f"{base_url}/api/animator/grabber/start", json=payload, timeout=30
+    )
     resp.raise_for_status()
     grab_data = resp.json()
-    logger.info("Pipeline Assets: grabber started for {}", project_id)
+    provider_id = grab_data.get("provider") or selected
+    logger.info("Pipeline Assets: grabber started for {} via {}", project_id, provider_id)
 
-    # Open provider URL
-    provider_urls = {
-        "grok": "https://grok.com/imagine",
-        "midjourney": "https://www.midjourney.com/imagine",
-        "meta-ai": "https://www.meta.ai/",
-    }
+    # open_url lives on the manifest (§20.1) — never a route-side literal.
+    open_url = ""
+    try:
+        from studio.shared.providers_common.hub import hub
+        instance = hub.get("animator", provider_id)
+        if instance is not None and getattr(instance, "manifest", None):
+            open_url = getattr(instance.manifest, "open_url", "") or ""
+    except Exception:
+        open_url = ""
 
-    # Poll until all scenes are ready (timeout 2 hours)
     max_wait = 2 * 60 * 60  # 2 hours
     poll_interval = 10  # seconds
     start_time = time.time()
-    prev_ready = 0  # Track ready count to detect new completions
+    prev_ready = 0
 
     while time.time() - start_time < max_wait:
         if _stop_requested(job_id):
@@ -604,18 +616,22 @@ def _step_assets(scenes_result, config, project_id, job_id):
             raise PipelineStopped(step_name="assets")
         try:
             status_resp = http_requests.get(
-                f"{base_url}/api/animator/grabber/status/{project_id}", timeout=10)
+                f"{base_url}/api/animator/grabber/status/{project_id}", timeout=10
+            )
             if status_resp.status_code != 200:
                 continue
             status_data = status_resp.json()
 
             scene_statuses = status_data.get("scene_statuses", {})
             total = len(scene_statuses)
-            ready = sum(1 for s in scene_statuses.values() if s.get("status") == "ready")
-            errors = sum(1 for s in scene_statuses.values() if s.get("status") == "error")
+            ready = sum(
+                1 for s in scene_statuses.values() if s.get("status") == "ready"
+            )
+            errors = sum(
+                1 for s in scene_statuses.values() if s.get("status") == "error"
+            )
             pending = total - ready - errors
 
-            # Emit with scene_ready/scene_total so frontend can play per-video sounds
             _emit(job_id, {
                 "step": "assets", "status": "running",
                 "message": f"Waiting for assets ({project_id})... {ready}/{total} ready"
@@ -627,12 +643,13 @@ def _step_assets(scenes_result, config, project_id, job_id):
             prev_ready = ready
 
             if status_data.get("status") in ("done", "completed") or pending == 0:
-                logger.success("Pipeline Assets: {}/{} ready, {} errors",
-                               ready, total, errors)
+                logger.success(
+                    "Pipeline Assets: {}/{} ready, {} errors", ready, total, errors
+                )
                 return {
                     "total": total, "ready": ready, "errors": errors,
-                    "provider": provider,
-                    "provider_url": provider_urls.get(provider, ""),
+                    "provider": provider_id,
+                    "provider_url": open_url,
                 }
         except Exception as e:
             logger.debug("Pipeline Assets poll error: {}", e)

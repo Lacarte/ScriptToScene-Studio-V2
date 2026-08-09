@@ -1,4 +1,12 @@
-"""Pydantic schemas for Animator grabber routes."""
+"""Pydantic schemas for Animator grabber routes.
+
+Step 14.3 repaired the selection gap: `provider` defaulted every request to
+`midjourney` (resolved to `grok_automa`), so the authoritative selected-provider
+store was never consulted. Both fields are optional now; the route resolves
+`provider_override` → `provider` → saved selection → domain default, and legacy
+spellings (`grok` / `midjourney` / `kie-ai`) resolve through the registry's
+aliases.
+"""
 
 from typing import Optional
 
@@ -13,26 +21,30 @@ class ScenePrompt(BaseModel):
 
 
 class GrabberStartRequest(BaseModel):
+    """The grabber start request. `provider` is a real optional field (step 14.3).
+
+    It used to default to `"midjourney"`, which made every request that omitted
+    a provider land on `grok_automa` via the legacy map and never read
+    `domains.animator.selected_provider` (D15 / C2). Both override and legacy
+    fields are optional; an absent pair falls through to the saved selection.
+    """
+
     scenes: list[ScenePrompt] = Field(min_length=1)
     project_id: str = "default"
-    provider_override: Optional[str] = None  # New: provider ID from registry
+    # Canonical registry ID, e.g. "grok_automa" / "kie_ai".
+    provider_override: Optional[str] = None
+    # Legacy spelling kept for old callers; an alias resolves it.
+    provider: Optional[str] = None
     provider_options: dict = Field(default_factory=dict)
-    provider: str = "midjourney"  # Legacy: kept for compatibility
-    
-    arguments: str = Field(default="-v 7 -ar 9:16", max_length=200)
+
+    # Free-text Automa passthrough kept for wire compatibility. Not part of the
+    # frozen AnimatorRequest (§32.5) and no longer consumed by any provider —
+    # Midjourney is gone (P12). Accepted and dropped.
+    arguments: str = Field(default="", max_length=200)
     consistency: Optional[dict] = None
     model: Optional[str] = None
     aspect_ratio: Optional[str] = None
     resolution: Optional[str] = None
     output_format: Optional[str] = None
-
-    @property
-    def provider_id(self) -> str:
-        """Get provider ID (registry override or legacy)."""
-        if self.provider_override:
-            return self.provider_override
-        # Map legacy provider names to new IDs
-        legacy_map = {"midjourney": "grok_automa", "grok": "grok_automa", "kie-ai": "kie_ai"}
-        return legacy_map.get(self.provider, "grok_automa")
 
     model_config = {"extra": "allow"}

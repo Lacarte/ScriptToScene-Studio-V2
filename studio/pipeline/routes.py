@@ -640,11 +640,11 @@ def regenerate_assets(project_id):
         "aspect_ratio": aspect_ratio,
         "auto_type": True,
         "scenes": scenes_with_prompts,
+        # Flat keys for any provider that consumes them; unknown keys are ignored.
+        "grok_mode": body.get("grok_mode") or config.get("grok_mode", "video"),
+        "grok_quality": body.get("grok_quality") or config.get("grok_quality", "480p"),
+        "grok_duration": body.get("grok_duration") or config.get("grok_duration", "6s"),
     }
-    if provider == "grok":
-        payload["grok_mode"] = body.get("grok_mode") or config.get("grok_mode", "video")
-        payload["grok_quality"] = body.get("grok_quality") or config.get("grok_quality", "480p")
-        payload["grok_duration"] = body.get("grok_duration") or config.get("grok_duration", "6s")
 
     try:
         resp = http_requests.post(f"{base_url}/api/animator/grabber/start",
@@ -653,18 +653,22 @@ def regenerate_assets(project_id):
         grab_data = resp.json()
         logger.info("Regenerate assets started for {}", project_id)
 
-        # Provider URLs for frontend to open
-        provider_urls = {
-            "grok": "https://grok.com/imagine",
-            "midjourney": "https://www.midjourney.com/imagine",
-            "meta-ai": "https://www.meta.ai/",
-        }
+        # open_url lives on the provider manifest (§20.1), not a route literal.
+        open_url = ""
+        resolved = grab_data.get("provider") or provider
+        try:
+            from studio.shared.providers_common.hub import hub
+            instance = hub.get("animator", resolved)
+            if instance is not None and getattr(instance, "manifest", None):
+                open_url = getattr(instance.manifest, "open_url", "") or ""
+        except Exception:
+            open_url = ""
         return jsonify({
             "status": "started",
             "project_id": project_id,
-            "provider": provider,
+            "provider": resolved,
             "scene_count": len(scenes),
-            "open_url": provider_urls.get(provider, ""),
+            "open_url": open_url,
             **grab_data,
         })
     except Exception as e:
