@@ -501,6 +501,94 @@ The upgrade is complete only when a user can:
 
 ---
 
+# Extension brief — Provider plugin platform (Phases 10–16)
+
+> Added 2026-08-08. The brief above specifies the Workflow Builder (Phases 0–9, delivered). This
+> section is the authoritative spec for the provider-plugin migration that
+> [implementation-plan.md](implementation-plan.md) breaks into Phases 10–16. Phase 10 gates the plan
+> against *this* section and the real code.
+
+## Objective
+
+Make every AI module provider-driven. Script generation (random template and AI), Scene Blueprint,
+TTS, Storyboard, Animator, Music, and Captions each get a provider interface and a registry entry.
+Workflow nodes stay generic: they declare `provider` + `provider_options` and nothing provider-specific.
+The UI populates itself from provider metadata and settings schemas. Adding a provider means writing and
+registering a provider package — no edit to a node definition, adapter, route dispatcher, or Vue
+component.
+
+## Architectural decisions
+
+1. **Extend, do not replace.** `studio/shared/providers_common/` already provides discovery, manifests,
+   settings, health, and broken-provider isolation. The platform generalizes it; it does not introduce a
+   parallel framework.
+2. **Domains are data.** A domain catalog replaces every hardcoded domain set. The seven supported
+   domains are `script`, `scene_blueprint`, `tts`, `storyboard`, `animator`, `music`, `captions`.
+3. **One registry hub, module-owned provider folders.** Providers live beside the module they serve;
+   one hub resolves `(domain, provider_id)` for the whole process.
+4. **One versioned result envelope.** Every domain returns typed content inside a common envelope with
+   provider/domain/version, artifact refs, metadata, warnings, and provenance. Async providers share one
+   job handle/status/progress/terminal-state contract.
+5. **One error boundary.** Provider failures become `ProviderError` (stable code, safe message,
+   retryable flag, redacted details) at the registry boundary. No raw provider exception, credential,
+   filesystem path, or provider-specific response crosses into workflow records or API responses.
+6. **Failure is isolated.** One provider's import, health, execution, or shutdown failure cannot hide
+   healthy providers, block startup, or take down Flask.
+
+## What must be preserved
+
+- Every current provider ID, alias, default, and saved settings file.
+- All existing artifacts and output paths (`voice.json`, `scenes.json`, `captions.json`, media files).
+- Legacy request/response envelopes for the TTS, Story, Scene, Storyboard, Animator, Music, and Caption
+  routes, and the external Automa/extension/callback URLs.
+- Saved workflows: they upgrade through `type_version` migrations and run without manual edits.
+- Node type keys, port IDs, and port types — the provider migration must not change the graph contract.
+
+## Known starting conditions (verified in code, 2026-08-08)
+
+- The provider ABC layer (`TTSProvider`, `StoryboardProvider`, `AnimatorProvider`, and all seven
+  `get_provider()` factories) has **zero call sites**. Execution branches on `if provider_id == …`
+  into legacy modules. This work is first-time wiring, not a refactor of running code.
+- Two provider-selection stores coexist (`settings/settings.json` and `app-config.json`); one must win.
+- `GET /api/workflow/options/<source>` takes no parameters, so no dropdown can depend on the selected
+  provider until that contract is extended.
+- `studio/shared/providers_common/scaffold.py` and `docs/provider-template/README.md` already exist.
+
+## Security rules
+
+Secrets are write-only: never echoed by an API, never present in workflow JSON, execution records, SSE
+events, logs, errors, archives, notifications, or exported templates. Environment fallbacks may be
+*used* but never *returned*. Provider metadata sent to the browser is an explicit allowlist — no
+callables, no absolute paths, no resolved credentials. Callback correlation is scoped by
+domain/provider/job/project, idempotent, bounded, and redacted.
+
+## Definition of done
+
+The provider platform is complete only when:
+
+1. All seven domains dispatch exclusively through registered providers.
+2. No generic node definition, workflow adapter, shared dispatcher, or Vue component contains a
+   concrete provider ID — proven by an allowlist scan, not by inspection.
+3. A conforming provider can be added to any domain by creating and registering its package alone,
+   proven by a test that fails if any other file changes.
+4. Every domain returns the standard result envelope, and every failure the standard `ProviderError`.
+5. Old workflows, saved settings, legacy API requests, and existing artifacts keep working with no user
+   action.
+6. Provider selection, settings, health, and capability UI are generated from catalog metadata on both
+   the workflow canvas and the legacy pages.
+7. A broken provider degrades to a reported health state and nothing else.
+8. The provider reference is generated from the live hub, and docs drift checks fail on contract change.
+
+## Scope guardrails
+
+- Providers own remote/local generation mechanics only. Orchestration, staging, promotion, and execution
+  events belong to the shared runtime.
+- A provider may never modify a node definition, adapter, route, or generic UI component.
+- Domain result schemas stay typed; "pass through whatever the provider returned" is not acceptable.
+- Compatibility aliases live in exactly one documented migration module.
+
+---
+
 ## Research notes backing these choices
 
 - **Vue Flow everywhere**: n8n migrated from jsPlumb, Automa from Drawflow — both landed on `@vue-flow/core`.

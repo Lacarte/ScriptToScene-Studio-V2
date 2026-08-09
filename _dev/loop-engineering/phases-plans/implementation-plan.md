@@ -1,7 +1,8 @@
 # Workflow Builder — Implementation Plan (digestible steps)
 
 > Companion to [proposition-final.md](proposition-final.md) (the authoritative spec).
-> This plan breaks the 6 phases into small, independently verifiable steps.
+> This plan breaks the original Workflow Builder delivery and its provider-platform
+> extension into small, independently verifiable steps.
 > Each step is a commit-sized unit (roughly half a day to two days), has explicit
 > "done when" criteria, and leaves the app working.
 >
@@ -14,6 +15,36 @@
 >   and an initial frontend smoke test were added during step 0.3.
 > - Existing modules to wrap: `studio/{tts, timing, segmenter, build_scene_blueprints,
 >   storyboard, animator, captions, music, editor}` + assemble/export steps in pipeline routes.
+>
+> Provider-platform extension audit (verified 2026-08-08, re-verified against the code 2026-08-08):
+> - `studio/shared/providers_common/registry.py` already supplies discovery, manifests, health,
+>   settings, and failure isolation, but its domains are limited to TTS, Storyboard, and Animator
+>   (`ProviderRegistry.VALID_DOMAINS`, `registry.py:177`). `settings_manager.validate_settings`
+>   hardcodes the **same** three-domain set independently — both must change together.
+> - **The provider ABC layer is currently dead code on every execution path.** `TTSProvider.synthesize`,
+>   `StoryboardProvider.submit/poll`, `AnimatorProvider.submit/poll`, and the `get_provider()` factory in
+>   all seven provider packages have **zero call sites** outside their own modules. The registry supplies
+>   metadata, settings, and health only; execution then hard-branches on `if provider_id == …` into the
+>   legacy modules (`pipeline/services.py:59-276`, `storyboard/routes.py:307-353`,
+>   `animator/animation_routes.py:191-211`, `tts/routes.py:517/629/902`). Phases 11–15 therefore
+>   **wire these interfaces up for the first time** — the existing `provider.py` bodies have never run and
+>   must be treated as unverified, not as behavior-preserving baselines.
+> - Story/script generation, Scene Blueprint AI, Music, and Captions execute concrete services
+>   directly and do not yet have domain provider registries or provider packages of any kind.
+> - `studio/workflows/registry.py` keeps node ports/executors generic but still embeds provider IDs
+>   and provider-specific configuration fields (9 occurrences); the Vue provider components in
+>   `frontend/src/features/providers/` are reusable foundations.
+> - Two competing provider-selection stores exist: `settings/settings.json`
+>   (`domains.<domain>.selected_provider`) and `app-config.json` (`sts-tts-provider`). The UI writes the
+>   former by whole-blob read-modify-write through `PUT /api/settings/v2`;
+>   `settings_manager.set_selected_provider()` exists but is never called.
+> - The provider HTTP API lives in `studio/editor/routes.py:230-372`, not in a provider blueprint.
+> - `python -m studio.shared.providers_common.scaffold` and `docs/provider-template/README.md`
+>   **already exist** — the plugin SDK work extends them rather than creating them.
+> - `GET /api/workflow/options/<source>` takes **no parameters** (`resolve_options(source)` only), so
+>   provider-dependent dropdowns are impossible without extending that contract (see 10.2 / 12.2).
+> - Prior design doc for the existing infrastructure: `_dev/docs/plans/modular-providers-plan-v4.md`.
+>   Reuse its vocabulary and phase numbering rather than contradicting it.
 
 ## Working agreements (apply to every step)
 
@@ -176,7 +207,7 @@ Extract the `_step_*` bodies from `studio/pipeline/routes.py` into importable se
 
 ### 3.6 Live canvas states + minimal bottom panel
 Wire SSE to the store: status colors (idle/queued/running/waiting/succeeded/failed/cancelled/skipped/stale), animated running edges, post-run edge summaries, "from sample data" markers on stub-fed results, Stop button. Result Viewer stubs display their captured output summary (read-only at this phase). Bottom panel v1: current run's node list with status/duration/error; click a finished node → its output JSON. "Open in Timeline Editor" when an `editor_project` exists.
-**Done when (Phase 3 gate):** the Full Video template runs end-to-end from the canvas, produces a project that opens in the timeline editor, and exports video through the existing FFmpeg engine.
+**Done when:** the Full Video template runs end-to-end from the canvas, produces a project that opens in the timeline editor, and exports video through the existing FFmpeg engine. **Phase 3 gate.**
 
 ---
 
@@ -210,7 +241,7 @@ Per-node `on_error`: stop / bounded retry with delay/backoff / continue via expl
 
 ### 4.4 Run history + deep inspection UI
 Bottom panel full version: execution list (`GET /api/workflow/executions?workflow_id=`), node timeline, per-node resolved inputs/outputs/logs/errors/attempts, cache decisions and stale reasons. Summaries by default, explicit expansion for large values.
-**Done when (Phase 4 gate):** a failed run can be diagnosed and retried from the UI without rerunning successful nodes.
+**Done when:** a failed run can be diagnosed and retried from the UI without rerunning successful nodes. **Phase 4 gate.**
 
 #### Step 4.4 review status — 2026-08-04
 
@@ -289,8 +320,8 @@ Merge, Condition, Set Value, Wait — define ports, skip/join behavior, and sche
   and 105 frontend tests pass; the production frontend build succeeds. The in-app browser surface
   was unavailable, so the Phase 5 interactive expression-picker smoke check remains outstanding.
 
-### Final gate — Definition of Done
-Walk the 14-point Definition of Done checklist in [proposition-final.md](proposition-final.md) in the running app; fix anything that fails; record the results. Only then is the upgrade complete.
+### Phase 5 gate — Workflow Builder Definition of Done
+Walk the 14-point Definition of Done checklist in [proposition-final.md](proposition-final.md) in the running app; fix anything that fails; record the results. This closes the original Workflow Builder brief. It is **not** the end of the plan — Phases 6–9 harden and scale it, Phases 10–16 deliver the provider platform, and Phase 17 handles distribution. The project-wide final gate is 16.5 followed by Phase 17.
 
 ---
 
@@ -809,29 +840,541 @@ if needed, debounced persistence, and a generated large-workflow fixture for reg
 
 ---
 
-## Phase 10 — Distribution & assistant
+## Phase 10 — Provider architecture audit & contracts
+
+This is the Phase 0 equivalent for the provider-plugin migration. No production dispatch or UI
+behavior changes belong in this phase. The audit starts from the provider foundation already in
+`studio/shared/providers_common/` and the TTS, Storyboard, and Animator provider packages; it must
+also account for the provider-ID branches that remain in their routes/adapters and the currently
+non-provider-driven Story, Scene Blueprint, Music, and Captions modules.
+
+### 10.1 Current-path and compatibility audit
+Trace every way the legacy pages, pipeline services, workflow adapters, settings UI, and tests invoke
+script/story generation, scene-blueprint AI, TTS, Storyboard, Animator, Music, and Captions. Inventory
+all provider IDs, aliases, request fields, settings keys, environment fallbacks, output files, async
+callbacks, WebSocket/Automa hooks, and hard-coded provider branches. Include the frontend random-story
+templates in `frontend/src/shared/data/stories.js` and `useRandomStory.js`, the current Gemini/n8n story
+service, scene-blueprint webhooks, and provider-specific node fields in `studio/workflows/registry.py`.
+Record which behavior is public compatibility surface and which is internal debt.
+
+Read `_dev/docs/plans/modular-providers-plan-v4.md` first — it is the design doc the existing
+`providers_common` infrastructure was built from — and reconcile its vocabulary with this plan.
+The audit must explicitly answer these already-identified items rather than rediscover them:
+1. **Dead-interface inventory.** For each of the seven existing providers, record whether its
+   `provider.py` body, `get_provider()` factory, and ABC methods have ever executed. Mark every
+   never-executed path as unverified work in Phases 14/15, not as a preserved baseline.
+2. **Selection-store conflict.** `settings/settings.json` `domains.*.selected_provider` vs
+   `app-config.json` `sts-tts-provider`; the unused `settings_manager.set_selected_provider()`; and the
+   whole-blob `PUT /api/settings/v2` read-modify-write in `useProviders.js`. Decide which is
+   authoritative and record the migration for the other.
+3. **Env-var side effects.** First-run seeding (`settings_manager.py:67-107`) flips
+   `selected_provider` to `inworld` when `INWORLD_API_KEY` is present. Record every such implicit
+   selection change.
+4. **Legacy alias tables.** `pipeline/services.py:550` and `:644`
+   (`gemini_ws→gemini`, `wavespeed_webhook→webhook`, `wavespeed_direct→direct`, `grok_automa→grok`,
+   `kie_ai→kie-ai`) plus the legacy-alias branches in `app.py:253-276`.
+5. **Registry bypasses.** `animator/animation_routes.py:21` imports `generate_image` directly from
+   `.providers.kie_ai`; `tts/routes.py` never touches the registry at all.
+6. **Duplicated contracts.** `JobHandle`/`JobStatus`/`SceneResult` are defined twice, once each in the
+   storyboard and animator `base.py`.
+7. **Known latent defect.** `adapters/story.py` returns a `story` output port that
+   `studio/workflows/registry.py` does not declare, so `_validate_outputs` silently drops it and its
+   artifact refs never reach a port. Assign it a fix owner (13.3).
+
+**Done when:** `contracts.md` contains an evidence-linked provider migration matrix for every listed
+module and current provider, with entry points, inputs, outputs, side effects, IDs/aliases, settings,
+and callers; all seven items above are answered with file/line evidence; every hard-coded provider
+decision and every never-executed provider code path has an owner step; and no current legacy or
+workflow execution path is unaccounted for.
+
+### 10.2 Freeze plugin, manifest, and settings contracts
+Extend `contracts.md` with Provider Contract v2, reusing `ProviderRegistry`, `ProviderManifest`,
+`settings_manager`, discovery, migrations, runtime hooks, and broken-provider isolation rather than
+building a parallel framework. Freeze the supported domains (`script`, `scene_blueprint`, `tts`,
+`storyboard`, `animator`, `music`, `captions`); package layout; provider ID/version rules; manifest
+metadata; capabilities; factory/lifecycle hooks; settings-schema widgets and conditional fields;
+secret/env handling; availability/health states; and frontend-safe serialization. Provider folders
+remain owned by their module, while one registry hub exposes all domain registries.
+
+Two contracts must be frozen here because later steps are impossible without them:
+- **Parameterized option sources.** `GET /api/workflow/options/<source>` currently resolves
+  `resolve_options(source)` with no arguments, so no dropdown can depend on the selected provider.
+  Freeze the extended, still-allowlisted shape (source + validated context such as domain/provider ID)
+  plus its caching and failure semantics; 12.2 implements it and 15.2 depends on it for per-provider
+  voice lists.
+- **Single authoritative selection store.** Freeze which of `settings/settings.json` and
+  `app-config.json` owns the selected provider, how the loser is migrated, and the replacement for the
+  whole-blob `PUT /api/settings/v2` read-modify-write.
+
+**Done when:** the contract specifies every required/optional manifest and settings field, validation
+and unknown-field policy, lifecycle and shutdown behavior, registration/discovery order, duplicate-ID
+handling, broken-plugin isolation, and exactly which metadata is safe to send to the browser; the
+parameterized option-source envelope and the authoritative selection store are both frozen with their
+migration paths; the domain catalog replaces **both** hardcoded three-domain sets
+(`ProviderRegistry.VALID_DOMAINS` and `settings_manager.validate_settings`); and adding a provider to an
+existing domain requires no edit to a workflow node, route dispatcher, or Vue component.
+
+### 10.3 Freeze invocation, result, job, and error contracts
+Define a shared invocation context (project/execution/node identity, managed output directory,
+cancellation token, progress callback, redacted logger) plus domain request/result schemas. Keep
+domain results typed—script document, scene-blueprint document, TTS audio, storyboard scene assets,
+animation scene assets, music selection, caption document—inside one versioned result envelope with
+provider/domain/version, artifact refs, metadata, warnings, and provenance. Standardize async job
+handles/status/progress and terminal states. Define `ProviderError` with stable code, safe message,
+retryable flag, redacted details, provider/domain, and optional recovery suggestion; unknown exceptions
+must be wrapped at the registry boundary.
+
+**Done when:** all seven domains have exact request/result schemas and artifact rules; synchronous and
+asynchronous providers share terminal/error semantics; partial per-scene results are unambiguous;
+cancel/retry/timeout behavior is frozen; no raw provider exception, credential, arbitrary filesystem
+path, or provider-specific response can cross into workflow records or API responses.
+
+### 10.4 Migration map, fixtures, and implementation gate
+Freeze compatibility mappings for legacy request fields (`engine`, `provider`, `provider_override`,
+domain-specific option dictionaries), current provider IDs, saved provider settings, workflow node
+configs/type versions, legacy API envelopes, output paths, and execution/cache records. Create or
+identify deterministic fixtures for every domain and provider boundary; live providers remain gated.
+Review the new contracts against the real code and update later steps if any adapter or provider cannot
+meet them without a deliberate compatibility shim.
+
+**Done when:** every persisted/API shape has an upgrade or passthrough strategy; old workflows and
+legacy requests are expected to run without manual edits; fixture ownership is explicit; provider
+contract tests can be written without live credentials; baseline pytest, Vitest, production build,
+and generated-doc drift checks pass; and Phase 11 is unblocked without inventing semantics.
+
+---
+
+## Phase 11 — Shared provider platform
+
+### 11.1 Generalize the registry into a domain hub
+Extend `studio/shared/providers_common/registry.py` so supported domains are declared through a
+domain catalog rather than the current `VALID_DOMAINS` set (`registry.py:177`) — and retire the
+duplicate hardcoded domain set in `settings_manager.validate_settings` in the same step, so the two can
+never drift. Replace the four copies of the identical 57-line `studio/<domain>/providers/__init__.py`
+with one generated/shared binding. Add a process-wide registry hub that can
+list and resolve `(domain, provider_id)` while preserving the existing per-module `registry`,
+`get_provider`, and `list_providers` imports as compatibility facades. Domain registration must bind
+the request/result contract and provider search path once; individual provider registration must not
+touch `app.py` or the workflow registry.
+
+**Done when:** all seven domains can register with the hub; existing TTS/Storyboard/Animator imports
+still work; duplicate domains/providers fail deterministically; discovery order is stable; and tests
+prove one broken or duplicate provider cannot hide healthy providers or stop application startup.
+
+### 11.2 Provider discovery, factories, and lifecycle isolation
+Upgrade discovery to validate the whole provider package (`manifest.py`, `provider.py`, optional
+`settings_schema.py` and runtime hooks) before atomic registration. Instantiate providers through a
+factory instead of module-level ID branching, cache only where declared, and shut down initialized
+instances safely. Preserve extension/WebSocket startup through `call_provider_runtime`, but drive it
+from manifest capabilities rather than provider IDs. Dev hot-reload swaps only a fully valid provider
+catalog and retains the last good version after an invalid edit.
+
+**Done when:** adding/removing a fixture provider directory changes the catalog on restart (and in
+guarded dev reload) with no central provider list edit; failed import/init/runtime/shutdown is isolated
+and reported as provider health metadata; and no half-loaded catalog becomes visible to requests.
+
+### 11.3 Manifest v2 and settings validation
+Extend `ProviderManifest` and settings schemas with label/description, domain, kind, version, contract
+version, capabilities, availability requirements, defaults, deprecation/alias metadata, and safe UI
+hints. Validate settings server-side from the provider schema, separate durable secret settings from
+portable per-run options, support environment fallbacks without returning their values, and migrate
+existing settings through `settings_migrations.py`. Reuse the current generic provider settings
+components rather than creating domain-specific forms.
+
+**Done when:** malformed manifests/settings are rejected with stable issues; secret values are write-
+only and redacted from logs, workflow snapshots, archives, APIs, and errors; existing selected-provider
+and provider-settings files migrate losslessly; and every manifest can round-trip through its public
+metadata representation without leaking internal callables or paths.
+
+### 11.4 Standard provider runtime and error boundary
+Implement the contract from 10.3 in `providers_common`: invocation context, typed result envelope,
+artifact normalization, progress events, job handle/status, cancellation/timeout helpers, and the
+single exception boundary that maps provider failures to `ProviderError`. Unify the duplicated
+`JobHandle`/`JobStatus`/`SceneResult` definitions (declared separately in the storyboard and animator
+`base.py`) into one shared async-job contract, and provide adapters for the existing `TTSResult` and
+those job types so the domain migrations can be diffed against today's dict payloads.
+
+**Behavior-preserving means the *legacy* path, not the ABC path.** The ABC methods and `get_provider()`
+factories have never executed, so the baseline to preserve is the observable output of the current
+`if provider_id == …` branches in `pipeline/services.py`, `storyboard/routes.py`,
+`animator/animation_routes.py`, and `tts/routes.py` — captured as fixtures before any rewiring. Treat
+every existing `provider.py` body as unverified code under first-time test. Provider output is staged
+and validated before promotion to managed output directories.
+
+**Done when:** contract tests cover sync success, async success, progress, cancellation, timeout,
+retryable and terminal errors, malformed results, partial scene failure, unmanaged/missing artifacts,
+and secret-bearing exceptions; every previously-unexecuted provider method is covered by at least one
+test that actually invokes it; recorded legacy-path fixtures match the new envelope field-for-field or
+each difference is explicitly approved; and workflow-facing errors keep stable codes and never expose
+raw provider objects or traceback text.
+
+### 11.5 Unified provider API and application startup
+Replace the three startup-specific initialization blocks in `app.py:90-95` with hub initialization while
+preserving their compatibility functions. Serve one versioned provider catalog plus domain/provider
+detail, health, settings-read, settings-write, and option/capability endpoints using the standard
+error envelope and loopback/security policy. The current provider API lives in the **editor** blueprint
+(`studio/editor/routes.py:230-372`, which re-imports all three registries inside each of its five
+handlers) — move it to a provider blueprint and keep the old paths as thin deprecated facades until the
+final compatibility gate. Replace the whole-blob `PUT /api/settings/v2` selection write with the
+targeted selection endpoint decided in 10.2, routing it through the existing but unused
+`settings_manager.set_selected_provider()`.
+
+**Done when:** one API enumerates every healthy, unavailable, deprecated, and broken provider by
+domain; settings and health use only registry metadata; old provider endpoints return compatible
+answers; startup/shutdown initializes each runtime exactly once; and backend tests cover auth,
+redaction, invalid domains/IDs, unavailable providers, and mixed healthy/broken catalogs.
+
+---
+
+## Phase 12 — Generic provider UI and generic workflow nodes
+
+### 12.1 Frontend provider catalog store
+Add a shared Pinia/composable layer that fetches the unified catalog, caches by catalog version,
+groups providers by domain, exposes health/availability/capabilities, and refreshes after provider
+dev-reload events. Route all current provider selectors through this store; do not duplicate provider
+lists in feature modules or static frontend data.
+
+**Done when:** mocked catalog changes add/remove/relabel a provider everywhere without a frontend code
+change; unavailable/deprecated/broken states render consistently; API errors use the standard envelope;
+and Vitest covers cache invalidation, domain filtering, selection fallback, and reload behavior.
+
+### 12.2 Metadata-driven selector and settings renderer
+Evolve `ProviderSelector.vue`, `ProviderSettingsForm.vue`, and `ProviderSettingsModal.vue` into the
+single UI for provider selection and configuration. Render all fields, conditional visibility,
+descriptions, validation, secret-write behavior, capability badges, health actions, and provider URLs
+from public metadata. Reuse `ConfigField.vue` primitives where possible so workflow and legacy forms
+interpret the same settings contract.
+
+Implement the parameterized option-source contract frozen in 10.2: extend `ASYNC_OPTION_SOURCES`,
+`studio/workflows/options.py` `_RESOLVERS`, `GET /api/workflow/options/<source>`, and
+`useOptionSources.js` so a resolver can receive validated context (domain + selected provider) and so
+the shared module-level cache is keyed by source **and** context. Keep the existing module-level assert
+and `test_workflow_options.py` allowlist/resolver-parity guards intact. Without this, no dropdown can
+depend on the selected provider and 15.2 cannot deliver per-provider voices.
+
+**Done when:** fixture schemas exercise every supported widget and conditional rule; a fixture
+option source resolves differently for two providers and its cache invalidates when the selection
+changes; unknown sources and unvalidated context are still rejected server-side; secrets are never
+echoed; switching providers preserves each provider's unsaved non-secret draft independently; health
+and validation feedback name the provider; and no provider ID appears in component control flow.
+
+### 12.3 Provider-aware generic node configuration
+Add a generic provider field/schema primitive keyed only by `provider_domain`. Convert `story.generate`,
+`scenes.blueprint`, `tts.generate`, `storyboard.generate`, `animator.generate`, `music.select`, and
+`captions.generate` to the common persisted pair `provider` + `provider_options`; their node types,
+ports, and executors remain stable. The inspector composes provider settings dynamically from the
+catalog. Remove Grok-, Gemini-, WaveSpeed-, Kokoro-, and other provider-specific fields and
+`display_options` from the node registry, moving them into provider settings schemas. Server
+validation resolves the selected provider/schema authoritatively and fails open only for explicitly
+documented unavailable-provider recovery cases.
+
+**Bridging rule — this step runs ahead of the domain migrations.** Only `tts`, `storyboard`, and
+`animator` have provider packages today; `script`, `scene_blueprint`, `music`, and `captions` get theirs
+in Phases 13–15. Converting their nodes to `provider` + `provider_options` first would leave four nodes
+selecting from an empty catalog. So each un-migrated domain must, in this step, register a single
+`builtin` provider that is a thin passthrough to today's concrete service, with a manifest and a settings
+schema carrying exactly the fields being removed from the node definition. Phases 13–15 then split,
+rename, or extend that `builtin` provider behind the interface it already satisfies. A domain's node is
+never converted before its domain has at least one registered provider.
+
+**Done when:** the seven nodes contain no provider IDs or provider-specific settings in their node
+definitions; every one of the seven domains resolves at least one registered provider and the four
+`builtin` passthroughs produce byte-identical artifacts to their pre-conversion services; each existing
+saved config migrates to the new shape through `type_version` migrations; future-version/
+unavailable-provider workflows remain safely inspectable; and pytest/Vitest prove provider-specific
+forms and validation are driven entirely by catalog metadata.
+
+### 12.4 Adopt the shared provider UI on legacy pages
+Replace domain-specific provider dropdowns/settings forms in the TTS, Story/Script, Scene Blueprint,
+Storyboard, Animator, Music, and Captions legacy surfaces with the shared selector/renderer while
+preserving each page's layout, request payload compatibility, defaults, and project hand-offs. Static
+lists may remain only for non-provider concepts such as workflow styles or export profiles.
+
+**Done when:** every listed legacy page selects and configures providers from the same catalog as the
+workflow inspector; existing defaults and user settings load correctly; legacy requests still pass
+their endpoint contract; and adding a fixture provider makes it selectable on both surfaces without
+editing either surface.
+
+### 12.5 No-node-edit extensibility proof and phase gate
+Create a test-only provider package for each execution shape needed by the platform (sync artifact,
+sync document, async multi-asset). Discover it normally, expose it through the API/UI, configure it on
+an existing generic node, execute it, and inspect its standardized result—without editing
+`studio/workflows/registry.py`, any workflow adapter, or any Vue component for that provider.
+
+**Done when:** an automated diff guard/test proves provider addition touches only its provider package
+and tests; backend and frontend integration tests complete catalog→settings→node validation→execution;
+all legacy and built-in workflow templates still validate; and the full Phase 12 test/build/manual UI
+gate passes.
+
+---
+
+## Phase 13 — Script, story, and scene-AI providers
+
+### 13.1 Script provider interface and local random-template provider
+Introduce the `script` domain contract for providers that produce the existing typed script/story
+document. Move the random template catalog and anti-repeat/random selection rules behind a backend
+`random_template` provider, preserving the current frontend random-story behavior through a thin API
+consumer and retaining existing categories/text. Provider metadata owns its category/language/tone
+options; deterministic seeding is available for tests.
+
+**Done when:** the random-story UI and generic Story Generator node can request a template-produced
+script from the same provider; current template content and anti-repeat behavior are preserved; the
+result validates against the standard script result; and no frontend static provider catalog or
+generation algorithm remains.
+
+### 13.2 Current AI story generator as a script provider
+Wrap `studio.story.service.generate_story`, its n8n/Gemini webhook behavior, parser, artifact writes,
+and diversity history as a registered AI script provider. Move webhook/model/provider-specific fields
+into its manifest/settings schema, translating the generic script request into the unchanged service
+contract. Keep `studio.story` public functions and routes as compatibility facades during migration.
+
+**Done when:** fixture-backed AI generation returns the standard script result with the same story
+text/sections/artifact/history behavior; provider failures are standardized and retryability is
+correct; old `/api/story` callers receive their established envelope; and no workflow adapter imports
+the concrete AI story service.
+
+### 13.3 Generic Story Generator dispatch and compatibility migration
+Change the `story.generate` adapter and legacy generation controller to resolve the selected `script`
+provider through the hub. Map absent/legacy configuration to the historical AI default and map the
+random-story action to `random_template`; preserve inherited Project Setup tone/style and current
+artifact locations. Provider-specific output is forbidden beyond the standard metadata extension.
+Also close the latent defect recorded in 10.1: `adapters/story.py` returns a `story` output that
+`studio/workflows/registry.py` never declares, so `_validate_outputs` drops it and its artifact refs
+reach no port — either declare the port or fold its artifacts into the declared `script` output, and
+add the regression test. Replace the hardcoded `"provider": "gemini"` metadata in
+`studio/story/service.py:102` with the resolved provider identity.
+
+**Done when:** the same unchanged node runs both random-template and AI providers; legacy saved
+workflows, requests, job-history reprocessing, and random-story UI actions still work; cache
+fingerprints include provider ID/version and normalized options; and adding another script provider
+requires no node/adapter/UI edit.
+
+### 13.4 Scene Blueprint provider migration
+Create the `scene_blueprint` provider interface and wrap the current
+`studio.build_scene_blueprints`/n8n/OpenRouter path as its first provider. Standardize scene,
+image-prompt, narrative-role, chapter, continuity, style, and sound-effect-validation outputs while
+preserving `scenes.json`, existing routes, workflow ports, and the current style/tone inheritance.
+Move webhook/model settings and health checks into provider metadata.
+
+**Done when:** `scenes.blueprint` and the legacy scene-generation page dispatch only through the
+registry; current fixture outputs remain schema-compatible; malformed AI responses become safe
+provider errors; an alternate fixture provider runs without node edits; and the Phase 13 full
+test/build plus mocked end-to-end Script→Scene Blueprint gate passes.
+
+---
+
+## Phase 14 — Storyboard and Animator provider migration
+
+### 14.1 Shared asynchronous media-job service
+Build one orchestration layer over the Phase 11 job contract for multi-scene submit, poll/callback,
+progress, per-scene results, retry, cancellation, timeout, resume/reconciliation, and terminal
+aggregation. It owns managed staging/promotion and execution events; providers own only remote/local
+generation mechanics. Adapt the existing Storyboard and Animator job stores/manifests without
+changing public job IDs or observable progress behavior.
+
+**Done when:** deterministic tests cover all-success, partial-success, all-failed, delayed callback,
+duplicate callback, restart reconciliation, cancellation, timeout, and retry; all-failed can never be
+reported as success; and Storyboard/Animator can share the service without domain-specific branches.
+
+### 14.2 Storyboard providers behind their interface
+Bring `gemini_ws`, `wavespeed_direct`, and `wavespeed_webhook` fully behind `StoryboardProvider` and
+Provider Contract v2. Move all provider-ID branching from `studio/storyboard/routes.py`, workflow
+adapters, and WebSocket/runtime setup into provider implementations/capabilities. Normalize
+storyboard paths, URLs, thumbnails, watermark handling, and per-scene metadata.
+
+**Done when:** routes and `storyboard.generate` resolve/execute providers generically; the three
+current IDs/defaults/settings and output artifacts remain compatible; unavailable browser-extension
+and invalid-key states are isolated health/errors; and contract tests exercise every provider with
+mocked transports.
+
+### 14.3 Animator providers behind their interface
+Bring `grok_automa` and `kie_ai` fully behind `AnimatorProvider` and Provider Contract v2. Move Kie
+options, Grok typing/quality/duration behavior, browser-open/runtime logic, polling, downloads, and all
+provider-ID branches from `animation_routes.py:191-211` and workflow adapters into provider packages.
+Close the direct-import bypass at `animator/animation_routes.py:21`, which pulls `generate_image`
+straight out of `.providers.kie_ai` without going through the registry. Note that both provider bodies
+have never executed (see the Phase 10 audit header), so this step is their first real test.
+Normalize video/image paths, thumbnails, durations, and per-scene failure metadata.
+
+**Done when:** routes and `animator.generate` have no provider-ID branches; both current providers
+preserve IDs, defaults, job/status APIs, Automa integration, artifacts, and legacy request mappings;
+mocked contract tests pass; and a fixture Animator provider executes with no route/node/UI edit.
+
+### 14.4 Extension, callback, and direct-API transport adapters
+Extract reusable transport helpers for browser WebSocket/Automa extensions, n8n webhooks, direct HTTP
+APIs, and provider callbacks into `providers_common` without coupling them to a domain. Providers opt
+in through capabilities/runtime hooks; callback correlation is scoped by domain/provider/job/project,
+idempotent, bounded, and redacted. Preserve existing external callback URLs as compatibility facades.
+
+**Done when:** Storyboard and Animator providers use shared transports without sharing business logic;
+cross-provider/job callbacks cannot contaminate results; replay/duplicate/oversized/unknown callbacks
+are rejected safely; and old extension/Automa flows connect through their existing URLs.
+
+### 14.5 Visual-provider compatibility and live gate
+Run fixture-backed full workflow paths for every visual provider, then gated live checks for configured
+providers. Compare job envelopes, progress events, `scenes.json` updates, managed artifacts, timeline
+assembly, and cache fingerprints before/after migration. Document providers blocked by credentials or
+human browser interaction without weakening deterministic gates.
+
+**Done when:** Storyboard-only and Full Video templates complete through the generic dispatch path;
+legacy Storyboard/Animator pages work; one configured direct provider completes live where credentials
+permit; all compatibility diffs are resolved or explicitly approved; and Phase 14 tests/build/manual
+smoke checks are green.
+
+---
+
+## Phase 15 — TTS, Music, and Captions provider migration
+
+### 15.1 Bring TTS providers onto Provider Contract v2
+Adapt Kokoro and Inworld to the common manifest, settings, invocation, result, error, lifecycle, and
+artifact contracts while retaining the domain-specific `TTSProvider` methods. Preserve Kokoro's
+process-wide singleton/exclusive execution, voice blending/normalization/pronunciation behavior, and
+Inworld cloud options. Replace duplicated metadata and settings paths with the shared registry data.
+
+**Done when:** Kokoro and Inworld pass the generic contract suite plus TTS-specific voice/audio tests;
+current provider IDs/settings and audio/metadata files are unchanged; exclusive execution is derived
+from provider capability metadata; and secret/error redaction is proven.
+
+### 15.2 Generic TTS dispatch and voice options
+Refactor `studio/tts/routes.py` (which today never touches the registry and branches on
+`provider == "inworld"` at lines 517, 629, and 902), pipeline services, and
+`studio/workflows/adapters/tts.py` to call the selected provider through the registry rather than
+branch on `kokoro`/`inworld` or `engine`. Drive voice/model lists, previews, capabilities, defaults, and
+provider-specific options from provider metadata/endpoints via the parameterized option sources built
+in 12.2. This fixes a live defect: the workflow `voice` dropdown always resolves Kokoro's `VOICES`
+through `_tts_voices()` and never reacts to the selected `engine`, so Inworld voices
+(`GET /api/tts/voices?provider=inworld`) are unreachable from the canvas. Also reconcile the
+`job_meta` blocks, which differ between the Inworld and Kokoro branches today. Keep old `engine`,
+`provider`, and TTS route shapes as compatibility inputs.
+
+**Done when:** legacy TTS pages/API and the unchanged `tts.generate` node produce compatible artifacts
+through both providers; saved `engine` configs migrate; the voice dropdown lists Inworld voices when
+Inworld is selected and Kokoro voices when Kokoro is; both branches emit one reconciled result/metadata
+shape; another fixture TTS provider appears and runs without node/UI edits; and mocked plus local
+Kokoro tests pass.
+
+### 15.3 Music provider interface and local-library provider
+Create the `music` domain contract and wrap current `select_music`, `select_random_music`, specific
+track selection, project history, tone matching, managed-library checks, volume, fades, looping, and
+ducking as a `local_library` provider. The provider returns a standardized managed music-track result;
+future generated/streaming sources can implement the same contract without altering `music.select`.
+
+**Done when:** all current tone/random/specific modes and history behavior are preserved through the
+provider; unmanaged/missing tracks fail with stable safe errors; legacy music APIs and the generic
+node remain compatible; and a fixture provider supplies a track without adapter/node/UI changes.
+
+### 15.4 Captions provider interface and built-in caption provider
+Create the `captions` domain contract and wrap current word grouping, preset lookup, style expansion,
+disabled-caption behavior, timestamp validation, and `captions.json` persistence as a `word_groups`
+provider. Provider metadata supplies supported modes/presets/options while the central result contract
+freezes caption timing/style/artifact shape. Keep presets as data/options, not hard-coded node fields.
+
+**Done when:** every existing caption preset and grouping behavior produces compatible output through
+the provider; invalid alignment/preset failures are standardized; legacy caption APIs and export
+consumers remain unchanged; and a fixture captions provider can emit an alternate caption document
+without node, adapter, export, or UI edits.
+
+### 15.5 Audio/text-output integration gate
+Exercise Narration Only and Full Video templates plus legacy TTS, Music, Captions, Timeline, and Export
+pages through the generic providers. Verify provider version/options affect cache fingerprints,
+standard artifacts still assemble/export, and provider errors remain isolated to their node/run.
+Run local Kokoro and FFmpeg media assertions; keep cloud calls mocked unless the live flag is enabled.
+
+**Done when:** old workflows run without edits, generated audio/music/captions are accepted by existing
+assembly/export code, no route/adapter branches on a concrete TTS/Music/Captions provider ID, all
+deterministic suites and production build pass, and a playable fixture export proves end-to-end
+compatibility.
+
+---
+
+## Phase 16 — Plugin SDK, cleanup, and final gate
+
+### 16.1 Remove concrete-provider knowledge from core code
+Audit `app.py`, workflow registry/adapters, pipeline services, routes, shared UI, and generic provider
+components for concrete provider IDs, imports, and option fields. Move legitimate mechanics into the
+owning provider; retain only documented alias/default compatibility tables at one boundary — the two
+legacy maps at `pipeline/services.py:550` and `:644` plus the `"gemini"`/`"grok"` alias branches in
+`app.py:253-276` collapse into that single table. Retire the losing provider-selection store decided in
+10.2 (`app-config.json` `sts-tts-provider` or `settings/settings.json`) so only one remains. Delete
+superseded dispatch code after coverage proves the compatibility facade.
+
+**Done when:** an allowlist-based test/scan finds no concrete provider IDs in generic nodes, generic UI,
+workflow adapters, or shared dispatch; core code imports provider interfaces/hub only; compatibility
+aliases live in one documented migration module; and all old routes/workflows/settings remain green.
+
+### 16.2 Provider scaffolder and contract-test kit
+`python -m studio.shared.providers_common.scaffold <domain> <provider_id>` and
+`docs/provider-template/README.md` **already exist** — extend them rather than rebuilding them. Bring the
+generator up to Provider Contract v2 (manifest v2 fields, settings schema, capabilities, lifecycle
+hooks), make it emit generated contract tests, and widen it from the three hardcoded domains to the
+domain catalog from 11.1. Supply reusable pytest suites/fakes for sync document/artifact and async
+multi-asset providers; refuse unknown domains, invalid IDs, collisions, and unsafe paths without partial
+files.
+
+**Done when:** a new demo provider generated from the CLI is discovered, API-visible, UI-configurable,
+and executable on its existing generic node with generated tests passing unchanged; removing the demo
+leaves no central registration or node edit; and scaffolding failure is atomic.
+
+### 16.3 Provider author guide and generated reference
+Generate a provider reference from the live hub and write a guide covering scaffold→manifest→settings
+→implementation→results/errors→artifacts→tests→health→ship. Include domain request/result tables,
+capabilities, secret rules, compatibility/versioning, sync/async examples, and the explicit rule that a
+provider may not modify nodes or generic UI. Integrate generation with the existing workflow docs
+`--check` drift gate.
+
+**Done when:** the provider catalog/reference is generated byte-for-byte from code; a developer can
+rebuild the 16.2 demo using only the guide; docs checks fail on manifest/domain contract drift; and
+README links the provider author guide and troubleshooting path.
+
+### 16.4 Compatibility, failure-isolation, and security hardening
+Build a matrix test covering every old provider ID/alias, saved settings format, node config version,
+legacy API request, built-in template, and output artifact. Fuzz malformed manifests, schemas, results,
+callbacks, provider exceptions, giant metadata, bad paths, secret values, and concurrent provider
+reload/invocation. Verify one provider's import, health, execution, or shutdown failure cannot break
+other providers or the Flask process.
+
+**Done when:** compatibility fixtures load/run/migrate without user edits; secrets never appear in API,
+SSE, logs, records, archives, or notifications; provider failures are bounded and attributable;
+concurrent catalog reads remain consistent during reload; and all security regressions pass.
+
+### 16.5 Final provider-platform gate
+Run the full deterministic backend/frontend/build/doc suite, the generic no-node-edit provider proof,
+all built-in templates, legacy page/API smoke tests, and configured live providers. In the running app,
+verify catalog-driven selection/settings/health for every domain and inspect execution diagnostics for
+success, partial failure, retry, and unavailable provider cases. Record exact results and remaining
+external credential/browser limitations.
+
+**Done when:** Script, Scene Blueprint, TTS, Storyboard, Animator, Music, and Captions all dispatch only
+through registered providers; nodes and UI are provider-agnostic; adding a conforming provider requires
+only its provider package/registration and tests; standardized results/errors are enforced; old
+workflows/APIs/settings/artifacts remain compatible; docs are current; and every deterministic gate is
+green before Phase 17 begins.
+
+---
+
+## Phase 17 — Distribution & assistant
 
 The app stops depending on a terminal and a memory of `python main.py`; a copilot drafts
 workflows from prompts.
 
-### 10.1 Desktop launcher
+### 17.1 Desktop launcher
 A single entry point that starts the backend, waits for health, opens the app window (browser
 or lightweight shell), adds a tray icon with open/restart/quit, and handles port-in-use
 gracefully.
 **Done when:** double-clicking the launcher on a clean boot yields the running app with no console window, and quit from the tray stops the backend cleanly.
 
-### 10.2 Versioned release build
+### 17.2 Versioned release build
 A build script that produces a versioned, reproducible release folder/installer: frontend
 production build, pinned dependencies, version stamp surfaced in the UI, and a changelog entry
 gate.
 **Done when:** one command emits a versioned artifact from a clean checkout, and the running app displays that version.
 
-### 10.3 Backup & restore of all state
+### 17.3 Backup & restore of all state
 One command/UI action exports all workflows, settings, schedules, and (optionally) projects to
 a single backup file; restore brings a fresh install to the same state. Builds on 9.4.
 **Done when:** backup → fresh install → restore round-trips the full app state and every workflow validates afterward.
 
-### 10.4 Workflow copilot
+### 17.4 Workflow copilot
 Prompt → draft workflow: an assistant panel that sends the registry (declarative node/port
 contracts) plus the user's goal to a configured LLM, receives a workflow document, runs
 authoritative validation, and only offers valid results for insertion — never silent apply.
@@ -853,8 +1396,33 @@ authoritative validation, and only offers valid results for insertion — never 
 | 7 — Triggers & automation | 7.1–7.5 (5) | 7.1 (queue) must land first; 7.2/7.3/7.4 parallel after it |
 | 8 — Node developer kit | 8.1–8.4 (4) | 8.2/8.3 parallel after 8.1; 8.4 last |
 | 9 — Scale & asset lifecycle | 9.1–9.5 (5) | 9.1 must land alone (scheduler change); 9.3/9.4/9.5 parallelizable |
-| 10 — Distribution & assistant | 10.1–10.4 (4) | 10.1/10.2 first; 10.3 builds on 9.4; 10.4 independent |
+| 10 — Provider audit & contracts | 10.1–10.4 (4) | sequential contract gate; no production behavior changes |
+| 11 — Shared provider platform | 11.1–11.5 (5) | 11.2/11.3 can follow 11.1; 11.4 before 11.5 |
+| 12 — Generic provider UI/nodes | 12.1–12.5 (5) | 12.1/12.2 before node conversion; 12.5 is the extensibility gate |
+| 13 — Script/story/scene AI | 13.1–13.4 (4) | 13.1/13.2 can parallel; 13.3 joins them; 13.4 independent after Phase 12 |
+| 14 — Storyboard & Animator | 14.1–14.5 (5) | async service first; 14.2/14.3 parallel; compatibility gate last |
+| 15 — TTS, Music & Captions | 15.1–15.5 (5) | TTS steps sequential; Music/Captions parallel; integration gate last |
+| 16 — SDK, cleanup & final gate | 16.1–16.5 (5) | cleanup after all migrations; docs/scaffolder can parallel; final gate last |
+| 17 — Distribution & assistant | 17.1–17.4 (4) | 17.1/17.2 first; 17.3 builds on 9.4; 17.4 uses provider-driven AI |
 
-55 steps total (31 original + 6 hardening + 18 roadmap). Phases 7–10 ordering logic: automation
-(7) multiplies the value of existing workflows; the developer kit (8) creates the node variety
-that surfaces the scale problems (9) fixes; distribution (10) wants a stable feature set last. The critical path is 0.1 → 0.2 → 0.4 → 1.2 → 1.6 → 3.1 → 3.2 → 3.3 → 3.5 → 3.6; everything else hangs off it. The two steps to treat with the most care are **3.1** (extracting step functions from the 2,400-line `routes.py` without behavior change) and **4.2** (cache correctness — wrong reuse silently corrupts projects).
+88 steps total. Phases 0–9 are the delivered Workflow Builder foundation. Phases 10–16 are the
+provider-platform migration and become the next work: audit/contracts (10), shared runtime (11),
+generic UI and nodes (12), domain migrations (13–15), then SDK/cleanup/final compatibility gate (16).
+Distribution moves to Phase 17 so releases and the Workflow Copilot build on the stable plugin
+platform. The provider critical path is **10.1 → 10.2 → 10.3 → 10.4 → 11.1 → 11.3 → 11.4 →
+11.5 → 12.1 → 12.2 → 12.3 → 12.5**, after which domain migrations can proceed in parallel before
+16.1–16.5. Treat **11.4** (result/error boundary), **12.3** (saved node migration), and **14.1**
+(async job reconciliation) with the most care: mistakes there can silently corrupt artifacts,
+invalidate caches, or report failed provider work as successful.
+
+Three risks are specific to this codebase and are easy to underestimate:
+
+- **The existing provider interfaces have never run.** Phases 11/14/15 are first-time wiring, not a
+  refactor of working code. Budget for the seven `provider.py` bodies being stale or wrong, and capture
+  legacy-path fixtures *before* rewiring so there is something real to diff against.
+- **12.2 gates 15.2.** Provider-dependent dropdowns are impossible until
+  `GET /api/workflow/options/<source>` accepts context. If 12.2 ships without it, 15.2 cannot deliver
+  per-provider voices and will either stall or smuggle a provider ID back into the UI.
+- **12.3 converts four nodes whose domains have no providers yet.** The `builtin` passthrough rule in
+  that step is what keeps the app working between Phase 12 and Phase 15; dropping it strands
+  Script, Scene Blueprint, Music, and Captions on an empty catalog.
