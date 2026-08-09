@@ -3,6 +3,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 
+const { setNodesSpy } = vi.hoisted(() => ({ setNodesSpy: vi.fn() }))
+
 vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/shared/api/client.js', () => ({
   api: {
@@ -21,10 +23,11 @@ vi.mock('@vue-flow/core', () => ({
     screenToFlowCoordinate: (point) => point,
     fitView: vi.fn(),
     setViewport: vi.fn(async () => {}),
+    setNodes: setNodesSpy,
   }),
   VueFlow: defineComponent({
     name: 'VueFlow',
-    emits: ['nodeContextMenu', 'edgeContextMenu', 'paneContextMenu'],
+    emits: ['nodeContextMenu', 'edgeContextMenu', 'paneContextMenu', 'nodesChange', 'edgesChange'],
     setup(_props, { emit, slots }) {
       return () => h('div', { class: 'vue-flow__pane' }, [
         h('button', {
@@ -38,6 +41,16 @@ vi.mock('@vue-flow/core', () => ({
         h('button', {
           class: 'emit-pane-menu',
           onContextmenu: (event) => emit('paneContextMenu', event),
+        }),
+        h('button', {
+          class: 'emit-vue-flow-delete',
+          onClick: () => {
+            emit('edgesChange', [
+              { id: 'e_1', type: 'remove' },
+              { id: 'e_2', type: 'remove' },
+            ])
+            emit('nodesChange', [{ id: 'n_1', type: 'remove' }])
+          },
         }),
         slots.default?.(),
       ])
@@ -61,12 +74,31 @@ const TYPES = {
     inputs: [{ id: 'value', type: 'text', required: true, multiple: false }],
     outputs: [], config_schema: [],
   },
+  'stub.input': {
+    type: 'stub.input', type_version: 1, display_name: 'Sample Input', category: 'testing',
+    inputs: [], outputs: [{ id: 'value', type: 'dynamic' }],
+    config_schema: [
+      { name: 'port_type', type: 'options', default: 'text' },
+      { name: 'payload', type: 'json', default: '' },
+    ],
+  },
+  'stub.output': {
+    type: 'stub.output', type_version: 1, display_name: 'Result Viewer', category: 'testing',
+    inputs: [{ id: 'value', type: 'dynamic', required: true, multiple: false }],
+    outputs: [],
+    config_schema: [
+      { name: 'port_type', type: 'options', default: 'text' },
+      { name: 'pinned', type: 'boolean', default: false },
+      { name: 'payload', type: 'json', default: '' },
+    ],
+  },
 }
 
 describe('step 5.2 context menus', () => {
   beforeEach(() => {
     localStorage.clear()
     setActivePinia(createPinia())
+    setNodesSpy.mockClear()
   })
 
   it('renders node, edge, and pane actions and dispatches duplicate undoably', async () => {
@@ -118,5 +150,37 @@ describe('step 5.2 context menus', () => {
     expect(wrapper.text()).toContain('Add note')
     expect(wrapper.text()).toContain('Auto arrange')
     wrapper.unmount()
+  })
+
+  it('deletes default sample nodes when Vue Flow removes edges before the main node', async () => {
+    const store = useWorkflowStore()
+    store.registryVersion = 1
+    store.nodeTypes = TYPES
+    store.portTypes = ['text']
+    store.samplePayloads = { text: 'sample' }
+    store.settings = { on_error: 'stop', auto_attach_stubs: true }
+    store.addNodeWithStubs('target', { x: 200, y: 0 })
+    store.clearCommandHistory()
+
+    expect(store.nodes.map((node) => node.type).sort()).toEqual(['stub.input', 'target'])
+    expect(store.edges).toHaveLength(1)
+
+    const wrapper = mount(WorkflowPage, {
+      global: {
+        stubs: {
+          NodeLibrary: true,
+          NodeInspector: true,
+          NodeCard: true,
+          ExecutionPanel: true,
+        },
+      },
+    })
+    await wrapper.find('.emit-vue-flow-delete').trigger('click')
+    await nextTick()
+
+    expect(store.nodes).toEqual([])
+    expect(store.edges).toEqual([])
+    expect(store.undoLabel).toBe('Delete node')
+    expect(setNodesSpy).toHaveBeenCalledWith([])
   })
 })

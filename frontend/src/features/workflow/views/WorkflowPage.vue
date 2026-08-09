@@ -31,7 +31,12 @@ import ProjectArchiveManager from '../components/ProjectArchiveManager.vue'
 
 const store = useWorkflowStore()
 const toast = useToast()
-const { screenToFlowCoordinate, fitView, setViewport: setFlowViewport } = useVueFlow()
+const {
+  screenToFlowCoordinate,
+  fitView,
+  setViewport: setFlowViewport,
+  setNodes: setFlowNodes,
+} = useVueFlow()
 const importInput = ref(null)
 const canvasSelection = ref(new Set())
 const runMode = ref('full')
@@ -341,12 +346,27 @@ function onNodesChange(changes) {
     canvasSelection.value = new Set(
       [...canvasSelection.value].filter((nodeId) => !removed.includes(nodeId)),
     )
+    // Vue Flow only generated a remove change for the user-selected main node.
+    // The store may also have removed its owned sample stubs, so replace Vue
+    // Flow's internal node collection after its default handler finishes. This
+    // prevents those already-deleted stubs from remaining as visual ghosts.
+    queueMicrotask(() => setFlowNodes(flowNodes.value))
   }
 }
 
 function onEdgesChange(changes) {
   const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id)
-  if (removed.length) store.removeEdges(removed)
+  if (!removed.length) return
+
+  // Vue Flow emits connected-edge removals immediately before the associated
+  // node removal. Defer the edge-only action by one microtask so removeNodes()
+  // can still see the intact relationships and include default sample stubs in
+  // the same atomic deletion. A genuinely standalone edge removal is applied
+  // once the event sequence has finished.
+  queueMicrotask(() => {
+    const remaining = removed.filter((edgeId) => store.edges.some((edge) => edge.id === edgeId))
+    if (remaining.length) store.removeEdges(remaining)
+  })
 }
 
 function onViewportChangeEnd(vp) {
