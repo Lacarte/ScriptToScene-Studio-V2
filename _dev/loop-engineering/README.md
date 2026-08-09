@@ -19,8 +19,8 @@ selected phase or step range is complete.
 Double-click `run.bat`, choose an agent profile, and run all remaining work
 phase by phase. The first (and command-line default) profile uses Claude for
 coding, automatically retries limit-blocked coding tasks with AGY, and uses
-Codex for review. All-Codex, all-Claude, and AGY-code/Codex-review profiles are
-also available. The window prints
+Codex for review. All-Codex, all-Claude, AGY-code/Codex-review, and Grok 4.5
+code/AGY-fallback/Codex-review profiles are also available. The window prints
 the selected roles, current phase, step, and stage, and stays open with the final
 exit code. Agent output and idle-process heartbeats appear in the main window.
 
@@ -51,11 +51,15 @@ fixes what it finds — only then does the loop advance to the next phase.
    step's commit range, fixes what it finds; the board is re-validated.
 6. **Done** — step recorded in `runtime/state.json`, pushed (unless `--no-push`).
 
-Claude quota/rate-limit messages during builder or fixer work trigger one retry
-with AGY. Other agent failures, an unsuccessful AGY fallback, timeouts, silent
+Coding-agent quota/rate-limit messages during builder or fixer work trigger one
+retry with AGY. Other agent failures, an unsuccessful AGY fallback, timeouts, silent
 exits, and builder/fixer runs that produce no changes are hard failures. The loop
 halts without marking that work complete. An interrupted phase review is shown as
 `REVIEW INCOMPLETE` and is resumed before later phases on the next phase-mode run.
+
+Grok is selectable from the CLI as `--builder grok`, `--fixer grok`, or
+`--reviewer grok`. The runner uses model `grok-4.5` and resolves either a `grok`
+command on PATH or the standard Windows install at `%USERPROFILE%\.grok\bin\grok.exe`.
 
 ## State
 

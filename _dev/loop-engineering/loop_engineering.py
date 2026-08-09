@@ -191,10 +191,25 @@ AGENT_BLOCKERS = (
     "you have hit your limit",
     "usage limit reached",
     "rate limit exceeded",
+    "quota exceeded",
+    "insufficient credits",
     "credit balance is too low",
 )
 
-AGENT_CHOICES = ("claude", "agy", "codex")
+AGENT_CHOICES = ("claude", "grok", "agy", "codex")
+GROK_MODEL = "grok-4.5"
+
+
+def agent_executable(agent: str) -> str | None:
+    """Resolve an agent CLI, including Grok's default per-user install path."""
+    executable = shutil.which(agent)
+    if executable:
+        return executable
+    if agent == "grok":
+        candidate = Path.home() / ".grok" / "bin" / "grok.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def run_logged(cmd, log_file: Path, cwd=ROOT, timeout=AGENT_TIMEOUT_S) -> LoggedResult:
@@ -314,7 +329,7 @@ def ensure_agents_available(args) -> None:
         selected.add(args.reviewer)
     if args.coding_fallback != "none":
         selected.add(args.coding_fallback)
-    missing = sorted(agent for agent in selected if shutil.which(agent) is None)
+    missing = sorted(agent for agent in selected if agent_executable(agent) is None)
     if missing:
         names = ", ".join(missing)
         sys.exit(f"Cannot start: required agent command(s) not found: {names}")
@@ -437,6 +452,10 @@ def agent_cmd(agent: str, prompt: str) -> str:
         return f'codex exec "{escaped}"'
     if agent == "claude":
         return f'claude -p --permission-mode acceptEdits "{escaped}"'
+    if agent == "grok":
+        executable = agent_executable("grok") or "grok"
+        return (f'"{executable}" --model {GROK_MODEL} '
+                f'--permission-mode bypassPermissions --output-format plain -p "{escaped}"')
     if agent == "agy":
         return (f'agy --mode accept-edits --dangerously-skip-permissions '
                 f'--print-timeout 60m -p "{escaped}"')

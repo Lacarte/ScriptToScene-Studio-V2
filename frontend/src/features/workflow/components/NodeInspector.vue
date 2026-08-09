@@ -29,6 +29,23 @@ const visibleFields = computed(() =>
   ),
 )
 
+/**
+ * The provider this node runs on, for its `provider_options` sub-form.
+ *
+ * Read from whichever field declares the `provider` widget — the node's own
+ * selection is authoritative, never the domain's global one, or switching the
+ * selection would silently reconfigure every saved workflow (§24.1 rule 2).
+ * The schema default counts, because a workflow saved before step 12.3 carries
+ * no `provider_id` and must still show the options of the provider it will
+ * actually run (§41.3 M4). This mirrors `options.configured_provider()`.
+ */
+const selectedProviderId = computed(() => {
+  const field = (def.value?.config_schema || []).find((f) => f.type === 'provider')
+  if (!field) return ''
+  const stored = node.value?.configuration?.[field.name]
+  return (typeof stored === 'string' && stored) || field.default || ''
+})
+
 const issues = computed(() => store.issuesByNode[node.value?.id] || [])
 const mappingOptions = computed(() => expressionOptions(
   node.value, store.nodes, store.edges, store.nodeTypes, store.variables,
@@ -183,6 +200,7 @@ function updateErrorPolicy(patch) {
         :field="field"
         :value="node.configuration[field.name]"
         :expression-options="mappingOptions"
+        :provider-id="selectedProviderId"
         @update="(value) => onUpdate(field.name, value)"
         @invalid="(message) => onFieldInvalid(field, message)"
       />

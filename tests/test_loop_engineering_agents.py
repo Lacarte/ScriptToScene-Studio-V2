@@ -28,6 +28,16 @@ def test_agy_command_is_noninteractive_and_accepts_edits():
     assert "--print-timeout 60m" in command
 
 
+def test_grok_command_uses_installed_coding_model(monkeypatch):
+    monkeypatch.setattr(loop, "agent_executable", lambda agent: r"C:\Tools\grok.exe")
+
+    command = loop.agent_cmd("grok", "implement this")
+
+    assert command.startswith(r'"C:\Tools\grok.exe" --model grok-4.5')
+    assert "--permission-mode bypassPermissions" in command
+    assert "--output-format plain -p" in command
+
+
 def test_limit_blocked_coding_task_falls_back_to_agy(monkeypatch, tmp_path):
     calls = []
     fallback_state = {"active": False}

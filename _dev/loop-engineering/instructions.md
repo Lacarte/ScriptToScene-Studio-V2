@@ -61,7 +61,8 @@ commits** in one pass and fixes what it finds — only then does the loop
 advance to the next phase.
 
 Agents are selectable per role — `--builder`, `--fixer`, `--reviewer`, each
-`codex|claude|agy` (`--reviewer none` to skip review). Defaults: Claude builds
+`codex|claude|grok|agy` (`--reviewer none` to skip review). Grok uses the
+installed `grok-4.5` model. Defaults: Claude builds
 and fixes, AGY retries coding work when the primary reaches a credit/usage limit,
 and Codex reviews. Configure the fallback with `--coding-fallback`; use `none`
 to disable it. Mixing vendors (one builds, the other reviews) gives a genuinely

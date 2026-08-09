@@ -1,0 +1,143 @@
+"""Async multi-asset provider body — submit, poll, per-unit results.
+
+Advances one unit per poll so a test drives the whole §33.2 state machine
+without a clock: `submitted → running → succeeded|partial`. Every unit writes a
+real file inside the managed directory, so the boundary's artifact check
+(§34.2 `PROVIDER_ARTIFACT_MISSING`) is exercised rather than bypassed.
+
+`fail_last_unit` turns the same job into the partial case, which is the branch
+§31.5 exists for and the one an all-success fixture would never reach.
+"""
+
+import os
+
+_PNG = b"\x89PNG\r\n\x1a\n"
+
+
+class FixtureAsyncProvider:
+    """A provider whose work happens between polls."""
+
+    def __init__(self):
+        self.shutdown_calls = 0
+        self.jobs: dict = {}
+
+    # -- submit / poll / cancel (contracts.md §33) -----------------------
+
+    def submit(self, request, invocation):
+        from studio.shared.providers_common.jobs import JobHandle, JobStatus, RUNNING
+
+        options = {**dict(invocation.settings), **dict(invocation.options)}
+        total = int(options.get("unit_count") or len(request.get("units") or ()) or 3)
+        handle = JobHandle(
+            job_id=f"fixture-async-{invocation.invocation_id[:12]}",
+            domain=invocation.domain,
+            provider_id=invocation.provider_id,
+            project_id=invocation.project_id,
+            invocation_id=invocation.invocation_id,
+        )
+        self.jobs[handle.job_id] = {
+            "status": JobStatus(job_id=handle.job_id, state=RUNNING, ready=0, total=total),
+            "invocation": invocation,
+            "fail_last": bool(options.get("fail_last_unit")),
+            "units": [],
+        }
+        invocation.progress(ready=0, total=total, message="submitted")
+        return handle
+
+    def poll(self, job_id: str, invocation):
+        from studio.shared.providers_common.jobs import SUCCEEDED
+        from studio.shared.providers_common.results import (
+            PARTIAL,
+            UNIT_FAILED,
+            UNIT_SUCCEEDED,
+            UnitResult,
+        )
+
+        job = self.jobs.get(job_id)
+        if job is None:
+            from studio.shared.providers_common.jobs import unknown_job_status
+
+            return unknown_job_status(job_id)
+
+        status = job["status"]
+        index = len(job["units"])
+        last = index == status.total - 1
+        if job["fail_last"] and last:
+            job["units"].append(UnitResult(index, UNIT_FAILED, error=_unit_error()))
+        else:
+            ref = _write_unit(job["invocation"], index)
+            job["units"].append(
+                UnitResult(index, UNIT_SUCCEEDED, artifact_refs=(ref,),
+                           metadata={"unit": index})
+            )
+
+        produced = sum(1 for unit in job["units"] if unit.state == UNIT_SUCCEEDED)
+        if len(job["units"]) >= status.total:
+            status = status.advance(
+                state=PARTIAL if job["fail_last"] else SUCCEEDED,
+                ready=produced,
+                units=tuple(job["units"]),
+            )
+        else:
+            status = status.advance(ready=produced, units=tuple(job["units"]))
+        job["status"] = status
+        invocation.progress(ready=produced, total=status.total)
+        return status
+
+    def cancel_job(self, job_id: str, invocation) -> None:
+        from studio.shared.providers_common.jobs import JOB_CANCELLED
+
+        job = self.jobs.get(job_id)
+        if job is not None:
+            job["status"] = job["status"].advance(state=JOB_CANCELLED)
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+
+
+def _write_unit(invocation, index: int) -> str:
+    from studio.shared.providers_common.results import normalize_ref
+
+    destination = os.path.join(invocation.output_dir, f"unit-{index}.png")
+    path = (
+        invocation.stage_artifact(destination)
+        if invocation.stage_artifact is not None
+        else destination
+    )
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(_PNG)
+    return normalize_ref(destination)
+
+
+def _unit_error():
+    from studio.shared.providers_common.errors import (
+        PROVIDER_UNIT_FAILED,
+        ProviderError,
+        ProviderErrorPayload,
+    )
+
+    return ProviderErrorPayload.from_error(ProviderError(
+        PROVIDER_UNIT_FAILED, "The renderer could not produce this unit", retryable=True
+    ))
+
+
+def create() -> FixtureAsyncProvider:
+    return FixtureAsyncProvider()
+
+
+def validate_settings(settings: dict) -> list[dict]:
+    url = str(settings.get("endpoint_url") or "")
+    if url and not url.startswith("https://"):
+        return [{
+            "field": "endpoint_url",
+            "severity": "error",
+            "message": "The endpoint must be https",
+        }]
+    return []
+
+
+def health_check(settings: dict) -> dict:
+    if not settings.get("endpoint_url"):
+        return {"status": "warn", "message": "No endpoint is configured"}
+    return {"status": "ok", "latency_ms": 0, "message": "Fixture renderer is reachable"}

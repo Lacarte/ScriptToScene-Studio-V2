@@ -110,6 +110,30 @@ export function withoutSecrets(values, schema) {
 }
 
 /**
+ * Drop the secret *properties* from a schema, so a renderer cannot offer them.
+ *
+ * The node inspector's per-run `provider_options` form uses this: a credential
+ * typed there would be persisted into the workflow document, its archives, and
+ * its exported templates, which `_validate_provider_options` already refuses at
+ * save time. Not drawing the field is how the operator learns that before
+ * typing rather than after (§22.6).
+ */
+export function withoutSecretProperties(schema) {
+  const props = schema?.properties || {}
+  const kept = {}
+  for (const [key, prop] of Object.entries(props)) {
+    if (!isSecretField(key, prop)) kept[key] = prop
+  }
+  return {
+    ...schema,
+    properties: kept,
+    required: (Array.isArray(schema?.required) ? schema.required : []).filter(
+      (key) => key in kept,
+    ),
+  }
+}
+
+/**
  * The values a *caller* should act on: schema defaults overlaid with what is
  * stored, secrets removed.
  *

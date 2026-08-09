@@ -2,12 +2,14 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useOptionSource } from '@/shared/composables/useOptionSources.js'
 import MediaAssetField from './MediaAssetField.vue'
+import ProviderOptionsField from './ProviderOptionsField.vue'
 import { isExpressionValue } from '../expressions.js'
 
 /**
  * One schema field → one widget (n8n ParameterInput pattern).
  * Widget chosen by `field.type`: string, textarea, number, boolean,
- * options (static or allowlisted async source), json, media_asset.
+ * options (static or allowlisted async source), json, media_asset,
+ * provider, provider_options.
  * Emits `update` with the new value, and `invalid` with a message (or null)
  * whenever the widget holds text that cannot become a value — the parent
  * registers it so Save can refuse while the edit is unfinished (step 6.4).
@@ -16,12 +18,21 @@ const props = defineProps({
   field: { type: Object, required: true },
   value: { required: false, default: undefined },
   expressionOptions: { type: Array, default: () => [] },
+  // The provider this node selected, resolved by the inspector from the node's
+  // own `provider` field. Only the `provider_options` widget reads it.
+  providerId: { type: String, default: '' },
 })
 const emit = defineEmits(['update', 'invalid'])
 
-// Async sources resolve through the backend allowlist; the composable
-// caches one fetch per source for the whole session.
-const asyncOptions = props.field.type === 'options' && props.field.options_source
+// A `provider` field is a dropdown over `<domain>_providers` — the same
+// allowlisted async source machinery, which the registry derives from a domain
+// id alone (step 12.3). No provider is named here either.
+const SELECT_TYPES = ['options', 'provider']
+
+// Async sources resolve through the backend allowlist; the composable caches
+// one fetch per (source, context) for the whole session. No context is sent:
+// the `*_providers` sources accept none and imply their domain (§23.1).
+const asyncOptions = SELECT_TYPES.includes(props.field.type) && props.field.options_source
   ? useOptionSource(props.field.options_source)
   : null
 
@@ -103,7 +114,20 @@ function restoreLiteral() {
 </script>
 
 <template>
-  <label class="cfg-field">
+  <!--
+    provider_options is a whole sub-form, so it sits outside the `<label>`:
+    nesting several controls in one label makes every click focus the first of
+    them. It also has no literal value to map an expression onto.
+  -->
+  <ProviderOptionsField
+    v-if="field.type === 'provider_options'"
+    :field="field"
+    :value="value || {}"
+    :provider-id="providerId"
+    @update="(next) => emit('update', next)"
+  />
+
+  <label v-else class="cfg-field">
     <span class="cfg-label">
       {{ field.label || field.name }}
       <span v-if="field.required" class="cfg-required" title="Required">*</span>
@@ -181,8 +205,12 @@ function restoreLiteral() {
       <span class="cfg-toggle-hint">{{ value ? 'On' : 'Off' }}</span>
     </span>
 
-    <!-- options (static, or resolved through the backend allowlist) -->
-    <span v-else-if="field.type === 'options'" class="cfg-json">
+    <!--
+      options (static, or resolved through the backend allowlist), and
+      provider — the same select, because a provider list *is* an allowlisted
+      async option source (step 12.3).
+    -->
+    <span v-else-if="SELECT_TYPES.includes(field.type)" class="cfg-json">
       <select
         class="cfg-input cfg-select"
         :value="value ?? field.default ?? ''"

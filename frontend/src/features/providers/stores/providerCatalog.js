@@ -60,6 +60,9 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
   const devReloadEnabled = ref(false)
   // `domain/provider_id` -> the last HealthResult seen for that provider.
   const health = ref({})
+  // `domain/provider_id` -> that provider's settings schema, or null when it
+  // ships none. Cached because the node inspector asks per selected node.
+  const schemas = ref({})
 
   let inFlight = null
   let devReloadSource = null
@@ -89,6 +92,11 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
         if (version !== null && version === catalogVersion.value) return
         catalogVersion.value = version
         domains.value = data.domains || {}
+        // A changed catalog version is the only thing that can change a
+        // provider's settings schema — a reloaded package, a new version of
+        // one. Dropping the cache here rather than on every settings save
+        // avoids a refetch that a value write could never have invalidated.
+        schemas.value = {}
       })
       .catch((err) => {
         error.value = apiErrorText(err, 'Failed to load providers')
@@ -321,6 +329,41 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     return api.get(`${CATALOG_URL}/${domain}/${providerId}/settings`)
   }
 
+  // ── Settings schemas, cached per provider ──────────────────────────────
+  //
+  // The node inspector renders a per-run options form for whichever provider
+  // the *node* selects, which is not necessarily the domain's selection, so it
+  // cannot reuse `useDomainProvider`'s single-provider load. Concurrent asks
+  // share one request: a workflow with three provider-backed nodes must not
+  // fetch the same schema three times.
+
+  const schemaRequests = new Map()
+
+  function schemaFor(domain, providerId) {
+    return schemas.value[healthKey(domain, providerId)] ?? null
+  }
+
+  async function loadProviderSchema(domain, providerId) {
+    if (!domain || !providerId) return null
+    const key = healthKey(domain, providerId)
+    if (key in schemas.value) return schemas.value[key]
+    if (schemaRequests.has(key)) return schemaRequests.get(key)
+
+    const request = getProviderSettings(domain, providerId)
+      .then((data) => data.schema || null)
+      // A provider that is not installed, or ships no schema, has no form —
+      // which is a state the inspector renders, not an error it reports. The
+      // node stays inspectable either way (§23.3).
+      .catch(() => null)
+      .then((schema) => {
+        schemas.value = { ...schemas.value, [key]: schema }
+        schemaRequests.delete(key)
+        return schema
+      })
+    schemaRequests.set(key, request)
+    return request
+  }
+
   /**
    * Save and re-read the catalog: filling in a required key flips availability
    * from `needs_configuration` to `available`, and that is not derivable here.
@@ -409,6 +452,9 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     testProvider,
     selectProvider,
     getProviderSettings,
+    schemas,
+    schemaFor,
+    loadProviderSchema,
     saveProviderSettings,
     validateProviderSettings,
     drafts,

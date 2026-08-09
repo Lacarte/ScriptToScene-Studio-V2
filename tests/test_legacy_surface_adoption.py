@@ -125,9 +125,21 @@ class StoryboardImageModelOptionsTests(unittest.TestCase):
         with self.assertRaises(OptionContextError):
             build_context('storyboard_image_models', {'domain': 'animator'})
 
+    def test_it_accepts_the_context_its_own_renderer_sends(self):
+        # 12.4 shipped this source with an empty context tuple while
+        # `ProviderSettingsForm` sends `{domain, provider}` to *every*
+        # `ui.options_source`, so on the Storyboard page the dropdown answered
+        # OPTION_CONTEXT_INVALID and rendered empty. Step 12.5 widened the
+        # tuple and made the invariant mechanical.
+        context = build_context(
+            'storyboard_image_models',
+            {'domain': 'storyboard', 'provider': 'wavespeed_webhook'},
+        )
+        self.assertEqual(context.provider, 'wavespeed_webhook')
+
     def test_an_unknown_parameter_is_rejected_rather_than_ignored(self):
         with self.assertRaises(OptionContextError):
-            build_context('storyboard_image_models', {'provider': 'anything'})
+            build_context('storyboard_image_models', {'style': 'anything'})
 
 
 class AnimatorProviderMetadataTests(unittest.TestCase):

@@ -68,7 +68,17 @@ ASYNC_OPTION_SOURCES = {
     # Storyboard page used to fetch this list itself and render a bespoke
     # `<select>` beside its webhook fields; step 12.4 moved the field into the
     # provider that consumes it, and this is how the option list follows.
-    "storyboard_image_models": OptionSourceSpec(domain="storyboard"),
+    #
+    # A source named by a provider's own `ui.options_source` is always resolved
+    # *for that provider*, so it must accept `domain` and `provider` — the
+    # settings renderer has no way to know which sources want them and sends
+    # both to every one. Shipped without them in 12.4, which made this dropdown
+    # answer `OPTION_CONTEXT_INVALID` on the Storyboard page;
+    # `test_provider_extensibility` now asserts the invariant for every source
+    # any provider schema names.
+    "storyboard_image_models": OptionSourceSpec(
+        context=("domain", "provider"), cache="settings", domain="storyboard"
+    ),
     "story_tones": OptionSourceSpec(),
     "style_templates": OptionSourceSpec(),
     "export_profiles": OptionSourceSpec(),

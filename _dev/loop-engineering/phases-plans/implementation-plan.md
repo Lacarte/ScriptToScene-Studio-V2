@@ -1675,6 +1675,80 @@ and tests; backend and frontend integration tests complete catalog→settings→
 all legacy and built-in workflow templates still validate; and the full Phase 12 test/build/manual UI
 gate passes.
 
+#### Step 12.5 review status — 2026-08-09
+
+- **Complete.** Three test-only packages, one per execution shape, live under
+  `tests/fixture_providers/<domain>/<id>/` — `script/fixture_document` (sync document),
+  `tts/fixture_artifact` (sync artifact), `storyboard/fixture_async` (async multi-asset).
+  They are registered by pointing a `DomainSpec.providers_base` at their folder, the
+  mechanism §46.3 already established for `fixture_provider`, so they are found by the
+  ordinary discovery scan and validated against their real domain's capability vocabulary
+  while never entering the shipped catalog. `tests/test_provider_extensibility.py` drives
+  all three through catalog → settings → selection → node validation → execution → §31
+  result.
+- **Defect found and fixed — 12.3 left the five converted nodes unconfigurable.** That step
+  gave them `type: "provider"` and `type: "provider_options"` widgets and nothing rendered
+  either: `ConfigField.vue` had no branch, so the inspector drew *"Unsupported field type:
+  provider"* for `story.generate`, `tts.generate`, `scenes.blueprint`,
+  `storyboard.generate`, and `animator.generate`. 12.5 cannot "configure it on an existing
+  generic node" without closing that, so it is closed here. `provider` reuses the existing
+  async-select path — a provider list *is* an allowlisted option source, so the change is
+  one predicate — and `provider_options` renders the same `ProviderSettingsForm` the
+  Settings page and the five legacy pages already use, over the schema of whichever
+  provider the *node* selected. `NodeInspector` resolves that from the field declaring the
+  `provider` widget, including its schema default, mirroring
+  `options.configured_provider()`; a workflow saved before 12.3 therefore shows the options
+  of the provider it will really run (§41.3 M4). Secret properties are stripped from the
+  node sub-form: a credential there would be persisted into the workflow document, and
+  `_validate_provider_options` already refuses it at save time.
+- **Defect found and fixed — 12.4's Storyboard model dropdown was dead on arrival.**
+  `ProviderSettingsForm` sends `{domain, provider}` to *every* `ui.options_source` it
+  renders, because the browser cannot know which sources accept context, but
+  `storyboard_image_models` shipped with an empty context tuple — so the request answered
+  `OPTION_CONTEXT_INVALID` and the dropdown rendered empty in the shipped app. The tuple is
+  widened to `("domain", "provider")` with a `settings` cache policy, and the invariant is
+  now mechanical: `test_every_source_a_provider_schema_names_accepts_its_own_context` walks
+  every shipped provider's schema and fails on any named source that would be rejected.
+  12.4's `test_an_unknown_parameter_is_rejected_rather_than_ignored` was asserting the
+  broken behavior and now uses a genuinely unsupported parameter.
+- **Adjustment recorded — the diff guard is an invariant, not a `git diff`.** A diff test
+  proves one commit; an invariant keeps proving it. Direction 1 walks `studio/`,
+  `frontend/src/`, `docs/`, `app.py`, and `config.py` and fails if a fixture provider id
+  appears anywhere outside `tests/`. Direction 2 is the backend counterpart of the
+  12.2/12.4 frontend guards, which had no backend half: it compares the provider ids found
+  in the eighteen §26 surfaces against a **frozen set**, so a new literal fails *and* so
+  does a stale entry. Each remaining pair records what it is and who removes it —
+  `domains.py` (§19.1) and `config_migrations.py` (§41.3) are the two legitimate homes, the
+  rest is 14.2/14.3/16.1 debt. A third test is the substantive one: no provider-id
+  *comparison* may appear in any surface except the two visual adapters and `app.py`, which
+  are deliberately absent for the same reason `useTts.js` is absent from the 12.4 frontend
+  guard.
+- **Adjustment recorded — a node names a provider only through its domain default.** The
+  literal claim "no provider id in a node definition" is false: `_provider_field`'s
+  `default` *is* `DOMAINS[domain].default_provider`. The guard asserts the stronger true
+  thing — every provider id in a materialized `config_schema` is that default, read from
+  the catalog, and appears nowhere else in any field.
+- **Deferred as already assigned — two of the three shapes execute through the runtime, not
+  through their node.** `story.generate` dispatches generically (`adapters/story.py:34`),
+  so the sync-document fixture runs end to end on a real, unmodified node: merged options,
+  request-wins precedence, hidden-field exclusion, a managed relative artifact ref, no
+  credential in the written artifact, and `PROVIDER_UNAVAILABLE` rather than a silent
+  substitution. `tts.generate` and `storyboard.generate` still call `_step_tts` /
+  `_step_storyboard`, which branch on provider id — the branches 15.2 and 14.2 own. Both
+  shapes are proved through `boundary.invoke` and the §33 job contract instead, including
+  the partial and cancelled paths, with `validate_egress` clean over every envelope.
+  Pulling that dispatch forward would have emptied two later steps.
+- The uninstalled-provider case is recorded rather than assumed: the `provider` field is a
+  hard error (a saved value resolving to nothing has no safe execution), while
+  `provider_options` fails open with no schema and the stored value is never rewritten, so
+  reinstalling the provider restores the workflow untouched.
+- Verification passes with 645 backend tests (10 live-provider tests skipped, 256
+  subtests), 280 frontend tests across 37 files, the Vite production build, and the
+  generated-document drift check. Four guards were mutation-checked: reverting the option
+  context, disabling the `provider_options` widget, leaking a fixture id into
+  `studio/providers/catalog.py`, and reintroducing `if selected == "kokoro"` in
+  `adapters/tts.py` each fail their tests.
+
 ---
 
 ## Phase 13 — Script, story, and scene-AI providers

@@ -28,10 +28,12 @@ echo   [1] Claude codes; AGY takes over at the limit; Codex reviews
 echo   [2] Codex builds, fixes, and reviews
 echo   [3] Claude builds, fixes, and reviews
 echo   [4] AGY codes; Codex reviews
+echo   [5] Grok 4.5 codes; AGY limit fallback; Codex reviews
 echo   [Q] Cancel
 echo.
-choice /c 1234Q /n /m "Select 1, 2, 3, 4, or Q: "
-if errorlevel 5 goto :cancelled
+choice /c 12345Q /n /m "Select 1, 2, 3, 4, 5, or Q: "
+if errorlevel 6 goto :cancelled
+if errorlevel 5 goto :grok_code_codex_review
 if errorlevel 4 goto :agy_code_codex_review
 if errorlevel 3 goto :all_claude
 if errorlevel 2 goto :all_codex
@@ -57,6 +59,12 @@ goto :launch
 :agy_code_codex_review
 set "PROFILE=AGY builds and fixes; Codex reviews"
 set "RUNARGS=--by-phase --builder agy --fixer agy --coding-fallback none --reviewer codex"
+set "USES_CLAUDE=0"
+goto :launch
+
+:grok_code_codex_review
+set "PROFILE=Grok 4.5 builds and fixes; AGY limit fallback; Codex reviews"
+set "RUNARGS=--by-phase --builder grok --fixer grok --coding-fallback agy --reviewer codex"
 set "USES_CLAUDE=0"
 goto :launch
 
