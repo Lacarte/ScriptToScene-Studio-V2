@@ -366,12 +366,22 @@ def head_commit() -> str:
 # Agent prompts
 # ---------------------------------------------------------------------------
 
+# On this machine 'python' and 'pytest' are NOT on PATH — bare 'python' resolves to a
+# non-existent interpreter. Agents that guess waste turns on a confusing error, so every
+# prompt names the exact commands the orchestrator itself uses in validate().
+VERIFY = (
+    "Verification commands — 'python' and 'pytest' are NOT on PATH on this machine, "
+    "always use the venv interpreter: from the repo root run "
+    "'venv/Scripts/python.exe -m pytest tests/ -q', then from frontend/ run "
+    "'npm run test' and 'npm run build'."
+)
+
 AGREEMENTS = (
     "Working agreements: implement ONLY this step (do not start other steps); "
-    "follow existing conventions and _dev/loop-engineering/phases-plans/contracts.md; run pytest, "
-    "'npm run test' and 'npm run build' (frontend/) and get them green BEFORE "
-    "committing; finish with exactly one commit whose subject contains "
-    "'step {step_id}'. Do not push."
+    "follow existing conventions and _dev/loop-engineering/phases-plans/contracts.md; "
+    "read CLAUDE.md at the repo root before touching code. " + VERIFY + " "
+    "Get all three green BEFORE committing; finish with exactly one commit whose "
+    "subject contains 'step {step_id}'. Do not push."
 )
 
 
@@ -389,7 +399,7 @@ def fix_prompt(step: Step, failure: str) -> str:
         f"The build/test board is RED after work on step {step.id} ({step.title}). "
         f"Diagnose and fix the failures below, re-run the suites until green, "
         f"then commit the fix with subject 'fix: step {step.id} validation'. "
-        f"Do not start new features.\n\nFailure output:\n{failure}"
+        f"Do not start new features.\n\n{VERIFY}\n\nFailure output:\n{failure}"
     )
 
 
@@ -398,9 +408,9 @@ def review_prompt(step: Step, before: str, after: str) -> str:
         f"Review the commits {before}..{after} implementing step {step.id} "
         f"({step.title}) of _dev/loop-engineering/phases-plans/implementation-plan.md. Hunt for real "
         f"bugs: correctness, contract violations vs _dev/loop-engineering/phases-plans/contracts.md, "
-        f"security, edge cases. Fix what you find, run pytest and the frontend "
-        f"suites until green, then commit fixes with subject "
-        f"'fix(review): step {step.id}'. If nothing needs fixing, change nothing."
+        f"security, edge cases. Fix what you find, get every suite green, then commit "
+        f"fixes with subject 'fix(review): step {step.id}'. If nothing needs fixing, "
+        f"change nothing.\n\n{VERIFY}"
     )
 
 
@@ -413,8 +423,7 @@ def phase_review_prompt(phase: int, title: str, steps: list[Step], before: str, 
         f"1) Hunt for real bugs across the WHOLE phase: correctness, integration "
         f"seams between the steps, contract violations vs "
         f"_dev/loop-engineering/phases-plans/contracts.md, security, edge cases.\n"
-        f"2) Smoke test: run pytest from the repo root; run 'npm run test' and "
-        f"'npm run build' in frontend/; verify the Flask app still boots "
+        f"2) Smoke test: {VERIFY} Also verify the Flask app still boots "
         f"(venv/Scripts/python.exe -c \"import app\").\n"
         f"3) Fix every bug you find, keep all suites green, and commit the fixes "
         f"with subject 'fix(review): phase {phase}'.\n"
