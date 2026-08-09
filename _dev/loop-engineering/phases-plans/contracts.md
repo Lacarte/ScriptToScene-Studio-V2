@@ -1639,3 +1639,843 @@ adding a provider to an existing domain touches no workflow node, route dispatch
 component — with the one real obstacle (P27) resolved rather than waved through. Deferred by
 design: invocation context, request/result envelopes, job handles, and `ProviderError`
 (10.3); alias mapping tables, legacy field compatibility, and fixtures (10.4).
+
+---
+
+# Provider Contract v2 — Invocation, Results, Jobs, Errors (Phase 10.3 frozen)
+
+> Produced by step 10.3 of [implementation-plan.md](implementation-plan.md).
+> Grounded in code at commit `57f7477` (2026-08-09). Every `file:line` reference below was
+> read at that commit. §13–§18 is the audit; §19–§29 froze *what a provider is*; this section
+> freezes *how it is called, what it returns, and how it fails*.
+>
+> **Implementation owner.** Step **11.4** implements every module named here
+> (`providers_common`: invocation context, result envelope, artifact normalization, progress,
+> job handle/status, cancellation/timeout helpers, and the single exception boundary). Domain
+> request/result models are implemented with their domain migration (13.1–13.4, 14.2/14.3,
+> 15.1/15.2). Nothing in §30–§38 exists in code today.
+>
+> **What 10.3 does not freeze.** The legacy field/alias mapping tables (`engine`,
+> `provider_override`, `gemini→gemini_ws`, …), per-domain fixtures, and the node
+> `type_version` migration plan belong to **10.4**. This section defines the target shapes;
+> 10.4 defines how today's persisted values reach them.
+
+## 30. Invocation context
+
+### 30.1 `ProviderInvocation` (frozen)
+
+One frozen dataclass, `studio/shared/providers_common/invocation.py:ProviderInvocation`,
+passed to **every** domain invocation. It is constructed per call, never retained by a
+provider, and never passed to the memoized `create()` factory (§21.1).
+
+```python
+@dataclass(frozen=True)
+class ProviderInvocation:
+    # identity
+    domain: str                       # DOMAINS key (§19.1)
+    provider_id: str                  # canonical id, aliases already resolved (§19.3)
+    project_id: str                   # matches PROJECT_ID_RE (adapters/common.py:10)
+    execution_id: str = ""            # "" for legacy-route calls outside a workflow run
+    node_id: str = ""                 # "" for legacy-route calls
+    attempt: int = 1                  # scheduler attempt number (scheduler.py:697)
+    invocation_id: str = ""           # uuid4 hex; unique per call, used for job correlation
+    # capabilities the caller grants
+    output_dir: str = ""              # managed, per-invocation (§30.2)
+    stage_artifact: Callable[[str], str] | None = None   # scheduler.py:707
+    cancel: CancellationToken = ...   # §30.3 — never None
+    progress: ProgressReporter = ...  # §30.4 — never None
+    log: ProviderLogger = ...         # §30.5 — never None
+    deadline_s: float | None = None   # §35.3; None means the domain default
+    settings: Mapping[str, Any] = ... # resolved provider settings, env fallback applied (§22.6)
+    options: Mapping[str, Any] = ...  # per-run, non-durable node/request options
+```
+
+Frozen rules:
+
+- **`settings` vs `options`.** `settings` are the durable per-provider values from
+  `settings/settings.json` with the env read-time fallback already resolved; they may contain
+  secrets and must never be echoed into a result. `options` are the per-run values from the
+  node's `provider_options` / request body and must never contain secrets. A provider reads
+  both and writes neither. This split is what makes `job_meta.resolved_settings_redacted`
+  (`pipeline/services.py:166`, `:272`) mechanical rather than per-provider hand-work.
+- **No Flask, no `request`, no globals.** The context is the provider's only access to caller
+  state. A provider that needs `STS_PORT`, `flask.request`, or `os.environ` is non-conforming
+  (blockers B2 and B8).
+- **`cancel`, `progress`, and `log` are never `None`.** Today every consumer must write
+  `stop = context_value(context, "stop_requested"); if stop and stop():`
+  (`adapters/storyboard.py:47-48`, `adapters/animator.py:57-58`). v2 supplies no-op
+  implementations so a provider never guards. Owner: **11.4**.
+- **`attempt` is informational.** Retry is the caller's decision (§35.2); a provider must not
+  implement its own retry of a whole invocation on top of it.
+
+### 30.2 Managed output directory and artifact rules (frozen)
+
+`output_dir` is an absolute path allocated by the platform, always beneath `OUTPUT_DIR`,
+always built with `safe_join` (§9). A provider may write **only** inside `output_dir` or to a
+path returned by `stage_artifact()`. Any other write is a contract violation; `artifact_ref`
+already refuses to reference one (`ARTIFACT_UNMANAGED`, `adapters/common.py:74-82`).
+
+| rule | statement |
+|---|---|
+| allocation | `output_dir = safe_join(OUTPUT_DIR, <domain-owned relative dir>)`, created before the call. The domain owns the layout, and the existing layouts are preserved verbatim (`output/stories/{pid}`, `output/scenes/{pid}`, `output/tts/{pid}`, `output/storyboard/{pid}/{scene}`, `output/animator/{pid}/{scene}`; §13.1–§13.5). |
+| new files | created through `stage_artifact(destination)` where the workflow scheduler supplies one (`ArtifactPromoter.stage_path`, `scheduler.py:135-142`), so a failed invocation publishes nothing. Legacy-route invocations without a promoter write directly, exactly as today. |
+| references | every artifact leaves the provider as a **relative POSIX path beneath `OUTPUT_DIR`** — the value `artifact_ref()` already produces (`adapters/common.py:74-82`). |
+| absolute paths | **never** appear in a `ProviderResult`, a job status, an error message, an execution record, an SSE frame, or an API response (§36). |
+| deletion | a provider may delete only files it created during this invocation. |
+| concurrency | two invocations for the same `(domain, project_id)` may not run concurrently; the caller enforces it (workflow: `ProjectLock`, `scheduler.py:61`). |
+
+**Recorded divergence to resolve in 10.4, not here.** Today three port payloads carry
+absolute filesystem paths and a downstream node depends on one: `tts` returns
+`metadata["wav_path"]` and `audio["path"]` (`pipeline/services.py:263`,
+`adapters/tts.py:15`), and `adapters/timing.py:11` reads `audio.get("wav_path") or
+audio.get("path")` to call `_step_timing`. The v2 rule is that `artifact_refs` is the
+authority and consumers resolve a ref through one shared helper
+(`providers_common.results:resolve_ref(ref) -> str`). The absolute keys survive as deprecated
+compatibility fields on the *port payload* only; 10.4 freezes the mapping and 15.3 removes
+them once `timing.align` reads the ref. They are already absent from execution records
+because `_summarize` reduces every string to `{"chars": n}` (`scheduler.py:198-199`) — but
+they are present in the node output cache, which is why the deprecation has an owner rather
+than being waved through.
+
+### 30.3 Cancellation token (frozen)
+
+```python
+class CancellationToken:
+    def is_cancelled(self) -> bool: ...
+    def raise_if_cancelled(self) -> None:   # raises ProviderCancelled
+    def on_cancel(self, callback: Callable[[], None]) -> None:   # best-effort, idempotent
+```
+
+- Backed by the scheduler's existing `stop_requested` callable (`scheduler.py:421`,
+  `:708`); the token is a wrapper, not a new mechanism.
+- **Cooperative only.** No thread is killed and no process is signalled. A provider that
+  declares the `cancel` capability (§20.4) must poll `is_cancelled()` at least every 5 s
+  during any wait, and must return or raise within 10 s of the flag being set.
+- A provider that does **not** declare `cancel` is not cancelled mid-call; the platform stops
+  after the call returns (`scheduler.py:720-721`). This is exactly today's behavior and is why
+  all five provider-backed node types currently declare `"cancel": False`
+  (`registry.py:158, 197, 243, 267, 296`).
+- Cancellation is **not** an error condition to be retried. It maps to `ProviderCancelled` →
+  workflow code `CANCELLED` → node status `cancelled` (`scheduler.py:754-766`), never to
+  `failed`.
+- `on_cancel` callbacks run on the cancelling thread, must not block, and must not raise;
+  exceptions are logged and swallowed.
+
+### 30.4 Progress reporter (frozen)
+
+```python
+class ProgressReporter:
+    def __call__(self, *, ready: int | None = None, total: int | None = None,
+                 fraction: float | None = None, message: str | None = None,
+                 unit_index: int | None = None, state: str | None = None) -> None: ...
+```
+
+- **Advisory and lossy.** Dropping a progress call must never change the outcome. The
+  reporter never raises; a failure inside it is logged and swallowed.
+- Only providers declaring the `progress` capability report `fraction`; `fraction` is clamped
+  to `[0.0, 1.0]`. Providers declaring `single_scene`/`batch` report `ready`/`total`, which is
+  the shape the SSE frame already carries (`{"progress": {"ready": 3, "total": 10}}`, §6) and
+  the shape the legacy poll loop emits (`scene_ready`/`scene_total`,
+  `pipeline/services.py:611-613`).
+- `message` is free text, capped at 200 characters, and passes through redaction before it
+  reaches a log, an SSE frame, or an execution record. It must not contain a filesystem path
+  or a provider response body.
+- The platform **rate-limits** progress to at most one emitted event per second per
+  invocation, coalescing intermediate values; the last value before a terminal state is always
+  emitted. Without this, a per-scene provider would flood the bounded SSE ring (1000 events,
+  §6).
+- `ready` must be monotonic non-decreasing within one invocation; a lower value is ignored and
+  warned. `total` may only be set once per invocation after the first report.
+
+### 30.5 Redacted logger (frozen)
+
+```python
+class ProviderLogger:
+    def debug/info/warning/error(self, message: str, **fields) -> None: ...
+```
+
+- Every message and every field value passes through
+  `studio/workflows/redaction.py:redact` seeded with the invocation's `settings` secrets
+  before it reaches loguru. This is the *only* logging surface a provider may use; a provider
+  importing `loguru` directly bypasses redaction and is non-conforming.
+- Records are automatically tagged `domain`, `provider_id`, `project_id`, `execution_id`,
+  `node_id`, `invocation_id`. A provider never formats those into its message.
+- `error(...)` writes a log line; it does not fail the invocation. Failure is raising a
+  `ProviderError` (§34).
+- Only `warning` and `error` records are eligible to become execution-record log entries; the
+  node record already caps them (§5).
+
+### 30.6 Relationship to `AdapterContext` (frozen)
+
+`AdapterContext` (`adapters/common.py:24-35`) stays as the **workflow scheduler's** contract
+with its adapters and does not change shape in Phase 11. `ProviderInvocation` is built *from*
+it inside the adapter, so exactly one construction site per domain exists and legacy routes
+can build the same object without a scheduler:
+
+| `AdapterContext` | `ProviderInvocation` |
+|---|---|
+| `project_id` | `project_id` |
+| `execution_id`, `node_id` | same |
+| `progress: Callable[[str], None] \| None` | wrapped into `ProgressReporter` (`message=` only) |
+| `stop_requested: Callable[[], bool] \| None` | wrapped into `CancellationToken` |
+| `stage_artifact` | `stage_artifact` |
+| `authorize_existing_replace` | stays scheduler-only; not part of the provider contract |
+| — | `domain`, `provider_id`, `attempt`, `invocation_id`, `output_dir`, `deadline_s`, `settings`, `options`, `log` |
+
+## 31. Result envelope
+
+### 31.1 `ProviderResult` (frozen, `result_version: 1`)
+
+One envelope for all five domains, `providers_common/results.py:ProviderResult`. The typed
+per-domain body lives in `payload`; nothing else varies by domain.
+
+```jsonc
+{
+  "result_version": 1,
+  "domain": "tts",
+  "provider_id": "inworld",
+  "provider_version": "1.0.0",        // manifest version (§19.3)
+  "contract_version": 2,
+  "status": "succeeded",              // succeeded | partial | failed (§31.5)
+  "payload": { /* domain result body — §32 */ },
+  "artifact_refs": ["tts/pm_X/voice.wav", "tts/pm_X/tts.json"],
+  "units": [ /* per-unit results — §31.5; [] for single-unit domains */ ],
+  "metadata": {"duration_seconds": 28.5},
+  "warnings": [{"code": "VOICE_FALLBACK", "message": "…"}],
+  "provenance": { /* §31.3 */ },
+  "job": null                          // JobStatus snapshot for async providers (§33)
+}
+```
+
+| field | required | rule |
+|---|---|---|
+| `result_version` | yes | `1`. Bumped only for a breaking envelope change; readers reject an unknown major with `PROVIDER_RESULT_INVALID`. |
+| `domain`, `provider_id` | yes | canonical values; the platform overwrites whatever the provider set, so a provider cannot impersonate another. |
+| `provider_version`, `contract_version` | yes | copied from the manifest by the platform, not by the provider. |
+| `status` | yes | `succeeded` \| `partial` \| `failed`. A returned `failed` is equivalent to raising `ProviderError` and is converted to one at the boundary; providers should raise. |
+| `payload` | yes | must validate against `DomainSpec.result_model` (§32). JSON-serializable, no callables, no open handles, no `bytes`. |
+| `artifact_refs` | yes | list of normalized relative refs (§30.2); may be empty; deduplicated, order-stable. |
+| `units` | yes | `[]` for `script`/`scene_blueprint`/`tts`; one entry per requested scene for `storyboard`/`animator` (§31.5). |
+| `metadata` | no | small, flat, JSON-scalar values only; ≤ 40 keys; strings ≤ 500 chars. For diagnostics and UI, never for control flow. |
+| `warnings` | no | `[{code, message, unit_index?}]`; non-fatal. ≤ 50 entries; `message` ≤ 200 chars, redacted. |
+| `provenance` | yes | §31.3. |
+| `job` | no | present only when the provider declared `async_job`; a terminal `JobStatus` snapshot (§33.2). |
+
+Unknown top-level keys in a returned result are **dropped with a WARN**, mirroring the
+manifest policy (§20.3) — a provider written against a newer build must not fail on an older
+one. An invalid *known* field is `PROVIDER_RESULT_INVALID` (§34.2).
+
+### 31.2 What may not appear in a result (frozen)
+
+A result is validated at the registry boundary before the caller sees it. Rejected outright:
+absolute or UNC filesystem paths in any string field; keys matching
+`redaction.is_sensitive_key` (`redaction.py:25-29`); `bytes`; non-JSON types; and any value
+larger than the per-field caps above. The raw third-party HTTP body, the raw provider SDK
+object, and the provider's exception text are never part of a result — a provider that wants
+to surface a remote message must copy a bounded, redacted string into `warnings[].message` or
+`ProviderError.message`.
+
+Payload bodies stay small: anything that is not a bounded document goes to disk and is
+referenced through `artifact_refs`. This is already the rule for execution records
+("large payloads stay as artifact refs — never inlined", §5).
+
+### 31.3 Provenance (frozen)
+
+```jsonc
+"provenance": {
+  "invocation_id": "…", "domain": "tts", "provider_id": "inworld",
+  "provider_version": "1.0.0", "contract_version": 2,
+  "settings_version": 2,                       // settings.json version
+  "resolved_settings_redacted": {"api_key": "[REDACTED]", "model": "inworld-tts-1"},
+  "options": {"speed": 1.0},                   // per-run options, already secret-free
+  "selection_reason": "node_config",           // §24.1 rung: request | node_config | settings | default
+  "started_at": "ISO", "finished_at": "ISO", "duration_ms": 1234,
+  "cache_hit": false
+}
+```
+
+This generalizes the existing `job_meta` block, which already carries
+`provider_id`/`provider_version`/`provider_kind`/`resolved_settings_redacted`/`provider_options`/
+`resolved_at`/`settings_version` for TTS only (`pipeline/services.py:162-170`, `:268-276`).
+The platform fills provenance; a provider cannot write it. `selection_reason` names which rung
+of the §24.1 precedence chain chose the provider, which is what makes "why did this run use
+Gemini?" answerable without reading logs. Provenance is persisted into the domain's own
+artifact (`tts.json`, `story.json`, `scenes.json`, `storyboard.json`, `grabber_job.json`) and
+into `outputs_summary`; it is browser-safe by construction because
+`resolved_settings_redacted` is produced by `settings_manager.redact_settings`.
+
+### 31.4 Warnings vs errors (frozen)
+
+A warning never changes `status`. Anything that makes the requested work unusable is an error.
+Concretely: a per-scene failure inside a batch is a `unit` with `state: "failed"` plus a
+warning; *all* units failing is `status: "failed"` and is raised, never returned as success —
+the rule the two adapters already enforce by hand (`adapters/storyboard.py:62-67`,
+`adapters/animator.py:75-80`) and that 14.1 must preserve ("all-failed can never be reported
+as success").
+
+### 31.5 Partial results (frozen)
+
+Multi-unit domains (`storyboard`, `animator`; any provider declaring `batch`) return one
+`UnitResult` per **requested** unit, in requested order:
+
+```jsonc
+{ "unit_index": 3,                 // the scene index from the request; stable, not positional
+  "state": "succeeded",            // succeeded | failed | skipped | cancelled
+  "artifact_refs": ["storyboard/pm_X/3/image.png"],
+  "metadata": {"width": 1080, "height": 1920},
+  "error": {"code": "PROVIDER_UNIT_FAILED", "message": "…", "retryable": true} }
+```
+
+Frozen rules:
+
+1. `len(units) == len(requested units)`. A unit the provider never attempted is
+   `state: "skipped"`, not an omission. Today a scene that never reports simply stays
+   `pending` in `scene_statuses` and the poll loop can only infer it by arithmetic
+   (`pending = total - ready - errors`, `pipeline/services.py:593`).
+2. `unit_index` is the caller's index (the scene `index`), so a partial re-run addresses the
+   same units. Positional inference is forbidden.
+3. Envelope `status` is derived, never provider-declared:
+   all succeeded → `succeeded`; at least one succeeded and at least one not → `partial`;
+   none succeeded → `failed` (raised, §31.4); any unit `cancelled` with none failed →
+   the invocation is cancelled.
+4. `artifact_refs` at envelope level is the ordered union of unit refs plus domain-level
+   artifacts (the manifest JSON). No unit-level ref may be missing from it.
+5. A `failed` unit must carry `error`; a `succeeded` unit must carry at least one
+   `artifact_ref` unless the domain declares otherwise.
+6. Unit `error.message` obeys §31.2. This closes the current leak at
+   `storyboard/routes.py:254`, where `"error": str(e)` writes raw exception text into
+   `storyboard.json`, which the storyboard adapter then hands to the `images` port verbatim
+   (`adapters/storyboard.py:46`).
+
+**Whether `partial` fails the node is the caller's policy, not the provider's.** Frozen
+default for workflow execution: `partial` succeeds the node and records a warning, matching
+today (a run with 9/10 images succeeds). 14.1 may add an opt-in per-node "require all units"
+setting; it must default off.
+
+## 32. Domain request and result schemas
+
+Each domain gets `studio/<module>/providers/contract.py` exporting `<Domain>Request` and
+`<Domain>ResultPayload`, and the dotted paths fill the `DomainSpec.request_model` /
+`result_model` fields left blank in §19.1:
+
+| domain | request_model | result_model | shape | artifact rule |
+|---|---|---|---|---|
+| `script` | `studio.story.providers.contract:ScriptRequest` | `…:ScriptResultPayload` | single unit, sync | `stories/{pid}/story.json` |
+| `scene_blueprint` | `studio.build_scene_blueprints.providers.contract:SceneBlueprintRequest` | `…:SceneBlueprintResultPayload` | single unit, sync | `scenes/{pid}/scenes.json` |
+| `tts` | `studio.tts.providers.contract:TTSRequest` | `…:TTSResultPayload` | single unit, sync | `tts/{pid}/voice.wav` + `tts.json` |
+| `storyboard` | `studio.storyboard.providers.contract:StoryboardRequest` | `…:StoryboardResultPayload` | multi-unit, async | `storyboard/{pid}/storyboard.json` + `{scene}/image.{ext}` |
+| `animator` | `studio.animator.providers.contract:AnimatorRequest` | `…:AnimatorResultPayload` | multi-unit, async | `animator/{pid}/grabber_job.json` + `{scene}/*` |
+
+Requests are validated **before** the provider is constructed; a malformed request is
+`PROVIDER_REQUEST_INVALID` and is never a provider failure. Unknown request keys are rejected
+(unlike results and manifests): a silently ignored request field changes output without
+telling anyone.
+
+### 32.1 `script`
+
+```python
+ScriptRequest:  # from adapters/story.py + story/schemas.py:21-53
+    idea: str = ""                 # free text, ≤ 4000 chars
+    category: str                  # story_category, ≤ 80 chars
+    style: str = ""                # preset_style (§ style_templates)
+    tone: str = ""                 # story_tone
+    language: str = "english"      # english | french | spanish
+    language_level: str = ""
+    target_duration_s: int = 45    # 15–180
+    niche_preset: str = ""
+    seed: int | None = None        # deterministic providers only (13.1)
+```
+
+```python
+ScriptResultPayload:
+    script_text: str                    # non-empty; the canonical narration text
+    sections: dict[str, str]            # hook | build | climax | cta; may be empty for
+                                        # providers without `structured_sections`
+    word_count: int
+    estimated_duration_s: int
+    language: str
+```
+
+Maps onto today's `generate_story` return (`story/service.py:90-108`) field for field:
+`story_text→script_text`, `sections→sections`, `metadata.word_count→word_count`,
+`metadata.estimated_duration→estimated_duration_s`. Everything else in today's `metadata`
+(`preset_style`, `story_category`, `story_tone`, `duration`, `generation_time`, `timestamp`,
+`concept_family`) moves to `metadata`/`provenance`; the hardcoded `"provider": "gemini"`
+(`story/service.py:102`, P33) is deleted because `provenance.provider_id` supersedes it.
+`pipeline_ref` stays in the persisted `story.json` and is not part of the provider result.
+Artifact: exactly one ref, `stories/{pid}/story.json`. Anti-repeat history
+(`output/story_history/*`) is a provider-internal side effect and is **not** an artifact ref —
+it is not derived from this project and must not be attributed to the node.
+
+### 32.2 `scene_blueprint`
+
+```python
+SceneBlueprintRequest:
+    script: str
+    segments: list[Segment]        # {index, words, start, end, is_filler}; non-filler only
+                                   # are numbered, matching services.py:423-426
+    style: str = "cinematic"
+    style_notes: str = ""          # style_prompt / custom_style_notes
+    tone: str = ""
+    aspect_ratio: str = "9:16"
+```
+
+```python
+SceneBlueprintResultPayload:
+    scenes: list[Scene]            # {index, image_prompt, start, end, narrative_role, …}
+    style_spec: dict
+    style_prompt: str
+    analysis: dict
+    coherence: {"score": float, "warnings": [str], "metrics": dict}
+    sfx_report: dict | None        # only when `sfx_report` capability
+    total_duration_s: float
+```
+
+Preserves the current `_step_scenes` result keys (`pipeline/services.py:500-515`) so
+`scenes.json` stays schema-compatible (13.4's "current fixture outputs remain
+schema-compatible"). `scene_blueprints`, `visual_bible`, and `custom_style_notes` remain in the
+persisted artifact; they are planner inputs, not provider outputs, and 13.4 decides whether to
+surface them in `metadata`. Chaptering is a provider-internal decision behind the `chaptering`
+capability, not a request field — `should_use_chapters` (`chapters.py:31-34`) is a
+payload-size rule, and the caller must not have to know it. `scenes[].index` must be stable
+and dense over the non-filler segments; it is the `unit_index` the two visual domains key on.
+
+### 32.3 `tts`
+
+```python
+TTSRequest:
+    text: str                       # non-empty
+    voice: str = ""                 # canonical voice id for the resolved provider
+    speed: float = 1.0              # 0.5–2.0
+    language: str = ""
+    output_basename: str = "voice"  # file stem inside output_dir
+```
+
+```python
+TTSResultPayload:
+    audio_ref: str                  # relative ref to the wav; also in artifact_refs
+    duration_seconds: float         # > 0
+    sample_rate: int
+    format: str = "wav"
+    voice: str
+    characters_billed: int | None = None
+```
+
+The **one voice field** ends the `voice` vs `tts_voice` split that exists only because
+dispatch branches on the provider id (`pipeline/services.py:88-94`, P5): the caller resolves
+one voice for the resolved provider through the `tts_voices` option source (§23.1), so the
+provider receives exactly one. `TTSResult` (`tts/providers/base.py:22-29`) is the ABC shape
+being replaced: `audio_path`→`audio_ref` (relative, not absolute), `duration_seconds`,
+`format`, `sample_rate` carry over, and `metadata` is split into `metadata` + `provenance`.
+The remaining keys of today's `tts.json` (`prompt`, `words`, `approx_tokens`, `rtf`,
+`inference_time`, `model`, `visual_style`, `story_tone`, `category`, `timestamp`,
+`cache_hit`) move to `metadata`/`provenance` and the file keeps them, so
+`tts.json` consumers are unaffected. Artifacts: `tts/{pid}/voice.wav` and `tts/{pid}/tts.json`.
+Streaming (`stream()`, `TTSStreamChunk`) is **not** part of the invocation contract: it is a
+transport-level capability (`streaming`) used by `/api/tts/stream` and never produces a
+`ProviderResult`.
+
+### 32.4 `storyboard`
+
+```python
+StoryboardRequest:
+    scenes: list[{index: int, prompt: str}]   # non-empty; index is the unit_index
+    aspect_ratio: str = "9:16"
+    style: str = ""
+    image_model: str = ""                     # "" = provider default
+```
+
+```python
+StoryboardResultPayload:
+    total: int; ready: int; errors: int
+    manifest_ref: str                          # storyboard/{pid}/storyboard.json
+```
+
+Per-scene detail lives in `units[]`, not in the payload. Each unit carries
+`artifact_refs: ["storyboard/{pid}/{scene}/image.{ext}"]` and
+`metadata: {"thumbnail_ref": …, "width": …, "height": …}`. The remote `image_url` from the
+third-party CDN (`storyboard/routes.py:233`) is **provider-specific response data** and is
+dropped from the result; the downloaded file is the output. `scene_statuses` is retired as a
+provider-facing shape — it stays inside `storyboard.json` for the legacy status route
+(`routes.py:387-401`, public compatibility surface §17.1) and 14.2 derives it from `units[]`.
+`prompt_prefix` and `auto_type` are provider settings, not request fields (§26, P27).
+
+### 32.5 `animator`
+
+```python
+AnimatorRequest:
+    scenes: list[{index: int, prompt: str, reference_ref: str | None}]
+    aspect_ratio: str = "9:16"
+    mode: str = "video"            # video | image
+    duration_s: float | None = None
+    resolution: str = ""
+```
+
+```python
+AnimatorResultPayload:
+    total: int; ready: int; errors: int
+    manifest_ref: str              # animator/{pid}/grabber_job.json
+```
+
+Units carry `artifact_refs` for every produced media file plus
+`metadata: {"kind": "video"|"image", "thumbnail_ref": …, "duration_s": …}`. `reference_ref`
+is how the declared-but-unused `storyboard` input port (`registry.py:277`) becomes meaningful
+for `image_to_video` providers. `quality`, `duration`, `auto_type`, and Kie's
+`resolution`/`output_format` are provider settings (P27, §26); `arguments`
+(`adapters/animator.py:23`) is a free-text passthrough that 14.3 must either type or delete —
+it is not part of the frozen request. The remote `urls` list (`animator/routes.py:457`,
+`:532`) is provider-specific response data and is dropped, same rule as storyboard's
+`image_url`.
+
+## 33. Asynchronous jobs
+
+### 33.1 Unified job types (frozen)
+
+`providers_common/jobs.py` holds **one** definition each, replacing the two field-for-field
+duplicates in `storyboard/providers/base.py:13-38` and `animator/providers/base.py:12-38`
+(§14.6). Owner: **11.4**.
+
+```python
+@dataclass(frozen=True)
+class JobHandle:
+    job_id: str          # provider-scoped, opaque, stable; ^[A-Za-z0-9_.:-]{1,128}$
+    domain: str
+    provider_id: str
+    project_id: str
+    invocation_id: str   # correlates the handle to its ProviderInvocation
+    state: str           # a JobState value
+    created_at: str      # ISO
+
+@dataclass(frozen=True)
+class JobStatus:
+    job_id: str
+    state: str                   # §33.2
+    ready: int = 0
+    total: int = 0
+    fraction: float | None = None
+    message: str | None = None   # ≤ 200 chars, redacted
+    units: list[UnitResult] = ()  # §31.5, may be partial while running
+    error: ProviderErrorPayload | None = None   # §34.1; set only in state="failed"
+    updated_at: str = ""
+```
+
+Two deliberate changes from the duplicated dataclasses: `status: str` becomes `state` with a
+closed vocabulary (the old field held provider-defined strings), and `result: dict | None`
+becomes `units: list[UnitResult]` so a partial result is expressible while the job is still
+running. `SceneResult` (`image_url/image_path` vs `video_url/video_path`) is replaced by the
+one media-neutral `UnitResult` of §31.5; 11.4 keeps thin domain aliases so 14.2/14.3 can diff
+against the old shape.
+
+### 33.2 State machine (frozen)
+
+```
+submitted ──► running ──► succeeded
+     │           │    └──► partial
+     │           ├───────► failed
+     └───────────┴───────► cancelled
+                 └───────► timed_out
+```
+
+`JobState` = `submitted | running | succeeded | partial | failed | cancelled | timed_out`.
+Terminal: `succeeded`, `partial`, `failed`, `cancelled`, `timed_out`. Transitions are
+monotonic — a terminal job never returns to `running`, matching the execution-record rule in
+§5. `total` may only be set once, at or before the first `running` status.
+
+Every terminal state maps to exactly one invocation outcome, so a synchronous and an
+asynchronous provider are indistinguishable to the caller:
+
+| terminal job state | invocation outcome |
+|---|---|
+| `succeeded` | `ProviderResult(status="succeeded")` |
+| `partial` | `ProviderResult(status="partial")` + warnings |
+| `failed` | raise `ProviderError` (code from `JobStatus.error`) |
+| `cancelled` | raise `ProviderCancelled` → workflow `CANCELLED` |
+| `timed_out` | raise `ProviderError(code="PROVIDER_TIMEOUT", retryable=True)` → workflow `POLL_TIMEOUT` |
+
+**Zero produced units can never be `succeeded`.** A job whose units all failed is `failed`,
+which is the defect class currently guarded by hand in both adapters and by the known defect
+"storyboard poll counts errors as done" (§8).
+
+### 33.3 Poll and push (frozen)
+
+Providers declare exactly one of two delivery modes through capabilities (§20.4):
+
+- `async_job` without `push_callbacks` — the platform polls `poll(job_id, invocation)`.
+  Frozen cadence: first poll after 2 s, then the domain interval, ±10 % jitter. Domain
+  intervals are today's values: storyboard 10 s, animator 10 s
+  (`pipeline/services.py:573`, `:688`). A poll that raises is retried up to 3 consecutive
+  times before the job is failed; the current loop swallows *every* poll exception forever
+  (`pipeline/services.py:624-625`), which turns a permanently broken provider into a 30-minute
+  wait.
+- `push_callbacks` — the provider pushes status through its runtime (WebSocket for
+  `gemini_ws` / `grok_automa`, HTTP callback for `wavespeed_webhook`). The platform still
+  polls, at a 60 s watchdog interval, so a lost push cannot hang the job.
+
+Push correlation is frozen as the tuple `(domain, provider_id, project_id, job_id)`; a status
+whose tuple does not match a live job is **dropped and warned**, never applied. Duplicate
+status for a unit already in a terminal state is idempotent and ignored. Both rules are
+preconditions for 14.4's "cross-provider/job callbacks cannot contaminate results".
+
+### 33.4 Job persistence (frozen)
+
+A job handle survives a process restart: the platform persists `JobHandle` + last `JobStatus`
+next to the domain manifest through `safe_json_write`, and rehydrates on startup — which is
+what the animator store already does informally (`grabber_job.json`, in-memory `JobStore`
+rehydrated from disk, §13.5). Rehydrated jobs resume polling; a job whose provider is no
+longer registered is marked `failed` with `PROVIDER_NOT_FOUND` rather than being retried
+forever. Persisted job records obey §31.2 in full.
+
+## 34. `ProviderError`
+
+### 34.1 Shape (frozen)
+
+```python
+class ProviderError(Exception):
+    code: str                     # §34.2, stable
+    message: str                  # safe, human-readable, ≤ 300 chars, redacted
+    retryable: bool               # §34.3
+    domain: str
+    provider_id: str
+    details: dict | None          # redacted, JSON-only, ≤ 4 KiB serialized
+    recovery_suggestion: str | None
+    unit_index: int | None        # set for a per-unit failure
+    cause_type: str | None        # exception class name only — never its message
+```
+
+`ProviderErrorPayload` is its JSON form and is the value carried in `JobStatus.error` and
+`UnitResult.error`. `ProviderCancelled` is the one subclass with fixed semantics
+(`code="CANCELLED"`, `retryable=False`).
+
+`cause_type` records `"ConnectionError"` or `"JSONDecodeError"` and nothing else: the class
+name is diagnostic, the message is untrusted. The traceback is logged through the redacted
+logger and never serialized.
+
+### 34.2 Code catalog (frozen)
+
+Provider-level codes, stable across builds:
+
+| code | meaning | retryable |
+|---|---|---|
+| `PROVIDER_NOT_FOUND` | no such `(domain, provider_id)` after alias resolution | no |
+| `PROVIDER_UNAVAILABLE` | registered but not usable now — degraded, extension offline, model missing | yes |
+| `PROVIDER_NOT_CONFIGURED` | a `requires` key is empty after env fallback (§21.5) | no |
+| `PROVIDER_REQUEST_INVALID` | the request failed domain validation before dispatch | no |
+| `PROVIDER_RESULT_INVALID` | the provider returned a result violating §31 | no |
+| `PROVIDER_AUTH_FAILED` | remote rejected credentials (the live WaveSpeed 401, §17.4) | no |
+| `PROVIDER_RATE_LIMITED` | remote 429 / quota | yes |
+| `PROVIDER_QUOTA_EXHAUSTED` | remote balance/credit exhausted (the OpenRouter case) | no |
+| `PROVIDER_TIMEOUT` | invocation or job deadline exceeded (§35.3) | yes |
+| `PROVIDER_TRANSPORT_FAILED` | connection error, DNS, TLS, 5xx | yes |
+| `PROVIDER_RESPONSE_MALFORMED` | remote responded but the body is unusable | yes |
+| `PROVIDER_UNIT_FAILED` | one unit of a batch failed | per-case |
+| `PROVIDER_ARTIFACT_MISSING` | a declared artifact was not produced | no |
+| `PROVIDER_ARTIFACT_UNMANAGED` | a write outside the managed output directory | no |
+| `PROVIDER_FAILED` | wrapped unknown exception (§34.4) | no |
+| `CANCELLED` | cooperative cancellation | no |
+
+Mapping to the stable workflow error codes of §7 — the workflow-facing set does **not** grow
+for provider internals, so existing clients keep working:
+
+| provider code | workflow code |
+|---|---|
+| `PROVIDER_UNAVAILABLE`, `PROVIDER_NOT_CONFIGURED`, `PROVIDER_NOT_FOUND` | `PROVIDER_UNAVAILABLE` |
+| `PROVIDER_TIMEOUT` | `POLL_TIMEOUT` |
+| `CANCELLED` | `CANCELLED` |
+| `PROVIDER_ARTIFACT_MISSING`, `PROVIDER_ARTIFACT_UNMANAGED` | `ARTIFACT_MISSING` |
+| everything else | `NODE_EXECUTION_FAILED` |
+
+`EXTENSION_NOT_CONNECTED` stays reserved for the extension-runtime probe (`app.py:266`,
+`:276`) and is emitted by the platform, not by a provider. **The §7 stable list gains no new
+codes** — `PROVIDER_*` values live in the provider layer and travel in
+`details.provider_code` when the workflow code is coarser, so a UI can still distinguish an
+auth failure from a malformed response without a new top-level code.
+
+### 34.3 Retryability (frozen)
+
+`retryable` describes the *provider's* view; the caller decides whether to act on it. The
+scheduler's existing per-node policy is unchanged (`on_error.policy`, `max_attempts` 3,
+1000 ms base, ×2 backoff, capped at 60 s — `scheduler.py:878-885`, `:770-776`). New rule:
+a `retryable=False` provider error **stops the attempt loop immediately** instead of burning
+all three attempts on a permanently invalid API key. Owner: **11.4**.
+
+Retryable and non-retryable classes are fixed by the table above, not per provider. A provider
+may not mark `PROVIDER_AUTH_FAILED` retryable to force retries.
+
+### 34.4 The exception boundary (frozen)
+
+Exactly one place wraps provider exceptions: the registry/hub invocation boundary in
+`providers_common`. Frozen behavior for any exception that is not already a `ProviderError`:
+
+1. Log the full traceback through the redacted logger, tagged with the invocation identity.
+2. Return `ProviderError(code="PROVIDER_FAILED", retryable=False, cause_type=type(exc).__name__,
+   message=<generic per-domain sentence>, recovery_suggestion=…)`.
+3. **The original exception's `str(exc)` is never copied into `message` or `details`.**
+
+That third rule is the substantive change. Today the raw text propagates all the way into the
+persisted execution record: `call_webhook` builds `RuntimeError(f"{label} returned {status}:
+{body_text[:200]}")` embedding the third-party response body (`webhooks.py:39`, `:50-62`,
+`:112`, `:121`); `_step_scenes` raises bare `RuntimeError` (`pipeline/services.py:429`);
+`adapters/story.py:19-22` catches only `StoryServiceError`/`ValueError`, so the webhook
+`RuntimeError` passes through; and the scheduler's `_failure_payload` sets
+`message = str(exc)` (`scheduler.py:889`). `Redactor` removes key-shaped secrets but not a
+provider's response body, an absolute path, or a stack frame. `ArtifactPromoter.promote`
+likewise raises `ARTIFACT_MISSING` with the absolute staged path in the message
+(`scheduler.py:158`).
+
+Frozen consequence: `_failure_payload` must stop using `str(exc)` for non-`ProviderError`,
+non-`AdapterError`, non-`SchedulerError` exceptions and use the wrapped safe message; and
+every path-bearing message is reduced to a basename. Owner: **11.4** (boundary), **13.4**
+(scene-blueprint webhook errors), **16.4** (final sweep).
+
+`AdapterError` (`adapters/common.py:14-21`) is *not* replaced: it stays the adapter→scheduler
+carrier, and 11.4 provides `ProviderError.as_adapter_error()` so the two layers map without
+either importing the other's module.
+
+## 35. Cancellation, retry, and timeout
+
+### 35.1 Cancellation (frozen)
+
+| stage | behavior |
+|---|---|
+| before dispatch | the invocation is not started; node status `cancelled` |
+| during a sync call | only providers declaring `cancel` observe it; others complete and the platform discards the result after the call returns (`scheduler.py:720-721`) |
+| during an async job | the platform calls `cancel_job(job_id, invocation)` when the provider declares `cancel`, then stops polling; a provider without `cancel_job` has its job abandoned and marked `cancelled` locally |
+| after cancellation | staged artifacts are discarded (`ArtifactPromoter.cleanup`, `scheduler.py:760`); already-promoted artifacts from earlier nodes are kept |
+| record | `status: "cancelled"`, never `failed`; no retry (`scheduler.py:762-766`, `:794-799`) |
+
+A cancelled job on a remote provider may still consume quota. That is accepted and must be
+stated in the provider author guide (16.3), not hidden.
+
+**Defect found while freezing this contract — the one cancellation code that exists is the
+wrong one.** Both visual adapters raise `AdapterError("EXECUTION_CANCELLED", …)` when the stop
+flag is observed (`adapters/storyboard.py:49`, `adapters/animator.py:59`), but the scheduler
+recognizes cancellation only as `code == "CANCELLED"` (`scheduler.py:762`). With the default
+error policy (`policy: "stop"` → `max_attempts = 1`, `scheduler.py:695, 881`) the raise falls
+through to the ordinary failure path and the node is recorded **`failed`** with code
+`EXECUTION_CANCELLED`, while the overall execution is still marked `cancelled`
+(`scheduler.py:571`) — an internally inconsistent record. No test covers it, and
+`EXECUTION_CANCELLED` appears nowhere else in the repo. Frozen resolution: cancellation is
+raised as `ProviderCancelled` → `CANCELLED` (§34.1/§34.2), the only recognized code.
+Owner: **11.4**, with a regression test that cancels each visual node and asserts node status
+`cancelled`.
+
+### 35.2 Retry and idempotency (frozen)
+
+- **The platform retries invocations; providers do not.** A provider may retry an internal
+  HTTP request (as `call_webhook` does, 3 attempts / 2-4-8 s, `webhooks.py:9-10`) but must not
+  re-run the whole generation.
+- A retried invocation gets a **new** `invocation_id` and an incremented `attempt`. Any job
+  submitted by the failed attempt must be cancelled or abandoned before the retry; two live
+  jobs for one `(domain, project_id)` are a contract violation.
+- Retry is only safe because artifacts are staged: a failed attempt publishes nothing
+  (`promoter.promote()` runs only on success, `scheduler.py:728`).
+- For multi-unit domains, retry re-requests **only** units not in a terminal `succeeded`
+  state; already-produced artifacts are reused. This is 14.1's "restart reconciliation".
+- Non-retryable errors (§34.3) skip the remaining attempts.
+
+### 35.3 Timeouts (frozen)
+
+Two independent deadlines. Both are platform-owned; a provider never decides how long the
+caller waits.
+
+| scope | value | source |
+|---|---|---|
+| single outbound request | provider setting, default 180 s | `call_webhook(timeout=180)`, `webhooks.py:18` |
+| `script` invocation | 300 s | `generate_story` uses 120 s per webhook call (`story/service.py:79`) with retries |
+| `scene_blueprint` invocation | 600 s | 180 s per call, 300 s in chapter mode, up to 3 attempts (§13.2) |
+| `tts` invocation | 900 s | local model load + synthesis; no current explicit limit |
+| `storyboard` job | 1800 s (30 min) | `pipeline/services.py:572`, `adapters/storyboard.py:38` |
+| `animator` job | 7200 s (120 min) | `pipeline/services.py:687`, `adapters/animator.py:45` |
+
+`ProviderInvocation.deadline_s` overrides the domain default and is the single value a
+provider may read to size its own waits. Exceeding it is `PROVIDER_TIMEOUT` /
+`JobState.timed_out` → workflow `POLL_TIMEOUT`, with any units already terminal preserved as a
+`partial`-shaped diagnostic in `details` (the invocation still fails). The current code
+instead raises a bare `RuntimeError`/`AdapterError("NODE_TIMEOUT", …)` with no partial data
+(`pipeline/services.py:627`, `adapters/storyboard.py:51`, `adapters/animator.py:61`);
+`NODE_TIMEOUT` is not in the §7 stable set and is retired in favor of `POLL_TIMEOUT`.
+Owner: **11.4** for the helper, **14.1** for the job service.
+
+## 36. Egress assertion — the four prohibited classes
+
+No **raw provider exception**, **credential**, **arbitrary filesystem path**, or
+**provider-specific response** may reach a workflow record, an SSE frame, a cache entry, an
+exported template, or any API response. Enforcement points and the current violations:
+
+| # | class | current violation | enforcement in v2 | owner |
+|---|---|---|---|---|
+| L1 | raw exception | `scheduler.py:889` `message = str(exc)` for any adapter exception | §34.4 wrapping; `_failure_payload` uses the safe message | 11.4 |
+| L2 | raw exception | `webhooks.py:39,50-62` embeds up to 200–500 chars of the third-party body in the exception text, unhandled by `adapters/story.py:19-22` and `_step_scenes` | webhook helpers raise `ProviderError` with a generic message; body only in the redacted log | 13.2 / 13.4 |
+| L3 | raw exception | `storyboard/routes.py:254` `"error": str(e)` persisted into `storyboard.json` and returned on the `images` port (`adapters/storyboard.py:46`) | per-unit `error` is a `ProviderErrorPayload` (§31.5 rule 6) | 14.2 |
+| L4 | raw exception | `registry.py:135` `ValidationIssue(message=str(e))` and `:156` `HealthResult(message=str(e))` | already frozen by §22.5 / §21.1 as generic messages | 11.3 |
+| L5 | credential | `GET /api/settings/v2` and `GET /api/providers/*/settings` return unredacted `api_key` (§22.6) | `redacted_provider_settings` on both routes | 11.5 |
+| L6 | credential | provider settings reaching a result | `settings` are input-only; `provenance.resolved_settings_redacted` is the only echo (§31.3) | 11.4 |
+| L7 | filesystem path | `tts` ports carry absolute `wav_path` / `path` (`services.py:263`, `adapters/tts.py:15`), consumed by `adapters/timing.py:11` | `artifact_refs` are authoritative; absolute keys deprecated with an owner (§30.2) | 10.4 / 15.3 |
+| L8 | filesystem path | `scheduler.py:158` `ARTIFACT_MISSING: Staged artifact was not created: {staged}` | messages are basename-only (§34.4) | 11.4 |
+| L9 | provider response | remote `image_url` (`storyboard/routes.py:233`) and `urls` (`animator/routes.py:457,532`) cross into port payloads | dropped from results; downloaded files are the output (§32.4, §32.5) | 14.2 / 14.3 |
+| L10 | provider response | `scene_statuses` returned verbatim on the `images` port | replaced by `units[]`; `scene_statuses` stays inside the legacy status route only | 14.2 |
+
+Enforcement is mechanical, not by review: 11.4 adds a result/error validator that rejects
+absolute paths, sensitive keys, and oversized fields at the boundary, and a test asserts a
+provider raising `RuntimeError("key sk-abc123 at C:\\secret\\file.txt")` produces an execution
+record containing neither the key, the path, nor the class-specific text.
+
+Existing guarantees that already hold and must not regress: `Redactor` runs on every persisted
+record, SSE frame, and log entry (`scheduler.py:685-686`, `:731`, `:844`, `:875`);
+`_summarize` reduces payload strings to lengths (`scheduler.py:194-214`); a result whose
+redaction differs from itself is never cached (`scheduler.py:732-733`).
+
+## 37. Deltas this contract requires of shipped code
+
+Continues §28. Nothing below exists today.
+
+| # | delta | current state | owner |
+|---|---|---|---|
+| D22 | `providers_common/invocation.py` — `ProviderInvocation`, `CancellationToken`, `ProgressReporter`, `ProviderLogger` | only `AdapterContext` with two optional callables (`adapters/common.py:24-35`) | 11.4 |
+| D23 | `providers_common/results.py` — `ProviderResult`, `UnitResult`, provenance, `resolve_ref` | adapters return bare dicts + `with_artifacts` | 11.4 |
+| D24 | `providers_common/jobs.py` — one `JobHandle`/`JobStatus`/`JobState`, media-neutral `UnitResult` | duplicated dataclasses in two `base.py` files (§14.6) | 11.4 |
+| D25 | `providers_common/errors.py` — `ProviderError`, `ProviderCancelled`, the code catalog, `as_adapter_error()` | `AdapterError`, `SchedulerError`, `StoryServiceError`, bare `RuntimeError` | 11.4 |
+| D26 | single exception boundary that never copies `str(exc)` | `scheduler.py:889` copies it | 11.4 |
+| D27 | non-retryable errors stop the attempt loop | all failures consume `max_attempts` (`scheduler.py:770`) | 11.4 |
+| D28 | result/error egress validator (absolute paths, sensitive keys, size caps) | none | 11.4 |
+| D29 | progress rate limiting + monotonic `ready` | ad-hoc `_emit` per poll (`services.py:606-614`) | 11.4 / 14.1 |
+| D30 | five `providers/contract.py` request/result models; `DomainSpec.request_model`/`result_model` filled | fields left `None` in §19.1 | 13.1–13.4 / 14.2 / 14.3 / 15.1 |
+| D31 | poll cadence with jitter and a 3-strike poll-failure limit | poll exceptions swallowed forever (`services.py:624-625`) | 14.1 |
+| D32 | push correlation tuple + duplicate-status idempotence | none | 14.4 |
+| D33 | job persistence/rehydration for both visual domains | informal, animator only (§13.5) | 14.1 |
+| D34 | per-unit retry that reuses succeeded units | whole-node retry regenerates everything | 14.1 |
+| D35 | `POLL_TIMEOUT` replaces the ad-hoc `NODE_TIMEOUT` code | `NODE_TIMEOUT` is not in the §7 stable set | 11.4 / 14.1 |
+| D36 | cancellation raises `CANCELLED`, not `EXECUTION_CANCELLED` | a cancelled visual node records as `failed` (§35.1) | 11.4 |
+| D37 | one voice field in the TTS request | `voice` vs `tts_voice` chosen by a provider-id branch (P5) | 15.2 |
+| D38 | remote URLs dropped from storyboard/animator results | `image_url` / `urls` cross into ports | 14.2 / 14.3 |
+| D39 | `provenance` replaces the TTS-only `job_meta` and the hardcoded `"provider": "gemini"` (P33) | `job_meta` in TTS only; literal in story metadata | 11.4 / 13.3 |
+
+## 38. Phase 10.3 coverage assertion
+
+Frozen by this section: the shared invocation context with its identity, managed output
+directory, cancellation token, progress reporter, and redacted logger, plus its mapping to the
+existing `AdapterContext`; the versioned `ProviderResult` envelope with artifact rules,
+metadata and warning caps, provenance, and the prohibited-content list; exact request and
+result schemas for all five domains — `script`, `scene_blueprint`, `tts`, `storyboard`,
+`animator` — each mapped field-by-field onto the shape the current code produces, together
+with the `DomainSpec.request_model`/`result_model` paths left blank by 10.2; unambiguous
+partial results through a per-unit `UnitResult` keyed on the caller's index, with derived
+envelope status and the rule that zero produced units can never be success; one job contract
+replacing the two duplicated dataclasses, with a closed state machine whose five terminal
+states map one-to-one onto invocation outcomes so synchronous and asynchronous providers are
+indistinguishable to callers; poll cadence, push correlation, and job persistence; and
+`ProviderError` with a stable code catalog, fixed retryability classes, a mapping onto the §7
+workflow codes that adds none, and a single wrapping boundary that never copies raw exception
+text.
+
+Cancel, retry, and timeout are frozen end to end, including the six domain deadlines taken
+from today's values, the rule that a non-retryable error stops the attempt loop, and one
+defect found while freezing the contract: the visual adapters raise `EXECUTION_CANCELLED`,
+which the scheduler does not recognize as cancellation, so a cancelled Storyboard or Animator
+node is currently recorded as `failed` inside an execution the same scheduler marks
+`cancelled`. §36
+enumerates all ten current egress violations across the four prohibited classes with an owner
+each and a mechanical enforcement point, so no raw provider exception, credential, arbitrary
+filesystem path, or provider-specific response can reach a workflow record or an API response.
+Deferred by design to 10.4: legacy field/alias mapping tables, node `type_version` migrations,
+and the deterministic fixture set that makes these schemas testable without live credentials.
