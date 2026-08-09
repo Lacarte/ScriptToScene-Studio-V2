@@ -1,12 +1,6 @@
-import { ref, computed, readonly } from 'vue'
+import { ref, computed, readonly, watch } from 'vue'
 import { api } from '@/shared/api/client.js'
-
-// ---- Provider config ----
-const PROVIDER_URLS = {
-  midjourney: 'https://www.midjourney.com/imagine',
-  grok: 'https://grok.com/imagine',
-  'meta-ai': 'https://www.meta.ai/media',
-}
+import { useDomainProvider } from '@/features/providers/composables/useDomainProvider.js'
 
 const TYPE_COLORS = {
   video: '#4ECDC4',
@@ -16,18 +10,11 @@ const TYPE_COLORS = {
 
 // ---- Singleton state ----
 const scenes = ref([])
-const provider = ref('grok')
-const arguments_ = ref('')
 const aspectRatio = ref('9:16')
-const providerOptions = ref({
-  grok_mode: 'video',
-  grok_quality: '480p',
-  grok_duration: '6s',
-  model: 'default',
-  resolution: '1024x1024',
-  output_format: 'png',
-  auto_type: false,
-})
+// Per-run provider options, seeded from the selected provider's configured
+// values (step 12.4). The literal defaults that used to sit here spelled three
+// providers' option keys, two of which belonged to no registered provider.
+const providerOptions = ref({})
 
 const grabberRunning = ref(false)
 const grabberJobId = ref(null)
@@ -72,6 +59,36 @@ const progress = computed(() => {
 })
 
 export function useAssets() {
+  // The animator provider, its label, its own URL, and its capabilities all come
+  // from the catalog (step 12.4). This composable used to hold a `'grok'` ref
+  // and a three-entry URL table beside a four-entry dropdown in the view.
+  const animator = useDomainProvider('animator', { withSettings: true })
+
+  // A run starts from what the provider is configured with and may be tweaked
+  // for that run only; switching providers re-seeds rather than carrying one
+  // provider's option keys into another's request.
+  watch(
+    () => animator.settings.value,
+    (configured) => { providerOptions.value = { ...configured } },
+    { immediate: true },
+  )
+
+  function grabberPayload(projectId, sceneList) {
+    return {
+      project_id: projectId,
+      scenes: sceneList,
+      // The canonical id decides dispatch (§40.1 F3); the legacy field keeps
+      // its shape for anything still reading it (§40.3).
+      provider_override: animator.providerId.value,
+      provider: animator.legacyId.value,
+      provider_options: { ...providerOptions.value },
+      // Accepted by the endpoint and written to the job record; the route has
+      // always sent the empty string on to the extension.
+      arguments: '',
+      aspect_ratio: aspectRatio.value,
+    }
+  }
+
   // ---- Load scenes from scene generator result ----
   function loadScenes(data) {
     if (!data || !Array.isArray(data.scenes)) return
@@ -86,37 +103,25 @@ export function useAssets() {
     selectedScenes.value = new Set()
   }
 
-  function setProvider(p) {
-    provider.value = p
-  }
-
-  function setArguments(a) {
-    arguments_.value = a
-  }
-
   function setAspectRatio(ar) {
     aspectRatio.value = ar
   }
 
-  function setProviderOption(key, value) {
-    providerOptions.value = { ...providerOptions.value, [key]: value }
+  function setProviderOptions(values) {
+    providerOptions.value = { ...values }
   }
 
   // ---- Grabber ----
   async function startGrabber(projectId) {
     if (!scenes.value.length) return
 
-    const payload = {
-      project_id: projectId || `project_${Date.now()}`,
-      scenes: scenes.value.map(s => ({
+    const payload = grabberPayload(
+      projectId || `project_${Date.now()}`,
+      scenes.value.map(s => ({
         prompt: s.image_prompt || s.text_content || '',
         scene: s.index,
       })),
-      provider: provider.value,
-      arguments: arguments_.value,
-      aspect_ratio: aspectRatio.value,
-      ...providerOptions.value,
-    }
+    )
 
     try {
       const res = await api.post('/api/animator/grabber/start', { body: payload })
@@ -305,17 +310,13 @@ export function useAssets() {
     }
     sceneStatuses.value = updated
 
-    const payload = {
-      project_id: projectId || `project_${Date.now()}`,
-      scenes: selected.map(s => ({
+    const payload = grabberPayload(
+      projectId || `project_${Date.now()}`,
+      selected.map(s => ({
         prompt: s.image_prompt || s.text_content || '',
         scene: s.index,
       })),
-      provider: provider.value,
-      arguments: arguments_.value,
-      aspect_ratio: aspectRatio.value,
-      ...providerOptions.value,
-    }
+    )
 
     const res = await api.post('/api/animator/grabber/start', { body: payload })
     grabberRunning.value = true
@@ -350,10 +351,15 @@ export function useAssets() {
   return {
     // State
     scenes: readonly(scenes),
-    provider,
-    arguments: arguments_,
     aspectRatio,
     providerOptions,
+
+    // The selected animator provider, straight from the catalog
+    providerId: animator.providerId,
+    providerLabel: animator.label,
+    providerSchema: animator.schema,
+    providerOpenUrl: animator.openUrl,
+    providerSupports: animator.supports,
     grabberRunning: readonly(grabberRunning),
     grabberJobId: readonly(grabberJobId),
     sceneStatuses: readonly(sceneStatuses),
@@ -377,15 +383,12 @@ export function useAssets() {
     progress,
 
     // Constants
-    PROVIDER_URLS,
     TYPE_COLORS,
 
     // Functions
     loadScenes,
-    setProvider,
-    setArguments,
     setAspectRatio,
-    setProviderOption,
+    setProviderOptions,
     startGrabber,
     stopGrabber,
     pollStatus,

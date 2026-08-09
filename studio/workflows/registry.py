@@ -64,6 +64,11 @@ ASYNC_OPTION_SOURCES = {
     "tts_providers": OptionSourceSpec(cache="discovery", domain="tts"),
     "storyboard_providers": OptionSourceSpec(cache="discovery", domain="storyboard"),
     "animator_providers": OptionSourceSpec(cache="discovery", domain="animator"),
+    # Read by a storyboard provider's own `image_model` setting (§22.4). The
+    # Storyboard page used to fetch this list itself and render a bespoke
+    # `<select>` beside its webhook fields; step 12.4 moved the field into the
+    # provider that consumes it, and this is how the option list follows.
+    "storyboard_image_models": OptionSourceSpec(domain="storyboard"),
     "story_tones": OptionSourceSpec(),
     "style_templates": OptionSourceSpec(),
     "export_profiles": OptionSourceSpec(),

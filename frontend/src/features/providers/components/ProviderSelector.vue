@@ -7,6 +7,11 @@ const props = defineProps({
   domain: { type: String, required: true },
   label: { type: String, default: 'Provider' },
   description: { type: String, default: '' },
+  // `panel` is the Settings-page row. `inline` is the compact control group the
+  // legacy pages already lay out beside their own selects (step 12.4): same
+  // component, same behavior, their spacing. A second selector component is how
+  // the two surfaces would start to drift.
+  variant: { type: String, default: 'panel' },
 })
 
 const emit = defineEmits(['select', 'configure'])
@@ -76,7 +81,7 @@ watch(() => props.domain, () => catalog.loadCatalog(), { immediate: true })
 </script>
 
 <template>
-  <div class="provider-selector">
+  <div class="provider-selector" :class="`variant-${variant}`">
     <div class="selector-row">
       <div class="selector-info">
         <label class="selector-label">{{ label }}</label>
@@ -141,6 +146,44 @@ watch(() => props.domain, () => catalog.loadCatalog(), { immediate: true })
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+/* Inline: the label sits above a compact control group, matching the
+   `control-group` / `webhook-section` rhythm the legacy pages already use. */
+.variant-inline .selector-row {
+  display: block;
+}
+
+.variant-inline .selector-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted, #9ca3af);
+  margin-bottom: 8px;
+}
+
+.variant-inline .selector-controls {
+  gap: 6px;
+}
+
+.variant-inline .selector-select {
+  padding: 8px 30px 8px 12px;
+  font-size: 12px;
+  min-width: 150px;
+}
+
+.variant-inline .gear-btn,
+.variant-inline .health-btn {
+  height: 33px;
+}
+
+.variant-inline .gear-btn {
+  width: 33px;
+}
+
+.variant-inline .health-text {
+  font-size: 11px;
 }
 
 .selector-info {

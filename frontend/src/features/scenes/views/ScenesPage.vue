@@ -10,6 +10,7 @@ import { api } from '@/shared/api/client.js'
 import StylePicker from '../components/StylePicker.vue'
 import SceneCard from '../components/SceneCard.vue'
 import SceneTimeline from '../components/SceneTimeline.vue'
+import ProviderConfigurator from '@/features/providers/components/ProviderConfigurator.vue'
 
 defineOptions({ name: 'ScenesPage' })
 
@@ -348,6 +349,8 @@ function truncate(str, len = 45) {
     <!-- Generation Settings -->
     <section class="card">
       <label class="section-label">Generation Settings</label>
+
+      <ProviderConfigurator domain="scene_blueprint" label="Provider" variant="inline" />
 
       <StylePicker
         :templates="scenes.templates.value"

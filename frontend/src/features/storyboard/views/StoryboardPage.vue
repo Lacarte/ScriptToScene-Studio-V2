@@ -4,14 +4,15 @@ import { useRoute } from 'vue-router'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useProjectSync } from '@/shared/composables/useProjectSync.js'
-import { useSettings } from '@/features/settings/composables/useSettings.js'
+import { useDomainProvider } from '@/features/providers/composables/useDomainProvider.js'
+import ProviderConfigurator from '@/features/providers/components/ProviderConfigurator.vue'
+import { AVAILABLE } from '@/features/providers/availability.js'
 import { timeAgo } from '@/shared/utils/format.js'
 
 defineOptions({ name: 'StoryboardPage' })
 
 const route = useRoute()
 const toast = useToast()
-const { settings: _settings, update: _updateSetting } = useSettings()
 
 const projectId = ref(null)
 useProjectSync(projectId)
@@ -24,43 +25,50 @@ const history = ref([])
 const scenePickerOpen = ref(false)
 const scenePickerData = ref([])
 
-// Provider state — sourced from settings
-const storyboardProvider = computed(() => _settings.value['sts-storyboard-provider'] || 'gemini')
-function setProvider(val) {
-  _updateSetting('sts-storyboard-provider', val)
+// ── Provider (step 12.4) ──
+//
+// The page used to keep three stores: the selection in `app-config.json`, a
+// two-option `<select>` that could not see the third registered provider, and
+// the webhook URL, image model, and prompt prefix in `localStorage` behind
+// `v-if="provider === 'gemini'"` blocks. All three now come from the catalog and
+// from the selected provider's own settings schema, which is where the fields
+// were moved by 12.3.
+const storyboard = useDomainProvider('storyboard', { withSettings: true })
+
+// The `localStorage` keys those three fields used to live in. The map is by
+// *settings key*, so which provider owns a field is decided by whose schema
+// declares it, and adopting a value is a one-time move (§24.3's pattern).
+const LEGACY_LOCAL_KEYS = {
+  webhook_url: 'sts-storyboard-webhook-url',
+  image_model: 'sts-image-model',
+  prompt_prefix: 'sts-prompt-prefix',
 }
 
-// Prompt prefix (prepended to each prompt when using Gemini)
-const promptPrefix = ref(localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ')
-function setPromptPrefix(val) {
-  promptPrefix.value = val
-  localStorage.setItem('sts-prompt-prefix', val)
-}
+let legacyAdoptionDone = false
 
-// Webhook state
-const webhookEnabled = ref(true)
-const webhookUrl = ref('')
-const defaultWebhookUrl = ref('')
-let webhookLoaded = false
-
-// Image model (for webhook provider)
-const imageModel = ref(localStorage.getItem('sts-image-model') || '')
-const imageModelsConfig = ref({})
-const availableImageModels = computed(() => {
-  const cfg = imageModelsConfig.value || {}
-  const models = cfg['default']?.models || []
-  return models
-})
-function setImageModel(val) {
-  imageModel.value = val
-  if (val) localStorage.setItem('sts-image-model', val)
-  else localStorage.removeItem('sts-image-model')
-}
-async function loadImageModels() {
+async function adoptLegacyProviderSettings() {
+  const id = storyboard.providerId.value
+  if (legacyAdoptionDone || !id) return
+  const declared = storyboard.schema.value?.properties || {}
+  const patch = {}
+  for (const [key, legacyKey] of Object.entries(LEGACY_LOCAL_KEYS)) {
+    if (!(key in declared) || storyboard.settings.value[key]) continue
+    const stored = localStorage.getItem(legacyKey)
+    if (stored) patch[key] = stored
+  }
+  if (!Object.keys(patch).length) return
+  legacyAdoptionDone = true
   try {
-    imageModelsConfig.value = await api.get('/api/storyboard/image-models')
-  } catch (e) { /* ignore */ }
+    await storyboard.catalog.saveProviderSettings('storyboard', id, patch)
+    await storyboard.loadSettings()
+  } catch {
+    // A provider whose required fields are still empty rejects the patch. The
+    // user configures it through the gear; nothing is lost.
+  }
 }
+
+/** The prefix the selected provider declares, if it declares one at all. */
+const promptPrefix = computed(() => storyboard.settings.value.prompt_prefix || '')
 
 // Image settings
 const aspectRatio = ref(localStorage.getItem('sts-storyboard-aspect-ratio') || '9:16')
@@ -126,39 +134,6 @@ function onLightboxKey(e) {
 
 onMounted(() => window.addEventListener('keydown', onLightboxKey))
 onUnmounted(() => window.removeEventListener('keydown', onLightboxKey))
-
-// ── Webhook ──
-
-async function initWebhook() {
-  if (webhookLoaded) return
-  try {
-    const data = await api.get('/api/storyboard/webhook-url')
-    defaultWebhookUrl.value = data.url || ''
-  } catch (e) {
-    console.warn('[Storyboard] Failed to load webhook URL:', e.message)
-    defaultWebhookUrl.value = ''
-  }
-  const saved = localStorage.getItem('sts-storyboard-webhook-url')
-  webhookUrl.value = saved !== null ? saved : defaultWebhookUrl.value
-  const savedToggle = localStorage.getItem('sts-storyboard-webhook-enabled')
-  if (savedToggle === 'false') webhookEnabled.value = false
-  webhookLoaded = true
-}
-
-function toggleWebhook() {
-  webhookEnabled.value = !webhookEnabled.value
-  localStorage.setItem('sts-storyboard-webhook-enabled', webhookEnabled.value)
-}
-
-function saveWebhookUrl(url) {
-  webhookUrl.value = url
-  localStorage.setItem('sts-storyboard-webhook-url', url)
-}
-
-function resetWebhookUrl() {
-  webhookUrl.value = defaultWebhookUrl.value
-  localStorage.removeItem('sts-storyboard-webhook-url')
-}
 
 // ── Data loading ──
 
@@ -346,29 +321,54 @@ function saveEdit(scene) {
   toast.success(`Scene ${scene.index} prompt updated`)
 }
 
-async function grabScene(scene) {
-  const provider = storyboardProvider.value
-
-  if (provider === 'webhook') {
-    if (!webhookEnabled.value) { toast.warning('Enable the webhook first'); return }
-    const url = webhookUrl.value?.trim()
-    if (!url) { toast.warning('Enter a webhook URL'); return }
+/**
+ * Guard a run on the selected provider's availability rather than on a
+ * provider-specific field check.
+ *
+ * `needs_configuration` is precisely "a required setting is empty" (§21.5), so
+ * one check replaces "is the webhook enabled and does it have a URL" and covers
+ * every provider — including ones this page has never heard of.
+ */
+function providerReady() {
+  const id = storyboard.providerId.value
+  if (!id) {
+    toast.warning('No image provider is registered')
+    return false
   }
+  if (storyboard.catalog.availabilityOf('storyboard', id) !== AVAILABLE) {
+    toast.warning(`Configure ${storyboard.label.value} first`)
+    return false
+  }
+  return true
+}
+
+/**
+ * The legacy request shape, unchanged (§40.3): `provider` is still the string
+ * the routes compare against, and the two optional fields are still sent when
+ * the provider has them — they now come from its settings instead of from
+ * `localStorage`.
+ */
+function providerBody() {
+  const body = { provider: storyboard.legacyId.value }
+  const configured = storyboard.settings.value
+  if (configured.webhook_url) body.webhook_url = String(configured.webhook_url).trim()
+  if (configured.image_model) body.image_model = configured.image_model
+  return body
+}
+
+async function grabScene(scene) {
+  if (!providerReady()) return
 
   sceneStatuses.value[String(scene.index)] = { status: 'generating' }
   grabbing.value = true
 
   try {
     const body = {
+      ...providerBody(),
       project_id: projectId.value,
       scene: scene.index,
-      prompt: (provider === 'gemini' && promptPrefix.value ? promptPrefix.value : '') + scene.prompt,
+      prompt: promptPrefix.value + scene.prompt,
       aspect_ratio: aspectRatio.value,
-      provider,
-    }
-    if (provider === 'webhook') {
-      body.webhook_url = webhookUrl.value?.trim()
-      if (imageModel.value) body.image_model = imageModel.value
     }
 
     const res = await api.post('/api/storyboard/grab', { body })
@@ -377,7 +377,7 @@ async function grabScene(scene) {
       sceneStatuses.value[String(scene.index)] = { status: 'error' }
       return
     }
-    toast.success(`Scene ${scene.index} — generating via ${provider}...`)
+    toast.success(`Scene ${scene.index} — generating via ${storyboard.label.value}...`)
     startPolling()
   } catch (e) {
     toast.error(`Scene ${scene.index} failed: ${e.message}`)
@@ -386,31 +386,21 @@ async function grabScene(scene) {
 }
 
 async function grabAll() {
-  const provider = storyboardProvider.value
-
-  if (provider === 'webhook') {
-    if (!webhookEnabled.value) { toast.warning('Enable the webhook first'); return }
-    const url = webhookUrl.value?.trim()
-    if (!url) { toast.warning('Enter a webhook URL'); return }
-  }
+  if (!providerReady()) return
   if (!scenes.value.length) {
     toast.warning('No scenes loaded')
     return
   }
 
-  const pfx = provider === 'gemini' && promptPrefix.value ? promptPrefix.value : ''
+  const pfx = promptPrefix.value
   const scenesPayload = scenes.value.map(s => ({ scene: s.index, prompt: pfx + s.prompt }))
 
   try {
     const body = {
+      ...providerBody(),
       project_id: projectId.value,
       scenes: scenesPayload,
       aspect_ratio: aspectRatio.value,
-      provider,
-    }
-    if (provider === 'webhook') {
-      body.webhook_url = webhookUrl.value?.trim()
-      if (imageModel.value) body.image_model = imageModel.value
     }
 
     const res = await api.post('/api/storyboard/generate', { body })
@@ -418,7 +408,7 @@ async function grabAll() {
       toast.error(res.error)
       return
     }
-    toast.success(`Generating ${scenesPayload.length} images via ${provider}...`)
+    toast.success(`Generating ${scenesPayload.length} images via ${storyboard.label.value}...`)
     grabbing.value = true
     startPolling()
   } catch (e) {
@@ -478,10 +468,14 @@ watch(() => route.query.project, (pid) => {
   }
 })
 
+// One-time move of the three `localStorage` fields into the provider that owns
+// them, once its schema is known.
+watch(() => storyboard.settingsLoading.value, (loading) => {
+  if (!loading) adoptLegacyProviderSettings()
+})
+
 onMounted(async () => {
-  await initWebhook()
   await loadHistory()
-  await loadImageModels()
   if (projectId.value) loadProject()
 })
 
@@ -520,71 +514,16 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Provider Selector -->
+      <!-- Provider: the catalog dropdown, its state, and its settings form -->
       <div class="webhook-section">
-        <div class="webhook-header">
-          <span class="webhook-label">Image Provider</span>
-        </div>
-        <select class="aspect-select" style="margin-top:6px;" :value="storyboardProvider" @change="setProvider($event.target.value)">
-          <option value="gemini">Gemini Grabber</option>
-          <option value="webhook">Webhook (n8n)</option>
-        </select>
-      </div>
-
-      <!-- Webhook Config (only when webhook provider selected) -->
-      <div v-if="storyboardProvider === 'webhook'" class="webhook-section">
-        <div class="webhook-header">
-          <span class="webhook-label">Send to Webhook</span>
-          <button
-            class="toggle-track"
-            :class="{ on: webhookEnabled }"
-            @click="toggleWebhook()"
-          >
-            <span class="toggle-dot"></span>
-          </button>
-        </div>
-
-        <div v-if="webhookEnabled" class="webhook-url-row">
-          <input
-            type="text"
-            class="webhook-url-input"
-            :value="webhookUrl"
-            placeholder="Webhook URL..."
-            @input="saveWebhookUrl($event.target.value)"
-          />
-          <button class="action-btn" style="padding:6px 10px;font-size:10px;white-space:nowrap" @click="resetWebhookUrl()">Reset</button>
-        </div>
-        <p v-else class="setting-hint" style="font-style:italic">Webhook disabled — grabber won't send to n8n</p>
-
-        <!-- Image Model (webhook only) -->
-        <div v-if="availableImageModels.length > 1" style="margin-top:8px;">
-          <span class="webhook-label" style="font-size:10px;">Image Model</span>
-          <select class="aspect-select" style="margin-top:4px;" :value="imageModel" @change="setImageModel($event.target.value)">
-            <option value="">Auto ({{ availableImageModels[0]?.name || 'default' }})</option>
-            <option v-for="m in availableImageModels" :key="m.id" :value="m.id">
-              {{ m.name }}{{ m.price ? ` ($${m.price})` : '' }}
-            </option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Gemini Info (only when gemini provider selected) -->
-      <div v-if="storyboardProvider === 'gemini'" class="webhook-section">
-        <p class="setting-hint" style="color:var(--text-secondary);font-size:11px;line-height:1.5">
-          Prompts are sent via WebSocket to the <b style="color:var(--accent)">STS Gemini</b> Chrome extension.
-          Make sure <b>gemini.google.com</b> is open and the extension panel shows <b style="color:#34d399">Connected</b>.
+        <ProviderConfigurator
+          domain="storyboard"
+          label="Image Provider"
+          variant="inline"
+        />
+        <p v-if="storyboard.provider.value?.description" class="setting-hint" style="margin-top:8px">
+          {{ storyboard.provider.value.description }}
         </p>
-        <div style="margin-top:8px;">
-          <span class="webhook-label" style="font-size:10px;">Prompt Prefix</span>
-          <input
-            type="text"
-            class="webhook-url-input"
-            :value="promptPrefix"
-            placeholder="Prefix prepended to each prompt..."
-            @input="setPromptPrefix($event.target.value)"
-            style="margin-top:4px;"
-          />
-        </div>
       </div>
 
       <!-- Aspect Ratio -->
@@ -653,7 +592,7 @@ onUnmounted(() => {
         </div>
         <button
           class="gen-btn btn-grab-all"
-          :disabled="grabbing || !webhookEnabled"
+          :disabled="grabbing"
           @click="grabAll"
         >
           <template v-if="grabbing">
@@ -965,70 +904,15 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* ---- Webhook ---- */
+/* ---- Provider section ---- */
 .webhook-section {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
 }
-.webhook-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
 .webhook-label {
   font-size: 12px;
   color: var(--text-secondary);
-}
-.toggle-track {
-  width: 36px;
-  height: 20px;
-  border-radius: 10px;
-  background: var(--border);
-  border: none;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.2s;
-  padding: 0;
-}
-.toggle-track.on {
-  background: rgba(78, 205, 196, 0.3);
-}
-.toggle-dot {
-  display: block;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: transform 0.2s, background 0.2s;
-}
-.toggle-track.on .toggle-dot {
-  transform: translateX(16px);
-  background: var(--accent);
-}
-.webhook-url-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.webhook-url-input {
-  flex: 1;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--text);
-  background: var(--bg-darkest);
-  border: 1.5px solid var(--border);
-  border-radius: 8px;
-  outline: none;
-  transition: border-color 0.15s;
-}
-.webhook-url-input:focus {
-  border-color: var(--accent);
 }
 .setting-hint {
   font-size: 11px;

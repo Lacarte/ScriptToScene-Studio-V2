@@ -8,7 +8,6 @@ const props = defineProps({
   sceneIndex: { type: Number, required: true },
   status: { type: Object, default: () => ({}) },
   selected: { type: Boolean, default: false },
-  provider: { type: String, default: 'grok' },
   storyboardThumb: { type: String, default: null },
 })
 

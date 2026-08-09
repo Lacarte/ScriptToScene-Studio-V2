@@ -262,13 +262,22 @@ def grabber_start(data: GrabberStartRequest):
         "scenes": scene_list,
     }
 
+    # Per-run options, addressed by the provider's own settings-schema key names
+    # (contracts.md §40.2 O1). Step 12.4 made the Assets page render this form
+    # from provider metadata, so it now sends `provider_options` instead of the
+    # flat `grok_*` keys; a client still sending the flat keys keeps winning, so
+    # the endpoint contract is unchanged. Only what the request carries is read —
+    # saved settings never reach `automa_payload`, which is persisted under
+    # `output/` and may be archived (§22.6).
+    options = data.provider_options or {}
+
     # Pass Grok-specific options for Automa to configure the UI
     if provider_id == "grok_automa":
         request_data = request.get_json(silent=True) or {}
-        automa_payload["grok_mode"] = request_data.get("grok_mode", "video")
-        automa_payload["grok_quality"] = request_data.get("grok_quality", "480p")
-        automa_payload["grok_duration"] = request_data.get("grok_duration", "6s")
-        automa_payload["auto_type"] = request_data.get("auto_type", False)
+        automa_payload["grok_mode"] = request_data.get("grok_mode", options.get("mode", "video"))
+        automa_payload["grok_quality"] = request_data.get("grok_quality", options.get("quality", "480p"))
+        automa_payload["grok_duration"] = request_data.get("grok_duration", options.get("duration", "6s"))
+        automa_payload["auto_type"] = request_data.get("auto_type", options.get("auto_type", False))
 
     # Per-scene status tracking — preserve existing statuses for scenes not
     # being resent so that already-completed scenes keep their "ready" state.
@@ -296,10 +305,10 @@ def grabber_start(data: GrabberStartRequest):
     # Store Kie AI generation options for the background thread
     if provider_id == "kie_ai":
         job["_kie_ai_options"] = {
-            "model": data.model or KIE_AI_MODEL,
+            "model": data.model or options.get("model") or KIE_AI_MODEL,
             "aspect_ratio": data.aspect_ratio or "9:16",
-            "resolution": data.resolution or "1",
-            "output_format": data.output_format or "jpg",
+            "resolution": data.resolution or options.get("resolution") or "1",
+            "output_format": data.output_format or options.get("output_format") or "jpg",
         }
         # Merge the portable half of the provider settings only: this job is
         # persisted to grabber_job.json under output/ and may be archived, so a

@@ -1598,6 +1598,72 @@ workflow inspector; existing defaults and user settings load correctly; legacy r
 their endpoint contract; and adding a fixture provider makes it selectable on both surfaces without
 editing either surface.
 
+#### Step 12.4 review status — 2026-08-09
+
+- **Complete.** All five legacy surfaces now read their provider from
+  `GET /api/providers` and configure it through the same modal the workflow inspector uses.
+  The assembly is one component — `ProviderConfigurator.vue` (selector + modal + form) —
+  because copying the Settings page's three-component wiring onto five pages is how five
+  surfaces end up with four behaviors. `ProviderSelector.vue` gained a `variant` prop rather
+  than a sibling component, so the compact page rows and the Settings row cannot drift.
+- §24.3 rule 3 is implemented where it belongs, in the catalog store rather than per page:
+  `selectedProvider()` falls back through the retired `app-config.json` key before the domain
+  default, and `selectProvider()` mirrors the write back to it. The mirror matters more than
+  the read — `usePipeline`, `useProviderTabs`, and `/api/pipeline/preflight` still read those
+  keys and are owned by 14.x/16.1, so without it a selection made in the modal and a selection
+  made on a page would diverge on the next write. A failed mirror never fails the selection.
+- **Adjustment recorded — the catalog ships `legacy_selection_key` per domain.** The alternative
+  was a three-entry `domain → key` map in JavaScript, which is the mapping §24.3 exists to
+  delete; `DomainSpec` already holds it, and a settings *key name* is browser-safe by the same
+  argument that makes `requires` safe (§25). 16.1 removes the field and every reader with it.
+- **Adjustment recorded — the legacy wire spelling is `aliases[0]`.** §40.3's output column is
+  not carried on the manifest, and `POST /api/storyboard/grab` still compares against it
+  (P25). A manifest lists its retired identities in `aliases`, so the first one *is* that
+  string; a pytest test asserts this reproduces the frozen table for all seven shipped
+  providers, so a manifest that reorders its aliases fails rather than silently changing a
+  request. Adding a field to the frozen §20.1 manifest was rejected as the larger change.
+- Assets: the four-entry dropdown is gone. Two of its entries (`midjourney`, `meta-ai`) were
+  not providers at all, and the `arguments` field they gated was dead — the route compares a
+  `ProviderInstance` to the string `"midjourney"`, so it has always sent `""`. The Grok/Kie
+  option blocks are now one `ProviderSettingsForm` over the selected provider's schema minus
+  its secrets, and the page sends `provider_options` under the provider's own key names. The
+  route reads them with the flat `grok_*` keys still winning, so an un-migrated client is
+  unaffected — the one backend behavior change is additive.
+- **Adjustment recorded — three literals moved into the provider packages they describe.**
+  `grok_automa` declares `open_url` (the page the extension drives) and the `image_to_video`
+  capability that replaces `provider === 'grok'` around the storyboard hand-off; `kie_ai`
+  declares its model dropdown and an `output_format` field that had only ever existed as a page
+  widget, defaulted to `png` to preserve today's value. The route half of the animator branches
+  stays with 14.3.
+- **Defect found and fixed while removing that URL table.** It existed in three places, and the
+  third — `PipelinePage.handleRegenerateAssets` — indexed it by `assets.provider.value`, which
+  the catalog makes a provider *object*. Left as it was, a regenerate would silently have
+  stopped opening any page at all. All three now read `open_url`.
+- Storyboard: the two-option `<select>` could not see `wavespeed_direct` at all, and its
+  webhook URL, image model, and prompt prefix lived in `localStorage` behind blocks gated on
+  provider ids. All three are provider settings now, with a one-time adoption of any value left
+  in the old keys — keyed by *settings key*, so whose schema declares a field decides who owns
+  it. The run guard is `availability !== available`, which is exactly "a required setting is
+  empty" (§21.5) and covers providers this page has never heard of.
+- **Adjustment recorded — `storyboard_image_models` is a new option source.** Moving
+  `image_model` into `wavespeed_webhook` would have cost the priced model dropdown the page
+  fetched itself; §22.4 says a provider's dynamic list belongs in `ui.options_source`, and 12.2
+  built the machinery. The allowlist/resolver parity assert and its test are untouched.
+- TTS, Story/Script, and Scene Blueprint gained a selector where they had none — the first two
+  had no way to change a provider at all, and the TTS subtitle named an engine. Their request
+  payloads are unchanged: all three resolve the provider server-side from the selection, which
+  is now authoritative for them.
+- **Deferred as already assigned:** the per-engine generation and voice-routing branches in
+  `useTts.js` / `usePipelineForm.js` / `VoicePicker.vue` (P36–P39, 15.2); the animator and
+  storyboard dispatch branches (P13–P16, P24, P25, 14.2/14.3); `useProviderTabs.js` and
+  `usePipeline.js`, which still read the legacy keys the mirror now keeps correct (14.4/16.1);
+  deleting the three keys from `useSettings.DEFAULTS` (P35, 16.1). A guard test lists the files
+  that are now clean and states which two are deliberately absent and why.
+- Verification passes with 601 backend tests (10 live-provider tests skipped, 239 subtests),
+  266 frontend tests across 36 files, the Vite production build, and the generated-document
+  drift check. Three guards were mutation-checked: dropping the legacy read-through, blanking
+  `legacy_selection_key`, and disabling the per-run secret filter each fail their tests.
+
 ### 12.5 No-node-edit extensibility proof and phase gate
 Create a test-only provider package for each execution shape needed by the platform (sync artifact,
 sync document, async multi-asset). Discover it normally, expose it through the API/UI, configure it on

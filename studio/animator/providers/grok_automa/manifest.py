@@ -16,8 +16,15 @@ def manifest() -> ProviderManifest:
             "single_scene": True,
             "batch": True,
             "push_callbacks": True,
+            # Declared by step 12.4 so the Assets page can offer the
+            # storyboard-to-video hand-off without asking *which* provider it is
+            # talking to (contracts.md §20.4). The route half stays with 14.3.
+            "image_to_video": True,
         },
-        open_url=None,
+        # The page the user must have open for the extension to drive. It was a
+        # literal in `AssetsPage.vue` and `useAssets.js` until 12.4; a provider's
+        # own URL belongs in its manifest (§20.1).
+        open_url="https://grok.com/imagine",
         # `midjourney` is the third legacy wire value normalized here today
         # (animator/schemas.py:30-36, contracts.md §14.4).
         aliases=["grok", "midjourney"],

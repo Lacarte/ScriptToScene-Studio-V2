@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { api } from '@/shared/api/client.js'
 import { apiErrorText } from '@/shared/api/errors.js'
 import { invalidateOptionSources } from '@/shared/composables/useOptionSources.js'
+import { useSettings } from '@/features/settings/composables/useSettings.js'
 import { AVAILABLE, UNAVAILABLE } from '../availability.js'
 
 /**
@@ -147,12 +148,52 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     return domainEntry(domain)?.selected ?? null
   }
 
+  // ── The retired `app-config.json` selection keys (§24.3) ───────────────
+  //
+  // The catalog ships the *key name* per domain, so this file names no key and
+  // no provider. Both helpers disappear when 16.1 stops serving the field.
+
+  function legacySelectionKey(domain) {
+    return domainEntry(domain)?.legacy_selection_key || null
+  }
+
+  /**
+   * §24.3 rule 3 — read through to the legacy key for one release.
+   *
+   * The backend migration adopts the legacy value the first time a domain has
+   * no explicit `selected_provider`, but a browser that loads before that
+   * migration has run (or against a settings file it did not write) would
+   * otherwise silently show the domain default instead of the provider the
+   * user has been using. It is a *fallback*: an explicit `selected` always wins.
+   */
+  function legacySelectedId(domain) {
+    const key = legacySelectionKey(domain)
+    if (!key) return null
+    return useSettings().settings.value[key] || null
+  }
+
+  /**
+   * The value this provider is still spelled as on the legacy wire (§40.3,
+   * output column) — what `POST /api/storyboard/grab` and friends compare
+   * against until 16.1 removes the internal hop.
+   *
+   * A manifest lists its retired identities in `aliases`, so the first alias is
+   * exactly that string; a provider that never had another name is already
+   * canonical on the wire.
+   */
+  function legacyIdFor(domain, providerId) {
+    const provider = resolveProvider(domain, providerId)
+    if (!provider) return providerId || ''
+    return (provider.aliases || [])[0] || provider.id
+  }
+
   /**
    * The provider a domain will actually use, following the frozen precedence
-   * chain (§24.1) for the two rules a browser can evaluate: the stored
-   * selection, then the domain default. The last two steps are the recovery
-   * path for a selection whose provider was uninstalled — falling back to a
-   * usable provider beats rendering an empty dropdown over a populated domain.
+   * chain (§24.1) for the rules a browser can evaluate: the stored selection,
+   * the retired legacy key, then the domain default. The last two steps are the
+   * recovery path for a selection whose provider was uninstalled — falling back
+   * to a usable provider beats rendering an empty dropdown over a populated
+   * domain.
    */
   function selectedProvider(domain) {
     const entry = domainEntry(domain)
@@ -160,6 +201,7 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     const list = entry.providers || []
     return (
       resolveProvider(domain, entry.selected) ||
+      resolveProvider(domain, legacySelectedId(domain)) ||
       resolveProvider(domain, entry.default_provider) ||
       list.find((p) => p.availability === AVAILABLE) ||
       list[0] ||
@@ -232,11 +274,32 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     // context-free caller follows the selection (§23.4). Keeping the old list
     // is how one provider's voices end up offered for another provider's node.
     invalidateOptionSources({ domain })
+    await mirrorLegacySelection(domain, result.selected)
     return {
       switched: true,
       availability: result.availability,
       needsConfiguration: result.availability !== AVAILABLE,
       issues: result.issues || [],
+    }
+  }
+
+  /**
+   * Keep the retired key in step until 16.1 deletes it.
+   *
+   * `usePipeline`, `useProviderTabs`, and `/api/pipeline/preflight` still read
+   * it, so a selection made anywhere in the app has to land there too or the
+   * two stores diverge on the next write — the exact failure §24.3 exists to
+   * prevent. The legacy value is written, not the canonical id, because that is
+   * what those readers put on the wire (§40.3).
+   */
+  async function mirrorLegacySelection(domain, providerId) {
+    const key = legacySelectionKey(domain)
+    if (!key) return
+    try {
+      await useSettings().update(key, legacyIdFor(domain, providerId))
+    } catch {
+      // A stale mirror is recoverable; a failed selection is not. The write
+      // that matters already succeeded.
     }
   }
 
@@ -336,6 +399,8 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     resolveProvider,
     selectedId,
     selectedProvider,
+    legacySelectionKey,
+    legacyIdFor,
     availabilityOf,
     capabilitiesOf,
     supports,

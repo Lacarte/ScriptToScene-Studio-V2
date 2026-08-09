@@ -1,11 +1,15 @@
 <script setup>
 import { computed } from 'vue'
+import ProviderConfigurator from '@/features/providers/components/ProviderConfigurator.vue'
+import ProviderSettingsForm from '@/features/providers/components/ProviderSettingsForm.vue'
+import { isSecretField } from '@/shared/schema/providerSettings.js'
 
 defineOptions({ name: 'GrabberControls' })
 
 const props = defineProps({
-  provider: { type: String, default: 'grok' },
-  arguments: { type: String, default: '' },
+  providerId: { type: String, default: '' },
+  providerLabel: { type: String, default: '' },
+  providerSchema: { type: Object, default: () => ({}) },
   aspectRatio: { type: String, default: '9:16' },
   providerOptions: { type: Object, default: () => ({}) },
   grabberRunning: { type: Boolean, default: false },
@@ -15,30 +19,41 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'update:provider',
-  'update:arguments',
   'update:aspectRatio',
-  'update:providerOption',
+  'update:providerOptions',
   'start',
   'stop',
   'select-all',
   'select-pending',
   'select-none',
   'resend-selected',
-  'update:autoType',
   'validate-and-build',
 ])
 
-const providers = [
-  { value: 'grok', label: 'Grok' },
-  { value: 'midjourney', label: 'Midjourney' },
-  { value: 'meta-ai', label: 'Meta AI (Imagine)' },
-  { value: 'kie-ai', label: 'Kie AI' },
-]
+/**
+ * The per-run form is the selected provider's own settings schema minus its
+ * secrets (step 12.4). It replaces three hand-written blocks, each gated on a
+ * literal provider id — one of which named an alias rather than a provider
+ * (contracts.md §40.3 rule 2) and so could never render at all.
+ *
+ * Secrets are dropped rather than masked: these values travel in the grabber
+ * request and are persisted with the job, so a credential belongs behind the
+ * gear, in the settings modal, and nowhere on this page (§22.6). Nothing is
+ * required here either — a per-run override may always be left alone.
+ */
+const perRunSchema = computed(() => {
+  const properties = props.providerSchema?.properties || {}
+  const visible = Object.fromEntries(
+    Object.entries(properties).filter(([key, prop]) => !isSecretField(key, prop)),
+  )
+  return { ...props.providerSchema, properties: visible, required: [] }
+})
 
-const showMidjourneyArgs = computed(() => props.provider === 'midjourney')
-const showGrokOptions = computed(() => props.provider === 'grok')
-const showKieOptions = computed(() => props.provider === 'kie-ai')
+const hasPerRunOptions = computed(() => Object.keys(perRunSchema.value.properties).length > 0)
+
+const startLabel = computed(() =>
+  props.providerLabel ? `Send to ${props.providerLabel}` : 'Start Grabber',
+)
 
 const progressText = computed(() => {
   const p = props.progress
@@ -54,28 +69,7 @@ const progressPercent = computed(() => props.progress.percent)
     <!-- Controls row -->
     <div class="controls-row">
       <div class="control-group">
-        <label class="control-label">Provider</label>
-        <select
-          class="control-select"
-          :value="provider"
-          @change="emit('update:provider', $event.target.value)"
-        >
-          <option v-for="p in providers" :key="p.value" :value="p.value">
-            {{ p.label }}
-          </option>
-        </select>
-      </div>
-
-      <!-- Midjourney arguments -->
-      <div v-if="showMidjourneyArgs" class="control-group">
-        <label class="control-label">Arguments</label>
-        <input
-          type="text"
-          class="control-select"
-          placeholder="--c 70 --v 7 --ar 9:16"
-          :value="arguments"
-          @input="emit('update:arguments', $event.target.value)"
-        />
+        <ProviderConfigurator domain="animator" label="Provider" variant="inline" />
       </div>
 
       <div class="control-group">
@@ -90,81 +84,17 @@ const progressPercent = computed(() => props.progress.percent)
           <option value="1:1">1:1 (Square)</option>
         </select>
       </div>
+    </div>
 
-      <!-- Grok options -->
-      <template v-if="showGrokOptions">
-        <div class="control-group">
-          <label class="control-label">Mode</label>
-          <select
-            class="control-select"
-            :value="providerOptions.grok_mode || 'video'"
-            @change="emit('update:providerOption', 'grok_mode', $event.target.value)"
-          >
-            <option value="video">Video</option>
-            <option value="image">Image</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label">Quality</label>
-          <select
-            class="control-select"
-            :value="providerOptions.grok_quality || '480p'"
-            @change="emit('update:providerOption', 'grok_quality', $event.target.value)"
-          >
-            <option value="480p">480p</option>
-            <option value="720p">720p</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label">Duration</label>
-          <select
-            class="control-select"
-            :value="providerOptions.grok_duration || '6s'"
-            @change="emit('update:providerOption', 'grok_duration', $event.target.value)"
-          >
-            <option value="6s">6s</option>
-            <option value="10s">10s</option>
-          </select>
-        </div>
-      </template>
-
-      <!-- Kie AI options -->
-      <template v-if="showKieOptions">
-        <div class="control-group">
-          <label class="control-label">Model</label>
-          <select
-            class="control-select"
-            :value="providerOptions.model || 'google/nano-banana'"
-            @change="emit('update:providerOption', 'model', $event.target.value)"
-          >
-            <option value="google/nano-banana">Nano Banana — $0.02</option>
-            <option value="nano-banana-2">Nano Banana 2 — $0.04</option>
-            <option value="nano-banana-pro">Nano Banana Pro — $0.09</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label">Resolution</label>
-          <select
-            class="control-select"
-            :value="providerOptions.resolution || '1'"
-            @change="emit('update:providerOption', 'resolution', $event.target.value)"
-          >
-            <option value="1">1K</option>
-            <option value="2">2K</option>
-          </select>
-        </div>
-        <div class="control-group">
-          <label class="control-label">Format</label>
-          <select
-            class="control-select"
-            :value="providerOptions.output_format || 'jpg'"
-            @change="emit('update:providerOption', 'output_format', $event.target.value)"
-          >
-            <option value="jpg">JPG</option>
-            <option value="png">PNG</option>
-          </select>
-        </div>
-      </template>
+    <!-- Per-run provider options, rendered from the provider's own schema -->
+    <div v-if="hasPerRunOptions" class="per-run-options">
+      <ProviderSettingsForm
+        :model-value="providerOptions"
+        :schema="perRunSchema"
+        domain="animator"
+        :provider-id="providerId"
+        @update:model-value="(val) => emit('update:providerOptions', val)"
+      />
     </div>
 
     <!-- Grabber + Progress row -->
@@ -180,7 +110,7 @@ const progressPercent = computed(() => props.progress.percent)
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        {{ provider === 'grok' ? 'Send to Grok' : 'Start Grabber' }}
+        {{ startLabel }}
       </button>
       <button
         v-else
@@ -192,15 +122,6 @@ const progressPercent = computed(() => props.progress.percent)
         </svg>
         Stop Grabber
       </button>
-
-      <label class="auto-type-toggle">
-        <input
-          type="checkbox"
-          :checked="providerOptions.auto_type"
-          @change="emit('update:autoType', $event.target.checked)"
-        />
-        <span>Auto&#x2011;type</span>
-      </label>
 
       <span class="progress-text">{{ progressText }}</span>
 
@@ -350,21 +271,12 @@ const progressPercent = computed(() => props.progress.percent)
   opacity: 0.9;
 }
 
-.auto-type-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-}
-
-.auto-type-toggle input {
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.auto-type-toggle span {
-  font-size: 11px;
-  color: var(--text-muted);
+.per-run-options {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-darkest);
 }
 
 .progress-text {

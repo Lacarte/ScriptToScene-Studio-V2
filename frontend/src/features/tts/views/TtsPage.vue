@@ -7,11 +7,16 @@ import { STYLE_NAMES } from '@/shared/data/styleNames.js'
 import VoiceSelector from '../components/VoiceSelector.vue'
 import NowPlaying from '../components/NowPlaying.vue'
 import HistoryCard from '../components/HistoryCard.vue'
+import ProviderConfigurator from '@/features/providers/components/ProviderConfigurator.vue'
+import { useDomainProvider } from '@/features/providers/composables/useDomainProvider.js'
 
 defineOptions({ name: 'TtsPage' })
 
 const tts = useTts()
 const toast = useToast()
+// The page had no way to change the engine and named one in its subtitle; both
+// now come from the catalog (step 12.4).
+const ttsProvider = useDomainProvider('tts')
 
 const voiceSectionOpen = ref(false)
 
@@ -216,9 +221,12 @@ const genButtonLabel = computed(() => {
         <div class="title-row">
           <h2 class="page-title">Text to Speech</h2>
         </div>
-        <p class="page-subtitle">Kokoro TTS with 50+ voices and voice blending</p>
+        <p class="page-subtitle">
+          {{ ttsProvider.label.value || 'Text to speech' }} — narration, voices, and voice blending
+        </p>
       </div>
       <div class="model-status">
+        <ProviderConfigurator domain="tts" label="Engine" variant="inline" />
         <span v-if="tts.modelReady.value" class="status-text status-text--ready">Model ready</span>
         <template v-else>
           <span v-if="tts.progressText.value" class="status-text status-text--downloading">{{ tts.progressText.value }}</span>
@@ -512,6 +520,9 @@ const genButtonLabel = computed(() => {
 }
 
 .model-status {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
   padding-top: 6px;
   font-size: 11px;
   font-family: "JetBrains Mono", monospace;

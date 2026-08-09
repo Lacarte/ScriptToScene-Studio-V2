@@ -1,6 +1,7 @@
 import { ref, watch, computed } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useSettings } from '@/features/settings/composables/useSettings.js'
+import { useDomainProvider } from '@/features/providers/composables/useDomainProvider.js'
 
 // ── Singleton state ──
 
@@ -87,11 +88,18 @@ function loadInworldVoices() {
   })
 }
 
-// Computed: active provider from settings
-const ttsProvider = computed(() => {
-  const { settings } = useSettings()
-  return settings.value['sts-tts-provider'] || 'kokoro'
-})
+// The selected TTS provider, from the catalog (step 12.4). This used to read the
+// retired `app-config.json` key directly, so the pipeline and the provider modal
+// could disagree about which engine a run would use. The per-provider voice
+// routing below is 15.2's. Resolved on first use: this module is imported before
+// Pinia is active.
+let _ttsDomain = null
+function ttsDomain() {
+  if (!_ttsDomain) _ttsDomain = useDomainProvider('tts')
+  return _ttsDomain
+}
+
+const ttsProvider = computed(() => ttsDomain().providerId.value)
 
 // Computed: voice getter/setter that delegates to the active provider's ref
 const voice = computed({

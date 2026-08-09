@@ -20,8 +20,11 @@ const toast = useToast()
 const staging = useStagingStore()
 const {
   scenes,
-  provider,
-  arguments: args,
+  providerId,
+  providerLabel,
+  providerSchema,
+  providerOpenUrl,
+  providerSupports,
   aspectRatio,
   providerOptions,
   grabberRunning,
@@ -40,10 +43,8 @@ const {
   progress,
   TYPE_COLORS,
   loadScenes,
-  setProvider,
-  setArguments,
   setAspectRatio,
-  setProviderOption,
+  setProviderOptions,
   startGrabber,
   stopGrabber,
   redownload,
@@ -398,45 +399,40 @@ async function pickFromSceneHistory() {
   }
 }
 
-// Provider URLs for auto-open
-const PROVIDER_URLS = {
-  midjourney: 'https://www.midjourney.com/imagine',
-  grok: 'https://grok.com/imagine',
-  'meta-ai': 'https://www.meta.ai/media',
-}
-
 // Grabber actions
 async function onStart() {
   if (!projectId.value) projectId.value = `project_${Date.now()}`
+  const name = providerLabel.value || 'the provider'
+  // A provider that needs a page open declares it (`open_url`); one that runs
+  // server-side declares nothing and nothing is opened. That used to be a
+  // three-entry URL table matched against a literal id (step 12.4).
+  const url = providerOpenUrl.value
   try {
-    // For Grok: open the page first so Automa can load and connect
-    if (provider.value === 'grok') {
-      window.open('https://grok.com/imagine', 'sts-provider-tab')
-    }
+    // Open first so the extension can load and connect before the job lands.
+    if (url) window.open(url, 'sts-provider-tab')
 
     await startGrabber(projectId.value)
 
-    // For Grok with storyboard: also submit animation via WebSocket
-    if (provider.value === 'grok' && hasStoryboardImages.value) {
+    // Providers that turn storyboard frames into video take the second hop —
+    // a declared capability, not a provider name (contracts.md §20.4).
+    if (providerSupports('image_to_video') && hasStoryboardImages.value) {
       try {
         const result = await api.post('/api/animator/submit-storyboard', {
           body: {
             project_id: projectId.value,
             mode: 'imageToVideo',
-            duration: providerOptions.value?.grok_duration || '6s',
+            duration: providerOptions.value?.duration || '6s',
             aspect_ratio: aspectRatio.value,
           },
         })
-        toast.success(`Sent ${result.total} scenes to Grok`)
+        toast.success(`Sent ${result.total} scenes to ${name}`)
       } catch (e) {
         toast.warn(`Grabber started but storyboard animation failed: ${e.message}`)
       }
-    } else if (provider.value !== 'grok') {
-      toast.success('Grabber started.')
-      const url = PROVIDER_URLS[provider.value]
-      if (url) window.open(url, 'sts-provider-tab')
+    } else if (url) {
+      toast.success(`Grabber started — waiting for ${name} to connect`)
     } else {
-      toast.success('Grabber started — waiting for Grok to connect')
+      toast.success('Grabber started.')
     }
   } catch {
     toast.error('Failed to start grabber.')
@@ -692,19 +688,17 @@ onMounted(async () => {
     <!-- Controls -->
     <GrabberControls
       v-if="sceneCount"
-      :provider="provider"
-      :arguments="args"
+      :provider-id="providerId"
+      :provider-label="providerLabel"
+      :provider-schema="providerSchema"
       :aspect-ratio="aspectRatio"
       :provider-options="providerOptions"
       :grabber-running="grabberRunning"
       :progress="progress"
       :selected-count="selectedCount"
       :scene-count="sceneCount"
-      @update:provider="setProvider"
-      @update:arguments="setArguments"
       @update:aspect-ratio="setAspectRatio"
-      @update:provider-option="(k, v) => setProviderOption(k, v)"
-      @update:auto-type="(v) => setProviderOption('auto_type', v)"
+      @update:provider-options="setProviderOptions"
       @start="onStart"
       @stop="onStop"
       @select-all="selectAll"
@@ -725,7 +719,6 @@ onMounted(async () => {
         :scene-index="scene.index"
         :status="sceneStatuses[scene.index] || {}"
         :selected="selectedScenes.has(scene.index)"
-        :provider="provider"
         :storyboard-thumb="storyboardThumbs[scene.index] || null"
         @toggle-select="toggleSelect"
         @edit-prompt="editPrompt"

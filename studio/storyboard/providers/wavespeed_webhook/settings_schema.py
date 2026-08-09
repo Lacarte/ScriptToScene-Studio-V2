@@ -19,8 +19,12 @@ def settings_schema() -> dict:
                 "label": "Image Model",
                 "description": "Optional model override (leave empty for default)",
                 "default": "",
+                # The list, with its prices, was fetched and rendered by the
+                # Storyboard page itself until step 12.4. §22.4 puts it here,
+                # with the provider that consumes the value.
                 "ui": {
-                    "type": "text",
+                    "type": "dropdown",
+                    "options_source": "storyboard_image_models",
                 },
             },
         },

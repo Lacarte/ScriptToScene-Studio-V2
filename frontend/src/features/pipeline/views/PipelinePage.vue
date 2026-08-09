@@ -18,6 +18,7 @@ import { lastPickedStory } from '@/shared/composables/useRandomStory.js'
 import { formatElapsed } from '@/shared/utils/format.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useDoneSound } from '@/shared/composables/useDoneSound.js'
+import ProviderConfigurator from '@/features/providers/components/ProviderConfigurator.vue'
 
 defineOptions({ name: 'PipelinePage' })
 
@@ -1324,12 +1325,6 @@ function retryFromHistory(index) {
   nextTick(() => retry())
 }
 
-const PROVIDER_URLS = {
-  grok: 'https://grok.com/imagine',
-  midjourney: 'https://www.midjourney.com/imagine',
-  'meta-ai': 'https://www.meta.ai/media',
-}
-
 async function handleRegenerateAssets(projectId) {
   // 1. Check if scenes exist for this project
   let sceneData
@@ -1357,9 +1352,10 @@ async function handleRegenerateAssets(projectId) {
     return
   }
 
-  // 4. Open the provider website
-  const providerUrl = PROVIDER_URLS[assets.provider.value]
-  if (providerUrl) window.open(providerUrl, 'sts-provider-tab')
+  // 4. Open the provider's own page, if it needs one open (step 12.4)
+  if (assets.providerOpenUrl.value) {
+    window.open(assets.providerOpenUrl.value, 'sts-provider-tab')
+  }
 
   // 5. Navigate to the assets page
   router.push({ path: '/assets', query: { project: projectId } })
@@ -1716,6 +1712,9 @@ function logStepLabel(step) {
             <!-- "Run Pipeline generates first" toggle removed -->
           </div>
           <div class="gen-form">
+            <div class="gen-group">
+              <ProviderConfigurator domain="script" label="Provider" variant="inline" />
+            </div>
             <div class="gen-group">
             <label class="control-label">Language</label>
             <select v-model="story.storyLanguage.value" class="input-field control-select">

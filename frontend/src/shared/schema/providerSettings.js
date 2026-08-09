@@ -108,3 +108,24 @@ export function withoutSecrets(values, schema) {
   }
   return kept
 }
+
+/**
+ * The values a *caller* should act on: schema defaults overlaid with what is
+ * stored, secrets removed.
+ *
+ * A legacy page needs the configured value of a non-secret field — the webhook
+ * URL to post to, the prompt prefix to prepend — and an unsaved provider must
+ * still behave like its declared defaults, exactly as the un-migrated page's
+ * own `|| 'default'` expressions did. Secrets are dropped rather than passed
+ * through: a page has no use for one, and what it would receive is the
+ * redaction sentinel anyway (§22.6).
+ */
+export function effectiveSettings(schema, stored) {
+  const props = schema?.properties || {}
+  const values = {}
+  for (const [key, prop] of Object.entries(props)) {
+    if (isSecretField(key, prop)) continue
+    if (prop?.default !== undefined) values[key] = prop.default
+  }
+  return { ...values, ...withoutSecrets(stored, schema) }
+}

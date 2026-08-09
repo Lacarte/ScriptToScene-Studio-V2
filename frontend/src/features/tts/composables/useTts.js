@@ -2,7 +2,7 @@ import { ref, readonly, computed, watch } from 'vue'
 import { api } from '@/shared/api/client.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { timeAgo, fmtTime } from '@/shared/utils/format.js'
-import { useSettings } from '@/features/settings/composables/useSettings.js'
+import { useDomainProvider } from '@/features/providers/composables/useDomainProvider.js'
 
 // ── Constants (extracted to tts/data/voiceData.js) ──
 export {
@@ -137,9 +137,16 @@ async function downloadModel() {
   })
 }
 
+// The selected TTS provider, from the catalog (step 12.4). Resolved on first
+// use: this module is imported before Pinia is active.
+let _ttsDomain = null
+function ttsDomain() {
+  if (!_ttsDomain) _ttsDomain = useDomainProvider('tts')
+  return _ttsDomain
+}
+
 function _ttsProvider() {
-  const { settings } = useSettings()
-  return settings.value['sts-tts-provider'] || 'kokoro'
+  return ttsDomain().providerId.value
 }
 
 async function loadVoices() {
@@ -656,9 +663,8 @@ export function useTts() {
     Promise.all([checkModel(), loadVoices(), loadHistory()])
       .finally(() => { initializing.value = false })
 
-    // Reload voice list when TTS provider setting changes
-    const { settings } = useSettings()
-    watch(() => settings.value['sts-tts-provider'], () => { loadVoices() })
+    // Reload the voice list when the selection changes, wherever it was made
+    watch(() => _ttsProvider(), () => { loadVoices() })
   }
 
   return {

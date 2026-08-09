@@ -279,6 +279,24 @@ def _provider_options(ctx: OptionContext):
     ]
 
 
+def _storyboard_image_models(_ctx: OptionContext):
+    """The `default` style's model list, which is the list the page offered.
+
+    The empty first option means "let the pipeline choose", matching the
+    `image_model: ""` default in the provider's own settings schema.
+    """
+    from studio.storyboard.wavespeed import get_models_for_style
+
+    options = [_opt("", "Auto")]
+    for model in get_models_for_style("default"):
+        if not isinstance(model, dict) or not model.get("id"):
+            continue
+        label = model.get("name") or model["id"]
+        price = model.get("price")
+        options.append(_opt(model["id"], f"{label} (${price})" if price else label))
+    return options
+
+
 def _export_profiles(_ctx: OptionContext):
     return [_opt(profile) for profile in EXPORT_PROFILES]
 
@@ -302,6 +320,7 @@ _RESOLVERS = {
     "tts_providers": _provider_options,
     "storyboard_providers": _provider_options,
     "animator_providers": _provider_options,
+    "storyboard_image_models": _storyboard_image_models,
     "story_tones": _story_tones,
     "style_templates": _style_templates,
     "export_profiles": _export_profiles,
