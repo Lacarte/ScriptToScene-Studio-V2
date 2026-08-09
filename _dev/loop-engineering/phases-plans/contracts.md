@@ -957,8 +957,8 @@ Exactly **five** domains are supported. Music and Captions are excluded by owner
 
 | domain id | label | provider package | discovery base | default provider | legacy selection key |
 |---|---|---|---|---|---|
-| `script` | Script / Story | `studio.story.providers` | `studio/story/providers` | `random_template` | *(none)* |
-| `scene_blueprint` | Scene Blueprint | `studio.build_scene_blueprints.providers` | `studio/build_scene_blueprints/providers` | `n8n_webhook` | *(none)* |
+| `script` | Script / Story | `studio.story.providers` | `studio/story/providers` | `builtin` (12.3 bridge) | *(none)* |
+| `scene_blueprint` | Scene Blueprint | `studio.build_scene_blueprints.providers` | `studio/build_scene_blueprints/providers` | `builtin` (12.3 bridge) | *(none)* |
 | `tts` | Text to Speech | `studio.tts.providers` | `studio/tts/providers` | `kokoro` | `sts-tts-provider` |
 | `storyboard` | Storyboard | `studio.storyboard.providers` | `studio/storyboard/providers` | `gemini_ws` | `sts-storyboard-provider` |
 | `animator` | Animator | `studio.animator.providers` | `studio/animator/providers` | `grok_automa` | `sts-asset-provider` |
@@ -982,6 +982,13 @@ class DomainSpec:
 
 Adding a sixth domain is one `DomainSpec` entry plus a provider folder. It must not require
 editing the registry class, the settings manager, a route, or a Vue component.
+
+The two `builtin` defaults are intentional sequencing. The hub can register an empty domain in
+11.1, but `default_provider` is required to resolve once that domain becomes executable; 12.3
+creates both passthroughs before converting either node. Phase 13 may rename/split a bridge and
+update its `DomainSpec` default as a data change with a settings/workflow migration. In
+particular, `random_template` cannot be the initial Script default: it does not exist until
+13.1, and 13.3 requires absent configurations to retain the historical AI generator default.
 
 **This catalog replaces both hardcoded three-domain sets.** `ProviderRegistry.VALID_DOMAINS`
 (`registry.py:177`, P29) becomes `frozenset(DOMAINS)`; the duplicate `valid_domains`
@@ -1017,10 +1024,10 @@ it does not move the folders.
 
 | field | rule |
 |---|---|
-| `id` | `^[a-z][a-z0-9_]{1,31}$`; **must equal the folder name** (already enforced, `registry.py:320-323`); unique within its domain. The registry key is the pair `(domain, id)` — the same id may exist in two domains. |
-| `aliases` | **new, optional** `list[str]`, same charset as `id`. Legacy wire strings (`gemini`, `webhook`, `direct`, `grok`, `kie-ai`, `midjourney`) move here, retiring the hand-written tables at `pipeline/services.py:550`/`:644` and `animator/schemas.py:30-36` (P7, P8, P34). Resolution order: exact `id` first, then alias. An alias that collides with a real id **loses**, and the collision is logged WARN and recorded in `excluded()` metadata. Aliases are never written to settings and never returned as `selected`. The concrete mapping table is 10.4's deliverable; 10.2 freezes only the mechanism. |
+| `id` | `^[a-z][a-z0-9_]{0,31}$`; **must equal the folder name** (already enforced, `registry.py:320-323`); unique within its domain. The registry key is the pair `(domain, id)` — the same id may exist in two domains. |
+| `aliases` | **new, optional** `list[str]`, each matching `^[a-z][a-z0-9_-]{0,63}$`. Hyphen is deliberately allowed here (but not in canonical ids) because `kie-ai` is a shipped legacy wire value. Legacy wire strings (`gemini`, `webhook`, `direct`, `grok`, `kie-ai`, `midjourney`) move here, retiring the hand-written tables at `pipeline/services.py:550`/`:644` and `animator/schemas.py:30-36` (P7, P8, P34). Resolution order: exact `id` first, then alias. A real id always wins over an alias. If two providers claim the same alias, discovery order wins; the later alias is dropped and both collisions produce provider `warnings`, not `excluded[]` entries because neither provider was excluded. Aliases are never written to settings and never returned as `selected`. The concrete mapping table is 10.4's deliverable; 10.2 freezes only the mechanism. |
 | `version` | semver `MAJOR.MINOR.PATCH`, the *implementation* version. Informational: it is never used to gate compatibility, and it is carried into result provenance (10.3). |
-| `contract_version` | **new, optional** `int`, default `2`. `1` = the legacy ABC shape (all seven providers today; never executed, §14.1/§16). The registry loads both; only `2` may be invoked through the 10.3 invocation contract. A value above the build's maximum excludes the provider with reason `MANIFEST_UNSUPPORTED_CONTRACT`. |
+| `contract_version` | **new, optional** `int`, default `1` for backward compatibility. `1` = the legacy ABC shape (all seven providers today; never executed, §14.1/§16); every migrated/new v2 manifest must write `contract_version=2` explicitly. The registry loads both; only `2` may be invoked through the 10.3 invocation contract. It must be a positive integer (not `bool`); an unsupported positive version is `MANIFEST_UNSUPPORTED_CONTRACT`, while an invalid type/value is `MANIFEST_FIELDS_INVALID`. |
 | `domain` | must equal the owning registry's domain or registration is refused (`registry.py:196-199`). |
 
 Provider IDs in node configurations and `settings.json` are **canonical ids only**; legacy
@@ -1040,13 +1047,22 @@ canonical").
 | `domain` | yes | str | — | must be a `DOMAINS` key |
 | `kind` | yes | enum | — | `local` \| `cloud` \| `extension` \| `webhook` (§20.2) |
 | `version` | yes | str | — | semver |
-| `capabilities` | yes | `dict[str,bool]` | — | **must be non-empty**: `registry.py:314-318` treats a falsy value as missing, so `capabilities={}` silently excludes the provider. This trap is frozen as-is and documented in the author guide (owner 16.2). |
+| `capabilities` | yes | `dict[str,bool]` | — | may be empty; missing capability keys mean `False` (§20.4). The current truthiness check at `registry.py:314-318` must become a presence/type check (owner 11.2). |
 | `requires` | no | `list[str]` | `[]` | settings **key names** that must be non-empty for the provider to be usable (§21.5). Never values. |
 | `open_url` | no | `str \| None` | `None` | URL the UI may offer to open for `extension` providers |
 | `aliases` | no | `list[str]` | `[]` | new (§19.3); owner 11.2 |
-| `contract_version` | no | `int` | `2` | new (§19.3); owner 11.2 |
+| `contract_version` | no | `int` | `1` | new (§19.3); v2 manifests write `2` explicitly; owner 11.2 |
 | `description` | no | `str \| None` | `None` | new; one sentence, browser-safe |
 | `docs_url` | no | `str \| None` | `None` | new; must be `http(s)` |
+| `environment` | no | `dict[str,str]` | `{}` | new; setting key → environment-variable name for read-time fallback (§22.6); never serialized |
+
+`label` is 1–80 characters and `description` is at most 500 characters. `open_url` and
+`docs_url` are at most 2048 characters and must be absolute `https` URLs (`http` is permitted
+only for loopback development URLs). This validation happens before either value reaches the
+browser, preventing a discovered manifest from supplying a `javascript:`/`data:` URL to
+`window.open`. `environment` values must match `^[A-Z][A-Z0-9_]{0,127}$`; its keys must be
+settings-schema property names. Environment-variable **names** are internal metadata, not part
+of the public settings schema or provider payload.
 
 ### 20.2 `kind` semantics (frozen)
 
@@ -1068,21 +1084,24 @@ provider (§21.4):
 1. `manifest.py` imports without raising.
 2. A module-level `manifest` attribute exists and is callable.
 3. `manifest()` returns a `ProviderManifest` **or** a dict coercible to one.
-4. All required fields of §20.1 are present and truthy.
+4. All required fields of §20.1 are present; required strings are non-empty. An empty
+   `capabilities` dict is valid.
 5. `manifest.id == folder name`.
 6. `manifest.domain` is a `DOMAINS` key and matches the owning registry.
-7. `kind` is in the §20.2 enum; `version` parses as semver; `capabilities` values are `bool`.
-8. `contract_version` ≤ the build's maximum.
+7. Identity and field shapes satisfy §19.3 and §20.1; `kind` is in the §20.2 enum;
+   `version` parses as semver; `capabilities` values are `bool`; URLs and environment mappings
+   pass their validation rules.
+8. `contract_version` is supported by the build.
 
 **Unknown fields — the one behavioral change here.** Today `ProviderManifest(**dict)` raises
 `TypeError` on any unrecognized key and the provider is excluded (`registry.py:304-309`), so a
 provider folder written against a newer build cannot load on an older one. Frozen v2 policy:
 unknown top-level manifest keys are **ignored, logged WARN once, and surfaced** in the
 provider's browser payload as `warnings: ["unknown manifest field: <name>"]`. Unknown
-*capability* keys and unknown *`kind`* values follow the same ignore-and-warn rule, except
-that an unknown `kind` falls back to `cloud` for scheduling purposes and never to `extension`
-(so an unrecognized provider can never claim a WebSocket route). Steps 7 and 8 above remain
-hard failures because they are identity, not vocabulary. Owner: **11.2**.
+*capability* keys follow the same ignore-and-warn rule. An unknown `kind` is a hard
+`MANIFEST_FIELDS_INVALID` failure: silently treating a future lifecycle/security class as
+`cloud` could execute it with the wrong isolation or runtime hooks. Invalid known-field values
+and unsupported contract versions also remain hard failures. Owner: **11.2**.
 
 ### 20.4 Capability vocabulary (frozen)
 
@@ -1126,18 +1145,21 @@ provider-id branches (P5–P25) and become declarative during Phases 14–15.
 | discover | *(none — filesystem scan)* | once per process, or on dev reload under `STS_WORKFLOW_DEV_RELOAD` | per-provider exclusion |
 | describe | `manifest()` | discovery | exclusion |
 | describe | `settings_schema()` | lazy, first request, memoized (`registry.py:107-117`) | returns `None`, WARN; provider still listed with `has_settings: false` |
-| configure | `validate_settings(settings) -> list[dict]` | on save, on select, on demand | exception → single root `error` issue (`registry.py:133-135`) |
-| probe | `health_check(settings) -> dict \| str \| HealthResult` | explicit user action or TTL cache (§21.5) | exception → `HealthResult(status="fail", message=str(e))` (`registry.py:154-156`) |
-| construct | **`create(context) -> Provider`** (new v2 factory) | lazily, at first invocation | exception → `ProviderError` at the registry boundary (10.3); provider marked `degraded` |
+| configure | `validate_settings(settings) -> list[dict]` | on save, on select, on demand | exception → one redacted root `error` issue; raw exception is internal only |
+| probe | `health_check(settings) -> dict \| str \| HealthResult` | explicit user action or TTL cache (§21.5) | exception → `HealthResult(status="fail", message="Health check failed")`; raw exception is logged only after redaction |
+| construct | **`create() -> Provider`** (new v2 factory) | lazily, at first invocation | exception → `ProviderError` at the registry boundary (10.3); provider marked `degraded` |
 | serve | domain-specific invocation | per request | 10.3 |
 | bind | `register_runtime(app, sock)` | once at boot, `kind == "extension"` only | caught and logged (`runtime.py:63-65`); boot continues |
 | release | `shutdown()` | registry teardown, dev reload, process exit | best-effort; exceptions logged, never raised; **must be idempotent** |
 
 The v2 factory replaces the eight zero-argument `get_provider()` functions, none of which has
 ever executed (§14.1, §16). Frozen rules: `create()` is called **at most once per
-`(domain, provider_id)` per process**, memoized under the registry lock, never at import time,
-and never during discovery — so importing a provider package can never start a model load, a
-thread, or a socket. `context` is the invocation context frozen by 10.3. Owner: **11.2**.
+`(domain, provider_id)` per process**, through a per-provider construction lock, never at
+import time, and never during discovery — so importing a provider package can never start a
+model load, a thread, or a socket. Provider code is not called while the hub-wide registry
+lock is held. The invocation context frozen by 10.3 is passed to each domain invocation, **not
+to the memoized factory**; retaining the first request's project/output/cancellation context
+inside a process-wide provider would cross-contaminate later executions. Owner: **11.2**.
 
 `shutdown()` today exists on `Runtime` (`runtime.py:45-47`) and on `TTSProvider` with **zero
 callers**. v2 requires the registry to call it for every constructed provider on teardown, in
@@ -1157,6 +1179,11 @@ reverse construction order. Owner: **11.2**.
 4. Extension runtimes bind after **all** domains have been discovered, never interleaved with
    discovery, so a runtime can rely on the full catalog being present.
 5. Registration never touches `app.py` or `studio/workflows/registry.py`.
+6. Discovery and dev reload build a private catalog snapshot and publish it with one atomic
+   swap. Concurrent requests see either the complete old snapshot or the complete new one,
+   never a partially discovered catalog. Providers removed by the swap are shut down only
+   after new lookups can no longer acquire them and all pre-swap invocation leases have
+   drained; teardown must not close a provider still serving an old-snapshot request.
 
 ### 21.3 Duplicate IDs (frozen)
 
@@ -1172,7 +1199,7 @@ Every exclusion is *local*: it logs a WARN and continues. A broken provider must
 (a) abort discovery, (b) abort application startup, (c) hide or unregister a healthy provider,
 or (d) leak a stack trace or filesystem path into an API response.
 
-Frozen exclusion reason codes, all currently implemented as bare log lines
+Frozen exclusion reason codes; the corresponding current failure paths are bare log lines
 (`registry.py:278-323`):
 
 | code | condition | current line |
@@ -1184,6 +1211,7 @@ Frozen exclusion reason codes, all currently implemented as bare log lines
 | `MANIFEST_FIELDS_MISSING` | a required field is absent or falsy | `:317` |
 | `MANIFEST_ID_MISMATCH` | `manifest.id != folder` | `:321` |
 | `MANIFEST_DOMAIN_MISMATCH` | wrong domain | `:197` |
+| `MANIFEST_FIELDS_INVALID` | invalid id/alias/kind/version/capability/URL/environment field value | new (§19.3, §20.1, §20.3) |
 | `MANIFEST_UNSUPPORTED_CONTRACT` | `contract_version` too new | new (§19.3) |
 | `DUPLICATE_ID` | id already registered | `:203` |
 
@@ -1191,13 +1219,16 @@ Frozen exclusion reason codes, all currently implemented as bare log lines
 message}]` is new and is surfaced in `to_dict()` so the provider modal can show "3 providers
 loaded, 1 excluded" instead of the current silent disappearance. `message` is truncated to
 200 characters, stripped to a basename if it contains a path, and passed through
-`redact_settings` semantics. Owner: **11.2**.
+structured redaction plus a generic exception sanitizer; `redact_settings` alone cannot remove
+a secret embedded in an arbitrary exception string. Owner: **11.2**.
 
-**Partial degradation.** When `manifest.py` loads but `provider.py` does not, the provider is
-still registered and its callables fall back across modules (`_resolve`, `registry.py:73-81`,
-warned at `:335`). Frozen: this state is `availability: "degraded"` (§21.5) with a warning
-string, not a silent success. A degraded provider may be listed and configured but must not be
-constructed or invoked.
+**Partial degradation.** `provider.py` is optional because callables may live in `manifest.py`
+and `_resolve` already falls back across modules (`registry.py:73-81`). Its absence is not by
+itself degradation. If a present `provider.py` fails to load, a warning is recorded; the
+provider is `degraded` only when the v2 `create` callable can no longer be resolved. A present
+`settings_schema.py` that fails to load is degraded, while an intentionally absent schema is
+valid and yields `has_settings: false`. A degraded provider may be listed and configured but
+must not be constructed or invoked.
 
 ### 21.5 Availability vs health (frozen)
 
@@ -1209,9 +1240,9 @@ runs a *validation* call to decide whether a provider "needs configuration"
 
 | state | meaning |
 |---|---|
-| `available` | registered, `provider.py` loaded, every `requires` key non-empty after env fallback |
-| `needs_configuration` | registered and loadable, but a `requires` key is empty |
-| `degraded` | registered, but `provider.py` or `settings_schema.py` failed to load, or `create()` previously raised |
+| `available` | registered, its v2 `create` callable resolves, every `requires` key is non-empty after env fallback, and its settings schema is absent or loaded successfully |
+| `needs_configuration` | registered and constructable, but a `requires` key is empty after env fallback |
+| `degraded` | registered, but required construction callables cannot resolve, a present settings schema failed to load, or `create()` previously raised |
 | `unavailable` | discovered but excluded (§21.4); present only in the `excluded[]` list |
 
 **Health** — may perform I/O; runs on explicit user action (`POST /api/providers/<d>/<p>/test`)
@@ -1277,8 +1308,10 @@ mutually exclusive; if both are present, `options_source` wins and a warning is 
 
 `validate_settings(settings) -> list[dict]`, each `{field, severity, message}` with
 `severity ∈ {error, warning, info}`; a raising implementation yields one
-`{field: "root", severity: "error", message: str(e)}` (`registry.py:133-135`). `error` blocks
-saving (`editor/routes.py:410-412`); `warning` and `info` never do.
+`{field: "root", severity: "error", message: "Settings validation failed"}`. The current
+`message: str(e)` behavior (`registry.py:133-135`) is replaced because provider exceptions can
+contain submitted secrets. The raw exception may be logged only through the shared redacted
+logger. `error` blocks saving (`editor/routes.py:410-412`); `warning` and `info` never do.
 
 Unknown keys in *saved* provider settings are **preserved and reported as a `warning`**, never
 dropped. Today `put_provider_settings` merges anything with no check
@@ -1303,8 +1336,9 @@ A field is a secret if `ui.type == "password"` **or** its key matches `SENSITIVE
   outside `__all__`. Owner: **11.5**, which must also decide how the modal round-trips a
   redacted value without overwriting the real one (rule: a field whose submitted value is
   exactly the redaction sentinel `"***"` is ignored on save).
-- **Env vars are a read-time fallback, never a seed for secrets.** A provider resolves a
-  credential as `settings[key] or os.environ[ENV_NAME]`, and the resolved value is never
+- **Env vars are a read-time fallback, never a seed for secrets.** The registry resolves a
+  value as `settings[key] or os.environ[manifest.environment[key]]`, and passes the resolved
+  settings only to provider validation/health/invocation. The resolved value is never
   written back to `settings.json` and never returned. This replaces copying values in
   `_seed_from_env` (`settings_manager.py:85-104`). Owner: **11.3**.
 - **The `INWORLD_API_KEY` selection side effect is frozen as removed.** First-run seeding may
@@ -1347,7 +1381,9 @@ ASYNC_OPTION_SOURCES = {
 ```
 
 **Context validation is an allowlist too.** Only the parameter names in that source's
-`context` tuple are accepted; any other query parameter is ignored. `domain` must be a
+`context` tuple are accepted; any other query parameter is rejected with
+`OPTION_CONTEXT_INVALID` (silently ignoring a misspelling can resolve options for the global
+default provider). `domain` must be a
 `DOMAINS` key; `provider` must resolve in that domain's registry (id or alias, normalized to
 the canonical id before it reaches the resolver); `node_type` must be a registry node type;
 `project_id` must survive `sanitize_project_id` unchanged. A declared parameter may be
@@ -1389,10 +1425,12 @@ never the provider's raw exception.
 
 **Save-time validation still fails open.** `allowed_option_values` (`options.py:85-105`)
 becomes context-aware but keeps its contract from step 6.3: a bad value is rejected, an
-unavailable resolver returns `None` and never blocks saving an otherwise-valid workflow. For
-a context-sensitive source the legal set is the **union** over the currently registered
-providers of that domain, so switching provider can never retroactively invalidate a saved
-workflow.
+unavailable resolver returns `None` and never blocks saving an otherwise-valid workflow. A
+context-sensitive value is checked against the canonical provider saved in that same node
+configuration (or the selected provider only when the node has no provider field). It is not
+validated against a union across providers: that would accept an Inworld-only voice for a
+Kokoro node and defer a deterministic configuration error until execution. Existing workflows
+remain stable because their saved provider wins over the global selection (§24.1).
 
 ### 23.4 Caching and invalidation (frozen)
 
@@ -1443,7 +1481,8 @@ PUT /api/providers/<domain>/selection      body: {"provider_id": "inworld"}
 ```
 
 The handler validates the domain against `DOMAINS`, resolves `provider_id` through id-then-
-alias, refuses an id that is not registered (404) or is `unavailable` (409), and calls
+alias, returns 409 when the id is present in that domain's `excluded[]` catalog and 404 when it
+was not discovered at all, and calls
 `settings_manager.set_selected_provider()` (`settings_manager.py:189-198`) — which finally
 gains its first call site (§14.2). It then invalidates the `cache="settings"` option entries
 for that domain (§23.4). A `needs_configuration` or `fail`-health provider **may** be selected;
@@ -1456,10 +1495,12 @@ everything else. Owner: **11.5**.
 
 ### 24.3 Migration of the three legacy keys (frozen)
 
-One-time, on first load after upgrade, per domain, for each of the three keys:
+One-time, on first load after upgrade, per domain, for each of the three keys. The migration
+reads `app-config.json.user[legacy_selection_key]` (the shape served by `/api/settings`), not a
+top-level key:
 
 1. If `settings.json` has no explicit `selected_provider` for the domain **and**
-   `app-config.json` holds the legacy key, adopt the legacy value, normalized through the
+   `app-config.json.user` holds the legacy key, adopt the legacy value, normalized through the
    alias table (`gemini→gemini_ws`, `grok→grok_automa`, `kie-ai→kie_ai`), and write it once.
 2. Otherwise `settings.json` wins; the legacy key is ignored from that moment on.
 3. Legacy pages read the selection from `GET /api/providers` instead of `useSettings`, keeping
@@ -1471,9 +1512,19 @@ Today's values agree semantically (`inworld`, `gemini↔gemini_ws`, `grok↔grok
 migration is a no-op on the current machine — but it must still run, because the two stores can
 diverge on the next write.
 
+The migration is a new settings-version step and writes an explicit completion marker/version
+atomically with the adopted values. The current `apply_migrations` loop
+(`settings_migrations.py:39-45`) skips every registered version greater than or equal to the
+stored version, so it cannot run an upgrade migration as written; **11.3 must correct the
+sequencing and cover v1→v2, already-v2 idempotence, and a simulated interrupted write**. Reading
+the legacy file is injected into the migration/load boundary rather than importing the editor
+route's private `_read_app_config` helper.
+
 ## 25. Frontend-safe serialization (frozen)
 
-Exactly these fields may cross to the browser.
+Exactly these provider-instance fields may cross to the browser. The public settings-schema
+subset in §22 and the option-source response in §23.2 are the other two provider-contract
+payloads; neither may contain settings values or the manifest's internal `environment` map.
 
 `ProviderInstance.to_dict()` v2 — extends the eight fields at `registry.py:159-171`:
 
@@ -1553,7 +1604,7 @@ Nothing in §19–§27 is implemented yet. Every delta, with its owner:
 | D5 | `aliases` + `contract_version` in the manifest | hand-written alias tables (P7, P8, P34) | 11.2 |
 | D6 | unknown manifest/capability fields ignored + warned | `TypeError` → exclusion (`registry.py:304-309`) | 11.2 |
 | D7 | `excluded()` recorded and serialized | WARN log only | 11.2 |
-| D8 | v2 `create(context)` factory, memoized, plus real `shutdown()` calls | eight never-executed `get_provider()` factories; `shutdown` never called | 11.2 |
+| D8 | v2 zero-argument `create()` factory, memoized, plus real `shutdown()` calls | eight never-executed `get_provider()` factories; `shutdown` never called | 11.2 |
 | D9 | `availability` computed and serialized | not present | 11.3 |
 | D10 | missing `health_check` → `unknown` | returns `ok` (`registry.py:157`) | 11.3 |
 | D11 | env as read-time fallback; no secret seeding; no selection flip | `_seed_from_env` copies values and flips TTS selection (`settings_manager.py:85-88`) | 11.3 |
@@ -1565,6 +1616,8 @@ Nothing in §19–§27 is implemented yet. Every delta, with its owner:
 | D17 | `OPTION_CONTEXT_INVALID` added to §7 | not present | 12.2 |
 | D18 | `ui.show_if`, `ui.options_source`, `textarea` in the settings form | none supported | 12.4 |
 | D19 | provider-specific node fields move to provider settings schemas | `display_options.show.provider` gating (P27) | 12.3 |
+| D20 | correct settings-migration sequencing and inject the legacy `app-config.json.user` values | current loop cannot advance v1; legacy reader is private to editor routes | 11.3 |
+| D21 | atomically publish discovery/reload snapshots and drain old invocation leases before shutdown | current registry mutates its live dict during discovery | 11.2 |
 
 ## 29. Phase 10.2 coverage assertion
 
@@ -1572,7 +1625,7 @@ Frozen by this section: the five-domain catalog and its data shape; package layo
 id, alias, and version rules; every required and optional manifest field with its type and
 default; the `kind` and capability vocabularies; manifest validation order and the
 unknown-field policy; the full lifecycle from discovery through `create()` to `shutdown()`;
-registration and discovery order; duplicate-ID resolution; the nine broken-plugin exclusion
+registration and atomic discovery order; duplicate-ID/alias resolution; the ten broken-plugin exclusion
 reason codes and the isolation guarantees; settings-schema widgets, conditional fields, and
 dynamic options; validation severities and the unknown-key policy; secret classification, the
 redaction obligation, and env-fallback rules; the availability and health state machines; the
