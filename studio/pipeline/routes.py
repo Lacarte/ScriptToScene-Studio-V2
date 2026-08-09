@@ -160,6 +160,20 @@ def _preflight_provider_check(config: dict, project_id: str) -> None:
     logger.debug("[{}] Preflight provider check passed", project_id)
 
 
+def _provider_open_url(domain: str, provider: str) -> str | None:
+    """The URL a provider asks the operator to open, from its manifest (§20.1).
+
+    Resolves aliases, so a legacy `gemini` / `webhook` value works as well as a
+    canonical ID. Returns `None` when the provider declares no URL.
+    """
+    if not provider:
+        return None
+    from studio.shared.providers_common.hub import hub
+
+    instance = hub.get(domain, provider)
+    return instance.manifest.open_url if instance is not None else None
+
+
 def _emit(job_id, event):
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -858,7 +872,11 @@ def _run_pipeline(job_id):
     step_seq = job.get("step_sequence", [])
     resume_from = config.get("resume_from")
     provider = config.get("provider", "grok")
-    storyboard_provider = config.get("storyboard_provider", "webhook")
+    storyboard_provider = (
+        config.get("storyboard_provider_override")
+        or config.get("storyboard_provider")
+        or ""
+    )
 
     # Phase 8: Validate providers at preflight
     _preflight_provider_check(config, project_id)
@@ -1048,8 +1066,11 @@ def _run_pipeline(job_id):
                 "step": "storyboard", "status": "running",
                 "message": f"[{project_id}] Generating reference images...",
             }
-            if storyboard_provider == "gemini":
-                storyboard_emit["open_url"] = "https://gemini.google.com/app"
+            # The URL a provider wants opened is its manifest's `open_url`
+            # (§20.1), not a literal keyed on one provider ID (step 14.2).
+            open_url = _provider_open_url("storyboard", storyboard_provider)
+            if open_url:
+                storyboard_emit["open_url"] = open_url
             _emit(job_id, storyboard_emit)
             _t0 = time.perf_counter()
             storyboard_result = _step_storyboard(results.get("scenes", {}), config, project_id, job_id)

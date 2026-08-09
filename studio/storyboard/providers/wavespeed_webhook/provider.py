@@ -1,108 +1,99 @@
-"""WaveSpeed Webhook Storyboard Provider — Phase 6.
+"""WaveSpeed-via-n8n storyboard provider — Provider Contract v2 (step 14.2).
 
-Uses n8n webhook for image generation.
+The v1 body called `sb_routes.generate(StoryboardGenerateRequest(...))` — the
+Flask view function, decorated with `@validate_json`, which reads the request
+off the Flask context. It could not have run outside a request, and it never
+did. `submit` now starts the shared generation loop directly on a worker
+thread and returns immediately; the media-job service owns the wait.
 """
 
-import os
+from __future__ import annotations
+
+import threading
 import time
-from loguru import logger
 
 from config import N8N_STORYBOARD_WEBHOOK_URL, WAVESPEED_API_KEY
-from studio.shared.providers_common.jobs import status_from_scenes, unknown_job_status
-from studio.storyboard.providers.base import (
-    StoryboardProvider,
-    JobHandle,
-    JobStatus,
-    SceneResult,
-)
-from studio.storyboard import wavespeed
+from studio.shared.providers_common.jobs import JobHandle, JobStatus
+from studio.storyboard import generation, jobs
+from studio.storyboard.providers.base import StoryboardProvider, StoryboardRequest
+
+PROVIDER_ID = "wavespeed_webhook"
 
 
 class WaveSpeedWebhookProvider(StoryboardProvider):
-    """Storyboard provider using n8n webhook."""
+    """Storyboard frames from WaveSpeed through a user-supplied n8n webhook."""
 
-    def submit(
-        self,
-        project_id: str,
-        scenes: list[dict],
-        settings: dict,
-        on_progress=None,
-    ) -> JobHandle:
-        from studio.storyboard import routes as sb_routes
-        from studio.storyboard.schemas import StoryboardGenerateRequest
-        
-        webhook_url = settings.get("webhook_url") or N8N_STORYBOARD_WEBHOOK_URL
-        image_model = settings.get("image_model") or ""
-        aspect_ratio = "16:9"
-        
-        if on_progress:
-            on_progress({"status": "starting", "message": "Starting storyboard generation"})
-        
-        sb_routes.generate(StoryboardGenerateRequest(
-            project_id=project_id,
-            scenes=scenes,
-            aspect_ratio=aspect_ratio,
-            webhook_url=webhook_url,
-            image_model=image_model,
-        ))
-        
-        return JobHandle(
-            job_id=project_id,
-            domain="storyboard",
-            provider_id="wavespeed_webhook",
-            project_id=project_id,
+    def submit(self, request: StoryboardRequest, invocation) -> JobHandle:
+        options = {**dict(invocation.settings), **dict(invocation.options)}
+        transport = generation.webhook_transport(
+            options.get("webhook_url") or N8N_STORYBOARD_WEBHOOK_URL,
+            api_key=options.get("api_key") or WAVESPEED_API_KEY,
         )
 
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
-        from studio.storyboard import routes as sb_routes
+        jobs.seed(invocation.project_id, request, provider_id=PROVIDER_ID)
+        project_id = invocation.project_id
+        threading.Thread(
+            target=generation.run_batch,
+            args=(project_id, request, transport),
+            kwargs={"is_cancelled": invocation.cancel.is_cancelled},
+            name=f"storyboard-webhook-{project_id}",
+            daemon=True,
+        ).start()
 
-        job = sb_routes._jobs.get(job_id)
-        if not job:
-            return unknown_job_status(job_id)
-        # This body counted `status == "complete"`, a value the storyboard route
-        # has never written — it writes ready/error (`routes.py:390`). Found by
-        # first-time test in step 11.4.
-        return status_from_scenes(job_id, job.get("scene_statuses", {}))
+        return JobHandle(
+            job_id=project_id,
+            domain=invocation.domain,
+            provider_id=PROVIDER_ID,
+            project_id=project_id,
+            invocation_id=invocation.invocation_id,
+        )
+
+    def poll(self, job_id: str, invocation) -> JobStatus:
+        return jobs.status(invocation.project_id or job_id, job_id)
 
     def shutdown(self) -> None:
         pass
 
 
+def create() -> WaveSpeedWebhookProvider:
+    return WaveSpeedWebhookProvider()
+
+
 def validate_settings(settings: dict) -> list[dict]:
-    issues = []
-    webhook_url = settings.get("webhook_url", "").strip()
-    if not webhook_url:
-        issues.append({
+    if not str((settings or {}).get("webhook_url") or "").strip():
+        return [{
             "field": "webhook_url",
             "severity": "error",
             "message": "Webhook URL is required",
-        })
-    return issues
+        }]
+    return []
+
+
+def list_models(_settings: dict) -> list[dict]:
+    """The models the webhook can be pointed at (§22.4)."""
+    from studio.storyboard.wavespeed import get_models_for_style
+
+    return list(get_models_for_style("default"))
 
 
 def health_check(settings: dict) -> dict:
     import requests
-    webhook_url = settings.get("webhook_url") or N8N_STORYBOARD_WEBHOOK_URL
+
+    webhook_url = (settings or {}).get("webhook_url") or N8N_STORYBOARD_WEBHOOK_URL
     if not webhook_url:
-        return {"status": "fail", "message": "No webhook URL configured"}
-    
+        return {"status": "fail", "message": "No webhook URL is configured"}
+
     try:
         start = time.perf_counter()
-        resp = requests.get(webhook_url, timeout=5)
+        response = requests.get(webhook_url, timeout=5)
         elapsed = int((time.perf_counter() - start) * 1000)
-        
-        if resp.status_code in (200, 405):
-            return {"status": "ok", "latency_ms": elapsed, "message": "Webhook reachable"}
-        return {"status": "warn", "message": f"Webhook returned {resp.status_code}"}
-    except Exception as e:
-        return {"status": "fail", "message": str(e)}
+    except Exception as exc:
+        # The registry sanitizes this before serving it; a connection error can
+        # embed the URL, a local path, or a token (§36 L4).
+        return {"status": "fail", "message": str(exc)}
 
-
-_provider_instance = None
-
-
-def get_provider():
-    global _provider_instance
-    if _provider_instance is None:
-        _provider_instance = WaveSpeedWebhookProvider()
-    return _provider_instance
+    if response.status_code in (200, 405):
+        return {"status": "ok", "latency_ms": elapsed, "message": "Webhook reachable"}
+    if response.status_code in (401, 403):
+        return {"status": "fail", "message": "The webhook rejected the credentials"}
+    return {"status": "warn", "message": f"Webhook returned {response.status_code}"}

@@ -449,17 +449,16 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
     if _stop_requested(job_id):
         raise PipelineStopped(step_name="storyboard")
 
-    # Resolve provider: override → settings → default
-    sb_override = config.get("storyboard_provider_override")
-    sb_options = config.get("storyboard_provider_options", {})
-    
-    # Map new IDs to legacy names for backward compat
-    id_to_legacy = {"gemini_ws": "gemini", "wavespeed_webhook": "webhook", "wavespeed_direct": "direct"}
-    sb_provider = id_to_legacy.get(sb_override) if sb_override else config.get("storyboard_provider", "webhook")
-    prompt_prefix = config.get("prompt_prefix", "") if sb_provider == "gemini" else ""
-    if prompt_prefix:
-        for sp in scenes_payload:
-            sp["prompt"] = prompt_prefix + sp["prompt"]
+    # Resolve provider: override → legacy field → the route's own fallback.
+    # Step 14.2 deleted the canonical→legacy translation table that used to sit
+    # here: the route resolves both spellings through the registry's aliases, so
+    # the canonical ID can now be sent as-is. `prompt_prefix` went with it — it
+    # is a provider setting, applied by the provider that declares it (§26).
+    sb_provider = (
+        config.get("storyboard_provider_override")
+        or config.get("storyboard_provider")
+        or ""
+    )
 
     payload = {
         "project_id": project_id,
@@ -468,6 +467,7 @@ def _step_storyboard(scenes_result, config, project_id, job_id):
         "style": config.get("style"),
         "image_model": config.get("image_model"),
         "provider": sb_provider,
+        "provider_options": config.get("storyboard_provider_options") or {},
         "auto_type": config.get("auto_type", True),
     }
     resp = http_requests.post(f"{base_url}/api/storyboard/generate",

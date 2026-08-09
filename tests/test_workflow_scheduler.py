@@ -555,17 +555,19 @@ SCENES = {"scenes": [{"index": 0, "image_prompt": "a lighthouse"}]}
 
 def test_a_cancelled_storyboard_node_is_recorded_as_cancelled(tmp_path, monkeypatch):
     """contracts.md §35.1: this raised `EXECUTION_CANCELLED` and recorded `failed`."""
-    from studio.storyboard import routes as sb_routes
+    from studio.storyboard import generation, jobs as sb_jobs
     from studio.workflows.adapters import storyboard
 
     monkeypatch.setattr(storyboard, "STORYBOARD_DIR", str(tmp_path / "storyboard"))
-    monkeypatch.setattr(sb_routes._jobs, "set", lambda *a, **k: None)
-    monkeypatch.setattr(sb_routes, "_save_storyboard_json", lambda *a, **k: None)
-    monkeypatch.setattr(sb_routes, "_generate_storyboard", lambda *a, **k: None)
+    monkeypatch.setattr(sb_jobs, "STORYBOARD_DIR", str(tmp_path / "storyboard"))
+    monkeypatch.setattr(generation, "run_batch", lambda *a, **k: None)
 
     with pytest.raises(Exception) as caught:
         storyboard._step_storyboard(
-            SCENES, {"provider": "wavespeed_webhook"}, "pm_ABC123", _cancelling_context()
+            SCENES,
+            {"storyboard_provider_override": "wavespeed_webhook"},
+            "pm_ABC123",
+            _cancelling_context(),
         )
     assert caught.value.code == "CANCELLED"
 

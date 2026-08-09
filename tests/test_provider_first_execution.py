@@ -32,15 +32,39 @@ from studio.shared.providers_common.jobs import (
     JobHandle,
     JobStatus,
 )
+from studio.shared.providers_common.invocation import build_invocation
 from studio.shared.providers_common.results import validate_egress
 from studio.storyboard.providers.base import StoryboardProvider
+from studio.storyboard.providers.contract import StoryboardRequest
 from studio.tts.providers.base import TTSProvider, TTSResult, Voice
+
+PROJECT_ID = "pm_ABC123"
 
 
 def provider_module(domain, provider_id):
     instance = hub.get(domain, provider_id)
     assert instance is not None, f"{domain}/{provider_id} is not registered"
     return instance.provider_module
+
+
+def storyboard_request(*, scenes=None, aspect_ratio="9:16", style=""):
+    return StoryboardRequest.from_scenes(
+        scenes or [{"index": 0, "prompt": "a lighthouse"}],
+        aspect_ratio=aspect_ratio,
+        style=style,
+    )
+
+
+def storyboard_invocation(provider_id, *, settings=None, options=None, output_dir=""):
+    return build_invocation(
+        None,
+        domain="storyboard",
+        provider_id=provider_id,
+        project_id=PROJECT_ID,
+        output_dir=output_dir,
+        settings=settings or {},
+        options=options or {},
+    )
 
 
 class FakeAudio:
@@ -256,139 +280,13 @@ class InworldProviderTests(ShippedProviderCase):
 
 
 # -- storyboard --------------------------------------------------------------
-
-
-class StoryboardProviderTests(unittest.TestCase):
-    """`submit`/`poll` for all three storyboard providers, first execution."""
-
-    def test_gemini_ws_submit_and_poll(self):
-        module = provider_module("storyboard", "gemini_ws")
-        instance = hub.create("storyboard", "gemini_ws")
-        self.assertIsInstance(instance, StoryboardProvider)
-
-        gemini_ws = mock.Mock()
-        with mock.patch.object(instance, "_get_gemini_ws", return_value=gemini_ws):
-            handle = instance.submit(
-                "pm_ABC123", [{"index": 0, "prompt": "a lighthouse"}], {"auto_type": True}
-            )
-        self.assertIsInstance(handle, JobHandle)
-        self.assertEqual(handle.job_id, "pm_ABC123")
-        self.assertEqual(handle.correlation,
-                         ("storyboard", "gemini_ws", "pm_ABC123", "pm_ABC123"))
-        gemini_ws.add_job.assert_called_once()
-
-        status = instance.poll("pm_ABC123", {})
-        self.assertEqual(status.state, SUBMITTED)
-
-    def test_gemini_ws_generate_one_is_explicitly_unsupported(self):
-        instance = hub.create("storyboard", "gemini_ws")
-        with self.assertRaises(NotImplementedError):
-            instance.generate_one({"index": 0}, {})
-
-    def test_gemini_ws_health_check_counts_extension_clients(self):
-        module = provider_module("storyboard", "gemini_ws")
-        from studio.storyboard import gemini_ws
-
-        with mock.patch.object(gemini_ws, "_ws_clients", []):
-            self.assertEqual(module.health_check({})["status"], "warn")
-        with mock.patch.object(gemini_ws, "_ws_clients", [object()]):
-            health = module.health_check({})
-        self.assertEqual(health["status"], "ok")
-        self.assertEqual(health["details"]["clients"], 1)
-
-    def test_gemini_ws_register_runtime_delegates(self):
-        module = provider_module("storyboard", "gemini_ws")
-        from studio.storyboard import gemini_ws
-
-        with mock.patch.object(gemini_ws, "register_runtime") as register:
-            module.register_runtime(mock.Mock(), mock.Mock())
-        register.assert_called_once()
-
-    def test_wavespeed_direct_submit_and_poll(self):
-        module = provider_module("storyboard", "wavespeed_direct")
-        instance = hub.create("storyboard", "wavespeed_direct")
-        from studio.storyboard import routes as sb_routes
-
-        with mock.patch.object(sb_routes, "_generate_storyboard") as generate:
-            handle = instance.submit(
-                "pm_ABC123", [{"scene": 0, "prompt": "x"}], {"image_model": "m"},
-                on_progress=lambda event: None,
-            )
-        generate.assert_called_once()
-        self.assertEqual(handle.provider_id, "wavespeed_direct")
-
-        with mock.patch.object(sb_routes._jobs, "get", return_value=None):
-            missing = instance.poll("pm_ABC123", {})
-        self.assertEqual(missing.state, FAILED)
-        self.assertEqual(missing.error.code, "PROVIDER_NOT_FOUND")
-
-        # The vocabulary the storyboard route actually persists is ready/error;
-        # this body used to count `"complete"`, which it has never written.
-        job = {"scene_statuses": {"0": {"status": "ready"},
-                                  "1": {"status": "generating"}}}
-        with mock.patch.object(sb_routes._jobs, "get", return_value=job):
-            status = instance.poll("pm_ABC123", {})
-        self.assertEqual(status.state, RUNNING)
-        self.assertEqual((status.ready, status.total), (1, 2))
-        self.assertEqual(status.fraction, 0.5)
-
-        done = {"scene_statuses": {"0": {"status": "ready"}}}
-        with mock.patch.object(sb_routes._jobs, "get", return_value=done):
-            self.assertEqual(instance.poll("pm_ABC123", {}).state, SUCCEEDED)
-
-        partial = {"scene_statuses": {"0": {"status": "ready"},
-                                      "1": {"status": "error"}}}
-        with mock.patch.object(sb_routes._jobs, "get", return_value=partial):
-            self.assertEqual(instance.poll("pm_ABC123", {}).state, "partial")
-
-        all_failed = {"scene_statuses": {"0": {"status": "error"}}}
-        with mock.patch.object(sb_routes._jobs, "get", return_value=all_failed):
-            failed = instance.poll("pm_ABC123", {})
-        self.assertEqual(failed.state, FAILED)
-        self.assertEqual(failed.error.code, "PROVIDER_UNIT_FAILED")
-
-    def test_wavespeed_direct_settings_and_health(self):
-        module = provider_module("storyboard", "wavespeed_direct")
-        with mock.patch.object(module, "WAVESPEED_API_KEY", ""):
-            self.assertEqual(module.validate_settings({})[0]["field"], "api_key")
-            self.assertEqual(module.health_check({})["status"], "warn")
-        self.assertEqual(module.health_check({"api_key": "k"})["status"], "ok")
-
-    def test_wavespeed_webhook_submit_and_poll(self):
-        module = provider_module("storyboard", "wavespeed_webhook")
-        instance = hub.create("storyboard", "wavespeed_webhook")
-        from studio.storyboard import routes as sb_routes
-
-        with mock.patch.object(sb_routes, "generate") as generate:
-            handle = instance.submit(
-                "pm_ABC123", [{"scene": 0, "prompt": "x"}],
-                {"webhook_url": "http://127.0.0.1:5678/hook"},
-            )
-        generate.assert_called_once()
-        self.assertEqual(handle.domain, "storyboard")
-
-        with mock.patch.object(sb_routes._jobs, "get", return_value=None):
-            self.assertEqual(instance.poll("pm_ABC123", {}).state, FAILED)
-
-    def test_wavespeed_webhook_settings_and_health(self):
-        module = provider_module("storyboard", "wavespeed_webhook")
-        self.assertEqual(module.validate_settings({})[0]["severity"], "error")
-        with mock.patch.object(module, "N8N_STORYBOARD_WEBHOOK_URL", ""):
-            self.assertEqual(module.health_check({})["status"], "fail")
-        with mock.patch("requests.get", return_value=mock.Mock(status_code=200)):
-            health = module.health_check({"webhook_url": "https://n8n.invalid/hook"})
-        self.assertEqual(health["status"], "ok")
-
-    def test_a_webhook_health_failure_is_sanitized_before_it_is_served(self):
-        instance = hub.get("storyboard", "wavespeed_webhook")
-        with mock.patch(
-            "requests.get",
-            side_effect=RuntimeError("connect failed to /home/user/.n8n/config token=abc123xyz"),
-        ):
-            health = instance.health_check({"webhook_url": "https://n8n.invalid/hook"})
-        self.assertEqual(health.status, "fail")
-        self.assertNotIn("/home/user", health.message)
-        self.assertNotIn("abc123xyz", health.message)
+#
+# The three storyboard providers were first executed here against the v1
+# `submit(project_id, scenes, settings, on_progress)` signature. Step 14.2
+# replaced that with the Contract v2 async shape and moved the manifest,
+# transport, and metadata decisions into the providers, so their contract tests
+# moved to `tests/test_storyboard_dispatch.py`, beside the dispatch tests that
+# exercise them end to end.
 
 
 # -- animator ----------------------------------------------------------------
@@ -541,15 +439,19 @@ class AbstractBaseTests(unittest.TestCase):
 
     def test_storyboard_generate_one_default(self):
         class Minimal(StoryboardProvider):
-            def submit(self, project_id, scenes, settings, on_progress=None):
-                return JobHandle(job_id=project_id)
+            def submit(self, request, invocation):
+                return JobHandle(job_id=invocation.project_id)
 
-            def poll(self, job_id, settings):
+            def poll(self, job_id, invocation):
                 return JobStatus(job_id=job_id)
 
         provider = Minimal()
         with self.assertRaises(NotImplementedError):
-            provider.generate_one({}, {})
+            provider.generate_one(storyboard_request(), storyboard_invocation("gemini_ws"))
+        # `cancel_job` is optional and defaults to a no-op (§33).
+        self.assertIsNone(
+            provider.cancel_job("pm_ABC123", storyboard_invocation("gemini_ws"))
+        )
         provider.shutdown()
 
     def test_animator_open_url_default(self):

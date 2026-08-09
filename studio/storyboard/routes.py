@@ -1,282 +1,167 @@
-"""Storyboard Module — Reference Image Generation via n8n Webhook.
-
-Generates one reference image per scene using WaveSpeed AI (via n8n webhook),
-downloads them to output/storyboard/{project_id}/, and tracks per-scene status.
+"""Storyboard module — reference image generation, dispatched generically.
 
 Provides:
   POST /api/storyboard/generate                    — start storyboard generation
+  POST /api/storyboard/grab                        — generate a single scene
   GET  /api/storyboard/status/<project_id>          — poll per-scene status
   GET  /api/storyboard/images/<project_id>          — list generated images
-  GET  /api/storyboard/images/<project_id>/<scene>  — serve individual image
+  GET  /api/storyboard/images/<project_id>/<file>   — serve an individual image
+  POST /api/storyboard/remove-watermarks/<pid>      — re-run the watermark sweep
+  GET  /api/storyboard/image-models                 — image-model catalog
+  GET  /api/storyboard/webhook-url                  — configured webhook URL
+
+Step 14.2 removed every provider-ID branch from this module. Both generating
+routes resolve a provider through the registry and call `submit`; the transport,
+the aspect-ratio handling, the prompt prefix, and the watermark pass all belong
+to the provider that declares them. What did not change is the wire contract:
+the same fields are accepted, the same 202 envelopes are returned, and
+`storyboard.json` keeps the shape the status route and the Storyboard page read.
+
+The one repaired defect is the selection itself. `provider` was a read-only
+property on the request model, so the value old callers posted was discarded and
+only `provider_override` could choose a provider. Both are honoured now, and
+legacy spellings resolve through the registry's aliases.
 """
 
 import os
-import time
-from urllib.parse import urlparse
+import re
+import threading
 
-import requests as http_requests
-from flask import Blueprint, jsonify, request, send_from_directory
+from flask import Blueprint, jsonify, send_from_directory
 from loguru import logger
+from pydantic import ValidationError
 
-from config import STORYBOARD_DIR, THUMBNAILS_DIR, N8N_STORYBOARD_WEBHOOK_URL, WAVESPEED_API_KEY
-from studio.ffmpeg_utils import find_ffmpeg
-from studio.io_utils import safe_json_write, safe_json_read, now_iso, JobStore
+from config import N8N_STORYBOARD_WEBHOOK_URL, STORYBOARD_DIR
 from studio.security import sanitize_project_id
+from studio.shared.providers_common import settings_manager
+from studio.shared.providers_common.boundary import wrap_exception
+from studio.shared.providers_common.domains import DOMAINS
+from studio.shared.providers_common.errors import ProviderError
+from studio.shared.providers_common.hub import hub
+from studio.shared.providers_common.invocation import build_invocation
+from studio.shared.providers_common.registry import ProviderConstructionError
 from studio.validation import validate_json
-from studio.webhooks import call_webhook
+from studio.storyboard import jobs
+from studio.storyboard.providers.contract import StoryboardRequest
 from .schemas import StoryboardGenerateRequest, StoryboardGrabOneRequest
 
 storyboard_bp = Blueprint("storyboard", __name__)
 
-# ---------------------------------------------------------------------------
-# In-memory job tracking
-# ---------------------------------------------------------------------------
-_jobs = JobStore()
-
-MAX_DL_RETRIES = 3
-DL_RETRY_DELAY = 2  # seconds
-
-_DL_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-}
-
-
-def _storyboard_dir(project_id):
-    return os.path.join(STORYBOARD_DIR, project_id)
-
-
-def _storyboard_json_path(project_id):
-    return os.path.join(_storyboard_dir(project_id), "storyboard.json")
-
-
-def _save_storyboard_json(project_id, job):
-    """Persist storyboard state to disk."""
-    try:
-        safe_json_write(_storyboard_json_path(project_id), job, indent=2)
-    except Exception as e:
-        logger.error("Failed to save storyboard.json for {}: {}", project_id, e)
+DOMAIN = "storyboard"
 
 
 # ---------------------------------------------------------------------------
-# Image download
+# Generic provider dispatch
 # ---------------------------------------------------------------------------
 
-THUMB_SIZE = "480:-1"
-THUMB_QUALITY = "4"
 
+def resolve_provider(*candidates):
+    """The first candidate the registry resolves, by ID or by alias.
 
-def _thumb_path(project_id, scene_num):
-    """Return the thumbnail path: output/thumbnails/{project_id}/storyboard/{scene}.jpg"""
-    return os.path.join(THUMBNAILS_DIR, project_id, "storyboard", f"{scene_num}.jpg")
-
-
-def _generate_thumbnail(src_path, project_id, scene_num):
-    """Generate a JPEG thumbnail into the thumbnails directory."""
-    ffmpeg = find_ffmpeg()
-    if not ffmpeg:
-        logger.warning("ffmpeg not found — skipping thumbnail for {}", src_path)
-        return None
-    dest_path = _thumb_path(project_id, scene_num)
-    try:
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        import subprocess
-        subprocess.run(
-            [ffmpeg, "-y", "-i", src_path,
-             "-vf", f"scale={THUMB_SIZE}",
-             "-q:v", THUMB_QUALITY, dest_path],
-            capture_output=True, timeout=15,
-        )
-        if os.path.isfile(dest_path):
-            return f"/api/thumbnails/{project_id}/storyboard/{scene_num}.jpg"
-        return None
-    except Exception as e:
-        logger.debug("Thumbnail generation failed for {}: {}", src_path, e)
-        return None
-
-
-def _version_existing_image(scene_dir):
-    """If image.* exists in scene_dir, rename it to image_v{N}.* to keep history."""
-    import glob
-    for ext in (".jpeg", ".jpg", ".png", ".webp"):
-        current = os.path.join(scene_dir, f"image{ext}")
-        if not os.path.isfile(current):
-            continue
-        # Find next version number
-        pattern = os.path.join(scene_dir, f"image_v*{ext}")
-        existing = glob.glob(pattern)
-        next_v = len(existing) + 1
-        versioned = os.path.join(scene_dir, f"image_v{next_v}{ext}")
-        os.rename(current, versioned)
-        logger.info("Versioned {} → {}", current, versioned)
-
-
-def _download_image(url, dest_path):
-    """Download an image URL to a local file with retries."""
-    parsed = urlparse(url)
-    headers = {**_DL_HEADERS, "Referer": f"{parsed.scheme}://{parsed.netloc}/"}
-
-    for attempt in range(1, MAX_DL_RETRIES + 1):
-        try:
-            resp = http_requests.get(url, headers=headers, timeout=120, stream=True)
-            resp.raise_for_status()
-            with open(dest_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=65536):
-                    f.write(chunk)
-            size_kb = os.path.getsize(dest_path) / 1024
-            logger.info("Storyboard image downloaded ({:.0f} KB): {}", size_kb, dest_path)
-            return True
-        except Exception as e:
-            logger.warning("Download attempt {}/{} failed for {}: {}",
-                           attempt, MAX_DL_RETRIES, dest_path, e)
-            if os.path.isfile(dest_path):
-                os.remove(dest_path)
-            if attempt < MAX_DL_RETRIES:
-                time.sleep(DL_RETRY_DELAY * attempt)
-    return False
-
-
-# ---------------------------------------------------------------------------
-# Background generation
-# ---------------------------------------------------------------------------
-
-def _generate_storyboard(project_id, scenes, aspect_ratio, webhook_url, style=None, image_model=None):
-    """Background thread: generate one image per scene.
-
-    Uses direct WaveSpeed API when the style has a non-default model configured
-    in assets/image-models.json. Falls back to n8n webhook for default styles.
-
-    Style consistency comes from prompt engineering — the scene blueprint
-    generator appends a shared style/palette suffix to every scene prompt.
+    Order at the call sites is `provider_override` → the legacy `provider`
+    field → the saved selection → the domain default. Alias resolution is the
+    registry's (`gemini` → `gemini_ws`, `webhook` → `wavespeed_webhook`,
+    `direct` → `wavespeed_direct`), so no translation table lives here.
     """
-    from .wavespeed import is_default_model, generate_image
+    for candidate in candidates:
+        if not candidate:
+            continue
+        instance = hub.get(DOMAIN, str(candidate))
+        if instance is not None:
+            return instance
+    return None
 
-    job = _jobs.get(project_id)
-    if not job:
-        return
 
-    project_dir = _storyboard_dir(project_id)
-    os.makedirs(project_dir, exist_ok=True)
-    url = webhook_url or N8N_STORYBOARD_WEBHOOK_URL
+def _selected_provider() -> str:
+    return settings_manager.get_domain_settings(DOMAIN).get("selected_provider") or ""
 
-    # Decide whether to use direct WaveSpeed API or n8n webhook
-    use_direct = image_model or (style and not is_default_model(style))
-    if use_direct:
-        logger.info("[{}] Using direct WaveSpeed API (style={}, model={})", project_id, style, image_model or "auto")
-    else:
-        logger.info("[{}] Using n8n webhook for storyboard", project_id)
 
-    total = len(scenes)
-    ready = 0
-    errors = 0
+def _invocation(instance, project_id: str, options: dict):
+    """Build the provider invocation for a legacy route call (§30.6).
 
-    for entry in scenes:
-        scene_num = entry["scene"]
-        prompt = entry["prompt"]
-        scene_key = str(scene_num)
+    `context=None`: there is no scheduler here, so cancellation and progress are
+    the no-op collaborators, which is exactly what these fire-and-poll routes
+    have always had.
+    """
+    saved = settings_manager.get_provider_settings(DOMAIN, instance.id)
+    return build_invocation(
+        None,
+        domain=DOMAIN,
+        provider_id=instance.id,
+        project_id=project_id,
+        output_dir=jobs.project_dir(project_id),
+        settings=instance.resolve_settings(saved),
+        options={key: value for key, value in options.items() if value is not None},
+        selection_reason="request",
+    )
 
-        # Update status
-        job["scene_statuses"][scene_key] = {"status": "generating", "image_url": None, "local_path": None}
-        _save_storyboard_json(project_id, job)
 
-        try:
-            if use_direct:
-                # Direct WaveSpeed API — model selected by style config or override
-                logger.info("[{}] Storyboard scene {} — direct WaveSpeed", project_id, scene_num)
-                image_url = generate_image(
-                    prompt=prompt,
-                    style=style or "default",
-                    aspect_ratio=aspect_ratio,
-                    model_override=image_model,
-                )
-            else:
-                # n8n webhook (original path)
-                payload = {
-                    "image_prompt": prompt,
-                    "aspect_ratio": aspect_ratio,
-                    "wavespeed_api_key": WAVESPEED_API_KEY,
-                    "project_id": project_id,
-                    "scene": scene_num,
-                }
+def _submit(instance, request: StoryboardRequest, project_id: str, options: dict):
+    """Construct and run the provider. Raises `ProviderError` on failure.
 
-                logger.info("[{}] Storyboard scene {} — calling webhook", project_id, scene_num)
-                result = call_webhook(
-                    url, payload, timeout=300,
-                    label=f"Storyboard scene {scene_num}",
-                )
+    Everything a provider can throw is mapped onto the shared catalog, so a
+    misbehaving package answers 502 with a safe message rather than a 500 with
+    a traceback (§34.4).
+    """
+    try:
+        provider = hub.create(DOMAIN, instance.id)
+    except ProviderConstructionError as exc:
+        raise ProviderError(
+            "PROVIDER_UNAVAILABLE",
+            f"The storyboard provider '{instance.id}' could not be started",
+            domain=DOMAIN,
+            provider_id=instance.id,
+        ) from exc
+    invocation = _invocation(instance, project_id, options)
+    try:
+        return provider.submit(request, invocation)
+    except ProviderError:
+        raise
+    except BaseException as exc:
+        raise wrap_exception(
+            exc, domain=DOMAIN, provider_id=instance.id, log=invocation.log
+        ) from None
 
-                image_url = result.get("image_url")
-                if not image_url:
-                    raise RuntimeError(f"Webhook returned no image_url: {result}")
 
-            # Download into scene subfolder
-            job["scene_statuses"][scene_key]["status"] = "downloading"
-            _save_storyboard_json(project_id, job)
+def _request_from(scenes, *, aspect_ratio, style) -> StoryboardRequest:
+    """Build the §32.4 request, or fail as a bad request rather than a 500."""
+    try:
+        return StoryboardRequest.from_scenes(
+            scenes, aspect_ratio=aspect_ratio, style=style
+        )
+    except ValidationError as exc:
+        raise ProviderError(
+            "PROVIDER_REQUEST_INVALID",
+            "No scenes with a usable prompt were supplied",
+            domain=DOMAIN,
+        ) from exc
 
-            ext = ".jpeg"
-            if image_url.lower().endswith(".png"):
-                ext = ".png"
-            elif image_url.lower().endswith(".webp"):
-                ext = ".webp"
-            scene_dir = os.path.join(project_dir, str(scene_num))
-            os.makedirs(scene_dir, exist_ok=True)
-            _version_existing_image(scene_dir)
-            dest = os.path.join(scene_dir, f"image{ext}")
 
-            if _download_image(image_url, dest):
-                local_path = f"/output/storyboard/{project_id}/{scene_num}/image{ext}"
-                thumb_url = _generate_thumbnail(dest, project_id, scene_num)
+def _http_status(exc: ProviderError) -> int:
+    """A caller's mistake is 4xx; anything upstream is 502."""
+    return 400 if exc.code == "PROVIDER_REQUEST_INVALID" else 502
 
-                job["scene_statuses"][scene_key] = {
-                    "status": "ready",
-                    "image_url": image_url,
-                    "local_path": local_path,
-                    "thumb_path": thumb_url,
-                }
-                ready += 1
-                logger.success("[{}] Storyboard scene {} ready", project_id, scene_num)
-            else:
-                job["scene_statuses"][scene_key] = {
-                    "status": "error",
-                    "image_url": image_url,
-                    "local_path": None,
-                    "error": "Download failed after retries",
-                }
-                errors += 1
 
-        except Exception as e:
-            logger.error("[{}] Storyboard scene {} failed: {}", project_id, scene_num, e)
-            job["scene_statuses"][scene_key] = {
-                "status": "error",
-                "image_url": None,
-                "local_path": None,
-                "error": str(e),
-            }
-            errors += 1
-
-        _save_storyboard_json(project_id, job)
-
-    # Finalize
-    job["status"] = "done"
-    job["completed_at"] = now_iso()
-    job["ready"] = ready
-    job["errors"] = errors
-    job["total"] = total
-    _save_storyboard_json(project_id, job)
-    _jobs.set(project_id, job)
-    logger.success("[{}] Storyboard complete — {}/{} ready, {} errors",
-                   project_id, ready, total, errors)
+def _run_options(data) -> dict:
+    """Per-run values a request may override on the selected provider."""
+    options = dict(getattr(data, "provider_options", None) or {})
+    for name in ("webhook_url", "image_model", "auto_type"):
+        value = getattr(data, name, None)
+        if value is not None and value != "":
+            options.setdefault(name, value)
+    return options
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @storyboard_bp.route("/api/storyboard/image-models")
 def list_image_models():
     """Return the image-models.json config for frontend use."""
     from .wavespeed import _load_image_models
+
     return jsonify(_load_image_models())
 
 
@@ -285,82 +170,79 @@ def list_image_models():
 def generate(data: StoryboardGenerateRequest):
     """Start storyboard image generation for a project."""
     project_id = sanitize_project_id(data.project_id)
-    scenes = [{"scene": s.scene, "prompt": s.prompt} for s in data.scenes]
-
-    job = {
-        "project_id": project_id,
-        "status": "running",
-        "total": len(scenes),
-        "ready": 0,
-        "errors": 0,
-        "aspect_ratio": data.aspect_ratio,
-        "created_at": now_iso(),
-        "completed_at": None,
-        "scene_statuses": {
-            str(s["scene"]): {"status": "pending", "image_url": None, "local_path": None}
-            for s in scenes
-        },
-    }
-    _jobs.set(project_id, job)
-    _save_storyboard_json(project_id, job)
-
-    # Resolve provider: request override → settings → default
-    from studio.storyboard.providers import registry as sb_registry
-    from studio.shared.providers_common import settings_manager
-    
-    provider_override = getattr(data, "provider_override", None)
-    if provider_override:
-        provider_id = provider_override
-    else:
-        domain_settings = settings_manager.get_domain_settings("storyboard")
-        provider_id = domain_settings.get("selected_provider", "gemini_ws")
-    
-    provider = sb_registry.get(provider_id)
-    if provider is None:
-        logger.warning("[{}] Provider '{}' not found, falling back to gemini_ws", project_id, provider_id)
-        provider = sb_registry.get("gemini_ws")
-        provider_id = "gemini_ws"
-    
-    if provider_id == "gemini_ws":
-        # Gemini provider: queue prompts via WebSocket to Chrome extension
-        from studio.storyboard.gemini_ws import queue_image_job, is_extension_connected
-        
-        # Merge settings with provider_options from request
-        provider_settings = settings_manager.get_provider_settings("storyboard", provider_id)
-        merged_settings = {**provider_settings, **data.provider_options}
-        
-        # Per-request auto_type (from pipeline config) takes precedence over
-        # the saved provider setting — the pipeline always wants typing to
-        # start as soon as the extension acks the job.
-        job_msg = {
-            "type": "IMAGE_JOB",
-            "projectId": project_id,
-            "aspectRatio": data.aspect_ratio,
-            "autoType": data.auto_type if data.auto_type is not None else merged_settings.get("auto_type", True),
-            "scenes": [{"scene": s["scene"], "prompt": s["prompt"]} for s in scenes],
-        }
-
-        if is_extension_connected():
-            queue_image_job(job_msg)
-            logger.info("[{}] Gemini storyboard job sent — {} scenes", project_id, len(scenes))
-        else:
-            queue_image_job(job_msg)
-            logger.info("[{}] Gemini storyboard job queued (waiting for extension) — {} scenes",
-                        project_id, len(scenes))
-
-        return jsonify({"status": "running", "project_id": project_id, "total": len(scenes), "provider": provider_id}), 202
-
-    # Default: webhook/direct providers
-    t = threading.Thread(
-        target=_generate_storyboard,
-        args=(project_id, scenes, data.aspect_ratio, data.webhook_url),
-        kwargs={"style": data.style, "image_model": data.image_model},
-        daemon=True,
+    instance = resolve_provider(
+        data.provider_override,
+        data.provider,
+        _selected_provider(),
+        DOMAINS[DOMAIN].default_provider,
     )
-    t.start()
+    if instance is None:
+        return jsonify({"error": "No storyboard provider is registered"}), 503
 
-    logger.info("[{}] Storyboard generation started — {} scenes", project_id, len(scenes))
-    return jsonify({"status": "running", "project_id": project_id, "total": len(scenes)}), 202
+    try:
+        request = _request_from(
+            [{"index": scene.scene, "prompt": scene.prompt} for scene in data.scenes],
+            aspect_ratio=data.aspect_ratio,
+            style=data.style,
+        )
+        _submit(instance, request, project_id, _run_options(data))
+    except ProviderError as exc:
+        logger.error("[{}] storyboard submit failed: {}", project_id, exc.code)
+        return jsonify({"error": exc.message, "provider": instance.id}), _http_status(exc)
+
+    logger.info(
+        "[{}] Storyboard generation started via {} — {} scenes",
+        project_id, instance.id, request.unit_count,
+    )
+    return jsonify({
+        "status": "running",
+        "project_id": project_id,
+        "total": request.unit_count,
+        "provider": instance.id,
+    }), 202
+
+
+@storyboard_bp.route("/api/storyboard/grab", methods=["POST"])
+@validate_json(StoryboardGrabOneRequest)
+def grab_one(data: StoryboardGrabOneRequest):
+    """Generate a single scene's storyboard image.
+
+    The same generic dispatch as the bulk route with a one-scene request, so a
+    provider needs no separate single-image entry point. The manifest is merged
+    rather than replaced: regenerating one frame must not discard the rest.
+    """
+    project_id = sanitize_project_id(data.project_id)
+    instance = resolve_provider(
+        data.provider_override,
+        data.provider,
+        _selected_provider(),
+        DOMAINS[DOMAIN].default_provider,
+    )
+    if instance is None:
+        return jsonify({"error": "No storyboard provider is registered"}), 503
+
+    existing = jobs.read(project_id)
+    try:
+        request = _request_from(
+            [{"index": data.scene, "prompt": data.prompt}],
+            aspect_ratio=data.aspect_ratio,
+            style=data.style,
+        )
+        _submit(instance, request, project_id, _run_options(data))
+    except ProviderError as exc:
+        logger.error("[{}] storyboard grab failed: {}", project_id, exc.code)
+        return jsonify({"error": exc.message, "provider": instance.id}), _http_status(exc)
+
+    jobs.merge_prior_scenes(project_id, (existing or {}).get("scene_statuses"), data.scene)
+
+    logger.info("[{}] Storyboard grab started via {} — scene {}",
+                project_id, instance.id, data.scene)
+    return jsonify({
+        "status": "generating",
+        "project_id": project_id,
+        "scene": data.scene,
+        "provider": instance.id,
+    }), 202
 
 
 @storyboard_bp.route("/api/storyboard/status/<project_id>")
@@ -368,27 +250,20 @@ def status(project_id):
     """Poll storyboard generation status."""
     project_id = sanitize_project_id(project_id)
 
-    # Always reload from disk (Gemini WS handler writes to disk, not in-memory)
-    json_path = _storyboard_json_path(project_id)
-    job = None
-    if os.path.isfile(json_path):
-        try:
-            job = safe_json_read(json_path)
-            _jobs.set(project_id, job)
-        except Exception:
-            pass
-
-    if not job:
-        job = _jobs.get(project_id)
-
+    job = jobs.read(project_id)
     if not job:
         return jsonify({"error": "No storyboard job found for this project"}), 404
 
     scene_statuses = job.get("scene_statuses", {})
-    # Use the stored total (set at creation time), exclude sentinel key "-1" from counts
-    total = job.get("total", 0) or sum(1 for k in scene_statuses if k != "-1")
-    ready = sum(1 for k, s in scene_statuses.items() if k != "-1" and s.get("status") in ("ready", "done"))
-    errors = sum(1 for k, s in scene_statuses.items() if k != "-1" and s.get("status") == "error")
+    total = job.get("total", 0) or sum(1 for key in scene_statuses if key != "-1")
+    ready = sum(
+        1 for key, entry in scene_statuses.items()
+        if key != "-1" and entry.get("status") in ("ready", "done")
+    )
+    errors = sum(
+        1 for key, entry in scene_statuses.items()
+        if key != "-1" and entry.get("status") == "error"
+    )
 
     done = ready >= total and total > 0
 
@@ -408,60 +283,64 @@ def status(project_id):
 def list_images(project_id):
     """List generated storyboard images for a project."""
     project_id = sanitize_project_id(project_id)
-    project_dir = _storyboard_dir(project_id)
+    project_dir = jobs.project_dir(project_id)
 
     if not os.path.isdir(project_dir):
         return jsonify({"error": "No storyboard found for this project"}), 404
 
     images = []
-    image_exts = (".jpg", ".jpeg", ".png", ".webp")
-    import re
     for entry in sorted(os.scandir(project_dir), key=lambda e: e.name):
-        # New structure: {project_id}/{scene_num}/image.jpeg + image_v1.jpeg etc.
+        # Current structure: {project_id}/{scene}/image.jpeg + image_v1.jpeg …
         if entry.is_dir() and entry.name.isdigit():
-            scene_dir = entry.path
             scene_num = int(entry.name)
-            thumb_file = _thumb_path(project_id, scene_num)
-            thumb_url = (f"/api/thumbnails/{project_id}/storyboard/{entry.name}.jpg"
-                         if os.path.isfile(thumb_file) else None)
+            thumb_file = jobs.thumbnail_path(project_id, scene_num)
+            thumb_url = (
+                f"/api/thumbnails/{project_id}/storyboard/{entry.name}.jpg"
+                if os.path.isfile(thumb_file) else None
+            )
             versions = []
-            for f in sorted(os.scandir(scene_dir), key=lambda e: e.name):
-                if not f.is_file() or f.name == "thumb.jpg":
+            for file in sorted(os.scandir(entry.path), key=lambda e: e.name):
+                if not file.is_file() or file.name == "thumb.jpg":
                     continue
-                if not f.name.lower().endswith(image_exts):
+                if not file.name.lower().endswith(jobs.IMAGE_EXTENSIONS):
                     continue
-                # Determine version: image.ext = current, image_v1.ext = version 1
-                m = re.match(r"image_v(\d+)", f.name)
-                version = int(m.group(1)) if m else None
-                is_current = f.name.startswith("image.") or f.name.startswith("image.")
+                match = re.match(r"image_v(\d+)", file.name)
+                version = int(match.group(1)) if match else None
                 versions.append({
-                    "filename": f.name,
-                    "path": f"/output/storyboard/{project_id}/{entry.name}/{f.name}",
+                    "filename": file.name,
+                    "path": f"/output/storyboard/{project_id}/{entry.name}/{file.name}",
                     "version": version,
-                    "is_current": version is None and f.name.startswith("image."),
-                    "size_bytes": f.stat().st_size,
+                    "is_current": version is None and file.name.startswith("image."),
+                    "size_bytes": file.stat().st_size,
                 })
-            # Sort: current last (newest), versions ascending
-            versions.sort(key=lambda v: (v["version"] if v["version"] is not None else 9999))
+            # Sort: versions ascending, current frame last (newest).
+            versions.sort(key=lambda v: v["version"] if v["version"] is not None else 9999)
             images.append({
                 "scene": scene_num,
-                "path": next((v["path"] for v in versions if v["is_current"]), versions[-1]["path"] if versions else None),
+                "path": next(
+                    (v["path"] for v in versions if v["is_current"]),
+                    versions[-1]["path"] if versions else None,
+                ),
                 "thumb_path": thumb_url,
                 "versions": versions,
                 "version_count": len(versions),
             })
-        # Legacy flat structure: {project_id}/{scene_num}.jpg
-        elif entry.is_file() and entry.name.lower().endswith(image_exts):
+        # Legacy flat structure: {project_id}/{scene}.jpg
+        elif entry.is_file() and entry.name.lower().endswith(jobs.IMAGE_EXTENSIONS):
             base = os.path.splitext(entry.name)[0]
+            path = f"/output/storyboard/{project_id}/{entry.name}"
             images.append({
                 "scene": int(base) if base.isdigit() else None,
-                "path": f"/output/storyboard/{project_id}/{entry.name}",
+                "path": path,
                 "thumb_path": None,
-                "versions": [{"filename": entry.name, "path": f"/output/storyboard/{project_id}/{entry.name}", "version": None, "is_current": True, "size_bytes": entry.stat().st_size}],
+                "versions": [{
+                    "filename": entry.name, "path": path, "version": None,
+                    "is_current": True, "size_bytes": entry.stat().st_size,
+                }],
                 "version_count": 1,
             })
 
-    images.sort(key=lambda x: x.get("scene") if x.get("scene") is not None else 0)
+    images.sort(key=lambda item: item.get("scene") if item.get("scene") is not None else 0)
     return jsonify({"project_id": project_id, "images": images, "count": len(images)})
 
 
@@ -469,7 +348,7 @@ def list_images(project_id):
 def serve_image(project_id, filename):
     """Serve an individual storyboard image file."""
     project_id = sanitize_project_id(project_id)
-    project_dir = _storyboard_dir(project_id)
+    project_dir = jobs.project_dir(project_id)
 
     if not os.path.isfile(os.path.join(project_dir, filename)):
         return jsonify({"error": "Image not found"}), 404
@@ -479,152 +358,13 @@ def serve_image(project_id, filename):
 
 @storyboard_bp.route("/api/storyboard/remove-watermarks/<project_id>", methods=["POST"])
 def remove_watermarks(project_id):
-    """Sweep all storyboard images for a project and remove any Gemini watermarks."""
+    """Sweep a project's frames and remove any watermarks."""
     project_id = sanitize_project_id(project_id)
-    from .gemini_ws import _sweep_watermarks
-    import threading
-    threading.Thread(target=_sweep_watermarks, args=(project_id,), daemon=True).start()
-    return jsonify({"status": "started", "project_id": project_id}), 202
-
-
-@storyboard_bp.route("/api/storyboard/grab", methods=["POST"])
-@validate_json(StoryboardGrabOneRequest)
-def grab_one(data: StoryboardGrabOneRequest):
-    """Grab a single scene's storyboard image — sends to n8n and downloads result.
-
-    Creates or updates the job for this project, generating only the requested scene.
-    """
-    project_id = sanitize_project_id(data.project_id)
-    scene_key = str(data.scene)
-    webhook_url = data.webhook_url or N8N_STORYBOARD_WEBHOOK_URL
-
-    # Load or create job
-    job = _jobs.get(project_id)
-    if not job:
-        json_path = _storyboard_json_path(project_id)
-        if os.path.isfile(json_path):
-            try:
-                job = safe_json_read(json_path)
-                _jobs.set(project_id, job)
-            except Exception:
-                pass
-    if not job:
-        job = {
-            "project_id": project_id,
-            "status": "running",
-            "total": 0,
-            "ready": 0,
-            "errors": 0,
-            "aspect_ratio": data.aspect_ratio,
-            "created_at": now_iso(),
-            "completed_at": None,
-            "scene_statuses": {},
-        }
-
-    # Mark this scene as generating
-    job["status"] = "running"
-    job["scene_statuses"][scene_key] = {"status": "generating", "image_url": None, "local_path": None}
-    _jobs.set(project_id, job)
-    _save_storyboard_json(project_id, job)
-
-    def _grab_single(pid, sk, prompt, ar, url):
-        j = _jobs.get(pid)
-        if not j:
-            return
-        project_dir = _storyboard_dir(pid)
-        os.makedirs(project_dir, exist_ok=True)
-
-        try:
-            logger.info("[{}] Storyboard grab scene {} — calling webhook", pid, sk)
-            result = call_webhook(
-                url,
-                {"image_prompt": prompt, "aspect_ratio": ar,
-                 "wavespeed_api_key": WAVESPEED_API_KEY,
-                 "project_id": pid, "scene": int(sk)},
-                timeout=300,
-                label=f"Storyboard grab scene {sk}",
-            )
-            image_url = result.get("image_url")
-            if not image_url:
-                raise RuntimeError(f"Webhook returned no image_url: {result}")
-
-            j["scene_statuses"][sk]["status"] = "downloading"
-            _save_storyboard_json(pid, j)
-
-            ext = ".jpeg"
-            if image_url.lower().endswith(".png"):
-                ext = ".png"
-            elif image_url.lower().endswith(".webp"):
-                ext = ".webp"
-            scene_dir = os.path.join(project_dir, sk)
-            os.makedirs(scene_dir, exist_ok=True)
-            _version_existing_image(scene_dir)
-            dest = os.path.join(scene_dir, f"image{ext}")
-
-            if _download_image(image_url, dest):
-                local_path = f"/output/storyboard/{pid}/{sk}/image{ext}"
-                thumb_url = _generate_thumbnail(dest, pid, int(sk))
-
-                j["scene_statuses"][sk] = {
-                    "status": "ready",
-                    "image_url": image_url,
-                    "local_path": local_path,
-                    "thumb_path": thumb_url,
-                }
-                logger.success("[{}] Storyboard grab scene {} ready", pid, sk)
-            else:
-                j["scene_statuses"][sk] = {
-                    "status": "error",
-                    "image_url": image_url,
-                    "local_path": None,
-                    "error": "Download failed after retries",
-                }
-        except Exception as e:
-            logger.error("[{}] Storyboard grab scene {} failed: {}", pid, sk, e)
-            j["scene_statuses"][sk] = {
-                "status": "error",
-                "image_url": None,
-                "local_path": None,
-                "error": str(e),
-            }
-
-        # Update totals
-        statuses = j["scene_statuses"]
-        j["total"] = len(statuses)
-        j["ready"] = sum(1 for s in statuses.values() if s.get("status") == "ready")
-        j["errors"] = sum(1 for s in statuses.values() if s.get("status") == "error")
-        all_done = all(s["status"] in ("ready", "error") for s in statuses.values())
-        if all_done:
-            j["status"] = "done"
-            j["completed_at"] = now_iso()
-        _save_storyboard_json(pid, j)
-        _jobs.set(pid, j)
-
-    provider = getattr(data, "provider", "webhook") or "webhook"
-
-    if provider == "gemini":
-        from studio.storyboard.gemini_ws import queue_image_job
-
-        queue_image_job({
-            "type": "IMAGE_JOB",
-            "projectId": project_id,
-            "aspectRatio": data.aspect_ratio,
-            "autoType": getattr(data, "auto_type", True),
-            "scenes": [{"scene": data.scene, "prompt": data.prompt}],
-        })
-
-        logger.info("[{}] Gemini grab scene {} queued", project_id, scene_key)
-        return jsonify({"status": "generating", "project_id": project_id, "scene": data.scene, "provider": "gemini"}), 202
-
-    # Default: webhook
     threading.Thread(
-        target=_grab_single,
-        args=(project_id, scene_key, data.prompt, data.aspect_ratio, webhook_url),
-        daemon=True,
+        target=jobs.sweep_watermarks, args=(project_id,),
+        name=f"storyboard-sweep-{project_id}", daemon=True,
     ).start()
-
-    logger.info("[{}] Storyboard grab started — scene {}", project_id, scene_key)
-    return jsonify({"status": "generating", "project_id": project_id, "scene": data.scene}), 202
+    return jsonify({"status": "started", "project_id": project_id}), 202
 
 
 @storyboard_bp.route("/api/storyboard/webhook-url")
@@ -635,5 +375,5 @@ def get_webhook_url():
 
 @storyboard_bp.route("/output/storyboard/<path:filename>")
 def serve_output(filename):
-    """Serve storyboard files via /output/storyboard/ path (consistency with other modules)."""
+    """Serve storyboard files via /output/storyboard/ (consistent with other modules)."""
     return send_from_directory(STORYBOARD_DIR, filename)

@@ -96,8 +96,15 @@ DOMAINS: dict[str, DomainSpec] = {
             package="studio.storyboard.providers",
             providers_base=_base("studio", "storyboard", "providers"),
             default_provider="gemini_ws",
-            capability_vocabulary=_caps("image_edit", "watermark_removal", "prompt_prefix"),
+            # `auto_animate` is the storyboard→animator hand-off the Gemini
+            # extension performs on job completion (step 14.2): declared by the
+            # provider that does it rather than hardcoded in its transport.
+            capability_vocabulary=_caps(
+                "image_edit", "watermark_removal", "prompt_prefix", "auto_animate"
+            ),
             legacy_selection_key="sts-storyboard-provider",
+            request_model="studio.storyboard.providers.contract:StoryboardRequest",
+            result_model="studio.storyboard.providers.contract:StoryboardResultPayload",
         ),
         DomainSpec(
             id="animator",

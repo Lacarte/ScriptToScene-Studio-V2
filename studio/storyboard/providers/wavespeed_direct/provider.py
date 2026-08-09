@@ -1,98 +1,95 @@
-"""WaveSpeed Direct Storyboard Provider — Phase 6.
+"""Direct WaveSpeed storyboard provider — Provider Contract v2 (step 14.2).
 
-Uses direct WaveSpeed API for image generation.
+The v1 body called `sb_routes._generate_storyboard(...)` without a `style`, so
+the transport heuristic inside that function (`image_model or (style and not
+is_default_model(style))`) evaluated false whenever no model override was set
+and the "direct" provider ran the n8n webhook. Selecting this provider now
+selects the direct API unconditionally — the transport is the provider's, not a
+guess made from the request.
 """
 
-import os
-import time
-from loguru import logger
+from __future__ import annotations
+
+import threading
 
 from config import WAVESPEED_API_KEY
-from studio.shared.providers_common.jobs import status_from_scenes, unknown_job_status
-from studio.storyboard.providers.base import (
-    StoryboardProvider,
-    JobHandle,
-    JobStatus,
-    SceneResult,
-)
-from studio.storyboard import wavespeed
+from studio.shared.providers_common.jobs import JobHandle, JobStatus
+from studio.storyboard import generation, jobs
+from studio.storyboard.providers.base import StoryboardProvider, StoryboardRequest
+
+PROVIDER_ID = "wavespeed_direct"
 
 
 class WaveSpeedDirectProvider(StoryboardProvider):
-    """Storyboard provider using direct WaveSpeed API."""
+    """Storyboard frames from the WaveSpeed API, called directly."""
 
-    def submit(
-        self,
-        project_id: str,
-        scenes: list[dict],
-        settings: dict,
-        on_progress=None,
-    ) -> JobHandle:
-        from studio.storyboard import routes as sb_routes
-        from studio.storyboard.schemas import StoryboardGenerateRequest
-        
-        api_key = settings.get("api_key") or WAVESPEED_API_KEY
-        image_model = settings.get("image_model") or ""
-        aspect_ratio = "16:9"
-        
-        if on_progress:
-            on_progress({"status": "starting", "message": "Starting storyboard generation"})
-        
-        sb_routes._generate_storyboard(
-            project_id=project_id,
-            scenes=scenes,
-            aspect_ratio=aspect_ratio,
-            webhook_url=None,
-            image_model=image_model,
+    def submit(self, request: StoryboardRequest, invocation) -> JobHandle:
+        options = {**dict(invocation.settings), **dict(invocation.options)}
+        transport = generation.direct_transport(
+            style=request.style,
+            image_model=str(options.get("image_model") or ""),
         )
-        
+
+        jobs.seed(invocation.project_id, request, provider_id=PROVIDER_ID)
+        project_id = invocation.project_id
+        threading.Thread(
+            target=generation.run_batch,
+            args=(project_id, request, transport),
+            kwargs={"is_cancelled": invocation.cancel.is_cancelled},
+            name=f"storyboard-direct-{project_id}",
+            daemon=True,
+        ).start()
+
         return JobHandle(
             job_id=project_id,
-            domain="storyboard",
-            provider_id="wavespeed_direct",
+            domain=invocation.domain,
+            provider_id=PROVIDER_ID,
             project_id=project_id,
+            invocation_id=invocation.invocation_id,
         )
 
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
-        from studio.storyboard import routes as sb_routes
-
-        job = sb_routes._jobs.get(job_id)
-        if not job:
-            return unknown_job_status(job_id)
-        # This body counted `status == "complete"`, a value the storyboard route
-        # has never written — it writes ready/error (`routes.py:390`). Found by
-        # first-time test in step 11.4.
-        return status_from_scenes(job_id, job.get("scene_statuses", {}))
+    def poll(self, job_id: str, invocation) -> JobStatus:
+        return jobs.status(invocation.project_id or job_id, job_id)
 
     def shutdown(self) -> None:
         pass
 
 
+def create() -> WaveSpeedDirectProvider:
+    return WaveSpeedDirectProvider()
+
+
 def validate_settings(settings: dict) -> list[dict]:
-    issues = []
-    api_key = settings.get("api_key", "").strip() or WAVESPEED_API_KEY
+    api_key = str((settings or {}).get("api_key") or "").strip() or WAVESPEED_API_KEY
     if not api_key:
-        issues.append({
+        return [{
             "field": "api_key",
             "severity": "warning",
             "message": "No API key configured — will use environment variable",
-        })
-    return issues
+        }]
+    return []
+
+
+def list_models(_settings: dict) -> list[dict]:
+    """The models this provider can be pointed at (§22.4).
+
+    Read by the `storyboard_image_models` option source, which used to import
+    this catalog directly and would therefore have offered these models for any
+    provider selected.
+    """
+    from studio.storyboard.wavespeed import get_models_for_style
+
+    return list(get_models_for_style("default"))
 
 
 def health_check(settings: dict) -> dict:
-    api_key = settings.get("api_key", "").strip() or WAVESPEED_API_KEY
+    """Credential presence only. The live key check belongs to a test call.
+
+    An invalid key is reported by the invocation as `PROVIDER_AUTH_FAILED` on
+    the units it rejects, not here: this hook runs on catalog reads and must not
+    spend a request per provider.
+    """
+    api_key = str((settings or {}).get("api_key") or "").strip() or WAVESPEED_API_KEY
     if not api_key:
         return {"status": "warn", "message": "No API key (will use env var)"}
-    
-    return {"status": "ok", "message": "WaveSpeed API configured"}
-
-
-_provider_instance = None
-
-
-def get_provider():
-    global _provider_instance
-    if _provider_instance is None:
-        _provider_instance = WaveSpeedDirectProvider()
-    return _provider_instance
+    return {"status": "ok", "latency_ms": 0, "message": "WaveSpeed API key configured"}

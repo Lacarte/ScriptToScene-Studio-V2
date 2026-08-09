@@ -85,6 +85,25 @@ FAILURE_CODE = {"storyboard": "STORYBOARD_FAILED", "animator": "ANIMATOR_FAILED"
 # -- harness ----------------------------------------------------------------
 
 
+class _InlineThread:
+    """A `threading.Thread` stand-in that runs its target on `start()`."""
+
+    def __init__(self, target=None, args=(), kwargs=None, **_ignored):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def start(self):
+        if self._target is not None:
+            self._target(*self._args, **self._kwargs)
+
+
+class InlineThreads:
+    """Substitute for the `threading` module inside a provider under test."""
+
+    Thread = _InlineThread
+
+
 class Harness:
     """Drive one visual adapter against a scripted legacy job store.
 
@@ -180,15 +199,25 @@ class Harness:
 
 
 class StoryboardHarness(Harness):
+    """Step 14.2 moved the storyboard seam: the adapter now hands the real
+    provider to the service, so the script is installed under the provider's
+    transport rather than under a route helper."""
+
     def _install_domain(self):
-        from studio.storyboard import routes as sb_routes
+        from studio.shared.providers_common.hub import hub
+        from studio.storyboard import generation, jobs as sb_jobs
 
         self._monkeypatch.setattr(storyboard_adapter, "STORYBOARD_DIR", str(self.root))
-        self._monkeypatch.setattr(sb_routes._jobs, "set", lambda *a, **k: None)
-        self._monkeypatch.setattr(sb_routes, "_save_storyboard_json", lambda *a, **k: None)
+        self._monkeypatch.setattr(sb_jobs, "STORYBOARD_DIR", str(self.root))
+        self._monkeypatch.setattr(sb_jobs, "seed", lambda *a, **k: {})
+        self._monkeypatch.setattr(sb_jobs, "save_scene_prompts", lambda *a, **k: None)
+        # `run_batch` is what the WaveSpeed providers hand to their worker
+        # thread. Running it inline keeps the scripted store deterministic.
         self._monkeypatch.setattr(
-            sb_routes, "_generate_storyboard", lambda *a, **k: self._started()
+            generation, "run_batch", lambda *a, **k: self._started()
         )
+        module = hub.get("storyboard", "wavespeed_webhook").provider_module
+        self._monkeypatch.setattr(module, "threading", InlineThreads)
 
     def _started(self):
         self.starts += 1

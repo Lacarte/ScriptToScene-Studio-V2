@@ -279,22 +279,54 @@ def _provider_options(ctx: OptionContext):
     ]
 
 
-def _storyboard_image_models(_ctx: OptionContext):
-    """The `default` style's model list, which is the list the page offered.
+def _storyboard_image_models(ctx: OptionContext):
+    """The selected provider's own model list (§22.4, P32 closed in 14.2).
 
-    The empty first option means "let the pipeline choose", matching the
-    `image_model: ""` default in the provider's own settings schema.
+    This used to import one provider's module directly, so a second provider
+    with a different catalog would have shown the first one's models. The list
+    now comes from the provider's optional `list_models()` hook, which is why
+    the source declares a `provider` context parameter.
+
+    The empty first option means "let the provider choose", matching the
+    `image_model: ""` default in its settings schema.
     """
-    from studio.storyboard.wavespeed import get_models_for_style
-
     options = [_opt("", "Auto")]
-    for model in get_models_for_style("default"):
+    for model in _provider_models(ctx):
         if not isinstance(model, dict) or not model.get("id"):
             continue
         label = model.get("name") or model["id"]
         price = model.get("price")
         options.append(_opt(model["id"], f"{label} (${price})" if price else label))
     return options
+
+
+def _provider_models(ctx: OptionContext) -> list:
+    """Ask the selected provider for its models. No hook means no models."""
+    from studio.shared.providers_common import settings_manager
+    from studio.shared.providers_common.hub import hub
+
+    domain = ctx.domain
+    provider_id = ctx.provider or settings_manager.get_domain_settings(domain).get(
+        "selected_provider"
+    )
+    instance = hub.get(domain, provider_id) if provider_id else None
+    if instance is None:
+        return []
+    hook = instance._resolve("list_models")
+    if not callable(hook):
+        return []
+    try:
+        models = hook(
+            instance.resolve_settings(
+                settings_manager.get_provider_settings(domain, instance.id)
+            )
+        )
+    except Exception as exc:
+        # An option list is advisory; a broken provider hook must not 500 the
+        # editor. The redacted logger is the only place the cause is recorded.
+        logger.warning("[options] list_models failed for {}: {}", instance.id, exc)
+        return []
+    return list(models or [])
 
 
 def _export_profiles(_ctx: OptionContext):

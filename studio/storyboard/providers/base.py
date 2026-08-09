@@ -1,90 +1,94 @@
-"""Storyboard Provider Base Contract — Phase 3.
+"""Storyboard Provider Base Contract — Provider Contract v2 (step 14.2).
 
-Abstract base class defining the storyboard provider interface.
-All storyboard providers must implement these methods.
+Storyboard generation is asynchronous and multi-unit for every provider, so the
+interface is the shared `AsyncMediaProvider` shape from step 14.1: `submit`
+returns a `JobHandle`, `poll` reports a `JobStatus`, and the media-job service
+owns the deadline, cadence, cancellation, progress, retry, and aggregation.
 
-Step 11.4 deleted this module's copies of `JobHandle`, `JobStatus`, and
-`SceneResult`. They were field-for-field duplicates of the animator ones
-(contracts.md §14.6) and now have one shared definition in
-`providers_common.jobs`; the names are re-exported here so existing
-`from studio.storyboard.providers.base import JobHandle` imports keep resolving,
-and `SceneResult` is the media-neutral `UnitResult` (§33.1).
+Two changes from the v1 shape this replaces:
+
+  * `submit(project_id, scenes, settings, on_progress)` becomes
+    `submit(request, invocation)`. The three loose arguments were why every
+    caller had to know which provider it was talking to — `settings` was
+    provider-shaped, `scenes` had two incompatible spellings, and `on_progress`
+    duplicated `ProviderInvocation.progress`;
+  * `poll(job_id, settings)` becomes `poll(job_id, invocation)`, so a poll can
+    observe cancellation and report progress like any other call.
+
+Providers own only remote/local generation mechanics. The manifest, per-scene
+metadata, thumbnails, and the watermark pass belong to `studio.storyboard.jobs`
+and are applied identically whichever provider produced the frame.
+
+`JobHandle`, `JobStatus`, and `SceneResult` are re-exported so existing
+`from studio.storyboard.providers.base import JobHandle` imports keep resolving;
+`SceneResult` is the media-neutral `UnitResult` (§33.1).
 """
 
 from abc import ABC, abstractmethod
-from typing import Callable
 
+from studio.shared.providers_common.invocation import ProviderInvocation
 from studio.shared.providers_common.jobs import (  # noqa: F401  (re-exported)
     JobHandle,
     JobStatus,
     SceneResult,
     UnitResult,
 )
+from studio.storyboard.providers.contract import (  # noqa: F401  (re-exported)
+    StoryboardRequest,
+    StoryboardResultPayload,
+)
 
 
 class StoryboardProvider(ABC):
-    """Base class for all storyboard providers.
-    
-    Providers must implement:
-    - submit(): Submit a generation job
-    - poll(): Check job status
-    
-    Optional:
-    - generate_one(): Generate a single scene
-    """
-    
+    """Base class for all storyboard providers (contracts.md §32.4, §33)."""
+
     @abstractmethod
     def submit(
-        self,
-        project_id: str,
-        scenes: list[dict],
-        settings: dict,
-        on_progress: Callable[[dict], None] | None = None,
+        self, request: StoryboardRequest, invocation: ProviderInvocation
     ) -> JobHandle:
-        """Submit a storyboard generation job.
-        
-        Args:
-            project_id: Project identifier
-            scenes: List of scene dicts with 'index', 'prompt', 'aspect_ratio', etc.
-            settings: Provider settings from settings.json
-            on_progress: Optional callback for progress updates
-            
-        Returns:
-            JobHandle with job_id and initial status
+        """Start a storyboard job and return its handle.
+
+        The handle's `job_id` is the public identity; the shipped providers keep
+        using the project ID, so existing status URLs and job records stay
+        valid. Durable provider settings arrive on `invocation.settings`, per-run
+        node or request values on `invocation.options`.
         """
-        pass
-    
+
     @abstractmethod
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
-        """Poll status of a storyboard job.
-        
-        Args:
-            job_id: Job identifier from submit()
-            settings: Provider settings
-            
-        Returns:
-            JobStatus with current state
+    def poll(self, job_id: str, invocation: ProviderInvocation) -> JobStatus:
+        """Report the current state of a submitted job.
+
+        A provider that pushes its results still implements this: it is the
+        §33.3 watchdog, and answering from the manifest is what stops a lost
+        callback hanging the job for a whole deadline.
         """
-        pass
-    
+
+    def cancel_job(self, job_id: str, invocation: ProviderInvocation) -> None:
+        """Best-effort remote cancellation. Optional; the default is a no-op."""
+
     def generate_one(
-        self,
-        scene: dict,
-        settings: dict,
-        output_dir: str | None = None,
+        self, request: StoryboardRequest, invocation: ProviderInvocation
     ) -> SceneResult:
-        """Generate a storyboard image for a single scene. Optional.
-        
-        Args:
-            scene: Scene dict with 'index', 'prompt', 'aspect_ratio'
-            settings: Provider settings
-            output_dir: Optional output directory
-            
-        Returns:
-            SceneResult with image URL/path
+        """Generate a single scene synchronously. Optional.
+
+        Providers declaring `single_scene` may implement this; the legacy
+        single-image route reaches them through `submit` with a one-scene
+        request instead, so nothing depends on it today.
         """
-        raise NotImplementedError(f"generate_one not supported by {self.__class__.__name__}")
-    
+        raise NotImplementedError(
+            f"generate_one is not supported by {self.__class__.__name__}"
+        )
+
     def shutdown(self) -> None:
         """Clean up resources. Called on app shutdown."""
-        pass
+
+
+__all__ = [
+    "JobHandle",
+    "JobStatus",
+    "SceneResult",
+    "StoryboardProvider",
+    "StoryboardRequest",
+    "StoryboardResultPayload",
+    "UnitResult",
+]

@@ -1014,6 +1014,29 @@ def legacy_progress(status: JobStatus) -> dict[str, int]:
     return {"ready": int(status.ready), "total": int(status.total)}
 
 
+# Job-level completion markers the legacy stores write. Only "done" is produced
+# today; "completed" is carried over from the animator loop, which accepted it,
+# so an older manifest on disk still reads as finished.
+JOB_DONE_STATES = frozenset({"done", "completed"})
+
+
+def settled_state(units: tuple[UnitResult, ...], total: int) -> str:
+    """The terminal state of a store that declared itself done (§33.2).
+
+    A legacy store may write `status: "done"` over a per-scene map that still
+    has pending entries — the extension does exactly that. Those units never
+    arrive, so the outcome settles from what was produced rather than waiting
+    out the deadline. Zero produced units still cannot become success.
+    """
+    produced = sum(1 for unit in units if unit.state == UNIT_SUCCEEDED)
+    failed = sum(1 for unit in units if unit.state == UNIT_FAILED)
+    if produced == 0:
+        return FAILED
+    if failed or produced < total:
+        return PARTIAL
+    return SUCCEEDED
+
+
 def units_from_legacy_scenes(
     scene_statuses: Mapping[str, Any],
 ) -> tuple[UnitResult, ...]:
@@ -1079,6 +1102,7 @@ def units_from_legacy_scenes(
 
 
 __all__ = [
+    "JOB_DONE_STATES",
     "RECORD_FILENAME",
     "AsyncMediaProvider",
     "LiveJob",
@@ -1090,6 +1114,7 @@ __all__ = [
     "merge_prior_units",
     "record_path_for",
     "result_from_status",
+    "settled_state",
     "units_from_legacy_scenes",
     "units_needing_retry",
 ]

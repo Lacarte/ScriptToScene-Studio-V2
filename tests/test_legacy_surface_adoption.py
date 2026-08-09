@@ -118,8 +118,30 @@ class StoryboardImageModelOptionsTests(unittest.TestCase):
         with patch(
             'studio.storyboard.wavespeed.get_models_for_style', return_value=models
         ):
-            options, _context = resolve_options('storyboard_image_models')
+            options, _context = resolve_options(
+                'storyboard_image_models',
+                {'domain': 'storyboard', 'provider': 'wavespeed_webhook'},
+            )
         self.assertEqual(options[1], {'value': 'm1', 'label': 'Model One ($0.03)'})
+
+    def test_the_list_comes_from_the_selected_provider(self):
+        """Step 14.2 (P32): the resolver used to import one provider's catalog,
+        so every provider was offered that provider's models."""
+        models = [{'id': 'm1', 'name': 'Model One'}]
+        with patch(
+            'studio.storyboard.wavespeed.get_models_for_style', return_value=models
+        ):
+            webhook, _ = resolve_options(
+                'storyboard_image_models',
+                {'domain': 'storyboard', 'provider': 'wavespeed_webhook'},
+            )
+            extension, _ = resolve_options(
+                'storyboard_image_models',
+                {'domain': 'storyboard', 'provider': 'gemini_ws'},
+            )
+        self.assertEqual([option['value'] for option in webhook], ['', 'm1'])
+        # The extension declares no model catalog, so it offers only "Auto".
+        self.assertEqual([option['value'] for option in extension], [''])
 
     def test_the_option_source_is_scoped_to_its_domain(self):
         with self.assertRaises(OptionContextError):

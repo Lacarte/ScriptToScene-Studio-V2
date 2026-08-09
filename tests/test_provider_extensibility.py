@@ -802,9 +802,6 @@ KNOWN_PROVIDER_LITERALS = {
     ("studio/workflows/registry.py", "kokoro"),
     ("studio/workflows/registry.py", "gemini_ws"),
     ("studio/workflows/registry.py", "gemini"),
-    # P32 residue: the image-model resolver imports one provider's module.
-    # Owner 14.2, which moves the model catalog behind the provider interface.
-    ("studio/workflows/options.py", "wavespeed"),
     # A comment naming the provider 13.2 replaces the `builtin` bridge with.
     ("studio/workflows/adapters/story.py", "gemini"),
     # §19.1 — the domain catalog is where a default provider id belongs.
@@ -821,11 +818,8 @@ KNOWN_PROVIDER_LITERALS = {
     ("studio/workflows/config_migrations.py", "gemini"),
     # A comment about the removed C1 environment side effect. Owner 16.1.
     ("studio/shared/providers_common/settings_manager.py", "inworld"),
-    # The two visual dispatch branches. Owners 14.2 and 14.3.
-    ("studio/workflows/adapters/storyboard.py", "gemini_ws"),
-    ("studio/workflows/adapters/storyboard.py", "gemini"),
-    ("studio/workflows/adapters/storyboard.py", "wavespeed_webhook"),
-    ("studio/workflows/adapters/storyboard.py", "wavespeed"),
+    # Step 14.2 cleared the storyboard adapter: it names no provider at all
+    # now, in a comment or otherwise. The animator branch is 14.3's.
     ("studio/workflows/adapters/animator.py", "kie_ai"),
     ("studio/workflows/adapters/animator.py", "grok_automa"),
     # The extension routes P13–P16/P24/P25 own. Owners 14.2, 14.3, 16.1.

@@ -44,23 +44,14 @@ from studio.shared.providers_common.jobs import (
     status_from_scenes,
 )
 from studio.shared.providers_common.media_jobs import (
+    JOB_DONE_STATES,
     MediaJobService,
+    settled_state,
     units_from_legacy_scenes,
 )
-from studio.shared.providers_common.results import (
-    FAILED,
-    PARTIAL,
-    SUCCEEDED,
-    UNIT_FAILED,
-    UNIT_SUCCEEDED,
-)
+from studio.shared.providers_common.results import UNIT_FAILED
 
 from .common import AdapterError
-
-# Both legacy stores mark a finished job on the manifest itself. Only "done" is
-# ever written today; "completed" is carried over from the animator loop, which
-# accepted it, so an older manifest on disk still reads as finished.
-JOB_DONE_STATES = frozenset({"done", "completed"})
 
 
 class ManifestJobProvider:
@@ -113,7 +104,7 @@ class ManifestJobProvider:
             # pending at that point never arrive, so settle the outcome from
             # what was produced instead of waiting out the deadline. Zero
             # produced units still cannot become success (§33.2).
-            state = _settled_state(units, total)
+            state = settled_state(units, total)
         return JobStatus(
             job_id=job_id,
             state=state,
@@ -127,17 +118,6 @@ class ManifestJobProvider:
     def cancel_job(self, job_id: str, invocation: Any) -> None:
         """The legacy stores expose no remote cancel; 14.2/14.3 add real ones."""
         return None
-
-
-def _settled_state(units, total: int) -> str:
-    """Terminal state for a store that declared itself done (§33.2)."""
-    produced = sum(1 for unit in units if unit.state == UNIT_SUCCEEDED)
-    failed = sum(1 for unit in units if unit.state == UNIT_FAILED)
-    if produced == 0:
-        return FAILED
-    if failed or produced < total:
-        return PARTIAL
-    return SUCCEEDED
 
 
 def read_manifest(path: str) -> Mapping[str, Any] | None:
@@ -159,30 +139,45 @@ def run_manifest_job(
     context: Any,
     scenes: list[Mapping[str, Any]],
     manifest_path: str,
-    start: Callable[[], None],
+    start: Callable[[], None] | None = None,
     read: Callable[[], Mapping[str, Any] | None] | None = None,
     failure_code: str,
     failure_details: Mapping[str, Any] | None = None,
     service: MediaJobService | None = None,
+    job_provider: Any = None,
+    request: Any = None,
+    settings: Mapping[str, Any] | None = None,
+    options: Mapping[str, Any] | None = None,
 ) -> dict:
     """Run one multi-scene job through the shared service.
 
     Returns the legacy `{total, ready, errors, scene_statuses}` payload. Raises
     the `AdapterError` the scheduler already understands: `CANCELLED` on stop,
     `POLL_TIMEOUT` on deadline, and `failure_code` when nothing was produced.
+
+    `job_provider` is a real `AsyncMediaProvider`, used once a domain's
+    providers implement `submit`/`poll` themselves (storyboard, step 14.2). Pass
+    `start` instead while a domain is still driven through its legacy job store
+    and this module has to synthesize a provider for it (animator, until 14.3).
     """
-    reader = read if read is not None else (lambda: read_manifest(manifest_path))
-    job_provider = ManifestJobProvider(
-        start=start, read=reader, unit_count=len(scenes)
-    )
+    if job_provider is None:
+        if start is None:
+            raise ValueError("run_manifest_job needs either job_provider or start")
+        job_provider = ManifestJobProvider(
+            start=start, read=read or (lambda: read_manifest(manifest_path)),
+            unit_count=len(scenes),
+        )
     invocation = build_invocation(
         context,
         domain=domain,
         provider_id=provider,
         project_id=project_id,
         output_dir=os.path.dirname(manifest_path),
+        settings=settings,
+        options=options,
     )
-    request = {"scenes": list(scenes), "unit_count": len(scenes)}
+    if request is None:
+        request = {"scenes": list(scenes), "unit_count": len(scenes)}
 
     try:
         result = (service or MediaJobService()).run(
@@ -208,11 +203,19 @@ def run_manifest_job(
         raise exc.as_adapter_error() from None
 
     payload = result.payload if isinstance(result.payload, Mapping) else {}
+    # A synthesized `ManifestJobProvider` remembers the last map it polled; a
+    # real provider does not, so the manifest it owns is read once at the end.
+    observed = getattr(job_provider, "scene_statuses", None)
+    if observed is None:
+        manifest = read or (lambda: read_manifest(manifest_path))
+        raw = manifest()
+        scene_map = raw.get("scene_statuses") if isinstance(raw, Mapping) else None
+        observed = dict(scene_map) if isinstance(scene_map, Mapping) else {}
     return {
         "total": int(payload.get("total") or len(scenes)),
         "ready": int(payload.get("ready") or 0),
         "errors": sum(1 for unit in result.units if unit.state == UNIT_FAILED),
-        "scene_statuses": job_provider.scene_statuses,
+        "scene_statuses": observed,
     }
 
 
