@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSettings } from '../composables/useSettings.js'
+import { useProviderCatalogStore } from '@/features/providers/stores/providerCatalog.js'
 import { useScenes } from '@/features/scenes/composables/useScenes.js'
 import { useToast } from '@/shared/composables/useToast.js'
 import { useWelcomeOverlay } from '@/shared/composables/useWelcomeOverlay.js'
@@ -15,6 +16,7 @@ defineOptions({ name: 'SettingsPage' })
 
 const { settings, loading, health, healthLoading, update, fetchHealth } = useSettings()
 const { templates: styleTemplates } = useScenes()
+const providerCatalog = useProviderCatalogStore()
 const toast = useToast()
 const welcome = useWelcomeOverlay()
 const showClearDialog = ref(false)
@@ -108,10 +110,16 @@ async function loadCaptionPresets() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   fetchHealth()
   loadCaptionPresets()
+  // Editing a provider package with hot reload on republishes the catalog;
+  // the selectors on this page follow it without a browser refresh.
+  await providerCatalog.loadCatalog()
+  providerCatalog.watchCatalogReloads()
 })
+
+onUnmounted(() => providerCatalog.closeCatalogReloads())
 
 async function onToggle(key, value) {
   try {

@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
-import { useProviders } from '../composables/useProviders.js'
+import { computed, watch } from 'vue'
+import { useProviderCatalogStore } from '../stores/providerCatalog.js'
+import { availabilityInfo, healthInfo, isSelectable, toneColor } from '../availability.js'
 
 const props = defineProps({
   domain: { type: String, required: true },
@@ -10,70 +11,40 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'configure'])
 
-const { loadProviders, getProvidersByDomain, getSelectedProvider, selectProvider, validateProviderSettings } = useProviders()
+// Everything rendered here comes from the catalog: the list, the labels, the
+// state, and the selection. No provider id appears in this component.
+const catalog = useProviderCatalogStore()
 
-const selectedId = ref('')
-const showModal = ref(false)
-const healthStatus = ref('unknown')
-const hasIssues = ref(false)
-const providerList = ref([])
-const loading = ref(true)
-
-async function load() {
-  loading.value = true
-  await loadProviders()
-  providerList.value = getProvidersByDomain(props.domain)
-  const sel = getSelectedProvider(props.domain)
-  selectedId.value = sel?.id || ''
-  await checkHealth()
-  loading.value = false
-}
-
-async function checkHealth() {
-  if (!selectedId.value) {
-    healthStatus.value = 'unknown'
-    return
-  }
-  try {
-    const result = await validateProviderSettings(props.domain, selectedId.value)
-    hasIssues.value = !result.valid
-    healthStatus.value = result.valid ? 'ok' : 'warn'
-  } catch {
-    healthStatus.value = 'fail'
-    hasIssues.value = true
-  }
-}
+const providerList = computed(() => catalog.catalogEntriesFor(props.domain))
+const selectedId = computed(() => catalog.selectedProvider(props.domain)?.id || '')
+const availability = computed(
+  () => catalog.resolveProvider(props.domain, selectedId.value)?.availability,
+)
+// Availability is the resting state. A health probe costs I/O and runs only on
+// an explicit user action, so it shows here once one has happened and never
+// gates the selection (contracts.md §21.5).
+const probed = computed(() => catalog.healthFor(props.domain, selectedId.value))
+const status = computed(() =>
+  probed.value ? healthInfo(probed.value.status) : availabilityInfo(availability.value),
+)
+const needsAttention = computed(() => status.value.tone !== 'ok')
 
 async function onSelect(event) {
-  const newId = event.target.value
-  const result = await selectProvider(props.domain, newId)
-  
-  if (result?.needsConfiguration) {
-    showModal.value = true
-    emit('configure', { domain: props.domain, providerId: newId })
+  const providerId = event.target.value
+  const result = await catalog.selectProvider(props.domain, providerId)
+  if (!result.switched) return
+  if (result.needsConfiguration) {
+    emit('configure', { domain: props.domain, providerId })
   } else {
-    selectedId.value = newId
-    emit('select', { domain: props.domain, providerId: newId })
+    emit('select', { domain: props.domain, providerId })
   }
-  
-  await checkHealth()
 }
 
 function openSettings() {
-  showModal.value = true
   emit('configure', { domain: props.domain, providerId: selectedId.value })
 }
 
-function getHealthColor(status) {
-  if (status === 'ok') return '#22c55e'
-  if (status === 'warn') return '#f59e0b'
-  return '#6b7280'
-}
-
-watch(() => props.domain, load, { immediate: true })
-onMounted(load)
-
-defineExpose({ showModal, selectedId })
+watch(() => props.domain, () => catalog.loadCatalog(), { immediate: true })
 </script>
 
 <template>
@@ -87,17 +58,22 @@ defineExpose({ showModal, selectedId })
         <select
           class="selector-select"
           :value="selectedId"
-          :disabled="loading"
+          :disabled="catalog.loading"
           @change="onSelect"
         >
-          <option v-for="p in providerList" :key="p.id" :value="p.id">
-            {{ p.label }}
+          <option
+            v-for="p in providerList"
+            :key="p.id"
+            :value="p.id"
+            :disabled="!isSelectable(p)"
+          >
+            {{ p.label }}{{ isSelectable(p) ? '' : ` — ${availabilityInfo(p.availability).label}` }}
           </option>
         </select>
         <button
           class="gear-btn"
-          :class="{ 'has-warning': hasIssues }"
-          :disabled="!selectedId || loading"
+          :class="{ 'has-warning': needsAttention }"
+          :disabled="!selectedId || catalog.loading"
           title="Configure provider"
           @click="openSettings"
         >
@@ -108,11 +84,12 @@ defineExpose({ showModal, selectedId })
         </button>
         <span
           class="health-dot"
-          :style="{ background: getHealthColor(healthStatus) }"
-          :title="healthStatus"
+          :style="{ background: toneColor(status.tone) }"
+          :title="status.label"
         />
       </div>
     </div>
+    <p v-if="catalog.error" class="selector-error">{{ catalog.error }}</p>
   </div>
 </template>
 
@@ -143,6 +120,12 @@ defineExpose({ showModal, selectedId })
   font-size: 12px;
   color: var(--text-secondary, #9ca3af);
   margin: 4px 0 0;
+}
+
+.selector-error {
+  font-size: 12px;
+  color: #ef4444;
+  margin: 6px 0 0;
 }
 
 .selector-controls {

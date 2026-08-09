@@ -296,6 +296,21 @@ class CatalogTests(ProviderApiTestCase):
         second = self.client.get('/api/providers').get_json()['catalog_version']
         self.assertNotEqual(first, second)
 
+    def test_the_dev_reload_flag_rides_along_without_moving_the_version(self):
+        """Step 12.1: the browser store needs the flag to decide whether to
+        subscribe to the reload stream, and it must not perturb the digest."""
+        write_provider(self.base, 'alpha', domain='demo', provider_body=GOOD_PROVIDER)
+        self.install_hub()
+
+        with patch.dict(os.environ, {'STS_WORKFLOW_DEV_RELOAD': ''}, clear=False):
+            off = self.client.get('/api/providers').get_json()
+        with patch.dict(os.environ, {'STS_WORKFLOW_DEV_RELOAD': '1'}, clear=False):
+            on = self.client.get('/api/providers').get_json()
+
+        self.assertIs(off['dev_reload_enabled'], False)
+        self.assertIs(on['dev_reload_enabled'], True)
+        self.assertEqual(off['catalog_version'], on['catalog_version'])
+
     def test_no_internal_handle_reaches_the_catalog(self):
         write_provider(self.base, 'alpha', domain='demo', provider_body=GOOD_PROVIDER)
         self.install_hub()

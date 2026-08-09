@@ -28,7 +28,8 @@ vi.mock('@vue-flow/controls', () => ({ Controls: defineComponent(() => () => h('
 vi.mock('@vue-flow/minimap', () => ({ MiniMap: defineComponent(() => () => h('div')) }))
 
 import { api } from '@/shared/api/client.js'
-import { useWorkflowStore, apiErrorText } from '../stores/workflow.js'
+import { apiErrorText } from '@/shared/api/errors.js'
+import { useWorkflowStore } from '../stores/workflow.js'
 import ConfigField from '../components/ConfigField.vue'
 import NodeInspector from '../components/NodeInspector.vue'
 import WorkflowPage from '../views/WorkflowPage.vue'

@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { useProviders } from '../composables/useProviders.js'
+import { apiErrorText } from '@/shared/api/errors.js'
+import { useProviderCatalogStore } from '../stores/providerCatalog.js'
+import { healthInfo, toneColor } from '../availability.js'
 
 const props = defineProps({
   domain: { type: String, required: true },
@@ -10,7 +12,9 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'saved'])
 
-const { getProviderSettings, saveProviderSettings, validateProviderSettings, testProvider } = useProviders()
+// The schema, the label, and the health vocabulary all come from the catalog —
+// this modal knows nothing about any particular provider.
+const catalog = useProviderCatalogStore()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -19,6 +23,7 @@ const formData = ref({})
 const schema = ref(null)
 const manifest = ref(null)
 const errors = ref([])
+const loadError = ref('')
 const testResult = ref(null)
 const originalData = ref({})
 
@@ -26,8 +31,9 @@ const isValid = computed(() => errors.value.filter(e => e.severity === 'error').
 
 async function loadProviderData() {
   loading.value = true
+  loadError.value = ''
   try {
-    const data = await getProviderSettings(props.domain, props.providerId)
+    const data = await catalog.getProviderSettings(props.domain, props.providerId)
     schema.value = data.schema
     manifest.value = data.manifest
     formData.value = { ...data.settings }
@@ -35,7 +41,7 @@ async function loadProviderData() {
     errors.value = []
     testResult.value = null
   } catch (e) {
-    console.error('[Modal] Failed to load provider data:', e)
+    loadError.value = apiErrorText(e, 'Failed to load provider settings')
   } finally {
     loading.value = false
   }
@@ -43,11 +49,11 @@ async function loadProviderData() {
 
 async function validateForm() {
   try {
-    const result = await validateProviderSettings(props.domain, props.providerId, formData.value)
+    const result = await catalog.validateProviderSettings(props.domain, props.providerId, formData.value)
     errors.value = result.issues || []
     return result.valid
-  } catch {
-    errors.value = [{ field: 'root', severity: 'error', message: 'Validation failed' }]
+  } catch (e) {
+    errors.value = [{ field: 'root', severity: 'error', message: apiErrorText(e, 'Validation failed') }]
     return false
   }
 }
@@ -58,11 +64,11 @@ async function handleSave() {
 
   saving.value = true
   try {
-    await saveProviderSettings(props.domain, props.providerId, formData.value)
+    await catalog.saveProviderSettings(props.domain, props.providerId, formData.value)
     emit('saved', { domain: props.domain, providerId: props.providerId, settings: formData.value })
     emit('close')
   } catch (e) {
-    errors.value = [{ field: 'root', severity: 'error', message: e.message }]
+    errors.value = [{ field: 'root', severity: 'error', message: apiErrorText(e, 'Failed to save settings') }]
   } finally {
     saving.value = false
   }
@@ -72,10 +78,9 @@ async function handleTest() {
   testing.value = true
   testResult.value = null
   try {
-    const result = await testProvider(props.domain, props.providerId, formData.value)
-    testResult.value = result.health
+    testResult.value = await catalog.testProvider(props.domain, props.providerId, formData.value)
   } catch (e) {
-    testResult.value = { status: 'fail', message: e.message }
+    testResult.value = { status: 'fail', message: apiErrorText(e, 'Test failed') }
   } finally {
     testing.value = false
   }
@@ -89,12 +94,6 @@ function handleReset() {
 
 function handleCancel() {
   emit('close')
-}
-
-function getHealthColor(status) {
-  if (status === 'ok') return '#22c55e'
-  if (status === 'warn') return '#f59e0b'
-  return '#ef4444'
 }
 
 watch(() => props.visible, (val) => {
@@ -118,14 +117,26 @@ watch(() => props.visible, (val) => {
             Loading...
           </div>
 
+          <div v-else-if="loadError" class="validation-banner error">
+            <span>⚠️</span>
+            <span>{{ loadError }}</span>
+          </div>
+
           <div v-else-if="errors.length" class="validation-banner error">
             <span>⚠️</span>
             <span>This provider needs configuration before it can be used.</span>
           </div>
 
-          <div v-if="testResult" class="test-result" :style="{ borderColor: getHealthColor(testResult.status) }">
-            <span class="status-dot" :style="{ background: getHealthColor(testResult.status) }"></span>
-            <span>{{ testResult.message || testResult.status }}</span>
+          <div
+            v-if="testResult"
+            class="test-result"
+            :style="{ borderColor: toneColor(healthInfo(testResult.status).tone) }"
+          >
+            <span
+              class="status-dot"
+              :style="{ background: toneColor(healthInfo(testResult.status).tone) }"
+            ></span>
+            <span>{{ testResult.message || healthInfo(testResult.status).label }}</span>
             <span v-if="testResult.latency_ms">({{ testResult.latency_ms }}ms)</span>
           </div>
 

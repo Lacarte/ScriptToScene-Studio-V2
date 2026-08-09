@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/shared/api/client.js'
+import { apiErrorText } from '@/shared/api/errors.js'
 import { validateConnection } from '../validation.js'
 import { nodeIssues } from '../schema.js'
 import { createExecutionEventStream } from '../composables/useExecutionEvents.js'
@@ -20,17 +21,6 @@ export const DRAFT_STORAGE_KEY = 'sts-workflow-draft'
 export const DRAFT_DEBOUNCE_MS = 1000
 export const RECENT_NODE_TYPES_KEY = 'sts-workflow-recent-node-types'
 export const RECENT_NODE_TYPES_LIMIT = 5
-
-/**
- * User-facing text for a failed API call. The api client parses the
- * standard {error:{code,message}} envelope into `err.message`/`err.code`;
- * include the stable code so the surfaced reason is diagnosable, and fall
- * back to the generic text only when there is no real message at all.
- */
-export function apiErrorText(err, fallback) {
-  const message = err?.message || fallback
-  return err?.code ? `${message} [${err.code}]` : message
-}
 
 export const useWorkflowStore = defineStore('workflow', () => {
   // ── Registry (served by the backend, loaded once) ─────────────────────

@@ -19,6 +19,7 @@ from studio.providers.catalog import build_catalog, catalog_version, selected_pr
 from studio.security import is_loopback_remote
 from studio.shared.providers_common import hub, settings_manager
 from studio.shared.providers_common.domains import DOMAINS
+from studio.workflows.dev_reload import dev_reload_enabled
 
 providers_bp = Blueprint("providers", __name__)
 
@@ -111,12 +112,22 @@ def list_providers():
     Registered providers carry an `availability` of `available`,
     `needs_configuration`, or `degraded`; a provider that failed discovery is an
     `excluded[]` entry with its reason code (§21.4, §21.5).
+
+    `dev_reload_enabled` mirrors the flag on `GET /api/workflow/node-types`: the
+    hot-reload watcher covers provider packages too, so a browser holding a
+    cached catalog needs the same signal to decide whether subscribing to the
+    reload stream is worthwhile. It sits outside `domains`, so it can never move
+    `catalog_version`.
     """
     denied = _require_loopback()
     if denied:
         return denied
     catalog = build_catalog()
-    return jsonify({"catalog_version": catalog_version(catalog), "domains": catalog})
+    return jsonify({
+        "catalog_version": catalog_version(catalog),
+        "domains": catalog,
+        "dev_reload_enabled": dev_reload_enabled(),
+    })
 
 
 @providers_bp.route("/api/providers/<domain>", methods=["GET"])
