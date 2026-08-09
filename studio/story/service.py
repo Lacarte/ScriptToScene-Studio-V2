@@ -34,9 +34,14 @@ def generate_story(
     configuration: Mapping[str, Any],
     *,
     project_id: str,
-    webhook_caller: Callable[..., Mapping[str, Any]] = call_webhook,
+    webhook_caller: Callable[..., Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Generate, parse, and persist a story without Flask request state."""
+    """Generate, parse, and persist a story without Flask request state.
+
+    `webhook_caller` defaults to the module-level `call_webhook` so tests can
+    patch `studio.story.service.call_webhook` (or inject a caller) without
+    fighting a frozen default-argument binding.
+    """
     data = StoryGenerateRequest.model_validate(dict(configuration or {}))
     webhook_url = data.webhook_url or N8N_STORY_WEBHOOK_URL
     allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
@@ -76,7 +81,8 @@ def generate_story(
         "structure": ["hook", "build", "climax", "cta"],
     }
     started = time.perf_counter()
-    result = webhook_caller(webhook_url, payload, timeout=120, label="Story webhook")
+    caller = webhook_caller or call_webhook
+    result = caller(webhook_url, payload, timeout=120, label="Story webhook")
     raw_text = result.get("story_text", "")
     if not raw_text:
         raw_text = next((result.get(key, "") for key in ("output", "text", "response") if result.get(key)), "")

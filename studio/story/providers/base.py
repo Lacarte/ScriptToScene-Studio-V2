@@ -1,4 +1,4 @@
-"""Script provider base contract — step 13.1.
+"""Script provider base contract — steps 13.1 / 13.2.
 
 Providers that produce a typed script/story document implement this interface.
 Two entry points exist on purpose:
@@ -10,6 +10,8 @@ Two entry points exist on purpose:
   * `invoke(request, invocation)` — the v2 contract (contracts.md §30/§31).
     Returns a `ProviderResult` whose `payload` validates as
     `ScriptResultPayload`.
+
+Shipped providers: `random_template` (offline catalog) and `gemini` (AI webhook).
 """
 
 from __future__ import annotations

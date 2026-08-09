@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from studio.story.service import StoryServiceError
+from studio.shared.providers_common.errors import ProviderError
 
 from .common import (
     AdapterError,
@@ -26,10 +26,9 @@ def generate(inputs, config, context):
     )
     configuration["project_name_id"] = project_id(context, inputs)
     # `provider_id` is absent on every workflow saved before step 12.3, so it
-    # resolves to the domain default: today the `builtin` bridge, a passthrough
-    # to the same `generate_story` this adapter used to call directly. That is
-    # why M4 needs no `type_version` bump (§41.3); 13.2 swaps the bridge for the
-    # real `gemini` provider behind this same call.
+    # resolves to the domain default (`gemini` after 13.2). The transitional
+    # `builtin` value remains an input alias of that provider (§40.3). M4 needs
+    # no `type_version` bump (§41.3) because nothing is renamed on the node.
     selected = provider_id(DOMAIN, configuration)
     provider = resolve_provider(DOMAIN, selected)
     configuration.update(provider_run_options(DOMAIN, selected, configuration))
@@ -37,8 +36,8 @@ def generate(inputs, config, context):
         result = provider.generate(
             configuration, project_id=configuration["project_name_id"]
         )
-    except StoryServiceError as exc:
-        raise AdapterError(exc.code, str(exc)) from exc
+    except ProviderError as exc:
+        raise exc.as_adapter_error() from exc
     except ValueError as exc:
         raise AdapterError("STORY_CONFIG_INVALID", str(exc)) from exc
     path = result.pop("path")

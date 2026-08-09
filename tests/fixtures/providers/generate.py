@@ -79,6 +79,40 @@ def _script_random_template(raw):
     )
 
 
+def _script_gemini(raw):
+    """Recorded n8n story webhook body -> §32.1 envelope (step 13.2)."""
+    from studio.story.engine import parse_story_sections
+    from studio.story.prompts import WORDS_PER_SECOND
+
+    raw_text = str(raw.get("story_text") or raw.get("output") or raw.get("text") or "")
+    parsed = parse_story_sections(raw_text)
+    estimated = round(parsed["word_count"] / WORDS_PER_SECOND)
+    document = {
+        "story_text": parsed["story_text"],
+        "sections": parsed["sections"],
+        "metadata": {
+            "preset_style": "neural_glow",
+            "language": "english",
+            "story_category": "horror",
+            "story_tone": "suspenseful",
+            "duration": 50,
+            "word_count": parsed["word_count"],
+            "estimated_duration": estimated,
+            # Dropped by the legacy adapter — provenance owns identity (P33).
+            "provider": "gemini",
+            "generation_time": 1.25,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "concept_family": "recurring dreams that bleed into waking life",
+        },
+    }
+    return legacy.script_document_to_result(
+        document,
+        document_ref="stories/pm_SAMPLE/story.json",
+        provider_id="gemini",
+        provider_version="1.0.0",
+    )
+
+
 BUILDERS = {
     ("tts", "kokoro"): _tts_kokoro,
     ("storyboard", "wavespeed_webhook"): _visual(
@@ -88,6 +122,7 @@ BUILDERS = {
         "animator", "kie_ai", "animator/pm_SAMPLE/grabber_job.json", "1.0.0"
     ),
     ("script", "random_template"): _script_random_template,
+    ("script", "gemini"): _script_gemini,
 }
 
 

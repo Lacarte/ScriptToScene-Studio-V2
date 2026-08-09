@@ -312,7 +312,7 @@ Generate a structured narration script with the existing story service.
 
 | Field | Label | Widget | Default | Required | Constraints |
 |---|---|---|---|---|---|
-| `provider_id` | Provider | `provider` | `"builtin"` | yes | options from `script_providers` |
+| `provider_id` | Provider | `provider` | `"gemini"` | yes | options from `script_providers` |
 | `preset_style` | Visual style | `options` | `"cinematic"` | no | options from `style_templates` |
 | `story_category` | Story category | `string` | `"motivation"` | yes | max length 80 |
 | `duration` | Target duration (seconds) | `number` | `45` | no | range 15–180; integer |

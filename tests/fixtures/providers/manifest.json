@@ -13,6 +13,18 @@
       "bytes": 283,
       "sha256": "ea80a3bb6a7512eb473a1b57538ada8b0ec0724e3c1a3dd94b9bcf6c9063b60b"
     },
+    "script/gemini/expected_result.json": {
+      "bytes": 2838,
+      "sha256": "9329d5d1c232e531a4fa0b9eaeb6b1914100b3070bc4444c9c4dd8ecf663b36b"
+    },
+    "script/gemini/raw_response.json": {
+      "bytes": 848,
+      "sha256": "282f69e23dd425fb8f03c3990f97b935c5d4cb05a5f984f9dd2b0fe4abeb3b09"
+    },
+    "script/gemini/request.json": {
+      "bytes": 250,
+      "sha256": "d2525f461e6e0c9a3c010ee822784d79ec22cdc3edaa3bc8fab8eb2dbe74cfe5"
+    },
     "script/random_template/expected_result.json": {
       "bytes": 1779,
       "sha256": "0e30760788404b9bb028e106b967479d1f5471dc7c6c5913d0429ae9019dc180"

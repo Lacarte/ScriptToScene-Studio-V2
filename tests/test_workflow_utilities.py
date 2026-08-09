@@ -116,16 +116,20 @@ def test_wait_delay_requires_integer_milliseconds():
     assert any(problem.get("path", "").endswith("delay_ms") and "integer" in problem["message"] for problem in problems)
 
 
-def test_story_adapter_wraps_importable_service_and_emits_script(monkeypatch, tmp_path):
+def test_story_adapter_dispatches_to_script_provider_and_emits_script(monkeypatch, tmp_path):
+    """Adapter talks only to the script provider seam (step 13.2) — not the
+    concrete AI service module.
+    """
     artifact = tmp_path / "story.json"
     artifact.write_text("{}", encoding="utf-8")
-    service = Mock(return_value={
+    provider = Mock()
+    provider.generate = Mock(return_value={
         "story_text": "Hook: Test",
         "sections": {"hook": "Test"},
         "metadata": {},
         "path": str(artifact),
     })
-    monkeypatch.setattr(story_service, "generate_story", service)
+    monkeypatch.setattr(story, "resolve_provider", lambda domain, selected: provider)
     monkeypatch.setattr(story, "with_artifacts", lambda payload, *paths: {**payload, "artifact_refs": list(paths)})
     result = story.generate(
         {"settings": {"style": "cinematic", "tone": "dramatic"}},
@@ -134,7 +138,9 @@ def test_story_adapter_wraps_importable_service_and_emits_script(monkeypatch, tm
     )
     assert result["script"] == "Hook: Test"
     assert result["story"]["artifact_refs"] == [str(artifact)]
-    assert service.call_args.kwargs["project_id"] == "pm_ABC123"
+    assert provider.generate.call_args.kwargs["project_id"] == "pm_ABC123"
+    # Default provider after 13.2 is the AI gemini path (builtin remains an alias).
+    assert provider.generate.call_count == 1
 
 
 def test_story_service_reuses_story_pipeline_and_persists_artifact(monkeypatch, tmp_path):

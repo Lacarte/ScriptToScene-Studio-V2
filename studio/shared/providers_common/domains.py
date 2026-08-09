@@ -60,7 +60,9 @@ DOMAINS: dict[str, DomainSpec] = {
             label="Script / Story",
             package="studio.story.providers",
             providers_base=_base("studio", "story", "providers"),
-            default_provider="builtin",
+            # Historical AI path (step 13.2). The 12.3 `builtin` bridge ID remains
+            # a permanent *input* alias on the gemini package (contracts.md §40.3).
+            default_provider="gemini",
             capability_vocabulary=_caps("structured_sections", "language_select", "offline"),
             request_model="studio.story.providers.contract:ScriptRequest",
             result_model="studio.story.providers.contract:ScriptResultPayload",

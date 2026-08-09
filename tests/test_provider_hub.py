@@ -114,7 +114,7 @@ class HubSurfaceTests(unittest.TestCase):
         self.assertIsNone(payload['animator']['selected'])
         self.assertEqual(
             [p['id'] for p in payload['script']['providers']],
-            ['builtin', 'random_template'],
+            ['gemini', 'random_template'],
         )
         self.assertEqual([p['id'] for p in payload['scene_blueprint']['providers']], ['builtin'])
 
