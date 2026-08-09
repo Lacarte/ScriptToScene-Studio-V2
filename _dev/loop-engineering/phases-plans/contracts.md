@@ -2494,3 +2494,481 @@ each and a mechanical enforcement point, so no raw provider exception, credentia
 filesystem path, or provider-specific response can reach a workflow record or an API response.
 Deferred by design to 10.4: legacy field/alias mapping tables, node `type_version` migrations,
 and the deterministic fixture set that makes these schemas testable without live credentials.
+
+---
+
+# Provider Platform — Migration Map, Fixtures, Implementation Gate (Phase 10.4 frozen)
+
+> Produced by step 10.4 of [implementation-plan.md](implementation-plan.md).
+> Grounded in code at commit `5330f9e` (2026-08-09). Every `file:line` reference below was read
+> at that commit, not carried over from an earlier section.
+>
+> §13–§18 audited the current paths, §19–§29 froze *what a provider is*, §30–§38 froze *how it is
+> called and how it fails*. This section freezes the last missing piece: **how every value that is
+> already persisted or already on the wire reaches those shapes**, what fixtures make that testable
+> without credentials, and which contract obligations cannot be met without a deliberate shim.
+>
+> **Implementation owner.** Nothing in §39–§48 is code today. Each row names its owner step.
+> 10.4 itself writes no production code; its output is this contract plus the plan corrections
+> in §47.
+
+## 39. Compatibility policy (frozen)
+
+Three verbs, and only three, apply to every shape in this section:
+
+| verb | meaning | when a value is missing | observable effect |
+|---|---|---|---|
+| **passthrough** | v2 accepts the legacy name as-is; no rewrite, no deprecation | legacy default applies | none |
+| **upgrade** | the legacy value is rewritten to its v2 form exactly once, at a named boundary, and the rewrite is recorded | v2 default applies | the persisted document changes |
+| **reject** | the value is refused with a stable code | n/a | a `4xx`/validation issue, never a silent fallback |
+
+Rules that bind all three:
+
+1. **No manual edits.** A workflow saved before the migration, a `settings.json` written before
+   the migration, a legacy `POST` body sent by a legacy page, and an execution/cache record on
+   disk must all keep working with zero user action. This is §17.1 restated as an executable
+   requirement; §48 makes it a test.
+2. **Upgrade is idempotent.** Running an upgrade twice equals running it once. Every upgrade
+   step below is specified so that re-running it on already-upgraded data is a no-op.
+3. **Upgrade is write-once and recorded.** Node-config upgrades land in
+   `extensions.type_version_migrations` (`migrations.py:15,125`); settings upgrades bump
+   `settings.json.version`. Nothing upgrades a document that is only being read.
+4. **Reject is never a fallback.** The current code silently substitutes a provider when the
+   requested one is unknown (`storyboard/routes.py:320-322`, `animator/schemas.py:36`,
+   `services.py:551`). Under v2 an unknown provider ID is a `PROVIDER_NOT_FOUND` error
+   (§34.2), except at the two documented alias boundaries in §40.3.
+5. **Support window.** Legacy request fields and legacy provider strings are supported until
+   step **16.1** removes the internal HTTP hop and the legacy pages that emit them. Persisted
+   shapes (settings, workflow JSON, execution/cache records) have **no** removal date: their
+   upgrade paths are permanent.
+
+## 40. Legacy request-field map (frozen)
+
+### 40.1 Provider-selection fields
+
+Four different names select a provider today. All four are frozen as inputs; §24.1 already fixed
+the precedence between them. `v2 target` is the single field name the provider platform reads.
+
+| # | field | read at | default when absent | v2 target | verb | owner |
+|---|---|---|---|---|---|---|
+| F1 | `engine` (workflow node config, `tts.generate`) | `registry.py:185-186` (schema), `adapters/tts.py:11` (`merged.get("engine","kokoro")`) | `"kokoro"` | `provider_id` | upgrade (§41.3 M1) | 15.2 |
+| F2 | `provider` (workflow node config, `storyboard.generate` / `animator.generate`) | `registry.py:255-256`, `:280-281`; `adapters/storyboard.py:57`, `adapters/animator.py:66` | `"wavespeed_webhook"` / `"grok_automa"` | `provider_id` | upgrade (§41.3 M2, M3) | 14.2 / 14.3 |
+| F3 | `provider_override` (HTTP body) | `storyboard/routes.py:311`; `animator/schemas.py:18,32` | `None` | `provider_id` | passthrough | 14.2 / 14.3 |
+| F4 | `provider` (HTTP body, legacy) | `animator/schemas.py:20,35-36`; `storyboard/routes.py:603`; `pipeline/schemas.py:93-94` | `"midjourney"` (animator), `"webhook"` (storyboard grab), `"grok"` / `"webhook"` (pipeline) | `provider_id` via §40.3 | passthrough + alias | 14.2 / 14.3 |
+| F5 | `tts_provider` / `tts_provider_override` (pipeline body) | `pipeline/schemas.py:39,85`; consumed `services.py:77-82` | `"kokoro"` | `provider_id` | passthrough | 15.2 |
+| F6 | `storyboard_provider` / `storyboard_provider_override` | `pipeline/schemas.py:87,93`; consumed `services.py:546,551` | `"webhook"` | `provider_id` via §40.3 | passthrough + alias | 14.2 |
+| F7 | `animator_provider_override` / `provider` | `pipeline/schemas.py:89,94`; consumed `services.py:640,645` | `"grok"` | `provider_id` via §40.3 | passthrough + alias | 14.3 |
+| F8 | `storyboard_provider` / `asset_provider` (preflight) | `app.py:253-254` | `"gemini"` / `"grok"` | `provider_id` via §40.3 | passthrough + alias | 14.4 |
+
+`script` and `scene_blueprint` appear in no row: neither their routes
+(`story/routes.py:197-341`, `build_scene_blueprints/routes.py:263-372`) nor their node configs
+(`registry.py:140-157`, `:235-242`) accept any provider field at all. Their v2 selection is
+**new surface**, not a migration — the field is added with a default that reproduces today's
+single hard-wired behavior (`"gemini"` for script, `"n8n"` for scene blueprint), so an
+unedited saved workflow keeps running the same service. Owners: **13.1–13.3** (script),
+**13.4** (scene blueprint).
+
+### 40.2 Option dictionaries and the unknown-key rule
+
+| # | dict | read at | merge order today | v2 treatment | owner |
+|---|---|---|---|---|---|
+| O1 | `provider_options` (node config, `tts.generate`) | `registry.py:191`; `adapters/tts.py:12` | copied to `tts_provider_options` | per-run options (§22.6), validated against the provider settings schema | 15.2 |
+| O2 | `tts_provider_options` | `pipeline/schemas.py:86`; `services.py:97` | `{**provider_settings, **options}` — request wins | unchanged order; unknown keys become a `warning`, not an error | 15.2 |
+| O3 | `storyboard_provider_options` | `pipeline/schemas.py:88`; `services.py:547` | `{**provider_settings, **data.provider_options}` at `storyboard/routes.py:330` | same | 14.2 |
+| O4 | `animator_provider_options` | `pipeline/schemas.py:90`; `services.py:641,653` | request options override, then `_kie_ai_options.update(provider_settings)` inverts the precedence for Kie AI | **corrected**: request wins for every provider | 14.3 |
+| O5 | `segment_config` (node config) | `registry.py:221` | passed straight through | not a provider dict; untouched | — |
+
+Unknown keys are accepted everywhere today, structurally: `PipelineRunRequest`
+(`pipeline/schemas.py:99`), `GrabberStartRequest` (`animator/schemas.py:38`), and `ScenePrompt`
+(`animator/schemas.py:12`) all declare `model_config = {"extra": "allow"}`. Freezing that
+behavior is required by rule 1 of §39 — a legacy page sending a field this plan never inventoried
+must not start failing. The v2 rule is therefore **accept, warn, drop before dispatch**:
+an unknown key never reaches a provider, never reaches a result, and never contributes to a
+fingerprint. The warning uses the §22.5 `unknown_key` severity, and O4's inverted precedence is
+the one deliberate behavior change in this table — it is a defect fix, recorded in §47 as C4.
+
+### 40.3 Provider identity: the canonical ID and alias table (frozen, both directions)
+
+§14.4 inventoried three separate mapping sites pointing in two directions. This is the single
+table that replaces them; it is data for the `aliases` manifest field (D5, owner 11.2), not code.
+
+| domain | canonical ID | legacy aliases accepted (input) | legacy string emitted (output, until 16.1) | emitted at |
+|---|---|---|---|---|
+| `tts` | `kokoro` | — | `kokoro` | `tts/routes.py:721` |
+| `tts` | `inworld` | — | `inworld` | `tts/routes.py:783` |
+| `storyboard` | `gemini_ws` | `gemini` | `gemini` | `services.py:550`, `app.py:253` |
+| `storyboard` | `wavespeed_webhook` | `webhook` | `webhook` | `services.py:550` |
+| `storyboard` | `wavespeed_direct` | `direct` | `direct` | `services.py:550` |
+| `animator` | `grok_automa` | `grok`, `midjourney` | `grok` | `services.py:644`, `animator/schemas.py:35`, `app.py:254` |
+| `animator` | `kie_ai` | `kie-ai` | `kie-ai` | `services.py:644`, `animator/schemas.py:35` |
+| `script` | `gemini` (the current AI story service) | — | — | new (13.2) |
+| `script` | `random_template` | — | — | new (13.1) |
+| `scene_blueprint` | `n8n` | — | — | new (13.4) |
+
+Frozen rules:
+
+1. **Aliases are input-only and lossless.** Resolution is id-first, then alias (§20.3). An alias
+   never appears in a `ProviderResult`, a `provenance` block, an execution record, or
+   `settings.json`; only the canonical ID is persisted.
+2. **`midjourney` is an alias, not a provider.** `animator/schemas.py:35` maps it to
+   `grok_automa` and `animation_routes.py:260` still branches on it (P12, unreachable). The alias
+   survives; the branch is deleted by 14.3.
+3. **The output column is a wire-compatibility shim with an end date.** The legacy strings exist
+   only because `services.py` reaches its own HTTP API (blocker B1) and because
+   `/api/pipeline/preflight` publishes them. When 16.1 removes the internal hop, the output
+   column is deleted and canonical IDs go on the wire; the input column stays.
+4. **`script` and `scene_blueprint` have no aliases** and never will — they have no legacy
+   provider vocabulary to preserve. `script` is the one domain that gains a *second* provider
+   during migration (`random_template`, 13.1); the default stays `gemini` so the random-story UI
+   action selects `random_template` explicitly rather than by changing the domain default.
+
+### 40.4 The closed-alias defect (new finding, owner 14.2 / 14.3)
+
+`services.py:551` is `id_to_legacy.get(sb_override) if sb_override else …`. A `.get()` with no
+default returns `None` for any ID outside the three-entry table, and that `None` is then sent as
+`payload["provider"]` at `services.py:563`. `services.py:645` has the identical shape for the
+animator. The table is therefore a **closed allowlist wearing the costume of a mapping**: the
+moment a fourth storyboard provider or a third animator provider is registered — which is the
+entire point of Phases 11–16 — the legacy pipeline path silently transmits `provider: null`.
+
+It is latent today only because every currently registered ID happens to be in the table. The v2
+rule (§40.3 rule 1) makes the mapping total: an unmapped canonical ID passes through unchanged
+rather than becoming `None`. A regression test registering a fixture provider and running the
+pipeline path must assert the wire value is the canonical ID, not `null`.
+
+## 41. Workflow node configs and `type_version` (frozen)
+
+### 41.1 Current state, verified
+
+- Every node type in the registry declares `type_version: 1` — 23 occurrences, `registry.py:69`
+  through `:489`, with the five provider-touching nodes at `:133` (`story.generate`), `:177`
+  (`tts.generate`), `:227` (`scenes.blueprint`), `:247` (`storyboard.generate`), `:271`
+  (`animator.generate`).
+- **Zero migrations are declared.** `migrations` appears only as a lookup
+  (`migrations.py:82`), a validator for generated definitions (`registry.py:550-567`), and an
+  internal field stripped from the served payload (`registry.py:608`). No node defines one.
+- The machinery is complete and strict: `migrate_workflow` (`migrations.py:44-127`) requires
+  **every hop**, raising `NodeMigrationError` when a hop is missing (`migrations.py:85-88`), and
+  `is_supported` demands exact equality (`registry.py:621-623`).
+
+### 41.2 The bump rule (frozen)
+
+Because a missing hop raises rather than degrades, and because `load_workflow_state` runs
+`migrate_workflow` before validation (`persistence.py:181,189`), the rule is absolute:
+
+> **Bumping `type_version` on a node without shipping the `N → N+1` migration in the same commit
+> makes every saved workflow containing that node unloadable.**
+
+Therefore: a provider migration step may bump a node's `type_version` **only** when it renames,
+removes, or re-types a persisted config key. Adding an optional key with a default, changing a
+label, or changing an `options_source` does **not** bump the version — those are compatible under
+the existing config-schema validation and would only invalidate caches for no benefit (§45).
+Every migration is a pure `dict -> dict` function, declared as a `module:function` string so
+generated definitions and built-ins share one form (`migrations.py:31-41`).
+
+### 41.3 The four frozen migrations
+
+These are the complete set of `type_version` bumps the provider platform is permitted to make.
+Anything not listed here keeps `type_version: 1`.
+
+| # | node | v1 → v2 change | migration | owner |
+|---|---|---|---|---|
+| M1 | `tts.generate` | `engine` → `provider_id`; `provider_options` → `provider_settings` | `cfg["provider_id"] = cfg.pop("engine", "kokoro")`; `cfg["provider_settings"] = cfg.pop("provider_options", {})`; `voice`/`speed` untouched | 15.2 |
+| M2 | `storyboard.generate` | `provider` → `provider_id`; `prompt_prefix`/`auto_type` move out of the node into provider settings (D19/P27) | `cfg["provider_id"] = cfg.pop("provider", "wavespeed_webhook")`; the two gated keys move to `cfg["provider_settings"]` keyed by that ID | 14.2 |
+| M3 | `animator.generate` | `provider` → `provider_id`; `mode`/`quality`/`duration`/`auto_type` move to provider settings | `cfg["provider_id"] = cfg.pop("provider", "grok_automa")`; gated keys move to `cfg["provider_settings"]` | 14.3 |
+| M4 | `story.generate`, `scenes.blueprint` | add `provider_id` with the default that reproduces today's hard-wired service | identity plus `cfg.setdefault("provider_id", "gemini" \| "n8n")` — **no bump required**, since nothing is renamed; listed so the decision is explicit | 13.3 / 13.4 |
+
+M1–M3 bump to `type_version: 2` and ship their migration in the same commit. M4 is deliberately
+**not** a bump: `setdefault` on read is sufficient because the key is new and optional, and
+avoiding the bump keeps every saved workflow's cache valid (§45). The migration values are exactly
+today's effective defaults, so a saved workflow produces byte-identical requests after upgrade —
+that equivalence is the acceptance test in §48.
+
+Two consequences that must not be missed:
+
+1. **Node ports do not change.** No migration in this table alters a port ID or type, so no saved
+   edge is invalidated and §3's compatibility matrix is untouched.
+2. **`display_options.show.provider` disappears with M2/M3.** The gating key is renamed, so any
+   remaining `display_options` referencing `provider` must be updated in the same commit or the
+   field silently stops showing. Owner **12.3** verifies this in the inspector.
+
+### 41.4 Future versions and downgrade
+
+Already correct and frozen as-is: a stored version above the installed one marks the workflow
+`read_only` with a `FUTURE_NODE_VERSION` warning rather than failing (`migrations.py:69-80`), and
+validation is told to tolerate it (`persistence.py:189`). There is no downgrade path and none is
+added — a user who opens a v2 workflow on an older install gets a readable, non-editable graph.
+
+## 42. Saved provider settings (frozen)
+
+Current on-disk shape, read verbatim from `settings/settings.json`: `{"version": 1, "general":
+{...}, "domains": {"tts"|"storyboard"|"animator": {"selected_provider", "per_provider": {...}}}}`,
+with `_default_settings` writing `"version": 1` (`settings_manager.py:140`).
+
+| # | change | verb | detail | owner |
+|---|---|---|---|---|
+| S1 | add `script` and `scene_blueprint` domains | upgrade | added with their §40.3 default `selected_provider` and an empty `per_provider`; existing domains untouched | 11.1 / 11.3 |
+| S2 | adopt the three `app-config.json` legacy selection keys | upgrade | exactly as frozen in §24.3, normalized through §40.3 | 11.3 / 12.4 |
+| S3 | unknown domain / unknown provider already present in the file | passthrough | preserved verbatim, reported as a `warning`; never deleted, because a provider directory may return | 11.3 |
+| S4 | `version` bumped to `2` | upgrade | written atomically together with S1+S2 | 11.3 |
+| S5 | secret values already stored in `per_provider.*.api_key` | passthrough | stay where they are; only their *serialization* changes (redaction, D12) | 11.3 / 11.5 |
+
+Two defects block S1–S4 and are restated here so 11.3 cannot miss them:
+
+- **`apply_migrations` cannot run an upgrade.** `settings_migrations.py:41-46` skips every
+  registered version `>= current_version`, so a v2 migration never runs on a v1 file, and the
+  function never writes `data["version"]` back. §24.3 already assigned the correction to **11.3**;
+  §48's acceptance list makes v1→v2, already-v2 idempotence, and an interrupted write the three
+  required tests.
+- **`validate_settings` hardcodes the three domains** (`settings_manager.py:270`), so S1's two
+  new domains would be reported as `Unknown domain` warnings on every load. D1 (owner 11.1)
+  replaces this set with the catalog; S1 must not land before it.
+
+`_seed_from_env` is *not* in this table. It runs only when the file is absent
+(`settings_manager.py:49-54`), and D11 (owner 11.3) already removes its two side effects: copying
+secret values into the file (`:87`, `:96`, `:100`) and flipping the TTS selection to `inworld`
+(`:88`). After D11, a fresh install with `INWORLD_API_KEY` set gets `kokoro` selected and the key
+read at request time — a deliberate behavior change, listed in §47 as C1.
+
+## 43. Legacy API envelopes (frozen)
+
+Every envelope below is **passthrough**: the top-level key set is frozen, and the migration may
+only *add* keys. No legacy consumer breaks, because no key it reads is removed or re-typed.
+
+| route | envelope (verified) | v2 additions | owner |
+|---|---|---|---|
+| `POST /api/story/generate` | `{"success": true, "project_id", "story_text", "sections", "duration", "estimated_duration", "language", "story_category", "story_tone", "preset_style", "provider", "word_count", "generation_time", "timestamp", "concept_family"}` (`story/routes.py:276-292`) | `provider` becomes the resolved canonical ID instead of the literal `"gemini"` (P33) | 13.3 |
+| `POST /api/scenes/generate` | `{"project_id", "scenes", "style", "style_spec", "style_prompt", "timestamp", "generation_time", "total_duration"}` (`build_scene_blueprints/routes.py:350-363`) | `provider` added | 13.4 |
+| `POST /api/tts/generate` | flat dict incl. `"provider": "kokoro"` (`tts/routes.py:721`) / `"inworld"` (`:783`) | none | 15.2 |
+| `POST /api/storyboard/generate` | `{"status": "running", "project_id", "total", "provider"}`, HTTP 202 (`storyboard/routes.py:351`) | none — `provider` is already the canonical ID here | 14.2 |
+| `GET /api/storyboard/status/<id>` | `{"project_id", "status", "total", "ready", "errors", "scene_statuses", …}` | `units[]` added alongside `scene_statuses`, which stays (§36 L10) | 14.2 |
+| `POST /api/animator/grabber/start` | `{"job_id", "total", "status"}` | none | 14.3 |
+| workflow API | `{"error": {"code","message","details?"}}` on failure (§6) | unchanged; §34.2 adds no new §7 code | 11.4 |
+
+The one asymmetry worth stating plainly: the legacy routes return flat success dicts while the
+workflow API returns the `{"error": {...}}` envelope. **They are not unified.** Unifying them
+would break every legacy page for no benefit to this migration; §17.1 already classes the legacy
+envelopes as public compatibility surface.
+
+## 44. Output paths and artifacts (frozen — no relocation)
+
+| domain | managed path | built at |
+|---|---|---|
+| `script` | `output/stories/<project_id>/…` | `adapters/story.py:23` (path returned by the service) |
+| `scene_blueprint` | `output/scenes/<project_id>/scenes.json` | `adapters/scenes.py` via `config.SCENES_DIR` |
+| `tts` | `output/tts/<project_id>/voice.wav` + `tts.json` | `services.py:99-101`; `adapters/tts.py:14` |
+| `storyboard` | `output/storyboard/<project_id>/storyboard.json` + images | `adapters/storyboard.py:20,73` |
+| `animator` | `output/animator/<project_id>/grabber_job.json` + assets | `adapters/animator.py:44` |
+
+**No path changes.** Relocating artifacts would strand every existing project and invalidate every
+cache entry through `upstream_artifact_fingerprints` for zero contract benefit. §30.2 already made
+`artifact_refs` (relative, `output/`-rooted) authoritative; what changes is only *which key the
+consumer reads*, not where the bytes live.
+
+The one live incompatibility is L7 in §36: `tts` ports carry an absolute `wav_path` /
+`path` (`services.py:263`, `adapters/tts.py:15`) consumed by `adapters/timing.py:11`. Frozen
+resolution — **passthrough with a deprecation, not removal**:
+
+1. `artifact_refs` becomes authoritative immediately (11.4).
+2. The absolute keys keep being emitted for one migration window so `adapters/timing.py` and any
+   cached upstream payload keep resolving. Removing them changes the TTS output payload, which
+   changes the downstream node's `inputs` fingerprint component (`cache.py:53`) and silently
+   invalidates every alignment cache entry — acceptable, but it must be a deliberate act.
+3. **15.3** removes them and converts `adapters/timing.py` to `resolve_ref`, in one commit, with
+   the cache invalidation acknowledged in that step's record.
+
+## 45. Execution and cache records (frozen)
+
+| record | version field | verified | migration |
+|---|---|---|---|
+| execution record | `schema_version: 1` | `models.py:45` | **none** — records are append-only history, never re-read for execution |
+| node execution record | `schema_version: 1` | `models.py:65,73` | none |
+| cache entry | `cache_schema_version: 1` | `cache.py:22,167,207` | **none** — invalidate, never migrate |
+| adapter cache schema | `adapter_cache_schema_version: 1` | `cache.py:23,55` | bumped deliberately (below) |
+
+Frozen rules:
+
+1. **Execution records are never migrated.** They are a historical log. A record written under v1
+   is read only for display; a reader encountering an unknown `schema_version` shows it and does
+   not attempt to interpret provider-specific fields.
+2. **Cache entries are invalidated, not upgraded.** The fingerprint already contains
+   `type_version` and `adapter_cache_schema_version` (`cache.py:50-55`), and a mismatch yields a
+   clean miss with the reason `type_or_version_changed` or `adapter_schema_changed`
+   (`cache.py:117-120`). That is the correct and only mechanism.
+3. **Which changes must bump `ADAPTER_CACHE_SCHEMA_VERSION`.** Any change to what an adapter
+   *returns* for identical inputs — the §31 result envelope, dropping remote URLs (D38), adding
+   `provenance` (D39), or the L7 removal in §44 — is invisible to the config/input fingerprint and
+   therefore requires the bump. Owner **11.4** bumps it exactly once for the whole platform
+   migration; each later step that changes an output shape must verify the bump already covers it
+   or bump again.
+4. **The cost is bounded and stated.** One bump invalidates every cached node result, so the first
+   run after upgrade recomputes everything. This is preferable to the alternative — a stale cached
+   payload in the old shape being handed to a v2 consumer — and it is why rule 2 forbids migrating
+   cache entries.
+5. **M1–M3 (§41.3) invalidate their own nodes' caches** through `type_version`, which is the
+   desired behavior: the config changed shape, so the previous result is not provably reusable.
+
+## 46. Fixture map and ownership (frozen)
+
+### 46.1 What exists, and the gap
+
+`studio/workflows/fixtures/` is frozen, offline-reproducible, and manifest-hashed (§10, step 2.5),
+and `pytest.ini:3` gates live tests behind `STS_LIVE=1`, honored by
+`tests/test_live_providers.py`. That covers **port payloads**. It does not cover **provider
+boundaries**: today there is no fake provider anywhere in the repo, and adapter tests fake the
+orchestration instead — `tests/test_workflow_adapters.py` monkeypatches `_step_tts`,
+`_step_scenes`, `_step_storyboard`, i.e. the very functions the migration replaces. Those tests
+verify the adapter contract and will keep passing while the provider layer beneath them is
+rewritten, which is exactly the coverage gap this step must close.
+
+The archived JSON in `_dev/fixtures/` (`scene-output-v1.json`, `scene-output-v2.json`,
+`scene-output-n8n-wrapped.json`, `alignment-sample.json`, `request-sample.json`) is real recorded
+provider output but is referenced by no test. `scene-output-n8n-wrapped.json` is promoted to a
+first-class fixture by 13.2, since it is the only recorded example of the n8n envelope the scene
+blueprint provider must parse.
+
+### 46.2 The two fixture layers (frozen)
+
+| layer | root | owner | purpose |
+|---|---|---|---|
+| **port fixtures** (existing) | `studio/workflows/fixtures/` | already frozen; unchanged by this migration | what flows *between* nodes |
+| **provider fixtures** (new) | `tests/fixtures/providers/<domain>/<provider_id>/` | 11.4 creates the layout; each domain step fills it | what crosses the *provider* boundary |
+
+A provider fixture directory contains, per provider: `request.json` (the frozen §32 domain
+request), `raw_response.json` (recorded provider payload, secrets stripped, absolute paths
+stripped), and `expected_result.json` (the §31 `ProviderResult` the adapter must produce from it).
+Media bytes are **not** re-recorded — a provider fixture referencing media points into
+`studio/workflows/fixtures/media/`, so the repo keeps exactly one copy of every byte.
+
+### 46.3 Ownership per boundary
+
+| domain | provider | fixture source | owner |
+|---|---|---|---|
+| `script` | `gemini` | recorded n8n story response, secrets stripped | 13.1 / 13.3 |
+| `scene_blueprint` | `n8n` | `_dev/fixtures/scene-output-n8n-wrapped.json` promoted + `scene-output-v2.json` | 13.2 / 13.4 |
+| `tts` | `kokoro` | synthesized locally — `voice.wav` already exists and is reproducible | 15.1 / 15.2 |
+| `tts` | `inworld` | recorded response, key stripped; audio replaced by the fixture WAV | 15.2 |
+| `storyboard` | `gemini_ws` | recorded extension WebSocket frames | 14.2 |
+| `storyboard` | `wavespeed_webhook` | recorded webhook callback body | 14.2 |
+| `storyboard` | `wavespeed_direct` | recorded direct API body (the key is 401 — §17.4; the *shape* is still recordable from the archived body) | 14.2 |
+| `animator` | `grok_automa` | recorded Automa payload + job manifest | 14.3 |
+| `animator` | `kie_ai` | recorded job submit/poll pair | 14.3 |
+| all five | `fixture_provider` | **hand-written**, no recording | 11.2 |
+
+`fixture_provider` is the load-bearing one: a deterministic in-repo provider package registered in
+every domain, used to prove discovery, duplicate handling, broken-plugin isolation (11.2), the
+result/error envelope (11.4), and — critically — §26's zero-touch assertion and §40.4's total
+alias mapping, both of which need a provider that is *not* in any hardcoded list.
+
+### 46.4 Rules (frozen)
+
+1. **No fixture requires credentials or network.** A provider contract test runs from
+   `raw_response.json`; recording is a one-time human act, never part of the test.
+2. **Recording is sanitized at record time**: no API keys, no absolute paths, no wall-clock
+   timestamps, no account identifiers. The §36 egress validator runs over every fixture in CI, so
+   a fixture that would leak is a test failure, not a review finding.
+3. **Live tests stay gated** behind `pytest.ini:3` / `STS_LIVE=1` and are never the only coverage
+   of a boundary. Every provider in §46.3 has an offline fixture even where the live credential
+   works.
+4. **Fixture drift is mechanical.** Provider fixtures get the same manifest-with-SHA-256 treatment
+   as the port fixtures (§10), so an accidental edit fails a test rather than silently changing
+   the meaning of every provider test.
+5. **The three unusable live providers** (WaveSpeed 401, retired n8n webhook, human-driven
+   `grok_automa` — §17.4) are exactly why 46.3 is mandatory: for these, the offline fixture is the
+   *only* possible verification, and their migration steps cannot be gated on live access.
+
+## 47. Contract-vs-code review — the deliberate shims
+
+Reviewing §19–§46 against the shipped code, five obligations cannot be met without a deliberate
+compatibility shim or an acknowledged behavior change. Each is accepted here rather than
+discovered mid-implementation.
+
+| # | obligation | why the code cannot meet it cleanly | frozen decision | owner |
+|---|---|---|---|---|
+| C1 | §22.6 — env vars are read-time fallbacks that never change a selection | `_seed_from_env` flips TTS to `inworld` when `INWORLD_API_KEY` is set (`settings_manager.py:85-88`) and this machine's `settings.json` already records `"selected_provider": "inworld"` | the *existing* file is left alone (it is now an explicit user choice); only future seeding stops flipping. Fresh installs behave differently from today — accepted | 11.3 |
+| C2 | §24.1 rule 3 — `settings.json` is authoritative for every domain | `animation_routes.py:194` never reads `domains.animator.selected_provider` (D15/§24.1) | wiring it changes what an existing animator run selects when the modal and settings disagree. Accepted, and 14.3 must state the resulting behavior in its record | 14.3 |
+| C3 | §32.4 / §36 L9 — remote URLs never cross into results | `image_url` is persisted inside `storyboard.json` (`storyboard/routes.py:233`) and re-read by `adapters/storyboard.py:46`, so old manifests on disk contain them | reading an old manifest strips the field at load; the *file* is not rewritten. A shim, deliberately, because rewriting user projects to satisfy an egress rule is worse than filtering on read | 14.2 |
+| C4 | §22.6 — request options override stored settings | `_kie_ai_options.update(provider_settings)` inverts precedence for Kie AI only (§40.2 O4) | corrected to request-wins for all providers. A behavior change for anyone relying on the inversion; no evidence anyone does | 14.3 |
+| C5 | §41.2 — a `type_version` bump requires its migration | four provider nodes need config renames but the registry has **zero** migrations declared, so the mechanism has never executed in production | 11.4 lands one no-op migration plus its round-trip test **before** M1–M3, so the first real migration is not also the first ever migration | 11.4 |
+
+Two further review findings change no contract but do change later steps:
+
+- **§40.4 is a new blocker for 11.1/11.2.** Registering a provider not present in
+  `services.py:550/644` transmits `provider: null` on the internal HTTP hop. The `fixture_provider`
+  in §46.3 will hit this on the day it is registered, so the total-mapping fix must land **with**
+  11.2, not later with 14.2/14.3.
+- **M4 (§41.3) removes a planned bump.** Adding `provider_id` to `story.generate` and
+  `scenes.blueprint` was assumed to need a version bump; it does not, and not bumping preserves
+  every existing cache entry for those nodes. Owners **13.3** and **13.4** must `setdefault` the
+  key on read instead of migrating it.
+
+No later step needs its scope changed beyond these two notes; every other obligation in §19–§46
+is reachable with the owners already assigned in §28 and §37.
+
+## 48. Implementation gate
+
+### 48.1 Acceptance criteria for the phases that follow
+
+Each is a test, not a review item, and each names the step that must make it pass.
+
+| # | criterion | owner |
+|---|---|---|
+| A1 | A workflow JSON saved before the migration loads, validates, and executes with no manual edit, for all five provider nodes | 11.4 / each domain step |
+| A2 | M1–M3 are byte-equivalent: a v1 node config, migrated, produces the identical provider request to the v1 path | 14.2 / 14.3 / 15.2 |
+| A3 | `settings.json` v1 → v2 upgrades, is idempotent on re-run, and survives a simulated interrupted write | 11.3 |
+| A4 | Every legacy request field in §40.1 and every alias in §40.3 resolves to the correct canonical provider | 11.2 |
+| A5 | A registered fixture provider absent from every hardcoded list is selectable, invocable, and never transmits `null` (§40.4) | 11.2 |
+| A6 | Every legacy envelope in §43 keeps its full key set | each domain step |
+| A7 | Provider contract tests for all nine domain/provider pairs pass with no network and no credentials | 11.4 + each domain step |
+| A8 | The §36 egress validator passes over every fixture and every provider result | 11.4 |
+| A9 | A cache entry written before the migration is a clean miss, never a stale hit | 11.4 |
+
+### 48.2 Baseline verification (2026-08-09, commit `5330f9e`)
+
+Recorded before any Phase 11 code lands, so a later regression is attributable:
+
+- `venv/Scripts/python.exe -m pytest tests/ -q` — **224 passed, 10 skipped, 62 subtests**
+  (the 10 skips are `tests/test_live_providers.py`, gated by `STS_LIVE`).
+- `cd frontend && npm run test` — **154 passed across 25 files**.
+- `cd frontend && npm run build` — production build succeeds (`✓ built in 1.22s`).
+- `venv/Scripts/python.exe -m studio.workflows.docs --check` — `OK: generated workflow
+  documentation matches contracts and registry.`
+
+Phase 10 changed documentation only, so these are the numbers any Phase 11 regression is measured
+against. They are **three backend and four frontend tests above** the counts recorded at the Phase
+9 gate (221 / 150). The delta is accounted for and is not Phase 10's: `cc0e3ba` added
+`tests/test_loop_engineering_agents.py`, and `8132931` plus `d276aec` added workflow-canvas
+frontend tests — all three landed between the Phase 9 gate and Phase 10. The four Phase 10 commits
+touched no test file. Re-measuring rather than copying the older figures is the point: an
+unexplained delta at the Phase 11 gate is a regression, and it can only be read as one against a
+freshly measured baseline.
+
+## 49. Phase 10.4 coverage assertion
+
+Frozen by this section: a three-verb compatibility policy with an idempotence rule, a write-once
+rule, and a stated support window that separates removable wire compatibility from permanent
+persisted-shape compatibility; the complete legacy request-field map — eight provider-selection
+fields with their read sites, defaults, and v2 targets, and five option dictionaries with their
+merge order and the accept-warn-drop rule for the unknown keys that three `extra="allow"` models
+accept today; one canonical provider ID and alias table replacing the three mapping sites §14.4
+found, valid in both directions with an explicit end date for the emitted legacy strings; the
+`type_version` bump rule derived from the fact that a missing migration hop raises rather than
+degrades, together with the exact four config migrations the platform is permitted to make and
+the reason two of them require no bump at all; the settings upgrade path with its two blocking
+defects restated against their owners; the frozen legacy API envelopes with their additive-only
+rule and the deliberate decision not to unify them with the workflow error envelope; the frozen
+artifact layout and the staged retirement of the absolute TTS path keys; the invalidate-never-
+migrate rule for cache entries with the single platform-wide `ADAPTER_CACHE_SCHEMA_VERSION` bump
+and its stated cost; and a two-layer fixture map that adds a provider-boundary layer beside the
+existing port fixtures, with per-boundary ownership for all nine domain/provider pairs plus the
+`fixture_provider` that makes the zero-touch assertion testable.
+
+The contracts were reviewed against the shipped code: five obligations that need a deliberate
+shim or an acknowledged behavior change are recorded in §47 with their owners, and two review
+findings move work earlier — the closed-alias defect (§40.4) becomes an 11.2 blocker rather than a
+14.2/14.3 cleanup, and the `story.generate`/`scenes.blueprint` version bump is dropped as
+unnecessary. Nine acceptance criteria and a freshly measured baseline (224 backend tests with 10
+live skips, 154 frontend tests, a clean production build, and no generated-doc drift) close the
+gate.
+Phase 11 can begin without inventing semantics: every value that is persisted or on the wire today
+has a named verb, a named boundary, and a named owner.
