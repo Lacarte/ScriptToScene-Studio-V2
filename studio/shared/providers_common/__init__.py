@@ -13,6 +13,7 @@ Modules:
   - invocation: ProviderInvocation, cancellation, progress, redacted logging
   - results: the ProviderResult envelope, units, provenance, egress validation
   - jobs: the one asynchronous job contract shared by both visual domains
+  - media_jobs: shared multi-unit async orchestration (submit/poll/push/retry/resume)
   - boundary: the single exception boundary and the deadline helpers
   - legacy: adapters from today's dict payloads onto the v2 envelope
   - http_client: retry/backoff wrapped requests
@@ -112,6 +113,13 @@ from studio.shared.providers_common.jobs import (
     poll_interval,
     terminal_outcome,
     unknown_job_status,
+)
+from studio.shared.providers_common.media_jobs import (
+    MediaJobService,
+    MediaJobStore,
+    default_store,
+    record_path_for,
+    result_from_status,
 )
 from studio.shared.providers_common.boundary import (
     Deadline,
@@ -213,6 +221,11 @@ __all__ = [
     "poll_interval",
     "terminal_outcome",
     "unknown_job_status",
+    "MediaJobService",
+    "MediaJobStore",
+    "default_store",
+    "record_path_for",
+    "result_from_status",
     "Deadline",
     "invoke",
     "wait_until",
