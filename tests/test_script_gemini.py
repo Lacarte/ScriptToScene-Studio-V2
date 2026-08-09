@@ -108,8 +108,7 @@ class GeminiGenerateTests(unittest.TestCase):
                 set(document["sections"]), {"hook", "build", "climax", "cta"}
             )
             self.assertTrue(document["sections"]["hook"])
-            # Service still labels metadata with the historical provider name;
-            # provenance/envelope identity is owned by the provider layer (P33 → 13.3).
+            # P33 / step 13.3: metadata carries the resolved canonical provider id.
             self.assertEqual(document["metadata"]["provider"], "gemini")
             self.assertEqual(
                 document["metadata"]["story_category"], self.request["category"]
@@ -439,13 +438,15 @@ class LegacyStoryRouteEnvelopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             stories = Path(tmp) / "stories"
             history = Path(tmp) / "story_history"
-            with patch("studio.story.routes.STORIES_DIR", str(stories)):
+            # Route now dispatches through the hub (step 13.3); patch the
+            # concrete AI service's transport rather than a route-local helper.
+            with patch("studio.story.service.STORIES_DIR", str(stories)):
                 with patch("studio.story.history._HISTORY_DIR", str(history)):
                     with patch(
-                        "studio.story.routes.is_safe_webhook_url", return_value=True
+                        "studio.story.service.is_safe_webhook_url", return_value=True
                     ):
                         with patch(
-                            "studio.story.routes._call_story_webhook",
+                            "studio.story.service.call_webhook",
                             return_value={"story_text": raw_story},
                         ):
                             resp = self.client.post(
@@ -460,27 +461,27 @@ class LegacyStoryRouteEnvelopeTests(unittest.TestCase):
                                     ),
                                 },
                             )
-        self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
-        data = resp.get_json()
-        for key in (
-            "success",
-            "project_id",
-            "story_text",
-            "sections",
-            "duration",
-            "estimated_duration",
-            "language",
-            "story_category",
-            "preset_style",
-            "provider",
-            "word_count",
-            "generation_time",
-            "timestamp",
-        ):
-            self.assertIn(key, data)
-        self.assertTrue(data["success"])
-        self.assertEqual(data["provider"], "gemini")
-        self.assertEqual(set(data["sections"]), {"hook", "build", "climax", "cta"})
+            self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+            data = resp.get_json()
+            for key in (
+                "success",
+                "project_id",
+                "story_text",
+                "sections",
+                "duration",
+                "estimated_duration",
+                "language",
+                "story_category",
+                "preset_style",
+                "provider",
+                "word_count",
+                "generation_time",
+                "timestamp",
+            ):
+                self.assertIn(key, data)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["provider"], "gemini")
+            self.assertEqual(set(data["sections"]), {"hook", "build", "climax", "cta"})
 
 
 if __name__ == "__main__":

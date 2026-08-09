@@ -49,7 +49,7 @@
       "selected_provider": "inworld"
     },
     "script": {
-      "selected_provider": "builtin",
+      "selected_provider": "gemini",
       "per_provider": {}
     },
     "scene_blueprint": {
@@ -62,5 +62,5 @@
     "default_style": "cinematic",
     "sync_folder": "D:/@Sync/PHONE-S24-PC"
   },
-  "version": 2
+  "version": 3
 }

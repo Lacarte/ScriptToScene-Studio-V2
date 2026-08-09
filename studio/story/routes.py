@@ -1,7 +1,7 @@
 """Story Module — AI Story Generation Routes
 
 Provides:
-  POST /api/story/generate       — generate a story via n8n/Gemini webhook
+  POST /api/story/generate       — generate via the selected script provider
   POST /api/story/random         — pick a curated sample from random_template
   GET  /api/story/webhook-url    — return the configured story webhook URL
   GET  /api/story/history        — list generated stories
@@ -11,7 +11,6 @@ Provides:
 
 import json
 import os
-import time
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 
@@ -28,34 +27,19 @@ from config import (
     N8N_CLASSIFY_WEBHOOK_URL,
     generate_project_id,
 )
-from studio.io_utils import safe_json_read, safe_json_write
+from studio.io_utils import safe_json_read
 from studio.security import is_safe_webhook_url, sanitize_project_id
 from studio.validation import validate_json
 from studio.story.schemas import StoryGenerateRequest
 from studio.story.prompts import (
-    build_story_system_prompt,
-    build_story_user_prompt,
-    choose_story_concept_family,
-    compute_word_target,
     STORY_CATEGORIES,
     WORDS_PER_SECOND,
 )
 from studio.story.engine import parse_story_sections
-from studio.story.history import append_history
 from studio.build_scene_blueprints.templates import SCENE_STYLE_TEMPLATES
 from studio.niches.presets import CATEGORIES as NICHE_CATEGORIES
 
 story_bp = Blueprint("story", __name__)
-
-# ---------------------------------------------------------------------------
-# Webhook helper — delegate to shared module
-# ---------------------------------------------------------------------------
-
-from studio.webhooks import call_webhook  # noqa: E402
-
-
-def _call_story_webhook(webhook_url, payload, timeout=120):
-    return call_webhook(webhook_url, payload, timeout=timeout, label="Story webhook")
 
 
 def _swap_webhook_suffix(webhook_url, source_suffix, target_suffix):
@@ -257,160 +241,133 @@ def random_template_story():
     })
 
 
+def _resolve_script_provider_id(requested: str | None) -> tuple[str, object | None, str | None]:
+    """Resolve a request/default id to (canonical_id, provider_instance, error).
+
+    Absent/empty values map to the historical AI default (`gemini`). The 12.3
+    `builtin` bridge remains a permanent input alias of that provider.
+    """
+    from studio.shared.providers_common.domains import DOMAINS
+    from studio.shared.providers_common.hub import hub
+    from studio.shared.providers_common.registry import ProviderConstructionError
+
+    selected = (requested or "").strip() or DOMAINS["script"].default_provider
+    try:
+        instance = hub.create("script", selected)
+    except ProviderConstructionError:
+        return selected, None, "PROVIDER_UNAVAILABLE"
+    if instance is None:
+        return selected, None, "PROVIDER_UNAVAILABLE"
+    meta = hub.get("script", selected)
+    canonical = meta.id if meta is not None else selected
+    return canonical, instance, None
+
+
+def _legacy_provider_http_status(code: str) -> int:
+    """Map a ProviderError code onto the legacy flat-error HTTP statuses."""
+    if code in {"PROVIDER_REQUEST_INVALID", "PROVIDER_NOT_CONFIGURED"}:
+        return 400
+    if code == "PROVIDER_TIMEOUT":
+        return 504
+    if code in {
+        "PROVIDER_TRANSPORT_FAILED",
+        "PROVIDER_RESPONSE_MALFORMED",
+        "PROVIDER_FAILED",
+    }:
+        return 502
+    if code in {"PROVIDER_UNAVAILABLE", "PROVIDER_NOT_FOUND"}:
+        return 503
+    return 500
+
+
 @story_bp.route("/api/story/generate", methods=["POST"])
 @validate_json(StoryGenerateRequest)
 def generate_story(data: StoryGenerateRequest):
-    """Generate a story via n8n webhook (Gemini provider).
+    """Generate a story via the selected `script` provider (step 13.3).
+
+    Dispatches through the provider hub so the same node and this legacy route
+    share one implementation. The top-level envelope is frozen (contracts.md
+    §43); only the `provider` value changes from the hardcoded `"gemini"` to
+    the resolved canonical id.
 
     Accepts JSON body:
-      - preset_style: visual style preset ID
-      - story_category: story genre/category
-      - duration: target duration in seconds (15-180)
-      - language: output language (english, french, spanish)
-      - project_name_id: optional existing project ID to link to
-      - webhook_url: optional override for the webhook URL
+      - preset_style, story_category, duration, language, language_level,
+        story_tone, idea, webhook_url, project_name_id, niche_preset
+      - provider_id: optional script provider (`gemini` default; `builtin`
+        alias still accepted; `random_template` for the offline catalog)
     """
-    webhook_url = data.webhook_url or N8N_STORY_WEBHOOK_URL
-    allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
-    if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
-        return jsonify({"error": "Unsafe webhook URL"}), 400
+    import time
 
-    system_prompt = build_story_system_prompt(
-        data.preset_style, data.story_category, data.duration, data.language,
-        story_tone=data.story_tone,
-        language_level=data.language_level,
-    )
-    concept_family = choose_story_concept_family(
-        data.preset_style,
-        data.story_category,
-        data.language,
-        niche_preset=data.niche_preset,
-    )
-    user_prompt = build_story_user_prompt(
-        data.preset_style, data.story_category, data.duration, data.language,
-        idea=data.idea,
-        niche_preset=data.niche_preset,
-        concept_family=concept_family,
-    )
-    word_target = compute_word_target(data.duration)
+    from studio.shared.providers_common.errors import ProviderError
+    from studio.workflows.adapters.common import provider_run_options
 
-    payload = {
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt,
-        "preset_style": data.preset_style,
-        "story_category": data.story_category,
-        "story_tone": data.story_tone,
-        "duration": data.duration,
-        "language": data.language,
-        "word_target": word_target,
-        "structure": ["hook", "build", "climax", "cta"],
-    }
+    project_id = sanitize_project_id(
+        data.project_name_id or generate_project_id("ps")
+    )
+    if not project_id:
+        project_id = generate_project_id("ps")
+
+    canonical, provider, error = _resolve_script_provider_id(data.provider_id)
+    if error or provider is None:
+        return jsonify({
+            "error": f"No script provider named '{data.provider_id or canonical}' is registered",
+        }), 503
+
+    # Same merge the Story Generator adapter uses: request body + portable
+    # provider settings (request wins). Saved settings are never rewritten.
+    configuration = data.model_dump(exclude_none=True)
+    configuration["project_name_id"] = project_id
+    configuration["provider_id"] = canonical
+    configuration.update(provider_run_options("script", canonical, configuration))
 
     started = time.perf_counter()
-
     try:
-        result = _call_story_webhook(webhook_url, payload)
-
-        # Extract story text — webhook returns {story_text} (preferred) with fallbacks
-        raw_text = result.get("story_text", "")
-        matched_field = "story_text"
-        if not raw_text:
-            for field in ("output", "text", "response"):
-                raw_text = result.get(field, "")
-                if raw_text:
-                    matched_field = field
-                    logger.info("Story webhook: found text in '{}' field (expected 'story_text')", field)
-                    break
-        if not raw_text:
-            return jsonify({"error": "Webhook returned no story text"}), 502
-
-        parsed = parse_story_sections(raw_text)
-        generation_time = round(time.perf_counter() - started, 3)
-
-        # Generate project ID
-        project_id = sanitize_project_id(
-            data.project_name_id or generate_project_id("ps")
-        )
-        if not project_id:
-            project_id = generate_project_id("ps")
-
-        # Build response
-        estimated_duration = round(parsed["word_count"] / WORDS_PER_SECOND)
-        response = {
-            "success": True,
-            "project_id": project_id,
-            "story_text": parsed["story_text"],
-            "sections": parsed["sections"],
-            "duration": data.duration,
-            "estimated_duration": estimated_duration,
-            "language": data.language,
-            "story_category": data.story_category,
-            "story_tone": data.story_tone,
-            "preset_style": data.preset_style,
-            "provider": "gemini",
-            "word_count": parsed["word_count"],
-            "generation_time": generation_time,
-            "timestamp": datetime.now().isoformat(),
-            "concept_family": concept_family,
-        }
-
-        # Save to disk
-        story_data = {
-            "project_id": project_id,
-            "story_text": parsed["story_text"],
-            "sections": parsed["sections"],
-            "metadata": {
-                "preset_style": data.preset_style,
-                "language": data.language,
-                "story_category": data.story_category,
-                "story_tone": data.story_tone,
-                "duration": data.duration,
-                "word_count": parsed["word_count"],
-                "estimated_duration": estimated_duration,
-                "provider": "gemini",
-                "generation_time": generation_time,
-                "timestamp": response["timestamp"],
-                "concept_family": concept_family,
-            },
-            "pipeline_ref": {
-                "tts_project_id": None,
-                "scenes_project_id": None,
-            },
-        }
-
-        safe_json_write(
-            os.path.join(STORIES_DIR, project_id, "story.json"),
-            story_data,
-            indent=2,
-        )
-
-        # Record in per-preset history so the next call dodges this story's hook/opening.
-        try:
-            hook_text = parsed["sections"].get("hook", "") or ""
-            opening_text = (parsed["sections"].get("build", "") or "").split(".")[0]
-            append_history(
-                preset_style=data.preset_style,
-                category=data.story_category,
-                language=data.language,
-                hook=hook_text,
-                opening=opening_text,
-                timestamp=response["timestamp"],
-                concept_family=concept_family,
-            )
-        except Exception as e:
-            logger.debug("Could not append story history: {}", e)
-
-        logger.success("Generated story -> {} ({} words, {:.1f}s)", project_id, parsed["word_count"], generation_time)
-        return jsonify(response)
-
-    except http_requests.Timeout:
-        return jsonify({"error": "Story webhook timed out. Check your n8n workflow."}), 504
-    except http_requests.RequestException as e:
-        logger.error("Story webhook request error: {!r}", e)
-        return jsonify({"error": f"Webhook connection error: {e}"}), 502
-    except Exception as e:
+        result = provider.generate(configuration, project_id=project_id)
+    except ProviderError as exc:
+        logger.error("Script provider {} failed: {} — {}", canonical, exc.code, exc.message)
+        return jsonify({"error": exc.message}), _legacy_provider_http_status(exc.code)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
         logger.exception("Unexpected error in story generation")
-        return jsonify({"error": f"Server error: {e}"}), 500
+        return jsonify({"error": f"Server error: {exc}"}), 500
+
+    generation_time = round(time.perf_counter() - started, 3)
+    meta = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    sections = result.get("sections") if isinstance(result.get("sections"), dict) else {}
+    story_text = result.get("story_text") or ""
+    word_count = meta.get("word_count") or len(str(story_text).split())
+    estimated_duration = meta.get("estimated_duration")
+    if estimated_duration is None:
+        estimated_duration = round(word_count / WORDS_PER_SECOND)
+
+    # Frozen legacy envelope (§43). `provider` is the resolved canonical id.
+    response = {
+        "success": True,
+        "project_id": result.get("project_id") or project_id,
+        "story_text": story_text,
+        "sections": sections,
+        "duration": data.duration,
+        "estimated_duration": estimated_duration,
+        "language": data.language,
+        "story_category": data.story_category or meta.get("story_category") or "",
+        "story_tone": data.story_tone or meta.get("story_tone") or "",
+        "preset_style": data.preset_style or meta.get("preset_style") or "",
+        "provider": meta.get("provider") or canonical,
+        "word_count": word_count,
+        "generation_time": meta.get("generation_time", generation_time),
+        "timestamp": meta.get("timestamp") or datetime.now().isoformat(),
+        "concept_family": meta.get("concept_family") or "",
+    }
+
+    logger.success(
+        "Generated story via {} -> {} ({} words, {:.1f}s)",
+        response["provider"],
+        response["project_id"],
+        word_count,
+        generation_time,
+    )
+    return jsonify(response)
 
 
 @story_bp.route("/api/story/history")

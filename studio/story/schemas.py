@@ -29,6 +29,9 @@ class StoryGenerateRequest(BaseModel):
     story_tone: Optional[str] = None
     idea: Optional[str] = None
     webhook_url: Optional[str] = None
+    # Optional script-provider selector (step 13.3). Absent → domain default
+    # (`gemini`). Accepts the permanent `builtin` input alias of that provider.
+    provider_id: Optional[str] = None
 
     @model_validator(mode="after")
     def _normalize_fields(self):
@@ -43,6 +46,7 @@ class StoryGenerateRequest(BaseModel):
                 self.language_level = None
         self.idea = (self.idea or "").strip() or None
         self.webhook_url = (self.webhook_url or "").strip() or None
+        self.provider_id = (self.provider_id or "").strip() or None
 
         if not is_known_template(self.preset_style):
             raise ValueError(f"Unknown preset_style '{self.preset_style}'")

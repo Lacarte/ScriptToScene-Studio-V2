@@ -235,11 +235,19 @@ _NODE_TYPES = {
     "story.generate": {
         "type_version": 1,
         "display_name": "Story Generator",
-        "description": "Generate a structured narration script with the existing story service.",
+        "description": "Generate a structured narration script with the selected script provider.",
         "category": "ai",
         "icon": "sparkles",
         "inputs": [_TRIGGER_IN, _in("settings", "project_settings")],
-        "outputs": [_CONTROL_OUT, _out("script", "script")],
+        # `script` carries the narration text for TTS/scenes edges. `story`
+        # (step 13.3) is the full document + managed artifact ref that the
+        # adapter always emitted but the registry never declared (contracts
+        # §14.7) — declare it so edges/expressions can target it.
+        "outputs": [
+            _CONTROL_OUT,
+            _out("script", "script"),
+            _out("story", "generic_json"),
+        ],
         "config_schema": [
             # M4 (contracts.md §41.3): a new optional key with a default, so no
             # `type_version` bump — a saved config that predates it keeps

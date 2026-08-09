@@ -288,7 +288,7 @@ Split the alignment into scene-sized segments.
 
 ### Story Generator (`story.generate`)
 
-Generate a structured narration script with the existing story service.
+Generate a structured narration script with the selected script provider.
 
 - **Type version:** 1
 - **Capabilities:** supports retry, error output, skip-optional; no cancel
@@ -306,6 +306,7 @@ Generate a structured narration script with the existing story service.
 |---|---|---|
 | `control` | `control` | — |
 | `script` | `script` | — |
+| `story` | `generic_json` | — |
 | `error` | `control` | — |
 
 **Configuration**

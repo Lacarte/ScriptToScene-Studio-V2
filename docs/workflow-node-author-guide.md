@@ -120,7 +120,7 @@ Compatibility rule: **exact type match only.** No wildcard: `generic_json` conne
 | `trigger.manual` | — | `control:control` |
 | `project.setup` | `trigger:control?` | `control:control`, `settings:project_settings`, `error:control` |
 | `script.input` | `trigger:control?` | `control:control`, `script:script`, `error:control` |
-| `story.generate` | `trigger:control?`, `settings:project_settings?` | `control:control`, `script:script`, `error:control` |
+| `story.generate` | `trigger:control?`, `settings:project_settings?` | `control:control`, `script:script`, `story:generic_json`, `error:control` |
 | `project.existing` | `trigger:control?` | `control:control`, `project_id:project_id`, `project:editor_project`, `error:control` |
 | `tts.generate` | `trigger:control?`, `script:script`, `settings:project_settings?` | `control:control`, `audio:audio_file`, `metadata:tts_metadata`, `error:control` |
 | `timing.align` | `trigger:control?`, `audio:audio_file`, `script:script` | `control:control`, `alignment:alignment`, `error:control` |

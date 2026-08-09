@@ -54,7 +54,11 @@ class GeminiScriptProvider(ScriptProvider):
         project_id: str,
         webhook_caller: Callable[..., Mapping[str, Any]] | None = None,
     ) -> dict:
-        kwargs: dict[str, Any] = {"project_id": project_id}
+        kwargs: dict[str, Any] = {
+            "project_id": project_id,
+            # Canonical id, never the `builtin` input alias (P33 / step 13.3).
+            "provider_id": _PROVIDER_ID,
+        }
         if webhook_caller is not None:
             kwargs["webhook_caller"] = webhook_caller
         try:

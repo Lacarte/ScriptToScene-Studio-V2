@@ -34,6 +34,7 @@ def generate_story(
     configuration: Mapping[str, Any],
     *,
     project_id: str,
+    provider_id: str = "gemini",
     webhook_caller: Callable[..., Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Generate, parse, and persist a story without Flask request state.
@@ -41,6 +42,11 @@ def generate_story(
     `webhook_caller` defaults to the module-level `call_webhook` so tests can
     patch `studio.story.service.call_webhook` (or inject a caller) without
     fighting a frozen default-argument binding.
+
+    `provider_id` is the resolved canonical script-provider identity stamped
+    into artifact metadata (P33 / step 13.3). Callers that wrap this service
+    as a registered provider pass their own id; the historical default is the
+    AI `gemini` path.
     """
     data = StoryGenerateRequest.model_validate(dict(configuration or {}))
     webhook_url = data.webhook_url or N8N_STORY_WEBHOOK_URL
@@ -48,6 +54,7 @@ def generate_story(
     if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
         raise StoryServiceError("STORY_WEBHOOK_UNSAFE", "Unsafe story webhook URL")
 
+    resolved_provider = (provider_id or "gemini").strip() or "gemini"
     concept_family = choose_story_concept_family(
         data.preset_style,
         data.story_category,
@@ -105,7 +112,7 @@ def generate_story(
             "duration": data.duration,
             "word_count": parsed["word_count"],
             "estimated_duration": estimated_duration,
-            "provider": "gemini",
+            "provider": resolved_provider,
             "generation_time": generation_time,
             "timestamp": generated_at,
             "concept_family": concept_family,

@@ -165,6 +165,8 @@ def _build_document(
             "duration": request.target_duration_s,
             "word_count": payload.word_count,
             "estimated_duration": payload.estimated_duration_s,
+            # Resolved canonical id (P33 / step 13.3) — same key the AI path uses.
+            "provider": "random_template",
             "template_type": entry.get("type") or "",
             # Flat scalar only — envelope metadata drops non-scalars (§31.1).
             "template_styles": ",".join(entry.get("styles") or []),

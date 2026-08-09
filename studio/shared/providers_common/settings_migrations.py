@@ -16,7 +16,9 @@ from studio.shared.providers_common.domains import DOMAINS
 
 
 # The version a freshly written settings.json carries.
-SETTINGS_VERSION = 2
+# v2 = §24.3 five-domain catalog + legacy selection adoption (step 11.3).
+# v3 = S6 script selection `builtin` → `gemini` (step 13.3).
+SETTINGS_VERSION = 3
 
 MIGRATIONS: dict[int, Callable[[dict, dict], dict]] = {}
 
@@ -76,6 +78,21 @@ def migrate_to_v2(data: dict, legacy_user: dict) -> dict:
     return data
 
 
+@_register(3)
+def migrate_to_v3(data: dict, legacy_user: dict) -> dict:
+    """S6 — rewrite only the transitional script selection `builtin` → `gemini`.
+
+    The 12.3 bridge id was the domain default until 13.2 landed the real
+    `gemini` provider. Any explicit selection other than `builtin`
+    (`random_template`, a future plugin, …) is left alone (contracts.md §42 S6).
+    """
+    domains = data.setdefault("domains", {})
+    block = domains.get("script")
+    if isinstance(block, dict) and block.get("selected_provider") == "builtin":
+        block["selected_provider"] = "gemini"
+    return data
+
+
 def apply_migrations(data: dict, legacy_user: dict | None = None) -> tuple[dict, bool]:
     """Upgrade `data` to `SETTINGS_VERSION`.
 
@@ -117,4 +134,5 @@ __all__ = [
     "LEGACY_SELECTION_ALIASES",
     "apply_migrations",
     "migrate_to_v2",
+    "migrate_to_v3",
 ]
