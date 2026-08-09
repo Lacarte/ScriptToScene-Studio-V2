@@ -984,18 +984,9 @@ instances safely. Preserve extension/WebSocket startup through `call_provider_ru
 from manifest capabilities rather than provider IDs. Dev hot-reload swaps only a fully valid provider
 catalog and retains the last good version after an invalid edit.
 
-Also make the canonical/legacy provider-ID mapping **total**, per contracts §40.3 and §40.4. This
-moved here from 14.2/14.3 because it becomes live the moment this step registers the `fixture_provider`
-that §46.3 requires: `studio/pipeline/services.py:551` and `:645` call `id_to_legacy.get(...)` with no
-default, so any provider ID outside their three- and two-entry tables resolves to `None` and is
-transmitted as `payload["provider"] = None` (`:563`). Replace both closed tables with the §40.3 alias
-data and assert a registered fixture provider sends its canonical ID on the internal HTTP hop.
-
 **Done when:** adding/removing a fixture provider directory changes the catalog on restart (and in
 guarded dev reload) with no central provider list edit; failed import/init/runtime/shutdown is isolated
-and reported as provider health metadata; no half-loaded catalog becomes visible to requests; and a
-provider absent from every hardcoded list is selectable, invocable, and never transmits a null
-provider identity.
+and reported as provider health metadata; and no half-loaded catalog becomes visible to requests.
 
 ### 11.3 Manifest v2 and settings validation
 Extend `ProviderManifest` and settings schemas with label/description, domain, kind, version, contract
@@ -1025,15 +1016,13 @@ factories have never executed, so the baseline to preserve is the observable out
 every existing `provider.py` body as unverified code under first-time test. Provider output is staged
 and validated before promotion to managed output directories.
 
-Two ordering constraints from contracts §45 and §47 (C5) land here, before any domain migration.
-First, the node-config migration machinery (`studio/workflows/migrations.py`) is complete but has
-**never run**: zero node types declare a `migrations` entry, and a missing hop raises
-`NodeMigrationError` rather than degrading, so ship one no-op `type_version` migration with its
-save/load round-trip test here — the first real migration (contracts §41.3 M1–M3) must not also be
-the first migration ever executed. Second, this step owns the single platform-wide bump of
-`ADAPTER_CACHE_SCHEMA_VERSION` (`studio/workflows/cache.py:23`), because the new result envelope
-changes what adapters return for unchanged inputs and that is invisible to the config/input
-fingerprint; later steps verify the bump covers their output change rather than each bumping again.
+The migration machinery already has a two-hop save/load round-trip test
+(`tests/test_workflow_persistence.py`), so this step must not invent a production node-version bump
+solely to test it. If adopting the standard result envelope changes a workflow adapter's output in
+this step, bump `ADAPTER_CACHE_SCHEMA_VERSION` (`studio/workflows/cache.py:23`) in the same commit.
+Later output-shape changes must independently bump that version unless the affected node's
+`type_version` changes in the same commit; an earlier bump cannot invalidate cache entries written
+after it.
 
 **Done when:** contract tests cover sync success, async success, progress, cancellation, timeout,
 retryable and terminal errors, malformed results, partial scene failure, unmanaged/missing artifacts,
@@ -1095,7 +1084,7 @@ and validation feedback name the provider; and no provider ID appears in compone
 ### 12.3 Provider-aware generic node configuration
 Add a generic provider field/schema primitive keyed only by `provider_domain`. Convert the **five**
 provider-backed nodes — `story.generate`, `scenes.blueprint`, `tts.generate`, `storyboard.generate`,
-`animator.generate` — to the common persisted pair `provider` + `provider_options`; their node types,
+`animator.generate` — to the common persisted pair `provider_id` + `provider_options`; their node types,
 ports, and executors remain stable. The inspector composes provider settings dynamically from the
 catalog. Remove Grok-, Gemini-, WaveSpeed-, Kokoro-, and other provider-specific fields and
 `display_options` from the node registry, moving them into provider settings schemas. Server
@@ -1109,7 +1098,7 @@ not be mistaken for provider-specific fields during the registry cleanup.
 
 **Bridging rule — this step runs ahead of the domain migrations.** Only `tts`, `storyboard`, and
 `animator` have provider packages today; `script` and `scene_blueprint` get theirs in Phase 13.
-Converting their nodes to `provider` + `provider_options` first would leave two nodes selecting from an
+Converting their nodes to `provider_id` + `provider_options` first would leave two nodes selecting from an
 empty catalog. So each un-migrated domain must, in this step, register a single `builtin` provider that
 is a thin passthrough to today's concrete service, with a manifest and a settings schema carrying
 exactly the fields being removed from the node definition. Phase 13 then splits, renames, or extends
@@ -1120,7 +1109,8 @@ before its domain has at least one registered provider.
 node definitions; every one of the five domains resolves at least one registered provider and the two
 `builtin` passthroughs produce byte-identical artifacts to their pre-conversion services;
 `music.select` and `captions.generate` are provably unchanged; each existing saved config migrates to
-the new shape through `type_version` migrations; future-version/unavailable-provider workflows remain
+the new shape through the contracts §41.3 migrations (M1–M3 bump here; M4 uses a non-mutating
+fallback); future-version/unavailable-provider workflows remain
 safely inspectable; and pytest/Vitest prove provider-specific forms and validation are driven entirely
 by catalog metadata.
 
@@ -1168,6 +1158,9 @@ Wrap `studio.story.service.generate_story`, its n8n/Gemini webhook behavior, par
 and diversity history as a registered AI script provider. Move webhook/model/provider-specific fields
 into its manifest/settings schema, translating the generic script request into the unchanged service
 contract. Keep `studio.story` public functions and routes as compatibility facades during migration.
+Claim the 12.3 `builtin` bridge ID as a permanent input alias for this provider; 13.3 upgrades only a
+stored `selected_provider: "builtin"` to `"gemini"`, preserving any explicit `random_template`
+selection.
 
 **Done when:** fixture-backed AI generation returns the standard script result with the same story
 text/sections/artifact/history behavior; provider failures are standardized and retryability is
@@ -1198,7 +1191,9 @@ Create the `scene_blueprint` provider interface and wrap the current
 `studio.build_scene_blueprints`/n8n/OpenRouter path as its first provider. Standardize scene,
 image-prompt, narrative-role, chapter, continuity, style, and sound-effect-validation outputs while
 preserving `scenes.json`, existing routes, workflow ports, and the current style/tone inheritance.
-Move webhook/model settings and health checks into provider metadata.
+Move webhook/model settings and health checks into provider metadata. Claim the 12.3 `builtin` bridge
+ID as a permanent input alias and upgrade only the matching stored selection to `n8n` when the real
+provider lands.
 
 **Done when:** `scenes.blueprint` and the legacy scene-generation page dispatch only through the
 registry; current fixture outputs remain schema-compatible; malformed AI responses become safe
