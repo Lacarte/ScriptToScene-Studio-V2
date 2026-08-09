@@ -1,20 +1,28 @@
-"""Generate the workflow node reference from the authoritative registry.
+"""Generate workflow and provider documentation from live sources.
 
-The markdown written to ``docs/workflow-nodes.md`` is derived entirely from
-``serialize_registry()`` (the same presentation-safe payload the frontend
-consumes), so the reference can never drift from the code. A pytest guard
-(``tests/test_workflow_docs.py``) fails whenever the committed file differs
-from the generator output.
+Workflow markdown (``docs/workflow-nodes.md``, ``docs/workflow-node-author-guide.md``)
+is derived entirely from ``serialize_registry()`` (the same presentation-safe
+payload the frontend consumes). Provider markdown (``docs/providers.md``,
+``docs/provider-author-guide.md``) is derived from the domain catalog and the
+process-wide provider hub. A pytest guard fails whenever a committed file
+differs from the generator output.
 
 Usage:
-    python -m studio.workflows.docs            # rewrite both generated guides
-    python -m studio.workflows.docs --check    # exit 1 if either guide is stale
+    python -m studio.workflows.docs            # rewrite all generated guides
+    python -m studio.workflows.docs --check    # exit 1 if any guide is stale
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from studio.shared.providers_common.docs import (
+    DEFAULT_AUTHOR_OUTPUT as DEFAULT_PROVIDER_AUTHOR_OUTPUT,
+    DEFAULT_REFERENCE_OUTPUT as DEFAULT_PROVIDER_OUTPUT,
+    generate_provider_author_guide,
+    generate_provider_reference,
+)
 
 from .registry import serialize_registry
 from .templates import serialize_templates
@@ -418,28 +426,53 @@ def generate_node_author_guide(*, contracts_path: Path = CONTRACTS_SOURCE) -> st
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate workflow documentation from contracts and the registry.")
-    parser.add_argument("--check", action="store_true", help="fail if either committed file is stale")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="output markdown path")
-    parser.add_argument("--author-output", type=Path, default=DEFAULT_AUTHOR_OUTPUT,
-                        help="node-author guide output markdown path")
+    parser = argparse.ArgumentParser(
+        description="Generate workflow and provider documentation from live sources."
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="fail if any committed generated file is stale",
+    )
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="node reference markdown path")
+    parser.add_argument(
+        "--author-output",
+        type=Path,
+        default=DEFAULT_AUTHOR_OUTPUT,
+        help="node-author guide output markdown path",
+    )
+    parser.add_argument(
+        "--provider-output",
+        type=Path,
+        default=DEFAULT_PROVIDER_OUTPUT,
+        help="provider reference markdown path",
+    )
+    parser.add_argument(
+        "--provider-author-output",
+        type=Path,
+        default=DEFAULT_PROVIDER_AUTHOR_OUTPUT,
+        help="provider-author guide markdown path",
+    )
     args = parser.parse_args(argv)
 
-    content = generate_node_reference()
-    author_content = generate_node_author_guide()
+    targets = (
+        (args.output, generate_node_reference()),
+        (args.author_output, generate_node_author_guide()),
+        (args.provider_output, generate_provider_reference()),
+        (args.provider_author_output, generate_provider_author_guide()),
+    )
     if args.check:
-        current = args.output.read_text(encoding="utf-8") if args.output.exists() else None
-        current_author = args.author_output.read_text(encoding="utf-8") if args.author_output.exists() else None
-        stale = [path for path, actual, expected in (
-            (args.output, current, content),
-            (args.author_output, current_author, author_content),
-        ) if actual != expected]
+        stale = [
+            path
+            for path, expected in targets
+            if (path.read_text(encoding="utf-8") if path.exists() else None) != expected
+        ]
         if stale:
             print(f"STALE: {', '.join(str(path) for path in stale)}. Run: python -m studio.workflows.docs")
             return 1
-        print("OK: generated workflow documentation matches contracts and registry.")
+        print("OK: generated workflow and provider documentation matches live sources.")
         return 0
-    for path, generated in ((args.output, content), (args.author_output, author_content)):
+    for path, generated in targets:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(generated, encoding="utf-8", newline="\n")
         print(f"Wrote {path}")

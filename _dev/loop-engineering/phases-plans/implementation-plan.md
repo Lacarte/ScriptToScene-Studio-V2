@@ -1973,6 +1973,19 @@ provider may not modify nodes or generic UI. Integrate generation with the exist
 rebuild the 16.2 demo using only the guide; docs checks fail on manifest/domain contract drift; and
 README links the provider author guide and troubleshooting path.
 
+#### Step 16.3 review status — 2026-08-09
+
+- **Complete.** `studio/shared/providers_common/docs.py` generates `docs/providers.md` (live hub
+  catalog + domain request/result/capability tables + error-code catalog) and
+  `docs/provider-author-guide.md` (scaffold→ship path, extensibility rule, secret rules,
+  sync/async examples, troubleshooting).
+- Generation is wired into `python -m studio.workflows.docs` / `--check` alongside the workflow
+  node docs; standalone `python -m studio.shared.providers_common.docs` remains available.
+- README links the author guide, reference, and troubleshooting anchor; `docs/provider-template/`
+  points at the generated guide. Drift covered by `tests/test_provider_docs.py`.
+- Automated verification: provider + workflow docs suites and scaffold/contract-kit tests pass;
+  `python -m studio.workflows.docs --check` is green.
+
 ### 16.4 Compatibility, failure-isolation, and security hardening
 Build a matrix test covering every old provider ID/alias, saved settings format, node config version,
 legacy API request, built-in template, and output artifact. Fuzz malformed manifests, schemas, results,

@@ -14,6 +14,24 @@ available node, port, setting, and built-in template, see the generated
 from scaffold through release with the generated
 [Workflow Node Author Guide](docs/workflow-node-author-guide.md).
 
+## Provider platform
+
+Script, Scene Blueprint, TTS, Storyboard, and Animator dispatch through
+registered providers. The live catalog and domain contracts are generated as the
+[Provider Reference](docs/providers.md). Developers can add a provider from
+scaffold through release with the
+[Provider Author Guide](docs/provider-author-guide.md)
+(including the [troubleshooting](docs/provider-author-guide.md#troubleshooting)
+path). Quick scaffold notes also live in
+[docs/provider-template/README.md](docs/provider-template/README.md).
+
+Regenerate workflow and provider docs together:
+
+```powershell
+venv\Scripts\python.exe -m studio.workflows.docs
+venv\Scripts\python.exe -m studio.workflows.docs --check
+```
+
 ---
 
 ## How It Works — A Real Scenario

@@ -78,8 +78,10 @@ captions, music, editor, and export logic all work. Put thin adapters around the
 - Async dropdown options come from a backend allowlist. Adding one means editing **both**
   `ASYNC_OPTION_SOURCES` (`studio/workflows/registry.py`) and `_RESOLVERS`
   (`studio/workflows/options.py`) — a module-level assert and a test enforce parity.
-- Generated docs (`docs/workflow-nodes.md`, `docs/workflow-node-author-guide.md`) are produced by
-  `studio.workflows.docs`. Edit the registry, regenerate, never hand-edit; a drift test enforces it.
+- Generated docs (`docs/workflow-nodes.md`, `docs/workflow-node-author-guide.md`,
+  `docs/providers.md`, `docs/provider-author-guide.md`) are produced by
+  `studio.workflows.docs` (providers also via `studio.shared.providers_common.docs`).
+  Edit the registry/domains/hub, regenerate, never hand-edit; drift tests enforce it.
 
 ## Known traps
 

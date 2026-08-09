@@ -4,6 +4,12 @@ Scaffold a Provider Contract v2 package for any of the five supported domains.
 The CLI is the single source of the skeleton — this document describes what it
 emits and how to finish the package.
 
+**Primary guide:** the complete scaffold → manifest → settings → implementation
+→ results → artifacts → tests → health → ship path, plus troubleshooting, is the
+generated [Provider Author Guide](../provider-author-guide.md). The live catalog
+is the generated [Provider Reference](../providers.md). Prefer those over this
+short layout note when authoring a new provider.
+
 ## Quick start
 
 ```bash
