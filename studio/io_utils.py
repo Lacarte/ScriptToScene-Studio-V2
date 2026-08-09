@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from datetime import datetime
 
 from loguru import logger
@@ -55,6 +56,30 @@ class JobStore:
             return key in self._jobs
 
 
+_REPLACE_ATTEMPTS = 10
+_REPLACE_DELAY = 0.02
+
+
+def _replace_with_retry(tmp_path: str, path: str) -> None:
+    """``os.replace``, retried past transient Windows sharing violations.
+
+    ``os.replace`` needs delete access to the destination.  Windows refuses it
+    with WinError 5/32 while *any* other handle is open on that file — a
+    concurrent reader, an antivirus scanner, or the search indexer are all
+    enough.  The condition clears within milliseconds, so a bounded retry turns
+    a spurious failure back into the atomic write callers expect.  Elsewhere a
+    ``PermissionError`` is a real permission problem, so it propagates at once.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_DELAY * (attempt + 1))
+
+
 def safe_json_write(path: str, data: dict, *, indent: int | None = None, ensure_ascii: bool = False) -> None:
     """Write JSON atomically: tmp file → flush/fsync → rename over target.
 
@@ -86,7 +111,7 @@ def safe_json_write(path: str, data: dict, *, indent: int | None = None, ensure_
 
         # 3. Atomic rename (POSIX) / replace (Windows)
         #    os.replace is atomic on both POSIX and modern Windows (NTFS).
-        os.replace(tmp_path, path)
+        _replace_with_retry(tmp_path, path)
     except BaseException:
         # Clean up temp file on any failure
         try:
