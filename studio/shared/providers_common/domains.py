@@ -72,8 +72,12 @@ DOMAINS: dict[str, DomainSpec] = {
             label="Scene Blueprint",
             package="studio.build_scene_blueprints.providers",
             providers_base=_base("studio", "build_scene_blueprints", "providers"),
-            default_provider="builtin",
+            # Historical AI path (step 13.4). The 12.3 `builtin` bridge ID remains
+            # a permanent *input* alias on the n8n package (contracts.md §40.3).
+            default_provider="n8n",
             capability_vocabulary=_caps("chaptering", "coherence_scoring", "sfx_report"),
+            request_model="studio.build_scene_blueprints.providers.contract:SceneBlueprintRequest",
+            result_model="studio.build_scene_blueprints.providers.contract:SceneBlueprintResultPayload",
         ),
         DomainSpec(
             id="tts",

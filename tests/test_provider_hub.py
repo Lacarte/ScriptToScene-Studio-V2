@@ -116,7 +116,7 @@ class HubSurfaceTests(unittest.TestCase):
             [p['id'] for p in payload['script']['providers']],
             ['gemini', 'random_template'],
         )
-        self.assertEqual([p['id'] for p in payload['scene_blueprint']['providers']], ['builtin'])
+        self.assertEqual([p['id'] for p in payload['scene_blueprint']['providers']], ['n8n'])
 
     def test_shipped_domains_resolve_their_providers(self):
         self.assertIsNotNone(hub.get('tts', 'kokoro'))

@@ -113,6 +113,32 @@ def _script_gemini(raw):
     )
 
 
+def _scene_blueprint_n8n(raw):
+    """Recorded n8n scene-blueprint webhook body -> §32.2 envelope (step 13.4)."""
+    document = {
+        "scenes": list(raw.get("scenes") or []),
+        "analysis": dict(raw.get("analysis") or {}),
+        "style_spec": {"id": "cinematic", "label": "Cinematic"},
+        "style_prompt": "cinematic realistic",
+        "coherence_score": 0.92,
+        "coherence_warnings": [],
+        "coherence_metrics": {"role_mismatches": 0},
+        "sfx_report": {"hint_count": 0, "hint_max": 3, "hint_min": 0, "dropped": 0},
+        "total_duration": 12.5,
+        "style": "cinematic",
+        "scene_blueprints": [],
+        "provider": "n8n",
+        "generation_time": 2.5,
+        "timestamp": "2026-01-01T00:00:00+00:00",
+    }
+    return legacy.scenes_document_to_result(
+        document,
+        document_ref="scenes/pm_SAMPLE/scenes.json",
+        provider_id="n8n",
+        provider_version="1.0.0",
+    )
+
+
 BUILDERS = {
     ("tts", "kokoro"): _tts_kokoro,
     ("storyboard", "wavespeed_webhook"): _visual(
@@ -123,6 +149,7 @@ BUILDERS = {
     ),
     ("script", "random_template"): _script_random_template,
     ("script", "gemini"): _script_gemini,
+    ("scene_blueprint", "n8n"): _scene_blueprint_n8n,
 }
 
 

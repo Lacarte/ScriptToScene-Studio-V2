@@ -53,7 +53,7 @@
       "per_provider": {}
     },
     "scene_blueprint": {
-      "selected_provider": "builtin",
+      "selected_provider": "n8n",
       "per_provider": {}
     }
   },
@@ -62,5 +62,5 @@
     "default_style": "cinematic",
     "sync_folder": "D:/@Sync/PHONE-S24-PC"
   },
-  "version": 3
+  "version": 4
 }

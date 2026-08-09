@@ -260,10 +260,53 @@ def get_webhook_url():
     return jsonify({"url": N8N_WEBHOOK_URL})
 
 
+def _resolve_scene_provider_id(requested: str | None) -> tuple[str, object | None, str | None]:
+    """Resolve a request/default id to (canonical_id, provider_instance, error).
+
+    Absent/empty values map to the historical AI default (`n8n`). The 12.3
+    `builtin` bridge remains a permanent input alias of that provider.
+    """
+    from studio.shared.providers_common.domains import DOMAINS
+    from studio.shared.providers_common.hub import hub
+    from studio.shared.providers_common.registry import ProviderConstructionError
+
+    selected = (requested or "").strip() or DOMAINS["scene_blueprint"].default_provider
+    try:
+        instance = hub.create("scene_blueprint", selected)
+    except ProviderConstructionError:
+        return selected, None, "PROVIDER_UNAVAILABLE"
+    if instance is None:
+        return selected, None, "PROVIDER_UNAVAILABLE"
+    meta = hub.get("scene_blueprint", selected)
+    canonical = meta.id if meta is not None else selected
+    return canonical, instance, None
+
+
+def _legacy_provider_http_status(code: str) -> int:
+    """Map a ProviderError code onto the legacy flat-error HTTP statuses."""
+    if code in {"PROVIDER_REQUEST_INVALID", "PROVIDER_NOT_CONFIGURED"}:
+        return 400
+    if code == "PROVIDER_TIMEOUT":
+        return 504
+    if code in {
+        "PROVIDER_TRANSPORT_FAILED",
+        "PROVIDER_RESPONSE_MALFORMED",
+        "PROVIDER_FAILED",
+    }:
+        return 502
+    if code in {"PROVIDER_UNAVAILABLE", "PROVIDER_NOT_FOUND"}:
+        return 503
+    return 500
+
+
 @scenes_bp.route("/api/scenes/generate", methods=["POST"])
 @validate_json(SceneGenerateRequest)
 def generate_scenes(data: SceneGenerateRequest):
-    """Forward segmented data to n8n webhook for AI scene generation.
+    """Generate scenes via the selected `scene_blueprint` provider (step 13.4).
+
+    Dispatches through the provider hub so the Scene Blueprint node and this
+    legacy route share one implementation. The top-level envelope is frozen
+    (contracts.md §43); only the additive `provider` key is new.
 
     Accepts JSON body:
       - script: full transcript text
@@ -272,104 +315,79 @@ def generate_scenes(data: SceneGenerateRequest):
       - full_segments: optional full segment list (with fillers) for chapter mode
       - source_folder, aspect_ratio: optional metadata
       - webhook_url: optional override for the webhook URL
+      - provider_id: optional scene_blueprint provider (`n8n` default; `builtin`
+        alias still accepted)
     """
-    style_id = data.style
-    custom_style_notes = getattr(data, "custom_style_notes", None) or data.style_prompt or ""
-    webhook_url = data.webhook_url or N8N_WEBHOOK_URL
-    allow_private = os.environ.get("STS_ALLOW_PRIVATE_WEBHOOKS", "true").lower() == "true"
-    if not is_safe_webhook_url(webhook_url, allow_private=allow_private):
-        return jsonify({"error": "Unsafe webhook URL"}), 400
-    script = data.script
+    from studio.shared.providers_common.errors import ProviderError
 
+    project_id_raw = data.project_id or generate_project_id("pm")
+    project_id = sanitize_project_id(project_id_raw)
+    if not project_id:
+        return jsonify({"error": "Invalid project id"}), 400
+
+    requested = getattr(data, "provider_id", None)
+    canonical, provider, error = _resolve_scene_provider_id(requested)
+    if error or provider is None:
+        return jsonify({"error": f"Scene blueprint provider '{requested or canonical}' is unavailable"}), 503
+
+    # Prefer full_segments (with fillers) when present so chaptering matches
+    # the pre-migration route behaviour.
     segments_raw = _normalize_segments(data.segments)
     full_segments_raw = data.full_segments or []
-    bundle, visual_bible, scene_blueprints, plan_summary = _build_generation_context(
-        script,
-        style_id,
-        segments_raw,
-        full_segments_raw,
-        custom_style_notes,
-    )
+    if full_segments_raw:
+        segment_list = list(full_segments_raw)
+    else:
+        segment_list = list(segments_raw)
 
-    # Strip timing for webhook — LLM only sees {index, words}
-    segments_for_webhook = [
-        {"index": s["index"], "words": s["words"]} for s in segments_raw
-    ]
+    custom_style_notes = getattr(data, "custom_style_notes", None) or data.style_prompt or ""
+    configuration = {
+        "text": data.script,
+        "script": data.script,
+        "style": data.style,
+        "style_prompt": custom_style_notes,
+        "webhook_url": data.webhook_url or "",
+        "aspect_ratio": data.aspect_ratio or "9:16",
+        "story_tone": getattr(data, "story_tone", None) or "",
+        "provider_id": canonical,
+    }
+    # Merge portable saved settings for the resolved provider (request wins).
+    try:
+        from studio.shared.providers_common import settings_manager
 
-    started = time.perf_counter()
+        saved = settings_manager.portable_provider_settings("scene_blueprint", canonical)
+        for key, value in (saved or {}).items():
+            if configuration.get(key) in (None, ""):
+                configuration[key] = value
+    except Exception:
+        pass
+
+    segment_result = {
+        "segments": segment_list,
+        "metadata": {
+            "source_folder": sanitize_folder_name(data.source_folder or ""),
+        },
+    }
 
     try:
-        # Check if we should use chapter-based generation
-        full_segments = full_segments_raw
-        if full_segments and should_use_chapters(full_segments):
-            result = _generate_with_chapters(
-                script,
-                style_id,
-                bundle["style_spec"],
-                bundle["style_prompt"],
-                visual_bible,
-                scene_blueprints,
-                plan_summary,
-                full_segments,
-                webhook_url,
-                custom_style_notes,
-            )
-        else:
-            system_prompt = build_scene_system_prompt(
-                bundle["style_spec"],
-                visual_bible,
-                scene_blueprints,
-                plan_summary=plan_summary,
-                custom_style_notes=custom_style_notes,
-            )
-            result = _call_webhook(webhook_url, {
-                "script": script,
-                "style": style_id,
-                "style_prompt": bundle["style_prompt"],
-                "system_prompt": system_prompt,
-                "segments": segments_for_webhook,
-                "style_spec": bundle["style_spec"],
-                "visual_bible": visual_bible,
-                "scene_blueprints": scene_blueprints,
-                "plan_summary": plan_summary,
-            })
-        result = _normalize_webhook_response(result)
-        _apply_segmenter_timing(result, segments_raw, full_segments_raw)
-        ensure_analysis_payload(result, visual_bible, bundle["style_spec"], bundle["template"])
-        result["style_spec"] = bundle["style_spec"]
-        result["style_prompt"] = bundle["style_prompt"]
-        result["scene_blueprints"] = scene_blueprints
-        finalize_scene_result(result, scene_blueprints, visual_bible)
-
-        # Save to disk
-        project_id_raw = (data.project_id or result.get("pp_randomId")
-                          or result.get("project_id") or generate_project_id("pm"))
-        project_id = sanitize_project_id(project_id_raw)
-        if not project_id:
-            return jsonify({"error": "Invalid project id"}), 400
-        result["project_id"] = project_id
-        result["timestamp"] = datetime.now().isoformat()
-        result["generation_time"] = round(time.perf_counter() - started, 3)
-        result["source_folder"] = sanitize_folder_name(data.source_folder or "")
-        result["style"] = style_id
-        if custom_style_notes:
-            result["custom_style_notes"] = custom_style_notes
-        if data.parent_id:
-            result["parent_id"] = data.parent_id
-
-        safe_json_write(os.path.join(SCENES_DIR, project_id, "scenes.json"), result, indent=2)
-
-        logger.success("Generated {} scenes -> {}", len(result.get("scenes", [])), project_id)
-        return jsonify(result)
-
-    except http_requests.Timeout:
-        return jsonify({"error": "Webhook timed out (300s). Your n8n workflow may need more time — check if the LLM node has a timeout setting."}), 504
-    except http_requests.RequestException as e:
-        logger.error("Scene webhook request error: {!r}", e)
-        return jsonify({"error": f"Webhook connection error: {e}"}), 502
+        result = provider.generate(
+            segment_result,
+            configuration,
+            project_id=project_id,
+            parent_id=data.parent_id,
+            source_folder=sanitize_folder_name(data.source_folder or ""),
+        )
+    except ProviderError as exc:
+        status = _legacy_provider_http_status(exc.code)
+        # Flat legacy error string — key set frozen (§43); do not leak details.
+        return jsonify({"error": exc.message}), status
     except Exception as e:
         logger.exception("Unexpected error in scene generation")
-        return jsonify({"error": f"Server error: {e}"}), 500
+        return jsonify({"error": "Server error during scene generation"}), 500
+
+    result.pop("path", None)
+    if not result.get("provider"):
+        result["provider"] = canonical
+    return jsonify(result)
 
 
 # ---------------------------------------------------------------------------
@@ -379,12 +397,15 @@ def generate_scenes(data: SceneGenerateRequest):
 def generate_with_chapters_chunked(script, style_id, style_spec, style_prompt,
                                    visual_bible, scene_blueprints, plan_summary,
                                    full_segments, webhook_url, progress_cb=None,
-                                   custom_style_notes=""):
+                                   custom_style_notes="", webhook_caller=None):
     """Generate scenes in chapter mode with digestible payload chunks.
 
     Each chapter is split into small segment batches and validated to ensure
     all expected indexes are returned, preventing silent scene drops.
+    `webhook_caller` defaults to the module-level `_call_webhook` so tests and
+    the registered provider can inject a fixture without patching imports.
     """
+    caller = webhook_caller or _call_webhook
     chapters = group_into_chapters(full_segments)
     total = len(chapters)
     expected_total = sum(len(c["segments"]) for c in chapters)
@@ -456,7 +477,7 @@ def generate_with_chapters_chunked(script, style_id, style_spec, style_prompt,
                             f"{len(seg_chunk)} segments"
                         )
                     result = _normalize_webhook_response(
-                        _call_webhook(webhook_url, payload, timeout=300)
+                        caller(webhook_url, payload, timeout=300, label="Scene chapter webhook")
                     )
                     missing, unexpected = validate_scene_indexes(result, seg_chunk)
                     if missing or unexpected:

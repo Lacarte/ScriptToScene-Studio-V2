@@ -401,123 +401,30 @@ def _assign_hook_animations(result, story_tone):
 
 
 def _step_scenes(segment_result, config, project_id, job_id=None):
-    """Generate scene scripts via webhook (with chapter support)."""
-    from studio.build_scene_blueprints.chapters import (
-        should_use_chapters,
-    )
-    from studio.build_scene_blueprints.prompts import build_scene_system_prompt
-    from studio.build_scene_blueprints.style_compiler import resolve_template_bundle
-    from studio.build_scene_blueprints.planner import (
-        build_scene_blueprints,
-        build_visual_bible,
-        summarize_blueprints,
-    )
-    from studio.build_scene_blueprints.validators import ensure_analysis_payload, finalize_scene_result
-    from studio.build_scene_blueprints.routes import (
-        _call_webhook, generate_with_chapters_chunked,
-        _apply_segmenter_timing, _normalize_webhook_response,
-    )
-    from studio.build_scene_blueprints.templates import TEMPLATES_BY_ID
+    """Generate scene scripts via the scene_blueprint provider service.
 
-    all_segments = segment_result.get("segments", [])
-    segments = [
-        {"index": i, "words": s["words"]}
-        for i, s in enumerate(s for s in all_segments if not s.get("is_filler"))
-    ]
+    Compatibility facade for the fixed pipeline. The workflow adapter and the
+    legacy `/api/scenes/generate` route dispatch through the provider hub; this
+    step keeps calling the shared service so pipeline progress callbacks still
+    work without re-entering the hub (step 13.4).
+    """
+    from studio.build_scene_blueprints.service import SceneServiceError, generate_scenes
 
-    if not segments:
-        raise RuntimeError("No non-filler segments to generate scenes for")
+    def _progress(msg):
+        if job_id:
+            _emit(job_id, {"step": "scenes", "status": "running", "message": msg})
 
-    webhook_url = config.get("webhook_url") or N8N_WEBHOOK_URL
-    script = config.get("text", "")
-    custom_style_notes = config.get("style_prompt", "") or ""
-    # Resolve visual_style via niche system (falls back to legacy "style" field)
-    from studio.niches.presets import resolve_niche as _resolve_niche
-    _resolved = _resolve_niche(config)
-    style_id = _resolved["visual_style"]
-    bundle = resolve_template_bundle(style_id, TEMPLATES_BY_ID, custom_style_notes)
-    planning_segments = [
-        {**s, "index": i}
-        for i, s in enumerate(s for s in all_segments if not s.get("is_filler"))
-    ]
-    visual_bible = build_visual_bible(script, planning_segments, bundle["style_spec"])
-    scene_blueprints = build_scene_blueprints(
-        planning_segments,
-        visual_bible,
-        bundle["style_spec"],
-    )
-    plan_summary = summarize_blueprints(scene_blueprints)
-
-    # ── Chapter-based or single request ──
-    if should_use_chapters(all_segments):
-        def _progress(msg):
-            if job_id:
-                _emit(job_id, {"step": "scenes", "status": "running", "message": msg})
-
-        result = generate_with_chapters_chunked(
-            script=script,
-            style_id=style_id,
-            style_spec=bundle["style_spec"],
-            style_prompt=bundle["style_prompt"],
-            visual_bible=visual_bible,
-            scene_blueprints=scene_blueprints,
-            plan_summary=plan_summary,
-            full_segments=all_segments,
-            webhook_url=webhook_url,
+    try:
+        result = generate_scenes(
+            segment_result,
+            config,
+            project_id=project_id,
+            provider_id=(config or {}).get("provider_id") or "n8n",
             progress_cb=_progress if job_id else None,
-            custom_style_notes=custom_style_notes,
         )
-    else:
-        # Single request (small script)
-        system_prompt = build_scene_system_prompt(
-            bundle["style_spec"],
-            visual_bible,
-            scene_blueprints,
-            plan_summary=plan_summary,
-            custom_style_notes=custom_style_notes,
-        )
-        payload = {
-            "script": script,
-            "style": style_id,
-            "style_prompt": bundle["style_prompt"],
-            "system_prompt": system_prompt,
-            "segments": segments,
-            "style_spec": bundle["style_spec"],
-            "visual_bible": visual_bible,
-            "scene_blueprints": scene_blueprints,
-            "plan_summary": plan_summary,
-        }
-        result = _call_webhook(webhook_url, payload)
-
-    # Apply segmenter timing — single source of truth for scene placement
-    result = _normalize_webhook_response(result)
-    speech_segments = [
-        {**s, "index": i}
-        for i, s in enumerate(s for s in all_segments if not s.get("is_filler"))
-    ]
-    _apply_segmenter_timing(result, speech_segments, all_segments)
-    ensure_analysis_payload(result, visual_bible, bundle["style_spec"], bundle["template"])
-    result["style_spec"] = bundle["style_spec"]
-    result["style_prompt"] = bundle["style_prompt"]
-    result["scene_blueprints"] = scene_blueprints
-    if custom_style_notes:
-        result["custom_style_notes"] = custom_style_notes
-    finalize_scene_result(result, scene_blueprints, visual_bible)
-
-    # Assign hook animations to text scenes based on story tone
-    _assign_hook_animations(result, config.get("story_tone", ""))
-
-    # Save result
-    result["project_id"] = project_id
-    result["timestamp"] = datetime.now().isoformat()
-    result["source_folder"] = segment_result.get(
-        "metadata", {}).get("source_folder", "")
-    result["style"] = style_id
-
-    safe_json_write(os.path.join(SCENES_DIR, project_id, "scenes.json"), result, indent=2)
-
-    logger.success("Pipeline Scenes: {} scenes",
-                   len(result.get("scenes", [])))
+    except SceneServiceError as exc:
+        raise RuntimeError(str(exc)) from exc
+    result.pop("path", None)
     return result
 
 

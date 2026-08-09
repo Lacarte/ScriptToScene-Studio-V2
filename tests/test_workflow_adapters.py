@@ -50,12 +50,23 @@ def test_segmenter_adapter_uses_service_result(monkeypatch):
 
 def test_scenes_explicit_config_beats_project_settings(monkeypatch):
     seen = {}
-    def service(value, cfg, pid):
-        seen.update(cfg)
-        return {"scenes": [{"image_prompt": "p"}]}
-    monkeypatch.setattr(scenes, "_step_scenes", service)
+
+    class FakeProvider:
+        def generate(self, segments, configuration, *, project_id):
+            seen.update(configuration)
+            return {
+                "scenes": [{"image_prompt": "p"}],
+                "path": "scenes/pm_x/scenes.json",
+            }
+
+    monkeypatch.setattr(scenes, "resolve_provider", lambda domain, selected: FakeProvider())
+    monkeypatch.setattr(scenes, "provider_run_options", lambda *a, **k: {})
     monkeypatch.setattr(scenes, "with_artifacts", lambda payload, *paths: payload)
-    scenes.blueprint({"segments": {}, "script": "x", "settings": {"style": "inherited", "tone": "dark"}}, {"style": "explicit"}, CTX)
+    scenes.blueprint(
+        {"segments": {}, "script": "x", "settings": {"style": "inherited", "tone": "dark"}},
+        {"style": "explicit"},
+        CTX,
+    )
     assert seen["style"] == "explicit"
     assert seen["story_tone"] == "dark"
 
@@ -88,10 +99,17 @@ def test_empty_node_config_does_not_mask_inherited_settings(monkeypatch):
     # Live finding (step 6.1): music.select carries story_tone="" as its schema
     # default, which silently discarded the tone configured in Project Setup.
     seen = {}
-    def service(value, cfg, pid):
-        seen.update(cfg)
-        return {"scenes": [{"image_prompt": "p"}]}
-    monkeypatch.setattr(scenes, "_step_scenes", service)
+
+    class FakeProvider:
+        def generate(self, segments, configuration, *, project_id):
+            seen.update(configuration)
+            return {
+                "scenes": [{"image_prompt": "p"}],
+                "path": "scenes/pm_x/scenes.json",
+            }
+
+    monkeypatch.setattr(scenes, "resolve_provider", lambda domain, selected: FakeProvider())
+    monkeypatch.setattr(scenes, "provider_run_options", lambda *a, **k: {})
     monkeypatch.setattr(scenes, "with_artifacts", lambda payload, *paths: payload)
     scenes.blueprint(
         {"segments": {}, "script": "x", "settings": {"tone": "educational"}},

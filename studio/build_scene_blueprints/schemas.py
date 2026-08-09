@@ -24,4 +24,7 @@ class SceneGenerateRequest(BaseModel):
     parent_id: Optional[str] = None
     source_folder: Optional[str] = None
     aspect_ratio: Optional[str] = None
+    # Optional scene_blueprint provider (`n8n` default; `builtin` alias accepted).
+    provider_id: Optional[str] = None
+    story_tone: Optional[str] = None
     model_config = {"extra": "allow"}

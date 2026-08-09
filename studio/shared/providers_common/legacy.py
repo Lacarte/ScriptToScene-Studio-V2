@@ -200,6 +200,75 @@ def script_document_to_result(
     )
 
 
+# -- scene_blueprint (contracts.md §32.2) -----------------------------------
+
+def scenes_document_to_result(
+    document: Mapping[str, Any],
+    *,
+    document_ref: str,
+    provider_id: str = "",
+    provider_version: str = "",
+) -> ProviderResult:
+    """A legacy `scenes.json` / `generate_scenes` dict -> §32.2 envelope.
+
+    Coherence fields flatten into a `coherence` block; `total_duration` becomes
+    `total_duration_s`. Planner inputs (`scene_blueprints`, `visual_bible`,
+    `custom_style_notes`) stay in envelope `metadata`, not the payload.
+    The top-level `provider` label is dropped because provenance owns identity.
+    """
+    data = dict(document or {})
+    scenes = data.get("scenes") if isinstance(data.get("scenes"), list) else []
+    coherence_block = data.get("coherence")
+    if isinstance(coherence_block, Mapping):
+        coherence = {
+            "score": float(coherence_block.get("score") or 0.0),
+            "warnings": list(coherence_block.get("warnings") or []),
+            "metrics": dict(coherence_block.get("metrics") or {}),
+        }
+    else:
+        coherence = {
+            "score": float(data.get("coherence_score") or 0.0),
+            "warnings": list(data.get("coherence_warnings") or []),
+            "metrics": dict(data.get("coherence_metrics") or {}),
+        }
+    total = data.get("total_duration_s")
+    if total is None:
+        total = data.get("total_duration") or 0.0
+    sfx = data.get("sfx_report")
+    if sfx is not None and not isinstance(sfx, Mapping):
+        sfx = None
+    metadata = {}
+    for key in (
+        "scene_blueprints",
+        "visual_bible",
+        "custom_style_notes",
+        "style",
+        "generation_time",
+        "timestamp",
+        "source_folder",
+        "parent_id",
+    ):
+        if key in data and data[key] is not None:
+            metadata[key] = data[key]
+    return ProviderResult(
+        domain="scene_blueprint",
+        provider_id=provider_id or str(data.get("provider") or ""),
+        provider_version=provider_version,
+        payload={
+            "scenes": [dict(s) if isinstance(s, Mapping) else s for s in scenes],
+            "style_spec": dict(data.get("style_spec") or {}),
+            "style_prompt": str(data.get("style_prompt") or ""),
+            "analysis": dict(data.get("analysis") or {}),
+            "coherence": coherence,
+            "sfx_report": dict(sfx) if sfx is not None else None,
+            "total_duration_s": float(total or 0.0),
+            "document_ref": document_ref,
+        },
+        artifact_refs=dedupe_refs([document_ref]),
+        metadata=metadata,
+    )
+
+
 # -- storyboard (contracts.md §32.4) ----------------------------------------
 
 # `scene_statuses` values use these strings today; `done` appears in the legacy
@@ -404,6 +473,8 @@ __all__ = [
     "animator_manifest_to_units",
     "job_status_from_legacy",
     "ref_from_output_url",
+    "scenes_document_to_result",
+    "script_document_to_result",
     "storyboard_manifest_to_units",
     "tts_metadata_to_result",
     "tts_result_to_payload",

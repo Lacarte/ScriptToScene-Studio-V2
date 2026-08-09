@@ -13,6 +13,18 @@
       "bytes": 283,
       "sha256": "ea80a3bb6a7512eb473a1b57538ada8b0ec0724e3c1a3dd94b9bcf6c9063b60b"
     },
+    "scene_blueprint/n8n/expected_result.json": {
+      "bytes": 3083,
+      "sha256": "51942a97126f69ff844e3fd9638a15c8667175d7a138c75e329b8c46c6f3410f"
+    },
+    "scene_blueprint/n8n/raw_response.json": {
+      "bytes": 1688,
+      "sha256": "b7c4005c89715ec2e1c6ab406d142c8408a7bd14896f633cbf489c6ea718de27"
+    },
+    "scene_blueprint/n8n/request.json": {
+      "bytes": 643,
+      "sha256": "fa88d98262c1bdcd072242e6ee01820fd2e9e6c726afa6a5d11b45ade444c54f"
+    },
     "script/gemini/expected_result.json": {
       "bytes": 2838,
       "sha256": "9329d5d1c232e531a4fa0b9eaeb6b1914100b3070bc4444c9c4dd8ecf663b36b"

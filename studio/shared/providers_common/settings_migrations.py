@@ -18,7 +18,8 @@ from studio.shared.providers_common.domains import DOMAINS
 # The version a freshly written settings.json carries.
 # v2 = §24.3 five-domain catalog + legacy selection adoption (step 11.3).
 # v3 = S6 script selection `builtin` → `gemini` (step 13.3).
-SETTINGS_VERSION = 3
+# v4 = S7 scene_blueprint selection `builtin` → `n8n` (step 13.4).
+SETTINGS_VERSION = 4
 
 MIGRATIONS: dict[int, Callable[[dict, dict], dict]] = {}
 
@@ -93,6 +94,21 @@ def migrate_to_v3(data: dict, legacy_user: dict) -> dict:
     return data
 
 
+@_register(4)
+def migrate_to_v4(data: dict, legacy_user: dict) -> dict:
+    """S7 — rewrite only the transitional scene_blueprint selection `builtin` → `n8n`.
+
+    The 12.3 bridge id was the domain default until 13.4 landed the real
+    `n8n` provider. Any explicit selection other than `builtin` is left alone
+    (contracts.md §42 S7).
+    """
+    domains = data.setdefault("domains", {})
+    block = domains.get("scene_blueprint")
+    if isinstance(block, dict) and block.get("selected_provider") == "builtin":
+        block["selected_provider"] = "n8n"
+    return data
+
+
 def apply_migrations(data: dict, legacy_user: dict | None = None) -> tuple[dict, bool]:
     """Upgrade `data` to `SETTINGS_VERSION`.
 
@@ -135,4 +151,5 @@ __all__ = [
     "apply_migrations",
     "migrate_to_v2",
     "migrate_to_v3",
+    "migrate_to_v4",
 ]

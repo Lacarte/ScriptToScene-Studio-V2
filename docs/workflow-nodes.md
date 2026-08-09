@@ -353,7 +353,7 @@ AI scene descriptions and image prompts for each segment.
 
 | Field | Label | Widget | Default | Required | Constraints |
 |---|---|---|---|---|---|
-| `provider_id` | Provider | `provider` | `"builtin"` | yes | options from `scene_blueprint_providers` |
+| `provider_id` | Provider | `provider` | `"n8n"` | yes | options from `scene_blueprint_providers` |
 | `webhook_url` | Webhook URL | `string` | `""` | no | — |
 | `style` | Visual style | `options` | `"cinematic"` | no | options from `style_templates` |
 | `style_prompt` | Custom style notes | `textarea` | `""` | no | — |
