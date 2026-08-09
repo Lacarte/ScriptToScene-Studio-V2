@@ -466,3 +466,420 @@ Request hardening (step 6.3): JSON body limits are enforced by a bounded stream 
 1. Capture/generate and validate the fixture inventory before step 2.5.
 2. Convert the field-level contracts into executable validators/tests as their owning modules
    land in Phases 1–3; until then, this document is the normative source.
+
+---
+
+# Provider Platform — Migration Audit (Phase 10.1)
+
+> Produced by step 10.1 of [implementation-plan.md](implementation-plan.md).
+> Grounded in code at commit `36734f6` (2026-08-08). Every line number below was read
+> directly at that commit, not inferred.
+> Vocabulary reconciled with `_dev/docs/plans/modular-providers-plan-v4.md` (the design doc
+> the existing `studio/shared/providers_common/` was built from). Where v4 and this plan
+> disagree, this document wins and the divergence is recorded in §17.6.
+>
+> **Scope.** Five domains migrate: `script`, `scene_blueprint`, `tts`, `storyboard`,
+> `animator`. Music and Captions are excluded by owner decision; they are audited in §17.7
+> only to confirm they keep working untouched.
+
+## 13. Domain migration matrix
+
+Legend — **State**: `platform` = has a provider package + registry today; `ad-hoc` = no
+provider abstraction at all.
+
+### 13.1 `script` (Story Generator) — state: **ad-hoc**
+
+| aspect | evidence |
+|---|---|
+| entry points | `POST /api/story/generate` (`studio/story/routes.py:197`); workflow node `story.generate` → `studio.workflows.adapters.story:generate` (`registry.py:159`, adapter `adapters/story.py:10`) |
+| shared service | `studio.story.service.generate_story(config, project_id=…)` — called by the adapter (`adapters/story.py:18`). The legacy route does **not** call it; it re-implements the same flow inline (`routes.py:197-351`) |
+| other routes | `GET /api/story/webhook-url` (`routes.py:185`), `GET /api/story/categories` (`routes.py:191`), `GET /api/story/history` (`routes.py:353`), `GET /api/story/<project_id>` (`routes.py:382`), `POST /api/story/classify-style` (`routes.py:404`) |
+| inputs | `preset_style, story_category, duration (15–180), language (english\|french\|spanish), language_level, story_tone, idea, webhook_url, project_name_id, niche_preset` (`studio/story/schemas.py:21-53`) |
+| outputs | `{success, project_id, story_text, sections{hook,build,climax,cta}, metadata{…}}` |
+| artifacts | `output/stories/{project_id}/story.json`; history `output/story_history/{preset}__{category}__{language}.json` (cap 10 entries) |
+| side effects | outbound HTTP to n8n (120 s timeout); anti-repeat history mutation; non-deterministic concept-family pick |
+| provider IDs | **none.** `"provider": "gemini"` is a hardcoded literal in the response metadata (`studio/story/service.py:102`, and again at `routes.py:287`) — a label, not a selector |
+| aliases | none |
+| settings/env | `N8N_STORY_WEBHOOK_URL` (`config.py:74-76`), `N8N_CLASSIFY_WEBHOOK_URL` (`config.py:80-82`), `STS_ALLOW_PRIVATE_WEBHOOKS`. **No `settings.json` participation** |
+| hardcoded branches | none (single path) |
+| callers | frontend `features/pipeline/composables/useStory.js`; `PipelinePage.vue` (classify) |
+| owner | 13.1 (random_template provider), 13.2 (AI provider wrap), 13.3 (generic dispatch + defect fix) |
+
+**Frontend random-story templates are not a provider and never were.**
+`frontend/src/shared/data/stories.js:6` exports a static `RANDOM_STORIES` array of
+`{text, type, styles}` objects; `useRandomStory.js:14` picks one at random while avoiding an
+immediate repeat (`lastIdx`, lines 4 and 19). Consumers: `usePipeline.js:5`, `useTts.js:13`,
+`PipelinePage.vue:17`, `TtsPage.vue:5`. It never calls an API and has no backend counterpart —
+it is a "fill the textarea with sample text" affordance. 13.1 moves this catalog and its
+anti-repeat rule behind a backend `random_template` script provider; until then it is
+**public compatibility surface** (users rely on the button) with **zero** migration coupling.
+
+### 13.2 `scene_blueprint` (Scene Blueprint) — state: **ad-hoc**
+
+| aspect | evidence |
+|---|---|
+| entry points | `POST /api/scenes/generate` (`studio/build_scene_blueprints/routes.py:263`); workflow node `scenes.blueprint` → `adapters/scenes.py:7`; legacy pipeline `_step_scenes` (`studio/pipeline/services.py:403`, wrapper `pipeline/routes.py:1265`) |
+| other routes | `GET /api/scenes/templates` (`routes.py:251`), `/api/scenes/webhook-url` (`:257`), `/api/scenes/history` (`:533`), `/api/scenes/<project_id>` (`:565`), `/api/scenes/audio/<source_folder>` (`:579`) |
+| inputs | `segments[] (required), script, style, style_prompt, custom_style_notes, full_segments, webhook_url, project_id, parent_id, source_folder, aspect_ratio` (`schemas.py`, `extra="allow"`) |
+| outputs | `{scenes[], analysis, style_spec, style_prompt, scene_blueprints, coherence_score, coherence_warnings, coherence_metrics, sfx_report, total_duration, …}` |
+| artifacts | `output/scenes/{project_id}/scenes.json` (`routes.py:360`, `services.py:517`) |
+| side effects | outbound HTTP to n8n; chapter mode splits into chunks with per-chunk retry; unseeded `random.shuffle` in `_assign_hook_animations` (`services.py:508`) |
+| provider IDs | **none.** A grep for `provider` across `studio/build_scene_blueprints/` returns nothing |
+| aliases | none |
+| settings/env | `N8N_WEBHOOK_URL` (`config.py:68-70`), `STS_ALLOW_PRIVATE_WEBHOOKS`. **No `settings.json` participation** |
+| dispatch branch | the only branch is `should_use_chapters(segments)` → `speech_count > 20` (`chapters.py:31-34`) — a payload-size decision, not a provider decision |
+| transport | `studio.webhooks.call_webhook(url, payload, timeout=180, label=…)`; 3 attempts, 2/4/8 s backoff; chapter mode raises the timeout to 300 s |
+| owner | 13.4 |
+
+### 13.3 `tts` — state: **platform** (registry present, dispatch still by string)
+
+| aspect | evidence |
+|---|---|
+| entry points | `POST /api/tts/generate` (`studio/tts/routes.py:625`), `/api/tts/stream` (`:896`), `/api/tts/voices` (`:515`), model download/status, `/api/tts/cache/*`; workflow node `tts.generate` → `adapters/tts.py:7`; legacy `_step_tts` (`services.py:59`) |
+| provider IDs | `kokoro`, `inworld` |
+| aliases | **none** for TTS |
+| dispatch | `services.py:77-82` resolves `tts_provider_override → tts_provider → settings.json domains.tts.selected_provider → "kokoro"`, then **branches on the string** at `services.py:103` (`if provider_id == "inworld"`). `tts_registry.get()` at `:84` is only an existence gate plus `.version`/`.kind` reads (`:106`, `:112`) |
+| route dispatch | `tts/routes.py:629`, `:517`, `:902` each branch `if provider == "inworld"` |
+| registry bypass | **`studio/tts/routes.py` never imports or touches the registry** — a grep for `registry` and `providers import` in that file returns **no matches** |
+| settings | `settings.json domains.tts.{selected_provider, per_provider.{kokoro,inworld}}`; kokoro schema = `voice, speed, lang, blend, blendA, blendB, blendRatio, blendMethod`; inworld = `api_key, voice, model, speed` |
+| env | `INWORLD_API_KEY` (side effect — §14.3), `INWORLD_TTS_MODEL`, `INWORLD_TTS_BASE_URL` |
+| artifacts | `output/tts/{basename}/{basename}.wav` + `.json`; pipeline `…/voice.wav` + `tts.json`; cache `TMP_DIR/tts/{sha16}.wav` |
+| cache key | `sha256(f"{text}|{voice}|{speed:.2f}")[:16]` (`tts/routes.py:854-862`) — **provider is not in the key** (known defect, §8) |
+| node config | `engine` is a **static hardcoded list** `["kokoro","inworld"]` (`registry.py:186`); there is no `tts_providers` option source (§15.1) |
+| owner | 15.1, 15.2, 15.3 |
+
+### 13.4 `storyboard` — state: **platform** (registry present, dispatch still by string)
+
+| aspect | evidence |
+|---|---|
+| entry points | `POST /api/storyboard/generate` (`studio/storyboard/routes.py:283`), `/api/storyboard/grab` (`:490`), status/images/image-models/webhook-url/remove-watermarks; workflow node `storyboard.generate` → `adapters/storyboard.py:54`; legacy `_step_storyboard` (`services.py:530-627`) |
+| provider IDs | `gemini_ws`, `wavespeed_webhook`, `wavespeed_direct` |
+| aliases | `gemini_ws→gemini`, `wavespeed_webhook→webhook`, `wavespeed_direct→direct` (`services.py:550`) |
+| dispatch | `routes.py:316` selects from `settings.json` defaulting to `gemini_ws`, then branches at `routes.py:324` (`if provider_id == "gemini_ws"`) and `routes.py:605` (`if provider == "gemini"`). Adapter branches at `adapters/storyboard.py:21` |
+| async transport | WebSocket `/ws/storyboard-gemini-image-grabber`, registered by `gemini_ws.register_runtime(app, sock)` through `call_provider_runtime` when `manifest.kind == "extension"` (`storyboard/providers/__init__.py:36-52`) |
+| artifacts | `output/storyboard/{pid}/storyboard.json`, `{scene}/image.{ext}` (versioned), `scene_prompts.json`, thumbnails |
+| poll contract | 10 s interval / 30 min timeout; errors count toward completion (`pending = total-ready-errors`) |
+| settings | `per_provider.wavespeed_webhook.{webhook_url,image_model}`, `wavespeed_direct.{api_key,image_model}`, `gemini_ws.{auto_type}` |
+| env | `WAVESPEED_API_KEY` seeds `wavespeed_direct.api_key` (`settings_manager.py:94-96`) |
+| owner | 14.1, 14.2, 14.4, 14.5 |
+
+### 13.5 `animator` — state: **platform** (registry present, dispatch still by string)
+
+| aspect | evidence |
+|---|---|
+| entry points | `POST /api/animator/grabber/start` (`animation_routes.py:186`) plus pending/results/upload/status/redownload/history/reconcile/project/thumbnails; WS `/ws/animator-grok-video-grabber` (`animator/routes.py:199`); workflow node `animator.generate` → `adapters/animator.py:64`; legacy `_step_assets` (`services.py:630`) |
+| provider IDs | `grok_automa`, `kie_ai` |
+| aliases | `grok_automa→grok`, `kie_ai→kie-ai` (`services.py:644`) |
+| dispatch | `animation_routes.py:189-200` resolves and falls back to `grok_automa`, then branches at `:266`, `:297`, `:314`, `:333`. Adapter branches at `adapters/animator.py:28` and `:37` |
+| registry bypass | **`animation_routes.py:21`**: `from .providers.kie_ai import generate_image as kie_ai_generate` — direct module import; the registry is never consulted for this call |
+| artifacts | `output/animator/{pid}/{scene}/*` (+ `*_thumb.jpg`), `metadata.json`, `grabber_job.json`, legacy `animator.json` |
+| poll contract | 10 s interval / **120 min** timeout; `grabber_jobs` JobStore is in-memory, rehydrated from disk on import |
+| settings | `per_provider.kie_ai.{api_key,model,resolution}`, `grok_automa.{mode,quality,duration}` |
+| env | `KIE_AI_API_KEY`, `KIE_AI_MODEL` seed `kie_ai` settings (`settings_manager.py:98-104`) |
+| dead config | `arguments if provider == "midjourney"` (`animation_routes.py:260`) — `midjourney` is not a registered provider; the branch is unreachable |
+| owner | 14.1, 14.3, 14.4, 14.5 |
+
+## 14. The seven mandated items, answered
+
+### 14.1 Dead-interface inventory
+
+Method: exhaustive repo-wide grep for `.synthesize(`, `.submit(`, `.poll(`, and `get_provider`.
+
+| symbol | call sites found | verdict |
+|---|---|---|
+| `TTSProvider.synthesize` (+ both implementations) | **0** | never executed |
+| `StoryboardProvider.submit` / `.poll` (3 implementations) | **0** — the only `.submit(` in the repo is `pool.submit(` (`scheduler.py:535`); the only `.poll(` calls are `subprocess.poll()` (`storyboard/lama_client.py:77,114,152`) | never executed |
+| `AnimatorProvider.submit` / `.poll` (2 implementations) | **0** (same evidence) | never executed |
+| `get_provider()` — domain factories (`tts/providers/__init__.py:26`, `storyboard/…:26`, `animator/…:26`) | **0 call sites**; only the `def` plus an `__all__` entry at `:57` of each | never executed |
+| `get_provider()` — provider factories (`storyboard/providers/gemini_ws/provider.py:89`, `wavespeed_webhook/provider.py:108`, `wavespeed_direct/provider.py:98`, `animator/providers/grok_automa/provider.py:106`, `kie_ai/provider.py:246`) | **0**; `kie_ai/__init__.py:11` merely re-exports it | never executed |
+
+Beware the false positive: `settings_manager.get_provider_settings()` is a **different, live**
+function with many call sites. It is not a factory.
+
+What *is* live on provider objects: `.version` / `.kind` metadata (`services.py:106,112`),
+`.validate_settings()` (`editor/routes.py:282`, `pipeline/routes.py:129,142,155`),
+`.health_check()` (`editor/routes.py:327`), `.settings_schema()` (`editor/routes.py:361`),
+`.to_dict()` (`editor/routes.py:368`), and `registry.to_dict()` (`editor/routes.py:247-249`).
+
+**Consequence, frozen:** every `provider.py` body listed above is *unverified code under
+first-time test*, not a preserved baseline. The behavior to preserve is the observable output
+of the string-branch legacy paths. Owner: 11.4 (contract tests that actually invoke each
+previously-unexecuted method), then 14.2 / 14.3 / 15.1 for the domain rewiring.
+
+### 14.2 Selection-store conflict
+
+Two independent stores exist and neither writes to the other:
+
+| store | key | written by | read by |
+|---|---|---|---|
+| `settings/settings.json` | `domains.<domain>.selected_provider` (lines 16 / 32 / 49 of the live file) | `PUT /api/settings/v2` whole-blob replace (`editor/routes.py:215-227`; `save_settings(data)` at `:226`) | `services.py:80` (TTS pipeline), `storyboard/routes.py:316`, `animation_routes.py:189-200`, `editor/routes.py:247-249` |
+| `app-config.json` | `sts-tts-provider` (line 65, currently `"inworld"`) | frontend settings blob | `useTts.js:142`, `usePipelineForm.js:93`, `SettingsPage.vue:452`, watched at `useTts.js:661` |
+
+`settings_manager.set_selected_provider()` (`settings_manager.py:189-198`) exists and has
+**zero call sites** — only `__all__` re-exports at `shared/__init__.py:12` and
+`providers_common/__init__.py:20,59`.
+
+The frontend selection path is `useProviders.js:66-100`: `GET /api/settings/v2` →
+spread-merge a new `selected_provider` → `PUT /api/settings/v2` with the **entire** blob.
+`put_settings_v2` calls `save_settings(data)`, a full replace with no `expected_updated_at`
+and no field-level merge — a genuine lost-update window between any two concurrent writers.
+
+Both stores currently agree (`inworld`), so there is no live divergence to repair today — but
+the TTS *page* is driven by `app-config.json` while the TTS *pipeline* is driven by
+`settings.json`, so they can silently diverge on the next write to either.
+
+**Recommendation carried into 10.2 (decision, not yet frozen):** make
+`settings/settings.json` `domains.*.selected_provider` authoritative — it is the only store
+the backend reads, it is already per-domain, and it is the v4 design's stated source of
+truth. Migrate `sts-tts-provider` by having the legacy TTS page read the selection from the
+provider catalog API, keeping a read-through fallback for one release, then deleting the key.
+Replace the whole-blob write with a targeted selection endpoint routed through the existing
+`set_selected_provider()`. Owners: 10.2 freezes it, 11.5 builds the endpoint, 12.4 moves the
+legacy page, 16.1 deletes the loser key.
+
+### 14.3 Env-var side effects
+
+All in `_seed_from_env()` (`settings_manager.py:67-107`), which runs **only when
+`settings/settings.json` is absent** (first run):
+
+| env var | effect | line |
+|---|---|---|
+| `INWORLD_API_KEY` | seeds `per_provider.inworld.api_key` **and flips `domains.tts.selected_provider` to `"inworld"`** | `:85-88` |
+| `INWORLD_TTS_MODEL` | seeds `per_provider.inworld.model` | `:90-92` |
+| `WAVESPEED_API_KEY` | seeds `per_provider.wavespeed_direct.api_key` | `:94-96` |
+| `KIE_AI_API_KEY` | seeds `per_provider.kie_ai.api_key` | `:98-100` |
+| `KIE_AI_MODEL` | seeds `per_provider.kie_ai.model` | `:102-104` |
+| `STS_SYNC_FOLDER`, `STS_AUTO_SYNC` | seed `general.*` | `:79-83` |
+
+`INWORLD_API_KEY` is the **only** implicit *selection* change; the other four seed values
+only. Defaults without env: `kokoro` / `gemini_ws` / `grok_automa`
+(`settings_manager.py:148,152,156`).
+
+Separately, a present-but-empty `api_key` is persisted for `kie_ai`, `wavespeed_direct`, and
+`inworld` in the live `settings.json`, so "key configured" cannot be inferred from key
+presence. Owner: 11.3 (env fallback without returning values), 10.2 (availability states).
+
+### 14.4 Legacy alias tables
+
+Verified verbatim:
+
+- `studio/pipeline/services.py:550` — `id_to_legacy = {"gemini_ws": "gemini", "wavespeed_webhook": "webhook", "wavespeed_direct": "direct"}`, applied at `:551`; consumed at `:552` (`prompt_prefix` only when `sb_provider == "gemini"`) and sent as `payload["provider"]` at `:563` over an **HTTP-to-self** call to `/api/storyboard/generate` (`:566`, blocker B1).
+- `studio/pipeline/services.py:644` — `id_to_legacy = {"grok_automa": "grok", "kie_ai": "kie-ai"}`, applied at `:645`; consumed at `:664` (`if anim_override == "grok_automa" or provider == "grok"` → grok-specific payload keys).
+- `app.py:248-286` `POST /api/pipeline/preflight` — defaults `storyboard_provider="gemini"` (`:253`) and `asset_provider="grok"` (`:254`), branching at `:266` and `:276` to probe extension connectivity.
+- `app.py:198-200` `focus-studio` — `if target == "gemini" … elif target == "grok"`.
+
+Direction matters: the table maps **canonical → legacy**, not the reverse. The legacy strings
+are the wire format of the internal HTTP hop and the preflight API; the canonical IDs are what
+the registry and `settings.json` use. Owner: 10.4 (freeze the mapping in both directions),
+16.1 (delete once the internal HTTP hop is gone).
+
+### 14.5 Registry bypasses
+
+1. `studio/animator/animation_routes.py:21` — `from .providers.kie_ai import generate_image as kie_ai_generate`, invoked inside `_kie_ai_generate_all`. Violates §8 blocker B8 ("always `registry.get(id)`, never `import`"). Owner: 14.3.
+2. `studio/tts/routes.py` — **no registry reference at all**. Every TTS HTTP route dispatches on a raw request string. Owner: 15.2.
+3. `studio/workflows/adapters/animator.py:33` reads `settings_manager.get_provider_settings("animator", "kie_ai")` with a **literal provider ID**, hardcoding the adapter to one provider's settings. Owner: 14.3.
+4. `studio/storyboard/routes.py` and `animation_routes.py` do call `registry.get()`, but only to validate existence and read settings — dispatch remains the string branch. Owner: 14.2 / 14.3.
+
+### 14.6 Duplicated contracts
+
+`JobHandle` and `JobStatus` are **field-for-field identical** in both files; `SceneResult`
+differs only in two field names:
+
+| dataclass | storyboard | animator | identical? |
+|---|---|---|---|
+| `JobHandle` | `base.py:13-17` — `job_id, status, created_at` | `base.py:12-17` — same | yes |
+| `JobStatus` | `base.py:20-28` — `job_id, status, progress, message, result, error` | `base.py:20-28` — same | yes |
+| `SceneResult` | `base.py:31-38` — `scene_index, image_url, image_path, thumbnail_url, metadata` | `base.py:31-38` — `scene_index, `**`video_url, video_path`**`, thumbnail_url, metadata` | no — media field renamed |
+
+Related duplication: `studio/<domain>/providers/__init__.py` exists in **three** copies (tts,
+storyboard, animator), each exactly 57 lines, structurally identical but **not** byte-identical
+(distinct MD5s `2506fb31…`, `941ed83d…`, `64fe87a3…`) because each embeds its domain name and
+`init_<domain>_registry` function name.
+
+**Correction to the plan:** step 11.1 says "the four copies of the identical 57-line
+`studio/<domain>/providers/__init__.py`". There are **three**, and they are not byte-identical.
+The consolidation remains correct; only the count in 11.1 is wrong.
+
+Owner: 11.4 unifies the job dataclasses (one `SceneResult` with a neutral media field plus
+domain aliases); 11.1 replaces the three `__init__.py` copies with one shared binding.
+
+### 14.7 Known latent defect — `story` output port
+
+`adapters/story.py:24-27` returns `outputs(script=…, story=with_artifacts(result, path))`.
+`registry.py:139` declares only `outputs: [_CONTROL_OUT, _out("script", "script")]`.
+
+**The plan's stated mechanism is wrong and is corrected here.** `_validate_outputs`
+(`scheduler.py:958-967`) iterates the **declared** ports and raises `NODE_OUTPUT_MISSING` when
+one is absent. It never inspects undeclared keys, so it does **not** drop `story`.
+What actually happens:
+
+- `story` survives into `node_outputs[node_id]` (`scheduler.py:729`).
+- `_artifact_refs` (`scheduler.py:217-228`) recurses over *all* values, so
+  `output/stories/{pid}/story.json` **does** reach `node_record.artifact_refs`
+  (`scheduler.py:731`) and the execution record. The plan's "its artifact refs never reach a
+  port" is inaccurate for the record; it is accurate that they reach no *port*.
+- The payload is nonetheless **unreachable by any consumer**: no edge may target it (edge ports
+  must be registry port IDs, §4.1), and static expression validation rejects it —
+  `expressions.py:131-134` looks the port up in `get_node_type(...)["outputs"]` and emits
+  `EXPRESSION_OUTPUT_MISSING`. Runtime `resolve_configuration` (`expressions.py:160`) would
+  return it happily, but validation never lets execution get that far.
+
+Net effect: dead weight in the output dict plus a misleading artifact ref attributed to a port
+that does not exist. Severity is low; the remedy in 13.3 (declare the port **or** fold the
+artifacts into `script`) is unaffected. Owner: **13.3**, which must also drop the
+"`_validate_outputs` drops it" wording and replace the hardcoded `"provider": "gemini"` at
+`studio/story/service.py:102`.
+
+## 15. Hard-coded provider decision register
+
+Every production branch on a provider/engine literal. Tests excluded. Each has an owner.
+
+| # | location | branch | owner |
+|---|---|---|---|
+| P1 | `app.py:198` | `target == "gemini"` (focus-studio) | 16.1 |
+| P2 | `app.py:200` | `target == "grok"` | 16.1 |
+| P3 | `app.py:266` | `storyboard_provider == "gemini"` (preflight) | 14.4 |
+| P4 | `app.py:276` | `asset_provider == "grok"` (preflight) | 14.4 |
+| P5 | `pipeline/services.py:91` | `provider_id == "inworld"` (voice-key selection) | 15.2 |
+| P6 | `pipeline/services.py:103` | `provider_id == "inworld"` (dispatch) | 15.2 |
+| P7 | `pipeline/services.py:550-552` | storyboard alias table + `sb_provider == "gemini"` | 14.2 |
+| P8 | `pipeline/services.py:644-645`, `:664` | animator alias table + `provider == "grok"` | 14.3 |
+| P9 | `pipeline/routes.py:325` | `tts_provider == "inworld"` (voice default) | 15.2 |
+| P10 | `pipeline/routes.py:630` | `provider == "grok"` | 14.3 |
+| P11 | `pipeline/routes.py:1051` | `storyboard_provider == "gemini"` | 14.2 |
+| P12 | `animator/animation_routes.py:260` | `provider == "midjourney"` — **unreachable**, no such provider | 14.3 (delete) |
+| P13 | `animator/animation_routes.py:266` | `provider_id == "grok_automa"` | 14.3 |
+| P14 | `animator/animation_routes.py:297` | `provider_id == "kie_ai"` | 14.3 |
+| P15 | `animator/animation_routes.py:314` | `provider_id == "grok_automa"` | 14.3 |
+| P16 | `animator/animation_routes.py:333` | `provider_id == "kie_ai"` | 14.3 |
+| P17 | `workflows/adapters/storyboard.py:21` | `provider == "gemini_ws"` | 14.2 |
+| P18 | `workflows/adapters/animator.py:28` | `provider == "kie_ai"` | 14.3 |
+| P19 | `workflows/adapters/animator.py:37` | `provider == "kie_ai"` | 14.3 |
+| P20 | `workflows/adapters/animator.py:33` | literal `"kie_ai"` settings lookup | 14.3 |
+| P21 | `tts/routes.py:517` | `provider == "inworld"` (voice list) | 15.2 |
+| P22 | `tts/routes.py:629` | `provider == "inworld"` (generate) | 15.2 |
+| P23 | `tts/routes.py:902` | `provider == "inworld"` (stream reject) | 15.2 |
+| P24 | `storyboard/routes.py:324` | `provider_id == "gemini_ws"` | 14.2 |
+| P25 | `storyboard/routes.py:605` | `provider == "gemini"` (grab-one, legacy string) | 14.2 |
+| P26 | `workflows/registry.py:186` | `engine` static list `["kokoro","inworld"]` — the only domain whose node has no `options_source` | 12.3 / 15.2 |
+| P27 | `workflows/registry.py` storyboard + animator config | `display_options.show.provider: ["gemini_ws"]` / `["grok_automa"]` provider-specific field gating | 12.3 |
+| P28 | `editor/routes.py:236-238, 260-262, 305-307, 342-344, 397-399` | five handlers each re-importing the three registries and building a literal `{tts,storyboard,animator}` dict | 11.5 |
+| P29 | `providers_common/registry.py:177` | `VALID_DOMAINS = {'tts','storyboard','animator'}` | 11.1 |
+| P30 | `providers_common/settings_manager.py:270` | duplicate `valid_domains = {"tts","storyboard","animator"}` | 11.1 |
+| P31 | `providers_common/settings_manager.py:137-160` | `_default_settings()` hardcodes the same three domains and their default provider IDs | 11.1 / 11.3 |
+| P32 | `workflows/options.py:38-50` | `_provider_options(domain)` handles only `storyboard` / `animator` | 12.2 |
+| P33 | `story/service.py:102`, `story/routes.py:287` | literal `"provider": "gemini"` in result metadata | 13.3 |
+
+### 15.1 Parameterized option sources — the blocker for 15.2
+
+`GET /api/workflow/options/<source>` resolves `resolve_options(source)`
+(`studio/workflows/options.py:108`), which takes **exactly one argument** and passes no
+context. `_RESOLVERS` (`options.py:64-72`) has seven entries and must stay in lockstep with
+`ASYNC_OPTION_SOURCES` (`registry.py:30-34`) — enforced by the module-level assert at
+`options.py:75-77`.
+
+Consequence today: `_tts_voices()` (`options.py:19-21`) returns `studio.tts.routes.VOICES`, a
+static Kokoro list, regardless of the selected engine, so an Inworld node still offers Kokoro
+voice IDs. There is no `tts_providers` source at all. `allowed_option_values`
+(`options.py:85-105`) caches per source for the process lifetime and fails open. Owner: 10.2
+freezes the extended envelope, 12.2 implements it, 15.2 consumes it.
+
+## 16. Never-executed provider code paths — owner assignment
+
+| path | files | owner |
+|---|---|---|
+| `TTSProvider.synthesize` + `list_voices` + `shutdown` | `tts/providers/base.py`, `kokoro/provider.py`, `inworld/provider.py` | 11.4 (first test), 15.1 (bring onto Contract v2) |
+| `StoryboardProvider.submit`/`poll`/`generate_one` | `storyboard/providers/base.py` + 3 providers | 11.4, 14.2 |
+| `AnimatorProvider.submit`/`poll`/`open_url` | `animator/providers/base.py` + 2 providers | 11.4, 14.3 |
+| 3 domain `get_provider()` factories | `<domain>/providers/__init__.py:26` | 11.1 (replace with hub resolution) |
+| 5 provider `get_provider()` factories | the five `provider.py` files in §14.1 | 11.2 (factory instantiation) |
+| duplicate Kokoro singletons `kokoro_instance` / `kokoro_lock` / `generation_inference_lock` (never populated; the live ones are in `tts/routes.py`) | `tts/providers/kokoro/provider.py` | 15.1 (blocker B5 / K1 — collapse to one owner) |
+
+## 17. Compatibility surface vs internal debt
+
+### 17.1 Public compatibility surface (must keep working)
+
+HTTP: `/api/story/*`, `/api/scenes/*`, `/api/tts/*`, `/api/storyboard/*`, `/api/animator/*`,
+`/api/providers*`, `/api/settings/v2`, `/api/pipeline/*`, `/api/workflow/*`.
+Wire formats: the five request schemas; the legacy alias strings on the internal HTTP hop and
+preflight; `sts-tts-provider` in `app-config.json` until migrated.
+Files: `output/stories/*/story.json`, `output/scenes/*/scenes.json`, `output/tts/*`,
+`output/storyboard/*/storyboard.json`, `output/animator/*/{grabber_job,metadata}.json`,
+`settings/settings.json` v1 shape.
+Workflow: node type IDs, `type_version: 1`, port IDs, and saved node `configuration` keys
+(`engine`, `provider`, `webhook_url`, `style`, …) — old workflows must run unedited.
+UI: the random-story button, the provider gear modal, the per-domain selectors.
+Transports: the two WebSocket URLs (`/ws/storyboard-gemini-image-grabber`,
+`/ws/animator-grok-video-grabber`). Browser extensions are versioned independently and cannot
+be migrated in lockstep, so these paths and their message types are frozen.
+
+### 17.2 Internal debt (free to change)
+
+The ABC layer and all eight `get_provider()` factories; the three duplicated
+`providers/__init__.py`; the duplicated job dataclasses; the string-branch dispatch (P1–P25);
+the two hardcoded domain sets (P29, P30); the provider API living in the editor blueprint
+(P28); the whole-blob settings write; the internal HTTP-to-self hop (B1); the unreachable
+`midjourney` branch (P12); the duplicate Kokoro singletons; the undeclared `story` port.
+
+### 17.3 Pre-existing defects reconfirmed (not introduced by this migration)
+
+TTS cache key omits provider (`tts/routes.py:854-862`); double loudnorm on cache hit;
+storyboard poll counts errors as completion; `_step_scenes` has no stop check;
+`midjourney` / `meta_ai` are URL strings, not providers. These stay on the §8 list.
+
+### 17.4 Live-provider availability (gates fixture work)
+
+The WaveSpeed key returns 401; the hosted n8n webhook is retired; OpenRouter's balance is
+negative; `grok_automa` requires a human driving a browser; `kie_ai` is the only pinned working
+cloud animator. Only Kokoro TTS runs offline end-to-end. Tests marked `@pytest.mark.live` skip
+unless `STS_LIVE=1`. Every Phase 11–15 contract test must therefore be fixture-backed.
+Owner: 10.4.
+
+### 17.5 Test coverage baseline for the migrated surface
+
+`tests/test_workflow_adapters.py` covers the TTS adapter port mapping and both async adapters'
+typed outputs and failure codes with mocked services. `tests/test_scene_generation_v2.py`
+covers blueprint planning and annotation. `tests/test_story_routes.py` covers only
+classify-webhook derivation — **story generation itself has no test**.
+`tests/test_live_providers.py` is live-gated. No test invokes any ABC method.
+Owner: 11.4 (contract tests), 13.2 (story fixtures).
+
+### 17.6 Divergences from `modular-providers-plan-v4.md`
+
+| v4 said | this plan | resolution |
+|---|---|---|
+| three domains (`tts`, `storyboard`, `animator`) | five (`+script`, `+scene_blueprint`) | five; the domain catalog becomes data (11.1) |
+| "temporary flat↔nested settings adapter, deleted in Phase 9" | no such adapter exists in the tree | dropped; `settings_adapter.py` is absent from `providers_common/` |
+| "Discovery: on restart only. No hot reload." | dev hot-reload required (11.2) | 11.2 wins, guarded by `STS_WORKFLOW_DEV_RELOAD` |
+| "Pipeline stops knowing provider names" | it still knows them (P5–P11) | unmet goal, now owned by 14.x / 15.x |
+| `docs/provider-template/` scaffolds | absent; `providers_common/scaffold.py` (341 lines) exists instead | keep `scaffold.py`; 16.2 owns the kit |
+| idle-shutdown deferred to Phase 9 | not in this plan | out of scope |
+
+v4's vocabulary is otherwise adopted unchanged: *manifest*, *capabilities*, *runtime hook*,
+*broken-provider isolation*, and *rich job snapshots* (already implemented as `job_meta` in
+`services.py`), plus *per-domain provider folders*.
+
+### 17.7 Out of scope — Music and Captions (confirmed working, not migrated)
+
+Neither has a `providers/` package, a provider ID, or any dispatch branch. Music is
+`studio/music/selector.py` (`select_music`, `select_random_music`, `recall_last_music`) with a
+10-entry history; Captions is `studio/captions/routes.py` (`_group_words_into_captions`,
+`CAPTION_PRESETS`). Both are consumed by the `music.select` / `captions.generate` nodes and by
+Assemble. They touch the provider platform at exactly two points, both of which must keep
+resolving: the `caption_presets` and `story_tones` option sources (`options.py:53-61` and
+`:24-26` — the latter reads `studio.music.selector.TONE_MUSIC_MAP`). No migration work;
+regression-only.
+
+## 18. Coverage assertion
+
+Every path that reaches a model or provider was enumerated: five domains × {legacy HTTP route,
+legacy pipeline step, workflow adapter}, plus the WebSocket transports, the internal
+HTTP-to-self hop, the preflight probe, and the provider settings/health API. The four
+never-provider-driven surfaces (frontend story templates, scene blueprint, music, captions) are
+explicitly accounted for. Twelve unexecuted provider code paths (§16) and thirty-three
+hardcoded provider decisions (§15) each carry an owner step. No item in §13–§17 is left without
+an owner.
+
+Open decisions deliberately deferred: the authoritative selection store (recommendation in
+§14.2 → 10.2), the parameterized option-source envelope (§15.1 → 10.2), the unified
+job/result/error contract (§14.6 → 10.3), and fixture ownership (§17.4 → 10.4).

@@ -960,9 +960,11 @@ and generated-doc drift checks pass; and Phase 11 is unblocked without inventing
 ### 11.1 Generalize the registry into a domain hub
 Extend `studio/shared/providers_common/registry.py` so supported domains are declared through a
 domain catalog rather than the current `VALID_DOMAINS` set (`registry.py:177`) — and retire the
-duplicate hardcoded domain set in `settings_manager.validate_settings` in the same step, so the two can
-never drift. Replace the four copies of the identical 57-line `studio/<domain>/providers/__init__.py`
-with one generated/shared binding. Add a process-wide registry hub that can
+duplicate hardcoded domain set in `settings_manager.validate_settings` (`settings_manager.py:270`) in
+the same step, so the two can never drift. Replace the three copies of the 57-line
+`studio/<domain>/providers/__init__.py` (tts, storyboard, animator — structurally identical, differing
+only in domain name and `init_<domain>_registry`; see contracts §14.6) with one generated/shared
+binding. Add a process-wide registry hub that can
 list and resolve `(domain, provider_id)` while preserving the existing per-module `registry`,
 `get_provider`, and `list_providers` imports as compatibility facades. Domain registration must bind
 the request/result contract and provider search path once; individual provider registration must not
@@ -1156,10 +1158,13 @@ Change the `story.generate` adapter and legacy generation controller to resolve 
 provider through the hub. Map absent/legacy configuration to the historical AI default and map the
 random-story action to `random_template`; preserve inherited Project Setup tone/style and current
 artifact locations. Provider-specific output is forbidden beyond the standard metadata extension.
-Also close the latent defect recorded in 10.1: `adapters/story.py` returns a `story` output that
-`studio/workflows/registry.py` never declares, so `_validate_outputs` drops it and its artifact refs
-reach no port — either declare the port or fold its artifacts into the declared `script` output, and
-add the regression test. Replace the hardcoded `"provider": "gemini"` metadata in
+Also close the latent defect recorded in 10.1: `adapters/story.py:26` returns a `story` output that
+`studio/workflows/registry.py:139` never declares. Per contracts §14.7 the payload is **not** dropped —
+`_validate_outputs` only checks declared ports for presence, so `story` survives into `node_outputs`
+and its artifact ref is recorded against a port that does not exist — but it is unreachable by any
+consumer, because no edge may target an undeclared port and static expression validation rejects it
+with `EXPRESSION_OUTPUT_MISSING`. Either declare the port or fold its artifacts into the declared
+`script` output, and add the regression test. Replace the hardcoded `"provider": "gemini"` metadata in
 `studio/story/service.py:102` with the resolved provider identity.
 
 **Done when:** the same unchanged node runs both random-template and AI providers; legacy saved
