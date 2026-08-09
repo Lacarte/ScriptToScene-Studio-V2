@@ -5,9 +5,8 @@ import { useDomainProvider } from '../composables/useDomainProvider.js'
 import { useProviderCatalogStore } from '../stores/providerCatalog.js'
 import { api } from '@/shared/api/client.js'
 
-// Step 12.4 — the three questions a legacy page used to answer for itself:
-// which provider is selected, what is it called on the wire, and what is it
-// configured with. All three are answered from the catalog here.
+// Step 12.4 / 16.1 — which provider is selected and what it is configured with.
+// Both answers come from the catalog; the wire spelling is the canonical id.
 
 const CATALOG = {
   catalog_version: 'v1',
@@ -102,10 +101,11 @@ describe('useDomainProvider', () => {
     expect(domain.supports('cancel')).toBe(false)
   })
 
-  it('gives the legacy wire spelling of the selection', async () => {
+  it('exposes the canonical provider id, never a legacy wire alias', async () => {
     const domain = await mounted()
 
-    expect(domain.legacyId.value).toBe('alpha-legacy')
+    expect(domain.providerId.value).toBe('alpha')
+    expect(domain.legacyId).toBeUndefined()
   })
 
   it('overlays stored values on schema defaults and drops secrets', async () => {
@@ -127,7 +127,7 @@ describe('useDomainProvider', () => {
 
     // One provider's option keys must never survive into another's request.
     expect(domain.settings.value).toEqual({ model: 'b1' })
-    expect(domain.legacyId.value).toBe('beta')
+    expect(domain.providerId.value).toBe('beta')
   })
 
   it('leaves the values empty when settings cannot be read', async () => {

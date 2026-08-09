@@ -12,6 +12,10 @@ into `settings.json`, which is the single selection authority (§24).
 
 from typing import Callable
 
+from studio.shared.providers_common.compatibility import (
+    LEGACY_SELECTION_ALIASES,
+    normalize_selection_alias,
+)
 from studio.shared.providers_common.domains import DOMAINS
 
 
@@ -30,18 +34,6 @@ def _register(version: int):
         MIGRATIONS[version] = func
         return func
     return decorator
-
-
-# Legacy wire values in `app-config.json` predate the canonical registry ids
-# (§24.3). Kept here rather than in the alias table because these are *selection*
-# strings from a retired store, not provider-declared aliases.
-LEGACY_SELECTION_ALIASES = {
-    "gemini": "gemini_ws",
-    "grok": "grok_automa",
-    "kie-ai": "kie_ai",
-    "webhook": "wavespeed_webhook",
-    "direct": "wavespeed_direct",
-}
 
 
 @_register(2)
@@ -68,8 +60,8 @@ def migrate_to_v2(data: dict, legacy_user: dict) -> dict:
         legacy_key = spec.legacy_selection_key
         legacy_value = legacy_user.get(legacy_key) if legacy_key else None
         if isinstance(legacy_value, str) and legacy_value.strip():
-            block["selected_provider"] = LEGACY_SELECTION_ALIASES.get(
-                legacy_value, legacy_value
+            block["selected_provider"] = normalize_selection_alias(
+                legacy_value, domain=domain_id
             )
         else:
             # An absent or null selection resolves to the catalog default (§24.1

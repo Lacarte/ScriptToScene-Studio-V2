@@ -5,13 +5,20 @@ import { useActivityFeed } from '@/shared/composables/useActivityFeed.js'
 import { pickRandomStory } from '@/shared/composables/useRandomStory.js'
 import { timeAgo } from '@/shared/utils/format.js'
 import { useDoneSound } from '@/shared/composables/useDoneSound.js'
-import { useSettings } from '@/features/settings/composables/useSettings.js'
+import { useProviderCatalogStore } from '@/features/providers/stores/providerCatalog.js'
 
 import { ALL_STEPS } from '../constants/steps.js'
 import { usePipelineForm } from './usePipelineForm.js'
 import { useNiches } from './useNiches.js'
 import { useProviderTabs } from './useProviderTabs.js'
 import { usePipelineHistory } from './usePipelineHistory.js'
+
+/** Canonical selected id for a domain, loaded from the provider catalog. */
+function _selectedProviderId(domain) {
+  const catalog = useProviderCatalogStore()
+  catalog.loadCatalog()
+  return catalog.selectedProvider(domain)?.id || ''
+}
 
 // ── Execution state (singleton) ──
 
@@ -185,10 +192,10 @@ async function start() {
     toast.error('Speed must be between 0.5 and 2.0'); return false
   }
 
-  // Preflight: check extension connectivity before starting
-  const { settings: _s } = useSettings()
-  const storyboardProvider = _s.value['sts-storyboard-provider'] || 'gemini'
-  const assetProvider = _s.value['sts-asset-provider'] || 'grok'
+  // Preflight: check extension connectivity before starting. Selections come
+  // from the provider catalog (step 16.1) — never from the retired app-config keys.
+  const storyboardProvider = _selectedProviderId('storyboard')
+  const assetProvider = _selectedProviderId('animator')
   const stopValue = form.stopAfter.value || undefined
 
   // Stay focused on STS at start. Each provider tab is activated only when
@@ -233,16 +240,16 @@ async function start() {
     speed: form.speed.value,
     style: form.style.value,
     ...niches._buildNicheConfig(),
-    tts_provider: form.ttsProvider.value || 'kokoro',
-    tts_voice: form.inworldVoice.value,
+    tts_provider: form.ttsProvider.value || _selectedProviderId('tts') || undefined,
+    tts_voice: form.voice.value,
     auto_scenes: true,
     auto_storyboard: true,
     stop_after: stopValue,
     webhook_url: webhookUrl || undefined,
     image_model: form.imageModel.value || undefined,
-    storyboard_provider: storyboardProvider,
+    storyboard_provider: storyboardProvider || undefined,
     prompt_prefix: localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ',
-    provider: assetProvider,
+    provider: assetProvider || undefined,
     auto_type: true,
   }
 
@@ -289,16 +296,16 @@ async function startResumedRun(resumeStep, resumeProject, { idleStatus = '', suc
     speed: form.speed.value,
     style: form.style.value,
     ...niches._buildNicheConfig(),
-    tts_provider: form.ttsProvider.value || 'kokoro',
-    tts_voice: form.inworldVoice.value,
+    tts_provider: form.ttsProvider.value || _selectedProviderId('tts') || undefined,
+    tts_voice: form.voice.value,
     auto_scenes: true,
     auto_storyboard: true,
     stop_after: form.stopAfter.value || undefined,
     webhook_url: webhookUrl || undefined,
     image_model: form.imageModel.value || undefined,
-    storyboard_provider: useSettings().settings.value['sts-storyboard-provider'] || 'gemini',
+    storyboard_provider: _selectedProviderId('storyboard') || undefined,
     prompt_prefix: localStorage.getItem('sts-prompt-prefix') ?? 'generate an image ',
-    provider: useSettings().settings.value['sts-asset-provider'] || 'grok',
+    provider: _selectedProviderId('animator') || undefined,
     auto_type: true,
     resume_from: resumeStep,
     resume_project_id: resumeProject,

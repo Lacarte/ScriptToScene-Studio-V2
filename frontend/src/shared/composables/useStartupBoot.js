@@ -13,8 +13,18 @@ async function fetchHealth() {
   try {
     return await api.get('/api/chromium/health')
   } catch {
-    return { gemini: { connected: false }, grok: { connected: false } }
+    return { extensions: {} }
   }
+}
+
+function extensionEntries(health) {
+  // Step 16.1: keys are canonical provider ids under `extensions`.
+  const map = health?.extensions || {}
+  return Object.entries(map).map(([id, info]) => ({
+    id,
+    connected: Boolean(info?.connected),
+    label: info?.label || id,
+  }))
 }
 
 async function activateTab(target) {
@@ -36,10 +46,12 @@ async function focusStudio() {
 
 /**
  * Startup boot sequence:
- *   1. Check Chromium extension health (Gemini + Grok)
+ *   1. Check Chromium extension health for every registered extension provider
  *   2. For each disconnected extension, activate its tab to wake it
  *   3. Re-check after a short grace window
  *   4. Ask the extensions to refocus the ScriptToScene Studio tab
+ *
+ * No provider id is hard-coded (step 16.1).
  */
 async function runBoot() {
   if (booted.value || booting.value) return
@@ -48,12 +60,16 @@ async function runBoot() {
 
   try {
     let health = await fetchHealth()
-    const targets = []
-    if (!health.gemini?.connected) targets.push('gemini')
-    if (!health.grok?.connected) targets.push('grok')
+    let entries = extensionEntries(health)
+    const targets = entries.filter(e => !e.connected).map(e => e.id)
 
     if (targets.length === 0) {
-      activity.push('Extensions ready (Gemini + Grok)', 'success', { source: 'boot' })
+      const labels = entries.map(e => e.label).join(' + ') || 'none'
+      activity.push(
+        entries.length ? `Extensions ready (${labels})` : 'No browser extensions registered',
+        entries.length ? 'success' : 'info',
+        { source: 'boot' },
+      )
     } else {
       activity.push(`Waking ${targets.join(' + ')} tab(s)...`, 'info', { source: 'boot' })
       for (const target of targets) {
@@ -61,16 +77,15 @@ async function runBoot() {
       }
       await sleep(1500)
       health = await fetchHealth()
+      entries = extensionEntries(health)
 
-      const stillDown = []
-      if (!health.gemini?.connected) stillDown.push('gemini')
-      if (!health.grok?.connected) stillDown.push('grok')
-
+      const stillDown = entries.filter(e => !e.connected)
       if (stillDown.length === 0) {
-        activity.push('Extensions ready (Gemini + Grok)', 'success', { source: 'boot' })
+        const labels = entries.map(e => e.label).join(' + ')
+        activity.push(`Extensions ready (${labels})`, 'success', { source: 'boot' })
       } else {
         activity.push(
-          `Extensions offline: ${stillDown.join(', ')}`,
+          `Extensions offline: ${stillDown.map(e => e.label).join(', ')}`,
           'warning',
           { source: 'boot' },
         )

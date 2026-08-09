@@ -101,15 +101,15 @@ describe('Storyboard provider adoption', () => {
     expect(wrapper.text()).toContain('A storyboard provider this page has never heard of.')
   })
 
-  it('sends the legacy provider spelling and the configured fields', async () => {
+  it('sends the canonical provider id and the configured fields', async () => {
     const wrapper = await page()
     wrapper.vm.scenes = [{ index: 0, prompt: 'a castle' }]
     await wrapper.vm.grabAll()
 
     const [url, { body }] = api.post.mock.calls.at(-1)
     expect(url).toBe('/api/storyboard/generate')
-    // §40.3's output column: what `POST /api/storyboard/grab` still compares.
-    expect(body.provider).toBe('fixture-legacy')
+    // Step 16.1: canonical id on the wire; aliases remain accepted as input only.
+    expect(body.provider).toBe('fixture_storyboard')
     expect(body.webhook_url).toBe('https://fixture.test/hook')
     expect(body.image_model).toBe('model-a')
     // The prefix is still applied client-side; it just no longer lives in

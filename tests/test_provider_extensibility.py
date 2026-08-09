@@ -766,28 +766,25 @@ AUDITED_SURFACES = (
     "studio/workflows/adapters/animator.py",
     # Step 15.2 made both of these generic: `_step_tts` dispatches through the
     # registry, and `studio/tts/dispatch.py` is now the one place that resolves
-    # a TTS provider, a voice, and a `job_meta` block. `studio/tts/routes.py`
-    # is deliberately not here yet — the model download and the multi-voice job
-    # still drive the local engine by name (owner 16.1).
+    # a TTS provider, a voice, and a `job_meta` block. Domain page multi-voice
+    # and model-download still live under `studio/tts/routes.py` (local engine
+    # features of the TTS page, not shared dispatch).
     "studio/pipeline/services.py",
     "studio/tts/dispatch.py",
     "studio/shared/providers_common/domains.py",
     "studio/shared/providers_common/hub.py",
     "studio/shared/providers_common/registry.py",
     "studio/shared/providers_common/settings_manager.py",
+    "studio/shared/providers_common/compatibility.py",
+    "studio/shared/providers_common/extension_ops.py",
     "studio/providers/routes.py",
     "studio/providers/catalog.py",
     "app.py",
 )
 
-# The subset that must contain no provider-id *comparison* at all. Both visual
-# adapters are clean after 14.2/14.3; only `app.py` is still excused (16.1).
-BRANCH_FREE_SURFACES = tuple(
-    surface for surface in AUDITED_SURFACES
-    if surface not in {
-        "app.py",
-    }
-)
+# Step 16.1: every audited surface is branch-free. Provider-id comparisons
+# belong only inside a provider package.
+BRANCH_FREE_SURFACES = AUDITED_SURFACES
 
 # Every `(surface, provider id)` pair that still exists, with what it is and
 # who removes it. Frozen as a *set* rather than an allowlist: a new pair fails
@@ -797,7 +794,9 @@ BRANCH_FREE_SURFACES = tuple(
 # `domains.py` and `config_migrations.py` are the two legitimate homes. §19.1
 # makes the domain catalog the single place a default provider id is written,
 # and §41.3 freezes the v1 defaults a migration has to reproduce — both would
-# be *wrong* to remove. Everything else is debt with an owner.
+# be *wrong* to remove. `compatibility.py` is the residual selection-alias
+# table for the one-time app-config migration (step 16.1). Everything else is
+# a comment, a frozen public health key, or a frozen WebSocket path string.
 KNOWN_PROVIDER_LITERALS = {
     # Two explanatory comments. Harmless today; listed so a *third* one, or a
     # literal in code, cannot slip in unnoticed.
@@ -818,13 +817,22 @@ KNOWN_PROVIDER_LITERALS = {
     ("studio/workflows/config_migrations.py", "grok_automa"),
     ("studio/workflows/config_migrations.py", "gemini_ws"),
     ("studio/workflows/config_migrations.py", "gemini"),
-    # A comment about the removed C1 environment side effect. Owner 16.1.
+    # A comment about the removed C1 environment side effect.
     ("studio/shared/providers_common/settings_manager.py", "inworld"),
-    # Step 14.2 cleared the storyboard adapter; step 14.3 cleared the animator
-    # adapter: neither names a provider at all now, in a comment or otherwise.
-    # The extension routes P13–P16/P24/P25 own. Owners 14.2, 14.3, 16.1.
+    # Step 16.1 residual selection-alias table (retired app-config store only).
+    # "wavespeed" is the substring of wavespeed_webhook / wavespeed_direct.
+    ("studio/shared/providers_common/compatibility.py", "gemini"),
+    ("studio/shared/providers_common/compatibility.py", "gemini_ws"),
+    ("studio/shared/providers_common/compatibility.py", "wavespeed"),
+    ("studio/shared/providers_common/compatibility.py", "wavespeed_webhook"),
+    ("studio/shared/providers_common/compatibility.py", "wavespeed_direct"),
+    ("studio/shared/providers_common/compatibility.py", "grok_automa"),
+    ("studio/shared/providers_common/compatibility.py", "kie_ai"),
+    ("studio/shared/providers_common/compatibility.py", "kie-ai"),
+    # Public `/api/health` key kept for consumers that probe Inworld package
+    # availability; not a dispatch branch.
     ("app.py", "inworld"),
-    ("app.py", "gemini_ws"),
+    # Frozen WebSocket route paths and boot banner (`…-gemini-…`, `…-grok-…`).
     ("app.py", "gemini"),
 }
 

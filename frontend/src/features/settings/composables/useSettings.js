@@ -1,6 +1,10 @@
 import { ref, readonly } from 'vue'
 import { api } from '@/shared/api/client.js'
 
+// Step 16.1: provider selection lives only in settings.json via the provider
+// catalog API. The three retired app-config keys (sts-tts-provider,
+// sts-storyboard-provider, sts-asset-provider) are no longer defaulted or
+// mirrored here.
 const DEFAULTS = {
   'sts-normalize': true,
   'sts-clean': true,
@@ -9,9 +13,6 @@ const DEFAULTS = {
   'sts-sound-enabled': true,
   'sts-caption-default-preset': 'bold_popup',
   'sts-default-style': 'cinematic',
-  'sts-tts-provider': 'kokoro',
-  'sts-storyboard-provider': 'gemini',
-  'sts-asset-provider': 'grok',
   'sts-sync-folder': 'D:/@Sync/PHONE-S24-PC',
   'sts-auto-sync': true,
 }

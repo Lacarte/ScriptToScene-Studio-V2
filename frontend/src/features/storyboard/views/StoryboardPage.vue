@@ -343,13 +343,12 @@ function providerReady() {
 }
 
 /**
- * The legacy request shape, unchanged (§40.3): `provider` is still the string
- * the routes compare against, and the two optional fields are still sent when
- * the provider has them — they now come from its settings instead of from
- * `localStorage`.
+ * Request body for storyboard generate/grab. `provider` is the canonical
+ * registry id (step 16.1); optional fields come from the provider's own
+ * settings rather than from `localStorage`.
  */
 function providerBody() {
-  const body = { provider: storyboard.legacyId.value }
+  const body = { provider: storyboard.providerId.value }
   const configured = storyboard.settings.value
   if (configured.webhook_url) body.webhook_url = String(configured.webhook_url).trim()
   if (configured.image_model) body.image_model = configured.image_model

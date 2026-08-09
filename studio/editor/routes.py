@@ -164,19 +164,27 @@ def _write_app_config(cfg):
 
 @editor_bp.route("/api/settings", methods=["GET"])
 def get_settings():
-    """Return user settings from app-config.json['user']."""
+    """Return user settings from app-config.json['user'].
+
+    Step 16.1: the three retired provider-selection keys never leave this
+    endpoint — ``settings.json`` is the only selection store.
+    """
+    from studio.shared.providers_common.compatibility import strip_legacy_selection_keys
+
     cfg = _read_app_config()
-    return jsonify(cfg.get("user", {}))
+    return jsonify(strip_legacy_selection_keys(cfg.get("user", {})))
 
 
 @editor_bp.route("/api/settings", methods=["PUT"])
 def put_settings():
     """Replace all user settings in app-config.json['user']."""
+    from studio.shared.providers_common.compatibility import strip_legacy_selection_keys
+
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Expected JSON object"}), 400
     cfg = _read_app_config()
-    cfg["user"] = data
+    cfg["user"] = strip_legacy_selection_keys(data)
     _write_app_config(cfg)
     return jsonify({"ok": True})
 
@@ -184,13 +192,21 @@ def put_settings():
 @editor_bp.route("/api/settings", methods=["PATCH"])
 def patch_settings():
     """Merge partial updates into app-config.json['user']."""
+    from studio.shared.providers_common.compatibility import (
+        LEGACY_SELECTION_KEYS,
+        strip_legacy_selection_keys,
+    )
+
     patch = request.get_json(silent=True)
     if not isinstance(patch, dict):
         return jsonify({"error": "Expected JSON object"}), 400
+    # Silently drop attempts to write the retired selection keys so a stale
+    # mirror or an old client cannot reintroduce them.
+    patch = {k: v for k, v in patch.items() if k not in LEGACY_SELECTION_KEYS}
     cfg = _read_app_config()
-    user = cfg.get("user", {})
+    user = dict(cfg.get("user", {}) or {})
     user.update(patch)
-    cfg["user"] = user
+    cfg["user"] = strip_legacy_selection_keys(user)
     _write_app_config(cfg)
     return jsonify({"ok": True})
 

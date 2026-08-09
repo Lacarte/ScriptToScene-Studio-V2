@@ -402,16 +402,29 @@ class CallbackIntakeTests(unittest.TestCase):
 
 
 class PreflightAliasTests(unittest.TestCase):
-    def test_extension_target_accepts_legacy_and_canonical(self):
+    def test_extension_ops_accept_legacy_and_canonical(self):
+        """Step 16.1: resolve returns canonical ids; cloud providers are skipped."""
         import app as app_module
 
-        self.assertEqual(app_module._extension_target("gemini"), "gemini")
-        self.assertEqual(app_module._extension_target("gemini_ws"), "gemini")
-        self.assertEqual(app_module._extension_target("grok"), "grok")
-        self.assertEqual(app_module._extension_target("grok_automa"), "grok")
-        self.assertEqual(app_module._extension_target("midjourney"), "grok")
-        self.assertIsNone(app_module._extension_target("wavespeed_direct"))
-        self.assertIsNone(app_module._extension_target("kie_ai"))
+        gemini = app_module._extension_ops("gemini")
+        self.assertIsNotNone(gemini)
+        self.assertEqual(gemini.provider_id, "gemini_ws")
+
+        gemini_ws = app_module._extension_ops("gemini_ws")
+        self.assertIsNotNone(gemini_ws)
+        self.assertEqual(gemini_ws.provider_id, "gemini_ws")
+
+        grok = app_module._extension_ops("grok")
+        self.assertIsNotNone(grok)
+        self.assertEqual(grok.provider_id, "grok_automa")
+
+        midjourney = app_module._extension_ops("midjourney")
+        self.assertIsNotNone(midjourney)
+        self.assertEqual(midjourney.provider_id, "grok_automa")
+
+        # Cloud / non-extension providers must not be treated as extension targets.
+        self.assertIsNone(app_module._extension_ops("wavespeed_direct"))
+        self.assertIsNone(app_module._extension_ops("kie_ai"))
 
 
 if __name__ == "__main__":

@@ -3,15 +3,15 @@ import { useProviderCatalogStore } from '../stores/providerCatalog.js'
 import { effectiveSettings } from '@/shared/schema/providerSettings.js'
 
 /**
- * One legacy page's view of one provider domain (step 12.4).
+ * One legacy page's view of one provider domain (step 12.4 / 16.1).
  *
- * The pages that predate the provider platform each answered three questions
- * for themselves: which provider is selected, what is it called on the wire,
- * and what is it configured with. They answered them from `useSettings`, from a
- * hardcoded list, and from `localStorage` respectively — three stores that could
- * disagree with the catalog and with each other. This answers all three from
- * `GET /api/providers` (contracts.md §24.3 rule 3), so a page keeps its own
- * layout and request shape while owning none of the provider knowledge.
+ * The pages that predate the provider platform each answered which provider is
+ * selected and what it is configured with. They answered them from
+ * `useSettings`, a hardcoded list, and `localStorage` — stores that could
+ * disagree with the catalog. This answers both from `GET /api/providers`
+ * (contracts.md §24), so a page keeps its own layout and request shape while
+ * owning none of the provider knowledge. Step 16.1 put **canonical** provider
+ * ids on the wire; aliases remain accepted as input by the backend only.
  *
  * `withSettings` is opt-in because it costs a request per provider switch, and
  * only pages that put a configured value on the wire need it.
@@ -21,8 +21,6 @@ export function useDomainProvider(domain, { withSettings = false } = {}) {
 
   const provider = computed(() => catalog.selectedProvider(domain))
   const providerId = computed(() => provider.value?.id || '')
-  /** What the legacy routes still compare against (§40.3, output column). */
-  const legacyId = computed(() => catalog.legacyIdFor(domain, providerId.value))
   const label = computed(() => provider.value?.label || providerId.value)
   /** The provider's own page, from its manifest — never a literal in a view. */
   const openUrl = computed(() => provider.value?.open_url || null)
@@ -68,7 +66,6 @@ export function useDomainProvider(domain, { withSettings = false } = {}) {
     catalog,
     provider,
     providerId,
-    legacyId,
     label,
     openUrl,
     supports,

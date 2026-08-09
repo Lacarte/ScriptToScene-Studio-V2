@@ -350,8 +350,14 @@ def _step_assets(scenes_result, config, project_id, job_id):
     if "auto_type" not in anim_options and "auto_type" in config:
         anim_options["auto_type"] = config["auto_type"]
 
-    # Prefer the canonical override; fall back to the legacy wire spelling.
-    selected = anim_override or config.get("provider") or "grok"
+    # Prefer the explicit override; fall back to the domain default from the
+    # catalog (step 16.1 — no concrete provider id in shared dispatch).
+    from studio.shared.providers_common.domains import DOMAINS
+    selected = (
+        anim_override
+        or config.get("provider")
+        or DOMAINS["animator"].default_provider
+    )
 
     payload = {
         "project_id": project_id,

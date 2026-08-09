@@ -132,7 +132,7 @@ describe('Assets grabber request', () => {
     vi.useRealTimers()
   })
 
-  it('sends the canonical id, the legacy spelling, and generic options', async () => {
+  it('sends the canonical id on both provider fields and generic options', async () => {
     vi.useFakeTimers()
     const assets = useAssets()
     vi.useRealTimers()
@@ -145,9 +145,9 @@ describe('Assets grabber request', () => {
 
     const [url, { body }] = api.post.mock.calls.at(-1)
     expect(url).toBe('/api/animator/grabber/start')
-    // §40.1 F3 decides dispatch; §40.3's legacy field keeps its shape.
+    // Step 16.1: canonical ids on the wire; aliases remain accepted as input only.
     expect(body.provider_override).toBe(FIXTURE_ID)
-    expect(body.provider).toBe('fixture-legacy')
+    expect(body.provider).toBe(FIXTURE_ID)
     // Per-run options are seeded from the provider's configured values, and the
     // credential is not one of them.
     expect(body.provider_options).toEqual({ mode: 'image', duration: '6s' })

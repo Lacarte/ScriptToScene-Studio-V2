@@ -77,10 +77,10 @@ export function useAssets() {
     return {
       project_id: projectId,
       scenes: sceneList,
-      // The canonical id decides dispatch (§40.1 F3); the legacy field keeps
-      // its shape for anything still reading it (§40.3).
+      // Canonical id on both fields (step 16.1). Routes still accept aliases
+      // as input; we no longer emit them.
       provider_override: animator.providerId.value,
-      provider: animator.legacyId.value,
+      provider: animator.providerId.value,
       provider_options: { ...providerOptions.value },
       // Accepted by the endpoint and written to the job record; the route has
       // always sent the empty string on to the extension.

@@ -1,21 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { useProviderCatalogStore } from '../stores/providerCatalog.js'
 import { useSettings } from '@/features/settings/composables/useSettings.js'
 import { api } from '@/shared/api/client.js'
 
-// Step 12.4 — the retired `app-config.json` selection keys (contracts.md §24.3).
-// Rule 3 gives the legacy pages one release of read-through, and the mirror keeps
-// the readers this step does not touch — the pipeline run payload, the preflight,
-// the provider tab opener — agreeing with the catalog. 16.1 deletes both.
-//
-// No shipped provider id appears here: the domain, the ids, and the legacy key
-// are all fixtures, which is the whole claim being tested.
+// Step 16.1 — the retired app-config selection store is gone.
+// settings.json via the catalog is the only selection authority. These tests
+// prove the read-through, the mirror, and the three key names no longer exist
+// in the frontend surfaces that used to own them.
 
-const CATALOG_URL = '/api/providers'
-const LEGACY_KEY = 'sts-demo-provider'
+const RETIRED_KEYS = [
+  'sts-tts-provider',
+  'sts-storyboard-provider',
+  'sts-asset-provider',
+]
 
-function catalog({ selected = null, legacyKey = LEGACY_KEY } = {}) {
+function catalog({ selected = 'alpha' } = {}) {
   return {
     catalog_version: 'v1',
     dev_reload_enabled: false,
@@ -25,7 +27,6 @@ function catalog({ selected = null, legacyKey = LEGACY_KEY } = {}) {
         label: 'Demo',
         default_provider: 'alpha',
         selected,
-        legacy_selection_key: legacyKey,
         count: 2,
         excluded: [],
         providers: [
@@ -37,19 +38,7 @@ function catalog({ selected = null, legacyKey = LEGACY_KEY } = {}) {
   }
 }
 
-async function loadedStore(options) {
-  api.get.mockImplementation(async (url) =>
-    url === '/api/settings'
-      ? { [LEGACY_KEY]: 'beta-legacy' }
-      : structuredClone(catalog(options)),
-  )
-  await useSettings().load()
-  const store = useProviderCatalogStore()
-  await store.loadCatalog()
-  return store
-}
-
-describe('legacy selection interop', () => {
+describe('legacy selection retirement (step 16.1)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.spyOn(api, 'get')
@@ -59,21 +48,18 @@ describe('legacy selection interop', () => {
 
   afterEach(() => vi.restoreAllMocks())
 
-  it('reads through to the legacy key when the catalog has no selection', async () => {
-    const store = await loadedStore({ selected: null })
+  it('selects from the catalog alone when selected is set', async () => {
+    api.get.mockImplementation(async (url) =>
+      url === '/api/settings' ? {} : structuredClone(catalog({ selected: 'beta' })),
+    )
+    await useSettings().load()
+    const store = useProviderCatalogStore()
+    await store.loadCatalog()
 
-    // Stored as an alias, resolved to the canonical id — a browser that loads
-    // before the backend migration must not silently fall to the domain default.
     expect(store.selectedProvider('demo').id).toBe('beta')
   })
 
-  it('prefers an explicit selection over the legacy key', async () => {
-    const store = await loadedStore({ selected: 'alpha' })
-
-    expect(store.selectedProvider('demo').id).toBe('alpha')
-  })
-
-  it('falls back to the domain default when neither store answers', async () => {
+  it('falls back to the domain default when the catalog has no selection', async () => {
     api.get.mockImplementation(async (url) =>
       url === '/api/settings' ? {} : structuredClone(catalog({ selected: null })),
     )
@@ -84,29 +70,11 @@ describe('legacy selection interop', () => {
     expect(store.selectedProvider('demo').id).toBe('alpha')
   })
 
-  it('spells a provider on the legacy wire as its first alias', async () => {
-    const store = await loadedStore({ selected: 'alpha' })
-
-    // §40.3's output column: the string the un-migrated routes compare against.
-    expect(store.legacyIdFor('demo', 'beta')).toBe('beta-legacy')
-    // A provider that never had another name is already canonical there.
-    expect(store.legacyIdFor('demo', 'alpha')).toBe('alpha')
-  })
-
-  it('mirrors a selection into the legacy key so the two stores cannot diverge', async () => {
+  it('does not mirror a selection into app-config', async () => {
+    api.get.mockResolvedValue(structuredClone(catalog({ selected: 'alpha' })))
     api.put.mockResolvedValue({ selected: 'beta', availability: 'available', issues: [] })
-    const store = await loadedStore({ selected: 'alpha' })
-
-    await store.selectProvider('demo', 'beta')
-
-    expect(api.patch).toHaveBeenCalledWith('/api/settings', {
-      body: { [LEGACY_KEY]: 'beta-legacy' },
-    })
-  })
-
-  it('leaves the legacy store alone for a domain that never had one', async () => {
-    api.put.mockResolvedValue({ selected: 'beta', availability: 'available', issues: [] })
-    const store = await loadedStore({ selected: 'alpha', legacyKey: null })
+    const store = useProviderCatalogStore()
+    await store.loadCatalog()
 
     await store.selectProvider('demo', 'beta')
 
@@ -114,23 +82,41 @@ describe('legacy selection interop', () => {
     expect(store.selectedId('demo')).toBe('beta')
   })
 
-  it('keeps the selection when the mirror write fails', async () => {
-    api.put.mockResolvedValue({ selected: 'beta', availability: 'available', issues: [] })
-    api.patch.mockRejectedValue(new Error('offline'))
-    const store = await loadedStore({ selected: 'alpha' })
+  it('no longer exposes legacySelectionKey or legacyIdFor', async () => {
+    api.get.mockResolvedValue(structuredClone(catalog()))
+    const store = useProviderCatalogStore()
+    await store.loadCatalog()
 
-    await expect(store.selectProvider('demo', 'beta')).resolves.toMatchObject({ switched: true })
-    expect(store.selectedId('demo')).toBe('beta')
+    expect(store.legacySelectionKey).toBeUndefined()
+    expect(store.legacyIdFor).toBeUndefined()
   })
 
-  it('never asks the settings endpoint for a catalog that ships no legacy key', async () => {
-    await loadedStore({ selected: 'alpha', legacyKey: null })
-    api.get.mockClear()
-    const store = useProviderCatalogStore()
+  it('does not default the three retired keys in useSettings', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/composables/useSettings.js'),
+      'utf8',
+    )
+    // Comments may name the keys; only a DEFAULTS entry is a regression.
+    const defaultsBlock = source.match(/const DEFAULTS = \{[\s\S]*?\n\}/)?.[0] || ''
+    for (const key of RETIRED_KEYS) {
+      expect(defaultsBlock, `DEFAULTS still ships ${key}`).not.toContain(`'${key}'`)
+    }
+  })
 
-    store.selectedProvider('demo')
-
-    expect(api.get.mock.calls.map(([url]) => url)).not.toContain('/api/settings')
-    expect(api.get.mock.calls.map(([url]) => url)).not.toContain(CATALOG_URL)
+  it('pipeline and provider-tab composables no longer name the retired keys', () => {
+    const files = [
+      'src/features/pipeline/composables/usePipeline.js',
+      'src/features/pipeline/composables/useProviderTabs.js',
+      'src/features/providers/stores/providerCatalog.js',
+      'src/features/providers/composables/useDomainProvider.js',
+    ]
+    for (const relative of files) {
+      const source = readFileSync(resolve(process.cwd(), relative), 'utf8')
+      for (const key of RETIRED_KEYS) {
+        // Allow the useSettings comment that documents the deletion.
+        if (relative.includes('useSettings')) continue
+        expect(source, `${relative} still names ${key}`).not.toContain(key)
+      }
+    }
   })
 })

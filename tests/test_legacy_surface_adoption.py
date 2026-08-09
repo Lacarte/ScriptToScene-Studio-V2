@@ -1,19 +1,12 @@
-"""Step 12.4: the backend half of adopting the shared provider UI.
+"""Step 12.4 / 16.1: the backend half of the shared provider UI.
 
-The legacy pages stopped owning provider knowledge; three things had to move
-into the backend for that to be possible, and this file freezes them:
+After 16.1 the catalog no longer ships `legacy_selection_key` and the browser
+sends canonical provider ids. What remains frozen here:
 
-  - the catalog names each domain's retired `app-config.json` selection key, so
-    a page can read through to it and mirror writes back without the mapping
-    being written down a second time in JavaScript (contracts.md §24.3 rule 3);
-  - a provider's first alias *is* its legacy wire spelling (§40.3, output
-    column), which is the rule the browser derives a request's `provider` field
-    from;
+  - input aliases still resolve (manifests declare them; the hub resolves them);
   - the per-run options a page sends arrive under the provider's own settings
-    key names, while the flat legacy keys keep winning (§40.2 O1).
-
-`test_the_option_source_is_scoped_to_its_domain` and the manifest tests are the
-zero-touch claim in miniature: what a page renders is what a provider declares.
+    key names, while the flat legacy keys keep winning (§40.2 O1);
+  - option sources and capabilities stay provider-declared (zero-touch).
 """
 
 import json
@@ -42,52 +35,54 @@ from studio.workflows.options import (
 from studio.workflows.registry import ASYNC_OPTION_SOURCES
 
 
-class CatalogLegacyKeyTests(unittest.TestCase):
-    """§24.3 — the key name crosses to the browser; the value never does."""
+class CatalogLegacyKeyRetirementTests(unittest.TestCase):
+    """Step 16.1 — the catalog no longer ships the retired selection keys."""
 
-    def test_every_domain_reports_its_legacy_selection_key(self):
+    def test_no_domain_reports_a_legacy_selection_key(self):
         catalog = catalog_module.build_catalog()
-        for domain, spec in DOMAINS.items():
+        for domain in DOMAINS:
             with self.subTest(domain=domain):
-                self.assertIn('legacy_selection_key', catalog[domain])
-                self.assertEqual(
-                    catalog[domain]['legacy_selection_key'],
-                    spec.legacy_selection_key,
-                )
+                self.assertNotIn('legacy_selection_key', catalog[domain])
 
-    def test_a_domain_that_never_had_one_reports_none(self):
-        catalog = catalog_module.build_catalog()
-        # `script` and `scene_blueprint` are new surface (§40.1): they had no
-        # pre-platform selection anywhere, so there is nothing to read through to.
-        self.assertIsNone(catalog['script']['legacy_selection_key'])
-        self.assertIsNone(catalog['scene_blueprint']['legacy_selection_key'])
-
-    def test_the_catalog_carries_no_settings_values(self):
+    def test_the_catalog_carries_no_settings_values_or_retired_keys(self):
         payload = json.dumps(catalog_module.build_catalog())
-        for key in ('api_key', 'webhook_url', 'sts-tts-provider'):
+        # Settings *values* would appear as `"api_key": "..."`; the requires
+        # list may still name the key. Retired selection fields must not appear
+        # as fields at all.
+        for key in ('api_key', 'webhook_url'):
             self.assertNotIn(f'"{key}":', payload)
+        for key in ('sts-tts-provider', 'sts-storyboard-provider',
+                    'sts-asset-provider', 'legacy_selection_key'):
+            self.assertNotIn(f'"{key}"', payload)
+
+    def test_domain_specs_keep_the_key_name_for_the_one_time_migration(self):
+        # The v2 settings migration still needs to find the retired keys on an
+        # un-migrated machine; DomainSpec is the only place they remain.
+        self.assertEqual(DOMAINS['tts'].legacy_selection_key, 'sts-tts-provider')
+        self.assertEqual(
+            DOMAINS['storyboard'].legacy_selection_key, 'sts-storyboard-provider'
+        )
+        self.assertEqual(DOMAINS['animator'].legacy_selection_key, 'sts-asset-provider')
 
 
-class LegacyWireSpellingTests(unittest.TestCase):
-    """§40.3 — the browser reads the output column off `aliases[0]`."""
+class InputAliasTests(unittest.TestCase):
+    """§40.3 — aliases remain accepted as input; canonical ids are persisted."""
 
-    EMITTED = {
-        ('storyboard', 'gemini_ws'): 'gemini',
-        ('storyboard', 'wavespeed_webhook'): 'webhook',
-        ('storyboard', 'wavespeed_direct'): 'direct',
-        ('animator', 'grok_automa'): 'grok',
-        ('animator', 'kie_ai'): 'kie-ai',
-        ('tts', 'kokoro'): 'kokoro',
-        ('tts', 'inworld'): 'inworld',
+    ACCEPTED = {
+        ('storyboard', 'gemini'): 'gemini_ws',
+        ('storyboard', 'webhook'): 'wavespeed_webhook',
+        ('storyboard', 'direct'): 'wavespeed_direct',
+        ('animator', 'grok'): 'grok_automa',
+        ('animator', 'midjourney'): 'grok_automa',
+        ('animator', 'kie-ai'): 'kie_ai',
     }
 
-    def test_the_first_alias_is_the_legacy_string_the_routes_compare(self):
-        for (domain, provider_id), expected in self.EMITTED.items():
-            with self.subTest(provider=provider_id):
-                provider = hub.get(domain, provider_id)
+    def test_every_documented_alias_resolves_to_its_canonical_id(self):
+        for (domain, alias), canonical in self.ACCEPTED.items():
+            with self.subTest(alias=alias):
+                provider = hub.get(domain, alias)
                 self.assertIsNotNone(provider)
-                aliases = provider.aliases
-                self.assertEqual(aliases[0] if aliases else provider.id, expected)
+                self.assertEqual(provider.id, canonical)
 
 
 class StoryboardImageModelOptionsTests(unittest.TestCase):

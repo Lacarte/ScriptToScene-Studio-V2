@@ -188,103 +188,62 @@ def _retry_until(predicate, timeout_s=4.0, interval_s=1.0):
         _time.sleep(min(interval_s, remaining))
 
 
-def _extension_target(name: str) -> str | None:
-    """Map a legacy or canonical extension id onto the shared hub key.
+def _extension_ops(name: str):
+    """Resolve a canonical id or input alias to extension browser-ops.
 
-    Accepts both the wire aliases the pipeline still sends (`gemini` / `grok`)
-    and the canonical provider ids resolved through the registry. Owner 14.4;
-    concrete provider ids are not listed here so the zero-touch scan stays clean
-    (16.1 retires the remaining alias tables).
+    Concrete provider ids never appear here: discovery and alias resolution
+    live on the provider hub (step 16.1 / extension_ops).
     """
-    key = str(name or "").strip()
-    if not key:
-        return None
-    lowered = key.lower()
-    if lowered in {"gemini", "grok"}:
-        return lowered
-    try:
-        from studio.shared.providers_common.hub import hub as provider_hub
-    except Exception:
-        return None
-    for domain, label in (("storyboard", "gemini"), ("animator", "grok")):
-        try:
-            instance = provider_hub.get(domain, key)
-        except Exception:
-            instance = None
-        if instance is not None and getattr(instance, "kind", None) == "extension":
-            return label
-    return None
+    from studio.shared.providers_common.extension_ops import resolve_extension
 
-
-def _extension_activate(target: str):
-    if target == "gemini":
-        from studio.storyboard.gemini_ws import activate_tab
-        return activate_tab
-    if target == "grok":
-        from studio.animator.routes import activate_tab
-        return activate_tab
-    return None
-
-
-def _extension_connected(target: str):
-    if target == "gemini":
-        from studio.storyboard.gemini_ws import is_extension_connected
-        return is_extension_connected
-    if target == "grok":
-        from studio.animator.routes import is_extension_connected
-        return is_extension_connected
-    return None
+    return resolve_extension(name)
 
 
 @app.route("/api/chromium/activate-tab", methods=["POST"])
 def activate_chromium_tab():
-    """Activate a provider tab via WebSocket to the extension."""
+    """Activate a provider tab via WebSocket to the extension.
+
+    ``target`` is a canonical provider id or a documented input alias. The
+    response echoes the canonical id so clients never re-learn a wire spelling.
+    """
     data = request.get_json(silent=True) or {}
-    raw_target = data.get("target", "gemini")
-    target = _extension_target(raw_target)
-    if target is None:
+    raw_target = data.get("target") or ""
+    ops = _extension_ops(raw_target)
+    if ops is None:
         return jsonify({"ok": False, "error": f"Unknown target: {raw_target}"}), 400
 
-    activate = _extension_activate(target)
     # Retry briefly — extension WS may be mid-reconnect (2s cycle)
-    if activate and _retry_until(activate, timeout_s=4.0, interval_s=1.0):
-        return jsonify({"ok": True, "target": target})
+    if _retry_until(ops.activate, timeout_s=4.0, interval_s=1.0):
+        return jsonify({"ok": True, "target": ops.provider_id})
 
-    return jsonify({"ok": False, "error": f"No {target} extension connected"}), 404
+    return jsonify({
+        "ok": False,
+        "error": f"No {ops.label} extension connected",
+        "target": ops.provider_id,
+    }), 404
 
 
 @app.route("/api/chromium/health", methods=["GET"])
 def chromium_health():
-    """Report connection status of all extension WebSocket clients."""
-    gemini_probe = _extension_connected("gemini")
-    grok_probe = _extension_connected("grok")
-    return jsonify({
-        "gemini": {"connected": bool(gemini_probe() if gemini_probe else False)},
-        "grok": {"connected": bool(grok_probe() if grok_probe else False)},
-    })
+    """Report connection status of every registered extension provider.
+
+    Keys are canonical provider ids. Clients iterate the map rather than
+    hardcoding a fixed pair of names (step 16.1).
+    """
+    from studio.shared.providers_common.extension_ops import health_snapshot
+
+    return jsonify({"extensions": health_snapshot()})
 
 
 @app.route("/api/chromium/focus-studio", methods=["POST"])
 def focus_studio_tab_endpoint():
-    """Ask any connected extension to focus the ScriptToScene Studio tab."""
-    from studio.storyboard.gemini_ws import focus_studio_tab as gemini_focus
-    from studio.animator.routes import focus_studio_tab as grok_focus
+    """Ask every connected extension to focus the ScriptToScene Studio tab."""
+    from studio.shared.providers_common.extension_ops import focus_all
 
-    sent_gemini = False
-    sent_grok = False
-    try:
-        sent_gemini = bool(gemini_focus())
-    except Exception as e:
-        logger.warning("focus-studio gemini failed: {}", e)
-    try:
-        sent_grok = bool(grok_focus())
-    except Exception as e:
-        logger.warning("focus-studio grok failed: {}", e)
-
+    results = focus_all()
     return jsonify({
-        "ok": sent_gemini or sent_grok,
-        "gemini": sent_gemini,
-        "grok": sent_grok,
+        "ok": any(results.values()),
+        "results": results,
     })
 
 
@@ -292,14 +251,30 @@ def focus_studio_tab_endpoint():
 def pipeline_preflight():
     """Check extension connectivity before starting a pipeline run.
 
-    Accepts legacy wire aliases and canonical registry ids for the two
-    extension providers. Only extension providers need a connected client;
-    cloud providers skip the probe (step 14.4 / P3 / P4).
+    Accepts legacy wire aliases and canonical registry ids. Only extension
+    providers need a connected client; cloud/local providers skip the probe
+    (step 14.4 / 16.1).
     """
+    from studio.shared.providers_common.domains import DOMAINS
+    from studio.shared.providers_common.extension_ops import resolve_extension
+    from studio.shared.providers_common import settings_manager
+
     data = request.get_json(silent=True) or {}
     stop_after = data.get("stop_after", "")
-    storyboard_provider = data.get("storyboard_provider", "gemini")
-    asset_provider = data.get("asset_provider", "grok")
+
+    stored = settings_manager.load_settings().get("domains", {})
+
+    def _pick(field: str, domain: str) -> str:
+        raw = data.get(field)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        selected = (stored.get(domain) or {}).get("selected_provider")
+        if isinstance(selected, str) and selected.strip():
+            return selected.strip()
+        return DOMAINS[domain].default_provider
+
+    storyboard_provider = _pick("storyboard_provider", "storyboard")
+    asset_provider = _pick("asset_provider", "animator")
 
     issues = []
     warnings = []
@@ -311,30 +286,24 @@ def pipeline_preflight():
     # Extension WS reconnect cycle is ~2s — give it a brief grace window
     # before declaring a provider unavailable. This prevents false negatives
     # between back-to-back jobs when the tab is mid-reconnect.
-    sb_target = _extension_target(storyboard_provider)
-    if needs_storyboard and sb_target == "gemini":
-        probe = _extension_connected("gemini")
-        if probe and not _retry_until(probe, timeout_s=4.0, interval_s=1.0):
+    def _probe(provider_name: str, needed: bool) -> None:
+        if not needed:
+            return
+        ops = resolve_extension(provider_name)
+        if ops is None:
+            return  # cloud/local — no extension to wait for
+        if not _retry_until(ops.is_connected, timeout_s=4.0, interval_s=1.0):
             warnings.append({
-                "target": "gemini",
-                "message": "Gemini extension not connected yet",
+                "target": ops.provider_id,
+                "message": f"{ops.label} extension not connected yet",
                 "recoverable": True,
                 "queued": True,
             })
 
-    asset_target = _extension_target(asset_provider)
-    if needs_assets and asset_target == "grok":
-        probe = _extension_connected("grok")
-        if probe and not _retry_until(probe, timeout_s=4.0, interval_s=1.0):
-            warnings.append({
-                "target": "grok",
-                "message": "Grok extension not connected yet",
-                "recoverable": True,
-                "queued": True,
-            })
+    _probe(storyboard_provider, needs_storyboard)
+    _probe(asset_provider, needs_assets)
 
     return jsonify({"ok": len(issues) == 0, "issues": issues, "warnings": warnings})
-
 
 @app.route("/api/open-folder", methods=["POST"])
 def open_folder():

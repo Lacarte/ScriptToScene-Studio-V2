@@ -29,12 +29,10 @@ def build_catalog() -> dict:
         if spec is not None:
             payload["label"] = spec.label
             payload["default_provider"] = spec.default_provider
-            # The `app-config.json` key this domain's selection used to live in
-            # (§24.3). Shipping the *key name* — never a value — is what lets a
-            # legacy page read through to the old selection and mirror writes back
-            # to it without the mapping being written down a second time in
-            # JavaScript. 16.1 deletes this field and every reader with it.
-            payload["legacy_selection_key"] = spec.legacy_selection_key
+            # Step 16.1: `legacy_selection_key` is no longer shipped. The retired
+            # app-config keys were adopted by the v2 settings migration; the field
+            # remains on DomainSpec only so that one-time upgrade can still find
+            # them on an un-migrated machine.
     return catalog
 
 
