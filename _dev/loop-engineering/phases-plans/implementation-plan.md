@@ -915,7 +915,9 @@ Two contracts must be frozen here because later steps are impossible without the
   voice lists.
 - **Single authoritative selection store.** Freeze which of `settings/settings.json` and
   `app-config.json` owns the selected provider, how the loser is migrated, and the replacement for the
-  whole-blob `PUT /api/settings/v2` read-modify-write.
+  whole-blob `PUT /api/settings/v2` read-modify-write. This applies to all three legacy keys
+  (`sts-tts-provider`, `sts-storyboard-provider`, `sts-asset-provider`), not only TTS; the contract must
+  also account for the current Animator route never reading `domains.animator.selected_provider`.
 
 **Done when:** the contract specifies every required/optional manifest and settings field, validation
 and unknown-field policy, lifecycle and shutdown behavior, registration/discovery order, duplicate-ID
@@ -1203,7 +1205,10 @@ reported as success; and Storyboard/Animator can share the service without domai
 Bring `gemini_ws`, `wavespeed_direct`, and `wavespeed_webhook` fully behind `StoryboardProvider` and
 Provider Contract v2. Move all provider-ID branching from `studio/storyboard/routes.py`, workflow
 adapters, and WebSocket/runtime setup into provider implementations/capabilities. Normalize
-storyboard paths, URLs, thumbnails, watermark handling, and per-scene metadata.
+storyboard paths, URLs, thumbnails, watermark handling, and per-scene metadata. Repair the audited
+legacy-selection gap: bulk `/api/storyboard/generate` currently ignores its accepted `provider` field,
+so normalize legacy `gemini` / `webhook` / `direct` values before generic dispatch while preserving the
+field and envelope for old callers.
 
 **Done when:** routes and `storyboard.generate` resolve/execute providers generically; the three
 current IDs/defaults/settings and output artifacts remain compatible; unavailable browser-extension
@@ -1214,6 +1219,9 @@ mocked transports.
 Bring `grok_automa` and `kie_ai` fully behind `AnimatorProvider` and Provider Contract v2. Move Kie
 options, Grok typing/quality/duration behavior, browser-open/runtime logic, polling, downloads, and all
 provider-ID branches from `animation_routes.py:191-211` and workflow adapters into provider packages.
+Make the authoritative selected-provider store the fallback when neither a canonical override nor a
+legacy request field is present; today the route comment promises that order but
+`GrabberStartRequest.provider_id` defaults every such request directly to `grok_automa`.
 Close the direct-import bypass at `animator/animation_routes.py:21`, which pulls `generate_image`
 straight out of `.providers.kie_ai` without going through the registry. Note that both provider bodies
 have never executed (see the Phase 10 audit header), so this step is their first real test.

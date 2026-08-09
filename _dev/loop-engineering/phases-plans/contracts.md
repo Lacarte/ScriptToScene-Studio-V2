@@ -502,7 +502,7 @@ provider abstraction at all.
 | aliases | none |
 | settings/env | `N8N_STORY_WEBHOOK_URL` (`config.py:74-76`), `N8N_CLASSIFY_WEBHOOK_URL` (`config.py:80-82`), `STS_ALLOW_PRIVATE_WEBHOOKS`. **No `settings.json` participation** |
 | hardcoded branches | none (single path) |
-| callers | frontend `features/pipeline/composables/useStory.js`; `PipelinePage.vue` (classify) |
+| callers | frontend `features/pipeline/composables/useStory.js`; `PipelinePage.vue` (classify); workflow scheduler through the adapter |
 | owner | 13.1 (random_template provider), 13.2 (AI provider wrap), 13.3 (generic dispatch + defect fix) |
 
 **Frontend random-story templates are not a provider and never were.**
@@ -523,7 +523,7 @@ anti-repeat rule behind a backend `random_template` script provider; until then 
 | inputs | `segments[] (required), script, style, style_prompt, custom_style_notes, full_segments, webhook_url, project_id, parent_id, source_folder, aspect_ratio` (`schemas.py`, `extra="allow"`) |
 | outputs | `{scenes[], analysis, style_spec, style_prompt, scene_blueprints, coherence_score, coherence_warnings, coherence_metrics, sfx_report, total_duration, …}` |
 | artifacts | `output/scenes/{project_id}/scenes.json` (`routes.py:360`, `services.py:517`) |
-| side effects | outbound HTTP to n8n; chapter mode splits into chunks with per-chunk retry; unseeded `random.shuffle` in `_assign_hook_animations` (`services.py:508`) |
+| side effects | outbound HTTP to n8n; chapter mode splits into chunks with per-chunk retry; unseeded `random.shuffle` in `_assign_hook_animations` (`pipeline/services.py:384-396`, invoked at `:508`) |
 | provider IDs | **none.** A grep for `provider` across `studio/build_scene_blueprints/` returns nothing |
 | aliases | none |
 | settings/env | `N8N_WEBHOOK_URL` (`config.py:68-70`), `STS_ALLOW_PRIVATE_WEBHOOKS`. **No `settings.json` participation** |
@@ -537,15 +537,16 @@ anti-repeat rule behind a backend `random_template` script provider; until then 
 |---|---|
 | entry points | `POST /api/tts/generate` (`studio/tts/routes.py:625`), `/api/tts/stream` (`:896`), `/api/tts/voices` (`:515`), model download/status, `/api/tts/cache/*`; workflow node `tts.generate` → `adapters/tts.py:7`; legacy `_step_tts` (`services.py:59`) |
 | provider IDs | `kokoro`, `inworld` |
-| aliases | **none** for TTS |
+| aliases | **none** for TTS; the legacy and canonical IDs are both `kokoro` / `inworld` |
 | dispatch | `services.py:77-82` resolves `tts_provider_override → tts_provider → settings.json domains.tts.selected_provider → "kokoro"`, then **branches on the string** at `services.py:103` (`if provider_id == "inworld"`). `tts_registry.get()` at `:84` is only an existence gate plus `.version`/`.kind` reads (`:106`, `:112`) |
 | route dispatch | `tts/routes.py:629`, `:517`, `:902` each branch `if provider == "inworld"` |
 | registry bypass | **`studio/tts/routes.py` never imports or touches the registry** — a grep for `registry` and `providers import` in that file returns **no matches** |
-| settings | `settings.json domains.tts.{selected_provider, per_provider.{kokoro,inworld}}`; kokoro schema = `voice, speed, lang, blend, blendA, blendB, blendRatio, blendMethod`; inworld = `api_key, voice, model, speed` |
+| settings | `settings.json domains.tts.{selected_provider, per_provider.{kokoro,inworld}}`; legacy `app-config.json` key `sts-tts-provider`; kokoro schema = `voice, speed, lang, blend, blendA, blendB, blendRatio, blendMethod`; inworld = `api_key, voice, model, speed` |
 | env | `INWORLD_API_KEY` (side effect — §14.3), `INWORLD_TTS_MODEL`, `INWORLD_TTS_BASE_URL` |
 | artifacts | `output/tts/{basename}/{basename}.wav` + `.json`; pipeline `…/voice.wav` + `tts.json`; cache `TMP_DIR/tts/{sha16}.wav` |
 | cache key | `sha256(f"{text}|{voice}|{speed:.2f}")[:16]` (`tts/routes.py:854-862`) — **provider is not in the key** (known defect, §8) |
 | node config | `engine` is a **static hardcoded list** `["kokoro","inworld"]` (`registry.py:186`); there is no `tts_providers` option source (§15.1) |
+| callers | frontend `useTts.js` and `TtsPage.vue`; pipeline `usePipelineForm.js`, `usePipeline.js`, `PipelinePage.vue`, and `VoicePicker.vue`; workflow scheduler through `adapters/tts.py` |
 | owner | 15.1, 15.2, 15.3 |
 
 ### 13.4 `storyboard` — state: **platform** (registry present, dispatch still by string)
@@ -554,13 +555,14 @@ anti-repeat rule behind a backend `random_template` script provider; until then 
 |---|---|
 | entry points | `POST /api/storyboard/generate` (`studio/storyboard/routes.py:283`), `/api/storyboard/grab` (`:490`), status/images/image-models/webhook-url/remove-watermarks; workflow node `storyboard.generate` → `adapters/storyboard.py:54`; legacy `_step_storyboard` (`services.py:530-627`) |
 | provider IDs | `gemini_ws`, `wavespeed_webhook`, `wavespeed_direct` |
-| aliases | `gemini_ws→gemini`, `wavespeed_webhook→webhook`, `wavespeed_direct→direct` (`services.py:550`) |
-| dispatch | `routes.py:316` selects from `settings.json` defaulting to `gemini_ws`, then branches at `routes.py:324` (`if provider_id == "gemini_ws"`) and `routes.py:605` (`if provider == "gemini"`). Adapter branches at `adapters/storyboard.py:21` |
+| aliases | canonical→legacy: `gemini_ws→gemini`, `wavespeed_webhook→webhook`, `wavespeed_direct→direct` (`services.py:550`). The legacy page and single-image route use `gemini` / `webhook`; there is no general reverse-normalization layer |
+| dispatch | bulk `routes.py:311-324` uses `provider_override → settings.json selection → gemini_ws`, then branches on `gemini_ws`; single-image `routes.py:603-605` branches on legacy `provider == "gemini"`. **The bulk route ignores its legacy extra field `provider`**, so the pipeline's canonical→legacy value at `services.py:563` does not select the provider; without `provider_override`, the settings selection wins. Adapter branches at `adapters/storyboard.py:21` |
 | async transport | WebSocket `/ws/storyboard-gemini-image-grabber`, registered by `gemini_ws.register_runtime(app, sock)` through `call_provider_runtime` when `manifest.kind == "extension"` (`storyboard/providers/__init__.py:36-52`) |
 | artifacts | `output/storyboard/{pid}/storyboard.json`, `{scene}/image.{ext}` (versioned), `scene_prompts.json`, thumbnails |
 | poll contract | 10 s interval / 30 min timeout; errors count toward completion (`pending = total-ready-errors`) |
-| settings | `per_provider.wavespeed_webhook.{webhook_url,image_model}`, `wavespeed_direct.{api_key,image_model}`, `gemini_ws.{auto_type}` |
+| settings | `per_provider.wavespeed_webhook.{webhook_url,image_model}`, `wavespeed_direct.{api_key,image_model}`, `gemini_ws.{auto_type}`; legacy frontend key `sts-storyboard-provider` (default `gemini`) |
 | env | `WAVESPEED_API_KEY` seeds `wavespeed_direct.api_key` (`settings_manager.py:94-96`) |
+| callers | frontend `StoryboardPage.vue`; pipeline `usePipeline.js`, `useProviderTabs.js`, and `PipelinePage.vue`; workflow scheduler through `adapters/storyboard.py` |
 | owner | 14.1, 14.2, 14.4, 14.5 |
 
 ### 13.5 `animator` — state: **platform** (registry present, dispatch still by string)
@@ -569,14 +571,15 @@ anti-repeat rule behind a backend `random_template` script provider; until then 
 |---|---|
 | entry points | `POST /api/animator/grabber/start` (`animation_routes.py:186`) plus pending/results/upload/status/redownload/history/reconcile/project/thumbnails; WS `/ws/animator-grok-video-grabber` (`animator/routes.py:199`); workflow node `animator.generate` → `adapters/animator.py:64`; legacy `_step_assets` (`services.py:630`) |
 | provider IDs | `grok_automa`, `kie_ai` |
-| aliases | `grok_automa→grok`, `kie_ai→kie-ai` (`services.py:644`) |
-| dispatch | `animation_routes.py:189-200` resolves and falls back to `grok_automa`, then branches at `:266`, `:297`, `:314`, `:333`. Adapter branches at `adapters/animator.py:28` and `:37` |
+| aliases | canonical→legacy in the pipeline: `grok_automa→grok`, `kie_ai→kie-ai` (`services.py:644`). Reverse normalization is local to `GrabberStartRequest.provider_id`: `midjourney→grok_automa`, `grok→grok_automa`, `kie-ai→kie_ai`, and every unknown legacy value→`grok_automa` (`schemas.py:30-36`) |
+| dispatch | `animation_routes.py:194` uses `GrabberStartRequest.provider_id` (override or legacy-map result), falls back to `grok_automa` only if that ID is absent from the registry, then branches at `:266`, `:297`, `:314`, `:333`. Despite the comment at `:190`, it **does not read `domains.animator.selected_provider` for selection**. Adapter branches at `adapters/animator.py:28` and `:37` |
 | registry bypass | **`animation_routes.py:21`**: `from .providers.kie_ai import generate_image as kie_ai_generate` — direct module import; the registry is never consulted for this call |
 | artifacts | `output/animator/{pid}/{scene}/*` (+ `*_thumb.jpg`), `metadata.json`, `grabber_job.json`, legacy `animator.json` |
 | poll contract | 10 s interval / **120 min** timeout; `grabber_jobs` JobStore is in-memory, rehydrated from disk on import |
-| settings | `per_provider.kie_ai.{api_key,model,resolution}`, `grok_automa.{mode,quality,duration}` |
+| settings | `per_provider.kie_ai.{api_key,model,resolution}`, `grok_automa.{mode,quality,duration}`; legacy frontend key `sts-asset-provider` (default `grok`). The backend selected value is currently catalog/display state, not route or adapter dispatch input |
 | env | `KIE_AI_API_KEY`, `KIE_AI_MODEL` seed `kie_ai` settings (`settings_manager.py:98-104`) |
 | dead config | `arguments if provider == "midjourney"` (`animation_routes.py:260`) — `midjourney` is not a registered provider; the branch is unreachable |
+| callers | frontend `AssetsPage.vue`, `useAssets.js`, `GrabberControls.vue`, and `AssetCard.vue`; pipeline `usePipeline.js`, `useProviderTabs.js`, and `PipelinePage.vue`; workflow scheduler through `adapters/animator.py` |
 | owner | 14.1, 14.3, 14.4, 14.5 |
 
 ## 14. The seven mandated items, answered
@@ -608,12 +611,19 @@ previously-unexecuted method), then 14.2 / 14.3 / 15.1 for the domain rewiring.
 
 ### 14.2 Selection-store conflict
 
-Two independent stores exist and neither writes to the other:
+Two independent stores exist and neither writes to the other. The conflict affects all three
+existing provider domains, not only TTS:
 
-| store | key | written by | read by |
+| domain | nested selection | legacy frontend selection | actual dispatch readers |
 |---|---|---|---|
-| `settings/settings.json` | `domains.<domain>.selected_provider` (lines 16 / 32 / 49 of the live file) | `PUT /api/settings/v2` whole-blob replace (`editor/routes.py:215-227`; `save_settings(data)` at `:226`) | `services.py:80` (TTS pipeline), `storyboard/routes.py:316`, `animation_routes.py:189-200`, `editor/routes.py:247-249` |
-| `app-config.json` | `sts-tts-provider` (line 65, currently `"inworld"`) | frontend settings blob | `useTts.js:142`, `usePipelineForm.js:93`, `SettingsPage.vue:452`, watched at `useTts.js:661` |
+| TTS | `domains.tts.selected_provider` | `sts-tts-provider` (currently persisted as `inworld`) | nested: pipeline fallback at `services.py:80`; legacy: `useTts.js:142`, `usePipelineForm.js:93`, `SettingsPage.vue:452` and pipeline request construction |
+| Storyboard | `domains.storyboard.selected_provider` | `sts-storyboard-provider` (frontend default `gemini`; absent from the current blob) | nested: bulk route fallback at `storyboard/routes.py:315-316`; legacy: `StoryboardPage.vue:28-30`, `usePipeline.js`, `useProviderTabs.js` |
+| Animator | `domains.animator.selected_provider` | `sts-asset-provider` (frontend default `grok`; absent from the current blob) | nested: **no generation dispatch reader** (catalog response only at `editor/routes.py:249`); legacy: `usePipeline.js`, `useProviderTabs.js`, Assets UI |
+
+The nested selections are written by `PUT /api/settings/v2` whole-blob replacement
+(`editor/routes.py:215-227`). The legacy keys are written independently by `PATCH /api/settings`
+through `useSettings.update()` (`useSettings.js:41-49`). Workflow nodes use their saved
+`engine` / `provider` configuration and do not inherit any of these default selections.
 
 `settings_manager.set_selected_provider()` (`settings_manager.py:189-198`) exists and has
 **zero call sites** — only `__all__` re-exports at `shared/__init__.py:12` and
@@ -624,15 +634,18 @@ spread-merge a new `selected_provider` → `PUT /api/settings/v2` with the **ent
 `put_settings_v2` calls `save_settings(data)`, a full replace with no `expected_updated_at`
 and no field-level merge — a genuine lost-update window between any two concurrent writers.
 
-Both stores currently agree (`inworld`), so there is no live divergence to repair today — but
-the TTS *page* is driven by `app-config.json` while the TTS *pipeline* is driven by
-`settings.json`, so they can silently diverge on the next write to either.
+The current values/defaults happen to agree semantically (`inworld`, `gemini↔gemini_ws`, and
+`grok↔grok_automa`), so there is no persisted divergence to repair today. They can silently
+diverge on the next write. Animator is worse than a two-store disagreement: selecting it in the
+provider modal changes catalog state but does not change legacy route, pipeline, or workflow
+dispatch at all.
 
 **Recommendation carried into 10.2 (decision, not yet frozen):** make
-`settings/settings.json` `domains.*.selected_provider` authoritative — it is the only store
-the backend reads, it is already per-domain, and it is the v4 design's stated source of
-truth. Migrate `sts-tts-provider` by having the legacy TTS page read the selection from the
-provider catalog API, keeping a read-through fallback for one release, then deleting the key.
+`settings/settings.json` `domains.*.selected_provider` authoritative — it is the intended
+backend store, it is already per-domain, and it is the v4 design's stated source of truth.
+First wire the missing animator dispatch read. Migrate all three legacy keys by having the legacy
+pages read selections from the provider catalog API, keeping read-through fallbacks for one
+release, then deleting the keys.
 Replace the whole-blob write with a targeted selection endpoint routed through the existing
 `set_selected_provider()`. Owners: 10.2 freezes it, 11.5 builds the endpoint, 12.4 moves the
 legacy page, 16.1 deletes the loser key.
@@ -664,13 +677,22 @@ presence. Owner: 11.3 (env fallback without returning values), 10.2 (availabilit
 Verified verbatim:
 
 - `studio/pipeline/services.py:550` — `id_to_legacy = {"gemini_ws": "gemini", "wavespeed_webhook": "webhook", "wavespeed_direct": "direct"}`, applied at `:551`; consumed at `:552` (`prompt_prefix` only when `sb_provider == "gemini"`) and sent as `payload["provider"]` at `:563` over an **HTTP-to-self** call to `/api/storyboard/generate` (`:566`, blocker B1).
+- That storyboard wire value is currently **ignored for dispatch**: `StoryboardGenerateRequest`
+  has no model field named `provider` (it is accepted only because `extra="allow"`), its property
+  always derives from `provider_override`, and `routes.py:311-316` reads only
+  `provider_override` or nested settings. Thus a legacy `provider="webhook"` request can run the
+  selected `gemini_ws` provider. Preserve the field as wire compatibility, but owner 14.2 must
+  normalize it before dispatch rather than preserving the bug.
 - `studio/pipeline/services.py:644` — `id_to_legacy = {"grok_automa": "grok", "kie_ai": "kie-ai"}`, applied at `:645`; consumed at `:664` (`if anim_override == "grok_automa" or provider == "grok"` → grok-specific payload keys).
+- `studio/animator/schemas.py:30-36` is the reverse/legacy normalization point:
+  `midjourney|grok→grok_automa`, `kie-ai→kie_ai`, and unknown values→`grok_automa`.
 - `app.py:248-286` `POST /api/pipeline/preflight` — defaults `storyboard_provider="gemini"` (`:253`) and `asset_provider="grok"` (`:254`), branching at `:266` and `:276` to probe extension connectivity.
 - `app.py:198-200` `focus-studio` — `if target == "gemini" … elif target == "grok"`.
 
-Direction matters: the table maps **canonical → legacy**, not the reverse. The legacy strings
-are the wire format of the internal HTTP hop and the preflight API; the canonical IDs are what
-the registry and `settings.json` use. Owner: 10.4 (freeze the mapping in both directions),
+Direction matters: the two pipeline tables map **canonical → legacy**; Animator alone also has
+the reverse map above. The legacy strings are the wire format of the internal HTTP hop and the
+preflight API; the canonical IDs are what the registry and `settings.json` use. Owner: 10.4
+(freeze the mapping in both directions),
 16.1 (delete once the internal HTTP hop is gone).
 
 ### 14.5 Registry bypasses
@@ -732,7 +754,8 @@ artifacts into `script`) is unaffected. Owner: **13.3**, which must also drop th
 
 ## 15. Hard-coded provider decision register
 
-Every production branch on a provider/engine literal. Tests excluded. Each has an owner.
+Backend and frontend production decisions on provider/engine literals. Tests excluded. A row may
+group several branches in one component; each has an owner.
 
 | # | location | branch | owner |
 |---|---|---|---|
@@ -769,6 +792,20 @@ Every production branch on a provider/engine literal. Tests excluded. Each has a
 | P31 | `providers_common/settings_manager.py:137-160` | `_default_settings()` hardcodes the same three domains and their default provider IDs | 11.1 / 11.3 |
 | P32 | `workflows/options.py:38-50` | `_provider_options(domain)` handles only `storyboard` / `animator` | 12.2 |
 | P33 | `story/service.py:102`, `story/routes.py:287` | literal `"provider": "gemini"` in result metadata | 13.3 |
+| P34 | `animator/schemas.py:20, 30-36` | legacy default plus `midjourney/grok/kie-ai` normalization and unknown→Grok fallback | 14.3 / 14.4 |
+| P35 | `frontend/src/features/settings/composables/useSettings.js:12-14` | legacy defaults for all three domains | 12.4 / 16.1 |
+| P36 | `frontend/src/features/tts/composables/useTts.js:142,390,661` | legacy TTS selection and Inworld generation branch | 12.4 / 15.2 |
+| P37 | `frontend/src/features/pipeline/composables/usePipelineForm.js:93-107,155` | legacy TTS selection, voice routing, and Inworld voice loading | 12.4 / 15.2 |
+| P38 | `frontend/src/features/pipeline/views/PipelinePage.vue:117-125,412,541-545` | TTS preview and niche/preset behavior branch on Inworld | 12.4 / 15.2 |
+| P39 | `frontend/src/features/pipeline/components/VoicePicker.vue:18` | Inworld-specific picker UI | 12.4 / 15.2 |
+| P40 | `frontend/src/features/storyboard/views/StoryboardPage.vue:28-30,350-411,535,572` | legacy `gemini` / `webhook` selection, payload, and UI branches | 12.4 / 14.2 |
+| P41 | `frontend/src/features/pipeline/composables/useProviderTabs.js:15,29,50-55` | legacy Gemini/Grok tab focus and extension reachability | 14.4 / 16.1 |
+| P42 | `frontend/src/features/pipeline/composables/usePipeline.js:190-202,236-245,292-301` | reads and sends all three legacy provider selections/defaults | 12.4 / 14.2 / 14.3 / 15.2 |
+| P43 | `frontend/src/features/assets/composables/useAssets.js:19,115,314` | legacy Grok default and request field | 12.4 / 14.3 |
+| P44 | `frontend/src/features/assets/views/AssetsPage.vue:413-434` | Grok-specific submit/retry behavior | 12.4 / 14.3 |
+| P45 | `frontend/src/features/assets/components/GrabberControls.vue:7,39-41,183` | Midjourney/Grok/Kie-specific controls and label | 12.4 / 14.3 |
+| P46 | `frontend/src/features/assets/components/AssetCard.vue:11` | legacy Grok provider default | 12.4 / 14.3 |
+| P47 | `frontend/src/features/settings/views/SettingsPage.vue:452` | Inworld-vs-Kokoro implementation label | 12.4 / 15.2 |
 
 ### 15.1 Parameterized option sources — the blocker for 15.2
 
@@ -802,7 +839,10 @@ freezes the extended envelope, 12.2 implements it, 15.2 consumes it.
 HTTP: `/api/story/*`, `/api/scenes/*`, `/api/tts/*`, `/api/storyboard/*`, `/api/animator/*`,
 `/api/providers*`, `/api/settings/v2`, `/api/pipeline/*`, `/api/workflow/*`.
 Wire formats: the five request schemas; the legacy alias strings on the internal HTTP hop and
-preflight; `sts-tts-provider` in `app-config.json` until migrated.
+preflight; `sts-tts-provider`, `sts-storyboard-provider`, and `sts-asset-provider` in
+`app-config.json` until migrated. The Storyboard bulk route's ignored legacy `provider` field is
+accepted compatibility input, but its failure to affect dispatch is debt (§14.4), not behavior to
+preserve.
 Files: `output/stories/*/story.json`, `output/scenes/*/scenes.json`, `output/tts/*`,
 `output/storyboard/*/storyboard.json`, `output/animator/*/{grabber_job,metadata}.json`,
 `settings/settings.json` v1 shape.
@@ -819,7 +859,9 @@ The ABC layer and all eight `get_provider()` factories; the three duplicated
 `providers/__init__.py`; the duplicated job dataclasses; the string-branch dispatch (P1–P25);
 the two hardcoded domain sets (P29, P30); the provider API living in the editor blueprint
 (P28); the whole-blob settings write; the internal HTTP-to-self hop (B1); the unreachable
-`midjourney` branch (P12); the duplicate Kokoro singletons; the undeclared `story` port.
+`midjourney` branch (P12); the duplicate Kokoro singletons; the undeclared `story` port; and the
+ignored Storyboard legacy selection. The legacy selection keys themselves remain public until
+migration even though the duplicate storage design is debt.
 
 ### 17.3 Pre-existing defects reconfirmed (not introduced by this migration)
 
@@ -841,7 +883,8 @@ Owner: 10.4.
 typed outputs and failure codes with mocked services. `tests/test_scene_generation_v2.py`
 covers blueprint planning and annotation. `tests/test_story_routes.py` covers only
 classify-webhook derivation — **story generation itself has no test**.
-`tests/test_live_providers.py` is live-gated. No test invokes any ABC method.
+`tests/test_live_providers.py` is live-gated. No test invokes any ABC method. Frontend tests do
+not freeze the provider-specific branches P35-P47 or the legacy-selection mappings.
 Owner: 11.4 (contract tests), 13.2 (story fixtures).
 
 ### 17.6 Divergences from `modular-providers-plan-v4.md`
@@ -874,10 +917,11 @@ regression-only.
 
 Every path that reaches a model or provider was enumerated: five domains × {legacy HTTP route,
 legacy pipeline step, workflow adapter}, plus the WebSocket transports, the internal
-HTTP-to-self hop, the preflight probe, and the provider settings/health API. The four
+HTTP-to-self hop, the preflight probe, the provider settings/health API, and the legacy frontend
+pages/settings consumers. The four
 never-provider-driven surfaces (frontend story templates, scene blueprint, music, captions) are
-explicitly accounted for. Twelve unexecuted provider code paths (§16) and thirty-three
-hardcoded provider decisions (§15) each carry an owner step. No item in §13–§17 is left without
+explicitly accounted for. The unexecuted provider path groups (§16) and forty-seven hardcoded
+provider-decision entries (§15) each carry an owner step. No item in §13–§17 is left without
 an owner.
 
 Open decisions deliberately deferred: the authoritative selection store (recommendation in
