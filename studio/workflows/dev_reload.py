@@ -1,8 +1,11 @@
-"""Opt-in hot reload for workflow node definitions and adapters.
+"""Opt-in hot reload for workflow node definitions, adapters, and provider packages.
 
-This module is deliberately dependency-free and dormant unless
-STS_WORKFLOW_DEV_RELOAD is truthy. It reloads only workflow developer-kit
-files; Flask itself and unrelated application modules are never watched.
+This module is dormant unless STS_WORKFLOW_DEV_RELOAD is truthy. It watches only
+developer-kit files — workflow node definitions and adapters, plus the
+`manifest.py` / `provider.py` / `settings_schema.py` of every provider folder named
+by the domain catalog. Flask itself and unrelated application modules are never
+watched. Provider changes go through `hub.reload()`, which keeps the last good
+catalog when an edit is invalid (step 11.2).
 """
 
 from __future__ import annotations
@@ -46,6 +49,21 @@ class WorkflowDevReloader:
         yield self.root / "registry.py"
         yield from sorted((self.root / "node_definitions").glob("*.json"))
         yield from sorted((self.root / "adapters").rglob("*.py"))
+        yield from self.watched_provider_files()
+
+    def watched_provider_files(self):
+        """Provider package sources, from the domain catalog rather than a list."""
+        from studio.shared.providers_common.domains import DOMAINS
+
+        for spec in DOMAINS.values():
+            base = Path(spec.providers_base)
+            for name in ("manifest.py", "provider.py", "settings_schema.py"):
+                yield from sorted(base.glob(f"*/{name}"))
+
+    def _provider_roots(self):
+        from studio.shared.providers_common.domains import DOMAINS
+
+        return {Path(spec.providers_base).resolve(): spec.id for spec in DOMAINS.values()}
 
     def snapshot(self):
         result = {}
@@ -163,6 +181,35 @@ class WorkflowDevReloader:
                 module = sys.modules.get(module_name)
                 if module is not None:
                     importlib.reload(module)
+
+            self._reload_providers(changed)
+
+    def _reload_providers(self, changed):
+        """Re-scan the domains whose provider sources changed.
+
+        The hub publishes a candidate catalog only when it is fully valid, so an
+        invalid edit leaves the last good catalog serving requests.
+        """
+        roots = self._provider_roots()
+        domains = []
+        for path in changed:
+            resolved = path.resolve()
+            for root, domain in roots.items():
+                if root in resolved.parents and domain not in domains:
+                    domains.append(domain)
+        if not domains:
+            return
+
+        from studio.shared.providers_common.hub import hub
+
+        report = hub.reload(domains)
+        for domain, reasons in report.retained.items():
+            logger.warning(
+                "Provider catalog for {} kept at its last good version: {}",
+                domain, ", ".join(reasons),
+            )
+        if report.swapped:
+            logger.success("Provider catalog hot-reloaded for {}", ", ".join(report.swapped))
 
     def _run(self):
         while not self._stop.wait(self.interval):

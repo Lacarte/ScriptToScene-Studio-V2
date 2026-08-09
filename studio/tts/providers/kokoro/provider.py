@@ -290,6 +290,11 @@ def validate_settings(settings: dict) -> list[dict]:
     return issues
 
 
+def create() -> KokoroTTSProvider:
+    """v2 factory (contracts.md §21.1). Memoized by the registry, never at import."""
+    return KokoroTTSProvider()
+
+
 def health_check(settings: dict) -> dict:
     if not _model_files_present():
         return {"status": "warn", "message": "Model files not downloaded", "details": {"model_present": False}}

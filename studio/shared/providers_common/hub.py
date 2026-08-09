@@ -5,19 +5,48 @@ The hub owns exactly one `ProviderRegistry` per catalog domain and resolves
 `studio/<module>/providers/__init__.py` files are thin compatibility facades built
 by `bind_domain()` — they no longer own a registry of their own.
 
-Owned by step 11.1. Provider construction, `shutdown()` of constructed provider
-instances, and alias resolution land in 11.2.
+Step 11.2 adds the lazily memoized `create()` factory, real `shutdown()` of
+constructed providers, alias resolution, manifest-driven runtime binding, and the
+guarded reload that keeps the last good catalog after an invalid edit.
 """
 
+# `ProviderHub.list` shadows the builtin inside the class body, so annotations
+# must stay lazy.
+from __future__ import annotations
+
+import atexit
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from loguru import logger
 
 from studio.shared.providers_common.domains import DOMAINS, DomainSpec, get_domain
-from studio.shared.providers_common.registry import ProviderInstance, ProviderRegistry
+from studio.shared.providers_common.registry import (
+    CatalogSnapshot,
+    ProviderInstance,
+    ProviderRegistry,
+)
 from studio.shared.providers_common.runtime import call_provider_runtime
+
+
+# `extension` is the only kind whose register_runtime() is called at boot
+# (contracts.md §20.2). `push_callbacks` is the capability that declares the same
+# behavior; a provider that claims it without being an extension is warned about
+# rather than silently given a WebSocket runtime.
+RUNTIME_KIND = "extension"
+RUNTIME_CAPABILITY = "push_callbacks"
+
+
+@dataclass
+class ReloadReport:
+    """Outcome of one guarded catalog reload."""
+
+    swapped: list[str] = field(default_factory=list)
+    retained: dict[str, list[str]] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {"swapped": self.swapped, "retained": self.retained}
 
 
 class ProviderHub:
@@ -27,6 +56,7 @@ class ProviderHub:
         self._catalog = catalog if catalog is not None else DOMAINS
         self._registries: dict[str, ProviderRegistry] = {}
         self._lock = threading.RLock()
+        self._runtime_target = None
 
     # -- catalog -----------------------------------------------------------
 
@@ -47,8 +77,12 @@ class ProviderHub:
             existing = self._registries.get(domain)
             if existing is not None:
                 return existing
-            self.spec(domain)  # validates the domain against the catalog
-            created = ProviderRegistry(domain=domain, valid_domains=frozenset(self._catalog))
+            spec = self.spec(domain)  # validates the domain against the catalog
+            created = ProviderRegistry(
+                domain=domain,
+                valid_domains=frozenset(self._catalog),
+                capability_vocabulary=spec.capability_vocabulary,
+            )
             self._registries[domain] = created
             return created
 
@@ -68,31 +102,42 @@ class ProviderHub:
             self.discover(domain)
 
     def bind_runtimes(self, app, sock) -> None:
-        """Call `register_runtime()` on every discovered `extension` provider.
+        """Bind the WebSocket runtime of every discovered `extension` provider.
 
         Runs after all domains are discovered so a runtime can rely on the full
-        catalog being present (contracts.md §21.2 item 4).
+        catalog being present (contracts.md §21.2 item 4). Selection is driven by
+        the manifest, never by a provider id, and a failed bind is recorded on the
+        provider rather than aborting startup.
         """
         if app is None or sock is None:
             return
+        self._runtime_target = (app, sock)
         for domain in self.domains():
-            registry = self.registry(domain)
-            for provider in registry.list_providers():
-                if provider.kind != "extension":
-                    continue
-                runtime_mod = provider.provider_module or provider.module
-                call_provider_runtime(provider.id, runtime_mod, app, sock)
+            for provider in self.registry(domain).list_providers():
+                self._bind_runtime(provider, app, sock)
+
+    @staticmethod
+    def _bind_runtime(provider: ProviderInstance, app, sock) -> None:
+        if provider.kind != RUNTIME_KIND:
+            if provider.capabilities.get(RUNTIME_CAPABILITY):
+                provider.add_warning(
+                    f"declares {RUNTIME_CAPABILITY} but kind is {provider.kind!r}; "
+                    "no runtime was bound"
+                )
+            return
+        runtime_module = provider.provider_module or provider.module
+        binding = call_provider_runtime(provider.id, runtime_module, app, sock)
+        if binding.error:
+            provider.add_warning(binding.error)
 
     # -- lookup ------------------------------------------------------------
 
     def get(self, domain: str, provider_id: str) -> ProviderInstance | None:
-        """Resolve one provider. Unknown domains return `None` rather than raising.
+        """Resolve one provider by canonical id, then by manifest alias (§19.3).
 
-        Discovery is triggered on first lookup, so a caller that never went through
-        application startup still sees the full catalog.
-
-        Alias resolution (id first, then manifest alias) arrives with manifest
-        aliases in 11.2; today only canonical ids resolve.
+        Unknown domains return `None` rather than raising. Discovery is triggered
+        on first lookup, so a caller that never went through application startup
+        still sees the full catalog.
         """
         if domain not in self._catalog:
             return None
@@ -103,6 +148,19 @@ class ProviderHub:
         if domain not in self._catalog:
             return []
         return self.discover(domain).list_providers()
+
+    def create(self, domain: str, provider_id: str):
+        """Construct — or return the memoized — provider object for `(domain, id)`.
+
+        Raises `ProviderConstructionError` when the provider cannot be built and
+        returns `None` only when no such provider is registered. The construction
+        lock lives on the instance, so provider code never runs under the hub lock
+        (contracts.md §21.1).
+        """
+        provider = self.get(domain, provider_id)
+        if provider is None:
+            return None
+        return provider.create()
 
     def catalog(self, selected: dict[str, str | None] | None = None) -> dict:
         """Serialize every domain for API responses.
@@ -116,32 +174,106 @@ class ProviderHub:
             for domain in self.domains()
         }
 
+    # -- guarded reload (contracts.md §21.2 item 6) ------------------------
+
+    def reload(self, domains: list[str] | None = None) -> ReloadReport:
+        """Re-scan provider folders and swap in only fully valid catalogs.
+
+        Each candidate snapshot is built privately and published only if it does
+        not *regress*: a provider that is registered today must not come back
+        excluded. An invalid edit therefore leaves the last good catalog serving
+        requests, while adding or removing a provider folder still takes effect.
+        """
+        report = ReloadReport()
+        for domain in domains or self.domains():
+            registry = self.registry(domain)
+            try:
+                candidate = registry.build_snapshot(self.spec(domain).providers_base)
+            except Exception as e:
+                logger.error("[providers] {}: reload scan failed, keeping last good: {}", domain, e)
+                report.retained[domain] = ["scan failed"]
+                continue
+
+            regressions = self._regressions(registry.snapshot, candidate)
+            if regressions:
+                logger.warning(
+                    "[providers] {}: reload rejected, keeping last good catalog ({})",
+                    domain, ", ".join(regressions),
+                )
+                report.retained[domain] = regressions
+                continue
+
+            registry._discovered = True
+            dropped = registry.publish(candidate)
+            self._rebind_new_runtimes(candidate)
+            for provider in dropped:
+                provider.retire()
+            report.swapped.append(domain)
+        return report
+
+    @staticmethod
+    def _regressions(live: CatalogSnapshot, candidate: CatalogSnapshot) -> list[str]:
+        """Providers that are registered now but excluded in the candidate snapshot.
+
+        Pre-existing exclusions do not block a swap — otherwise one permanently
+        broken folder on disk would freeze the catalog forever.
+        """
+        excluded_now = {e.id for e in candidate.exclusions}
+        return sorted(
+            f"{provider_id} would be excluded"
+            for provider_id in live.providers
+            if provider_id in excluded_now
+        )
+
+    def _rebind_new_runtimes(self, snapshot: CatalogSnapshot) -> None:
+        """Bind runtimes for providers that appeared after startup."""
+        if self._runtime_target is None:
+            return
+        app, sock = self._runtime_target
+        for provider in snapshot.providers.values():
+            self._bind_runtime(provider, app, sock)
+
     # -- teardown ----------------------------------------------------------
 
     def shutdown(self) -> None:
-        """Clear every registry so the next discovery re-scans from disk.
+        """Shut down every constructed provider, then clear every registry.
 
         Registry objects are kept and cleared in place, because the per-module
-        `providers/__init__.py` facades hold references to them. Calling
-        `shutdown()` on constructed provider instances is 11.2's work — nothing
-        constructs providers yet.
+        `providers/__init__.py` facades hold references to them.
         """
         with self._lock:
-            for registry in self._registries.values():
-                registry.reset()
+            registries = list(self._registries.values())
+        for registry in registries:
+            registry.shutdown_instances()
+            registry.reset()
 
 
 hub = ProviderHub()
+_teardown_armed = False
 
 
 def init_providers(app=None, sock=None) -> ProviderHub:
-    """Application startup entry point: discover all domains, then bind runtimes."""
+    """Application startup entry point: discover all domains, then bind runtimes.
+
+    Also arms the process-exit teardown, so `shutdown()` is a live code path rather
+    than the never-called hook it was before 11.2 (contracts.md §21.1).
+    """
+    global _teardown_armed
+    if not _teardown_armed:
+        atexit.register(hub.shutdown)
+        _teardown_armed = True
+
     hub.discover_all()
     for domain in hub.domains():
         registry = hub.registry(domain)
         logger.info(
             "[providers] {}: {} registered, ids={}", domain, len(registry), registry.list_ids()
         )
+        for exclusion in registry.excluded():
+            logger.warning(
+                "[providers] {}: excluded {} ({})",
+                domain, exclusion["id"], exclusion["reason_code"],
+            )
     hub.bind_runtimes(app, sock)
     return hub
 
@@ -196,9 +328,7 @@ def bind_domain(domain: str, discover_now: bool = True) -> DomainBinding:
         )
         if app is not None and sock is not None:
             for provider in registry.list_providers():
-                if provider.kind == "extension":
-                    runtime_mod = provider.provider_module or provider.module
-                    call_provider_runtime(provider.id, runtime_mod, app, sock)
+                hub._bind_runtime(provider, app, sock)
         return registry
 
     if discover_now:
@@ -207,4 +337,11 @@ def bind_domain(domain: str, discover_now: bool = True) -> DomainBinding:
     return DomainBinding(registry, discover, get_provider, list_providers, init_registry)
 
 
-__all__ = ["ProviderHub", "hub", "init_providers", "DomainBinding", "bind_domain"]
+__all__ = [
+    "ProviderHub",
+    "ReloadReport",
+    "hub",
+    "init_providers",
+    "DomainBinding",
+    "bind_domain",
+]

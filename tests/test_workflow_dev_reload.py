@@ -1,13 +1,18 @@
 """Step 8.2: guarded workflow node developer hot reload."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 from flask import Flask
 
+from studio.shared.providers_common.domains import DOMAINS
+from studio.shared.providers_common.hub import ReloadReport, hub as provider_hub
 from studio.workflows import workflows_bp
 from studio.workflows.dev_reload import WorkflowDevReloader, dev_reload_enabled
 from studio.workflows.registry import load_generated_node_types, reload_generated_node_types
+
+DOMAINS_TTS_BASE = DOMAINS["tts"].providers_base
 
 
 def _definition(display_name="Hot Node"):
@@ -95,6 +100,40 @@ def test_generated_registry_refresh_is_atomic_on_invalid_edit(tmp_path):
     # Restore the process catalog for the rest of the suite. The failed load
     # itself made no mutation because validation precedes the atomic swap.
     reload_generated_node_types()
+
+
+def test_provider_sources_are_watched_from_the_domain_catalog():
+    """Step 11.2: a provider edit must be observable without a central file list."""
+    from studio.shared.providers_common.domains import DOMAINS
+
+    reloader = WorkflowDevReloader(enabled=True)
+    watched = {path.resolve() for path in reloader.watched_provider_files()}
+
+    tts_manifest = Path(DOMAINS["tts"].providers_base) / "kokoro" / "manifest.py"
+    assert tts_manifest.resolve() in watched
+    assert all(
+        path.name in {"manifest.py", "provider.py", "settings_schema.py"} for path in watched
+    )
+
+
+def test_a_provider_edit_triggers_a_guarded_catalog_reload():
+    reloader = WorkflowDevReloader(enabled=True)
+    manifest = Path(DOMAINS_TTS_BASE) / "kokoro" / "manifest.py"
+
+    with patch.object(provider_hub, "reload") as reload_mock:
+        reload_mock.return_value = ReloadReport(swapped=["tts"])
+        reloader._reload_providers([manifest])
+
+    reload_mock.assert_called_once_with(["tts"])
+
+
+def test_a_workflow_only_edit_never_touches_the_provider_catalog():
+    reloader = WorkflowDevReloader(enabled=True)
+
+    with patch.object(provider_hub, "reload") as reload_mock:
+        reloader._reload_providers([Path(__file__)])
+
+    reload_mock.assert_not_called()
 
 
 def test_dev_event_endpoint_is_hidden_when_flag_is_off():

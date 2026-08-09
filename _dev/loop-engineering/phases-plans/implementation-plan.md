@@ -1024,6 +1024,63 @@ catalog and retains the last good version after an invalid edit.
 guarded dev reload) with no central provider list edit; failed import/init/runtime/shutdown is isolated
 and reported as provider health metadata; and no half-loaded catalog becomes visible to requests.
 
+#### Step 11.2 review status — 2026-08-09
+
+- **Complete.** `providers_common/validation.py` is new and holds the frozen §20.3 validation order,
+  the ten §21.4 reason codes, and `sanitize_message()`. Validation is pure — it imports nothing,
+  touches no filesystem, and never raises — so `registry._load_provider` now decides
+  *load → describe → validate → collect* and returns either an instance or an exclusion.
+- D6 is closed: unknown top-level manifest keys and unknown capability keys are ignored, logged, and
+  surfaced as `warnings[]` instead of raising `TypeError`. An unknown `kind`, a non-`bool` capability
+  value, a non-semver `version`, a bad id/alias shape, and a `javascript:`/`data:`/non-loopback-`http`
+  URL stay hard failures. The old truthiness check on `capabilities` became a presence/type check, so
+  an empty capability dict is valid.
+- D5 is closed: `ProviderManifest` gains `aliases` and `contract_version`. Aliases resolve *after* all
+  providers are registered, so a real id always beats an alias; a colliding alias is dropped with a
+  warning on **both** providers and excludes neither.
+- D7 is closed: `ProviderExclusion` / `ProviderRegistry.excluded()` are surfaced in `to_dict()`, and
+  `/api/providers` now answers `{count, excluded[]}` per domain. Messages are truncated to 200
+  characters, path-stripped to a basename, secret-masked, and stripped of `_sts_provider_*` names.
+- D21 is closed: `CatalogSnapshot` is immutable, `build_snapshot()` scans into a private builder, and
+  `publish()` swaps it in with one assignment. A rescan is invisible to readers until it completes.
+  Providers dropped by a swap are `retire()`d — new leases are refused, in-flight
+  `lease()` holders drain (5s cap), and only then does `shutdown()` run.
+- D8 is closed: `ProviderInstance.create()` is memoized per `(domain, provider_id)` behind a
+  per-instance lock, never runs at import or during discovery, and never runs under the hub lock.
+  `hub.create()` is the entry point; `registry.shutdown_instances()` tears down in reverse
+  construction order. `init_providers` arms `atexit`, so `shutdown()` is a live path rather than the
+  never-called hook it was. The two undeclared caches (`_cached_validation`, `_cached_health`) are
+  deleted; only the schema memo the contract declares remains.
+- Runtime binding moved to `hub._bind_runtime`, selected by `kind == "extension"` and reported back
+  through the new `RuntimeBinding` result; a failed `register_runtime()` becomes a provider warning
+  instead of a bare boot log, and never aborts startup.
+- **Adjustment recorded — the runtime selector was already manifest-driven.** The step text asks to
+  "drive it from manifest capabilities rather than provider IDs", but 11.1 had already replaced id
+  branching with `kind`, and §20.2 freezes `extension` as the only kind that binds. Rather than
+  re-derive selection from `push_callbacks` (which would give a WebSocket runtime to a future
+  `cloud` provider), selection stays on `kind` and a provider that declares `push_callbacks` without
+  being an `extension` is warned about.
+- **Adjustment recorded — `get_provider` is kept as a factory fallback.** §21.1 says `create()`
+  *replaces* the eight never-executed `get_provider()` functions. Rewriting all seven provider bodies
+  belongs to 14.2/14.3/15.2, so `create` resolves first and `get_provider` second. `create()` was
+  added to `kokoro` and `inworld`, which had no factory at all; all seven shipped providers now
+  construct and shut down, verified end to end.
+- **Adjustment recorded — reload rejects *regressions*, not all exclusions.** "Swaps only a fully
+  valid catalog" read literally would let one permanently broken folder freeze the catalog forever.
+  `hub.reload()` therefore publishes a candidate unless a currently-registered provider would come
+  back excluded. Adding or removing a folder still takes effect; an invalid edit to a live provider
+  keeps the last good catalog and is reported in `ReloadReport.retained`. The workflow dev reloader
+  now watches `manifest.py` / `provider.py` / `settings_schema.py` under every `DomainSpec`
+  `providers_base` and calls `hub.reload(domains)` for the domains that changed.
+- Verification passes with 310 backend tests (10 live-provider tests skipped, 88 subtests), all 154
+  frontend tests across 25 files, the Vite production build, and generated-document drift checks.
+  Both guards were mutation-checked: disabling lease draining and disabling regression detection each
+  fail their test.
+- **Deferred as already assigned:** `availability` computation and serialization (D9, 11.3), missing
+  `health_check` → `unknown` (D10, 11.3), the `description`/`docs_url`/`environment` manifest fields
+  and env fallback (11.3), and folding `ProviderConstructionError` into the shared `ProviderError`
+  boundary (11.4).
+
 ### 11.3 Manifest v2 and settings validation
 Extend `ProviderManifest` and settings schemas with label/description, domain, kind, version, contract
 version, capabilities, availability requirements, defaults, deprecation/alias metadata, and safe UI

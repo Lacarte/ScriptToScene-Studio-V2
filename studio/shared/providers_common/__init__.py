@@ -4,6 +4,7 @@ Modules:
   - domains: the domain catalog — the single declaration of supported domains
   - settings_migrations: version-to-version migrations
   - settings_manager: canonical load/save/validate for settings.json
+  - validation: manifest validation, exclusion reason codes, message sanitization
   - registry: provider discovery and domain-scoped registries
   - hub: process-wide hub resolving (domain, provider_id) across all domains
   - runtime: base class for extension provider runtimes
@@ -32,7 +33,16 @@ from studio.shared.providers_common.settings_manager import (
     redacted_provider_settings,
     validate_settings,
 )
+from studio.shared.providers_common.validation import (
+    EXCLUSION_REASON_CODES,
+    ManifestValidation,
+    sanitize_message,
+    validate_manifest,
+)
 from studio.shared.providers_common.registry import (
+    CatalogSnapshot,
+    ProviderConstructionError,
+    ProviderExclusion,
     ProviderRegistry,
     ProviderManifest,
     ProviderInstance,
@@ -41,11 +51,13 @@ from studio.shared.providers_common.registry import (
 )
 from studio.shared.providers_common.runtime import (
     Runtime,
+    RuntimeBinding,
     call_provider_runtime,
 )
 from studio.shared.providers_common.hub import (
     ProviderHub,
     DomainBinding,
+    ReloadReport,
     bind_domain,
     hub,
     init_providers,
@@ -81,15 +93,24 @@ __all__ = [
     "redact_settings",
     "redacted_provider_settings",
     "validate_settings",
+    "EXCLUSION_REASON_CODES",
+    "ManifestValidation",
+    "sanitize_message",
+    "validate_manifest",
+    "CatalogSnapshot",
+    "ProviderConstructionError",
+    "ProviderExclusion",
     "ProviderRegistry",
     "ProviderManifest",
     "ProviderInstance",
     "HealthResult",
     "ValidationIssue",
     "Runtime",
+    "RuntimeBinding",
     "call_provider_runtime",
     "ProviderHub",
     "DomainBinding",
+    "ReloadReport",
     "bind_domain",
     "hub",
     "init_providers",

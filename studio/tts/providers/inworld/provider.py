@@ -189,6 +189,11 @@ def validate_settings(settings: dict) -> list[dict]:
     return issues
 
 
+def create() -> InworldTTSProvider:
+    """v2 factory (contracts.md §21.1). Memoized by the registry, never at import."""
+    return InworldTTSProvider()
+
+
 def health_check(settings: dict) -> dict:
     api_key = settings.get("api_key") or INWORLD_API_KEY
     if not api_key:

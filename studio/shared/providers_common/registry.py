@@ -1,24 +1,31 @@
-"""Provider Registry — Phase 2.
+"""Provider Registry — domain-scoped discovery, validation, and lifecycle.
 
-Base registry class with domain scoping and discovery logic.
-Scans provider folders, loads manifests, applies broken-provider isolation.
+Discovery validates a whole provider package (`manifest.py`, optional `provider.py`
+and `settings_schema.py`) into a private catalog snapshot and publishes it with one
+atomic swap, so a request never observes a half-discovered catalog
+(contracts.md §21.2 item 6). Every exclusion is local and recorded as data
+(§21.4). Providers are constructed lazily through a memoized `create()` factory
+and released through `shutdown()` in reverse construction order (§21.1).
 """
 
 import importlib
 import importlib.util
+import itertools
 import os
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from loguru import logger
 
+from studio.shared.providers_common import validation as v
 from studio.shared.providers_common.domains import DOMAIN_IDS
 
 
 @dataclass
 class ProviderManifest:
-    """Required manifest returned by every provider."""
+    """Required manifest returned by every provider (contracts.md §20.1)."""
     id: str
     label: str
     domain: str
@@ -27,6 +34,10 @@ class ProviderManifest:
     requires: list[str] = field(default_factory=list)
     capabilities: dict[str, bool] = field(default_factory=dict)
     open_url: str | None = None
+    # v2 additions (§19.3). `aliases` retires the hand-written legacy tables;
+    # `contract_version` 1 is the legacy ABC shape, 2 the 11.4 invocation contract.
+    aliases: list[str] = field(default_factory=list)
+    contract_version: int = 1
 
 
 @dataclass
@@ -46,14 +57,49 @@ class ValidationIssue:
     message: str
 
 
+@dataclass(frozen=True)
+class ProviderExclusion:
+    """One provider that discovery refused to register (contracts.md §21.4)."""
+
+    id: str
+    reason_code: str
+    message: str
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "reason_code": self.reason_code, "message": self.message}
+
+
+class ProviderConstructionError(RuntimeError):
+    """`create()` could not produce a provider instance.
+
+    11.4 folds this into the shared `ProviderError` boundary; until then it carries
+    the same stable code so callers can already branch on it.
+    """
+
+    code = "PROVIDER_CREATE_FAILED"
+
+    def __init__(self, domain: str, provider_id: str, message: str):
+        super().__init__(f"{domain}/{provider_id}: {message}")
+        self.domain = domain
+        self.provider_id = provider_id
+        self.message = message
+
+
+_construction_counter = itertools.count()
+
+
 class ProviderInstance:
-    """Wrapper around a loaded provider module with metadata.
+    """A validated provider package plus its lifecycle state.
 
     Holds up to three modules loaded from the provider folder:
       - module: manifest.py (required, holds manifest() function)
-      - provider_module: provider.py (optional, holds validate_settings/health_check)
+      - provider_module: provider.py (optional, holds create/validate_settings/health_check)
       - schema_module: settings_schema.py (optional, holds settings_schema())
     """
+
+    # Resolved in order: the v2 name first, then the legacy zero-argument factory
+    # that the five shipped storyboard/animator providers still export (§21.1).
+    FACTORY_NAMES = ("create", "get_provider")
 
     def __init__(
         self,
@@ -62,15 +108,28 @@ class ProviderInstance:
         manifest: ProviderManifest,
         provider_module: Any = None,
         schema_module: Any = None,
+        warnings: list[str] | None = None,
     ):
         self.id = provider_id
         self.module = module
         self.provider_module = provider_module
         self.schema_module = schema_module
         self.manifest = manifest
+        self.warnings: list[str] = list(warnings or [])
         self._settings_schema = None
-        self._cached_validation = None
-        self._cached_health = None
+        self._schema_loaded = False
+
+        self._create_lock = threading.RLock()
+        self._instance: Any = None
+        self._create_error: str | None = None
+        self._construction_seq: int | None = None
+
+        self._lease_state = threading.Condition(threading.Lock())
+        self._leases = 0
+        self._retired = False
+        self._shutdown_done = False
+
+    # -- metadata ----------------------------------------------------------
 
     def _resolve(self, attr_name: str) -> Any:
         """Find a callable named `attr_name` across the loaded modules.
@@ -81,45 +140,61 @@ class ProviderInstance:
             if mod is not None and hasattr(mod, attr_name):
                 return getattr(mod, attr_name)
         return None
-    
+
     @property
     def label(self) -> str:
         return self.manifest.label
-    
+
     @property
     def domain(self) -> str:
         return self.manifest.domain
-    
+
     @property
     def kind(self) -> str:
         return self.manifest.kind
-    
+
     @property
     def version(self) -> str:
         return self.manifest.version
-    
+
+    @property
+    def contract_version(self) -> int:
+        return self.manifest.contract_version
+
+    @property
+    def aliases(self) -> list[str]:
+        return list(self.manifest.aliases)
+
     @property
     def capabilities(self) -> dict[str, bool]:
         return self.manifest.capabilities
-    
+
     @property
     def requires(self) -> list[str]:
         return self.manifest.requires
-    
+
+    def add_warning(self, message: str) -> None:
+        """Record a browser-safe warning, de-duplicated (contracts.md §25)."""
+        safe = v.sanitize_message(message)
+        if safe and safe not in self.warnings:
+            self.warnings.append(safe)
+
     def settings_schema(self) -> dict | None:
-        """Lazy-load settings schema from provider module."""
-        if self._settings_schema is None:
+        """Lazy-load and memoize the settings schema (contracts.md §21.1)."""
+        if not self._schema_loaded:
+            self._schema_loaded = True
             fn = self._resolve('settings_schema')
             if fn is not None:
                 try:
                     self._settings_schema = fn()
                 except Exception as e:
                     logger.warning("[registry] Failed to get settings_schema for {}: {}", self.id, e)
+                    self.add_warning(f"settings_schema() failed: {e}")
                     self._settings_schema = None
         return self._settings_schema
 
     def validate_settings(self, settings: dict) -> list[ValidationIssue]:
-        """Validate provider settings."""
+        """Validate provider settings. Never cached — the settings differ per call."""
         fn = self._resolve('validate_settings')
         if fn is not None:
             try:
@@ -134,7 +209,11 @@ class ProviderInstance:
                 ]
             except Exception as e:
                 logger.warning("[registry] validate_settings failed for {}: {}", self.id, e)
-                return [ValidationIssue(field='root', severity='error', message=str(e))]
+                return [
+                    ValidationIssue(
+                        field='root', severity='error', message=v.sanitize_message(e)
+                    )
+                ]
         return []
 
     def health_check(self, settings: dict) -> HealthResult:
@@ -155,39 +234,294 @@ class ProviderInstance:
                 return result
             except Exception as e:
                 logger.warning("[registry] health_check failed for {}: {}", self.id, e)
-                return HealthResult(status='fail', message=str(e))
+                return HealthResult(status='fail', message=v.sanitize_message(e))
         return HealthResult(status='ok')
-    
+
+    # -- construction (contracts.md §21.1) ---------------------------------
+
+    @property
+    def create_callable(self) -> Any:
+        """The zero-argument factory, or `None` when the provider cannot be built."""
+        for name in self.FACTORY_NAMES:
+            fn = self._resolve(name)
+            if callable(fn):
+                return fn
+        return None
+
+    @property
+    def constructed(self) -> bool:
+        return self._instance is not None
+
+    @property
+    def create_error(self) -> str | None:
+        return self._create_error
+
+    @property
+    def construction_seq(self) -> int | None:
+        """Monotonic construction order, used to shut down in reverse."""
+        return self._construction_seq
+
+    def create(self) -> Any:
+        """Construct the provider at most once per process.
+
+        Never called at import time or during discovery, and never while the
+        registry lock is held: the lock taken here belongs to this instance alone.
+        """
+        if self._instance is not None:
+            return self._instance
+        with self._create_lock:
+            if self._instance is not None:
+                return self._instance
+            if self._retired:
+                raise ProviderConstructionError(self.domain, self.id, "provider was retired")
+            if self._create_error is not None:
+                raise ProviderConstructionError(self.domain, self.id, self._create_error)
+            factory = self.create_callable
+            if factory is None:
+                self._create_error = "no create() factory found in the provider package"
+                self.add_warning(self._create_error)
+                raise ProviderConstructionError(self.domain, self.id, self._create_error)
+            try:
+                instance = factory()
+            except Exception as e:
+                self._create_error = v.sanitize_message(f"create() raised: {e}")
+                self.add_warning(self._create_error)
+                logger.error("[registry] create() failed for {}/{}: {}", self.domain, self.id, e)
+                raise ProviderConstructionError(self.domain, self.id, self._create_error) from None
+            if instance is None:
+                self._create_error = "create() returned None"
+                self.add_warning(self._create_error)
+                raise ProviderConstructionError(self.domain, self.id, self._create_error)
+            self._instance = instance
+            self._construction_seq = next(_construction_counter)
+            logger.info("[registry] Constructed provider '{}' in {}", self.id, self.domain)
+            return instance
+
+    # -- invocation leases (contracts.md §21.2 item 6) ---------------------
+
+    @contextmanager
+    def lease(self):
+        """Hold the provider open for one invocation.
+
+        A snapshot swap may drop this provider while a request is still using it;
+        `retire()` waits for outstanding leases before calling `shutdown()`.
+        """
+        with self._lease_state:
+            if self._retired:
+                raise ProviderConstructionError(self.domain, self.id, "provider was retired")
+            self._leases += 1
+        try:
+            yield self
+        finally:
+            with self._lease_state:
+                self._leases -= 1
+                if self._leases <= 0:
+                    self._lease_state.notify_all()
+
+    @property
+    def active_leases(self) -> int:
+        with self._lease_state:
+            return self._leases
+
+    def retire(self, timeout: float = 5.0) -> None:
+        """Stop new leases, wait for in-flight ones, then shut down."""
+        with self._lease_state:
+            self._retired = True
+            if self._leases > 0:
+                drained = self._lease_state.wait_for(lambda: self._leases <= 0, timeout=timeout)
+                if not drained:
+                    logger.warning(
+                        "[registry] {}/{}: {} lease(s) still active after {}s; shutting down anyway",
+                        self.domain, self.id, self._leases, timeout,
+                    )
+        self.shutdown()
+
+    def shutdown(self) -> None:
+        """Release a constructed provider. Best-effort and idempotent (§21.1)."""
+        with self._create_lock:
+            if self._shutdown_done:
+                return
+            self._shutdown_done = True
+            instance = self._instance
+            self._instance = None
+        if instance is None:
+            return
+        hook = getattr(instance, "shutdown", None)
+        if not callable(hook):
+            return
+        try:
+            hook()
+            logger.debug("[registry] Shut down provider '{}' in {}", self.id, self.domain)
+        except Exception as e:
+            # Never raised: one provider's teardown may not abort the rest (§21.1).
+            self.add_warning(f"shutdown() failed: {e}")
+            logger.error("[registry] shutdown() failed for {}/{}: {}", self.domain, self.id, e)
+
+    # -- serialization (contracts.md §25) ----------------------------------
+
     def to_dict(self) -> dict:
-        """Serialize to dict for API responses."""
+        """Browser-safe projection. Never exposes modules, paths, or settings values."""
         return {
             'id': self.id,
             'label': self.label,
             'domain': self.domain,
             'kind': self.kind,
             'version': self.version,
+            'contract_version': self.contract_version,
+            'aliases': self.aliases,
             'requires': self.requires,
             'capabilities': self.capabilities,
             'open_url': self.manifest.open_url,
             'has_settings': self.settings_schema() is not None,
+            'warnings': list(self.warnings),
         }
+
+
+@dataclass(frozen=True)
+class CatalogSnapshot:
+    """An immutable, fully validated view of one domain's providers.
+
+    Published by a single attribute assignment so readers see either the complete
+    old catalog or the complete new one (contracts.md §21.2 item 6).
+    """
+
+    providers: dict[str, ProviderInstance] = field(default_factory=dict)
+    aliases: dict[str, str] = field(default_factory=dict)
+    exclusions: tuple[ProviderExclusion, ...] = ()
+
+    def resolve(self, provider_id: str) -> ProviderInstance | None:
+        """Exact id first, then alias — a real id always wins (contracts.md §19.3)."""
+        found = self.providers.get(provider_id)
+        if found is not None:
+            return found
+        canonical = self.aliases.get(provider_id)
+        return self.providers.get(canonical) if canonical else None
+
+
+EMPTY_SNAPSHOT = CatalogSnapshot()
+
+
+class _CatalogBuilder:
+    """Accumulates a private snapshot during discovery; nothing is visible yet."""
+
+    def __init__(self, domain: str):
+        self.domain = domain
+        self.providers: dict[str, ProviderInstance] = {}
+        self.exclusions: list[ProviderExclusion] = []
+
+    def exclude(self, provider_id: str, reason_code: str, message: str) -> None:
+        safe = v.sanitize_message(message)
+        self.exclusions.append(ProviderExclusion(provider_id, reason_code, safe))
+        logger.warning("[registry] [EXCLUDED] {} ({}): {}", provider_id, reason_code, safe)
+
+    def add(self, instance: ProviderInstance) -> bool:
+        if instance.domain != self.domain:
+            self.exclude(
+                instance.id,
+                v.MANIFEST_DOMAIN_MISMATCH,
+                f"declares domain {instance.domain!r}, registered under {self.domain!r}",
+            )
+            return False
+        if instance.id in self.providers:
+            # First registration wins; the later one never replaces the incumbent.
+            self.exclude(
+                instance.id, v.DUPLICATE_ID, f"id already registered in domain {self.domain!r}"
+            )
+            return False
+        self.providers[instance.id] = instance
+        logger.info(
+            "[registry] Registered provider '{}' ({}) in {}",
+            instance.id, instance.label, self.domain,
+        )
+        return True
+
+    def build(self) -> CatalogSnapshot:
+        """Resolve aliases last, so a real id always beats an alias (§19.3)."""
+        aliases: dict[str, str] = {}
+        for provider in self.providers.values():
+            for alias in provider.aliases:
+                if alias in self.providers:
+                    provider.add_warning(f"alias dropped (collides with provider id): {alias}")
+                    continue
+                incumbent = aliases.get(alias)
+                if incumbent is not None:
+                    # Both sides are warned; neither provider is excluded (§19.3).
+                    provider.add_warning(f"alias dropped (claimed by '{incumbent}'): {alias}")
+                    self.providers[incumbent].add_warning(
+                        f"alias also claimed by '{provider.id}': {alias}"
+                    )
+                    continue
+                aliases[alias] = provider.id
+        return CatalogSnapshot(
+            providers=dict(self.providers),
+            aliases=aliases,
+            exclusions=tuple(self.exclusions),
+        )
 
 
 class ProviderRegistry:
     """Domain-scoped provider registry with discovery."""
-    
+
     # Derived from the domain catalog — never write a domain name here (§19.1).
     VALID_DOMAINS = DOMAIN_IDS
 
-    def __init__(self, domain: str, valid_domains: frozenset[str] | None = None):
+    def __init__(
+        self,
+        domain: str,
+        valid_domains: frozenset[str] | None = None,
+        capability_vocabulary: frozenset[str] | None = None,
+    ):
         allowed = self.VALID_DOMAINS if valid_domains is None else valid_domains
         if domain not in allowed:
             raise ValueError(f"Invalid domain: {domain}. Must be one of {sorted(allowed)}")
         self.domain = domain
-        self._providers: dict[str, ProviderInstance] = {}
+        self.capability_vocabulary = capability_vocabulary
+        self._snapshot: CatalogSnapshot = EMPTY_SNAPSHOT
         self._lock = threading.RLock()
         self._discovered = False
-    
+
+    # -- reads (lock-free: one attribute read of an immutable snapshot) ----
+
+    @property
+    def snapshot(self) -> CatalogSnapshot:
+        return self._snapshot
+
+    def get(self, provider_id: str) -> ProviderInstance | None:
+        """Get a provider by canonical id, then by alias."""
+        return self._snapshot.resolve(provider_id)
+
+    def list_providers(self) -> list[ProviderInstance]:
+        """List all registered providers."""
+        return list(self._snapshot.providers.values())
+
+    def list_ids(self) -> list[str]:
+        """List all provider IDs."""
+        return list(self._snapshot.providers)
+
+    def excluded(self) -> list[dict]:
+        """Providers discovery refused, as data rather than only a log line (§21.4)."""
+        return [e.to_dict() for e in self._snapshot.exclusions]
+
+    def aliases(self) -> dict[str, str]:
+        """`alias -> canonical id` for this domain."""
+        return dict(self._snapshot.aliases)
+
+    def __len__(self) -> int:
+        return len(self._snapshot.providers)
+
+    # -- writes ------------------------------------------------------------
+
+    def publish(self, snapshot: CatalogSnapshot) -> list[ProviderInstance]:
+        """Swap in a new snapshot atomically; return the providers it dropped."""
+        with self._lock:
+            previous = self._snapshot
+            self._snapshot = snapshot
+        return [
+            provider
+            for provider_id, provider in previous.providers.items()
+            if snapshot.providers.get(provider_id) is not provider
+        ]
+
     def register(
         self,
         provider_id: str,
@@ -196,36 +530,17 @@ class ProviderRegistry:
         provider_module: Any = None,
         schema_module: Any = None,
     ) -> None:
-        """Register a provider instance."""
-        if manifest.domain != self.domain:
-            logger.error("[registry] Cannot register {}: wrong domain (expected {}, got {})",
-                        provider_id, self.domain, manifest.domain)
-            return
-
+        """Register one provider outside of a discovery scan (copy-on-write)."""
         with self._lock:
-            if provider_id in self._providers:
-                logger.warning("[registry] Duplicate provider id '{}' in domain '{}', skipping",
-                             provider_id, self.domain)
-                return
-            self._providers[provider_id] = ProviderInstance(
+            builder = _CatalogBuilder(self.domain)
+            builder.providers.update(self._snapshot.providers)
+            builder.exclusions.extend(self._snapshot.exclusions)
+            builder.add(ProviderInstance(
                 provider_id, module, manifest,
                 provider_module=provider_module,
                 schema_module=schema_module,
-            )
-            logger.info("[registry] Registered provider '{}' ({}) in {}",
-                       provider_id, manifest.label, self.domain)
-    
-    def get(self, provider_id: str) -> ProviderInstance | None:
-        """Get a provider by ID."""
-        return self._providers.get(provider_id)
-    
-    def list_providers(self) -> list[ProviderInstance]:
-        """List all registered providers."""
-        return list(self._providers.values())
-    
-    def list_ids(self) -> list[str]:
-        """List all provider IDs."""
-        return list(self._providers.keys())
+            ))
+            self._snapshot = builder.build()
 
     def reset(self) -> None:
         """Drop every registration so the next discovery re-scans from disk.
@@ -233,26 +548,36 @@ class ProviderRegistry:
         Clears in place: the per-module compatibility facades hold this object.
         """
         with self._lock:
-            self._providers.clear()
+            dropped = self.publish(EMPTY_SNAPSHOT)
             self._discovered = False
+        for provider in dropped:
+            provider.retire()
 
-    def __len__(self) -> int:
-        return len(self._providers)
-    
+    def shutdown_instances(self) -> None:
+        """Shut down every constructed provider in reverse construction order (§21.1)."""
+        constructed = [p for p in self.list_providers() if p.construction_seq is not None]
+        for provider in sorted(constructed, key=lambda p: p.construction_seq, reverse=True):
+            provider.shutdown()
+
+    # -- discovery ---------------------------------------------------------
+
     def discovery_scan(self, providers_base: str) -> None:
-        """Scan provider folders and load manifests.
-        
-        Args:
-            providers_base: Base path like 'studio/tts/providers'
-        """
+        """Scan provider folders and publish the result as one atomic swap."""
         # Marked before the scan, not after: a provider module that imports its own
         # package (e.g. `from studio.tts.providers.base import ...`) re-enters
         # discovery, and the second scan would re-register every provider.
         self._discovered = True
+        dropped = self.publish(self.build_snapshot(providers_base))
+        for provider in dropped:
+            provider.retire()
+
+    def build_snapshot(self, providers_base: str) -> CatalogSnapshot:
+        """Scan `providers_base` into a private snapshot without publishing it."""
+        builder = _CatalogBuilder(self.domain)
 
         if not os.path.isdir(providers_base):
             logger.debug("[registry] Provider base not found: {}", providers_base)
-            return
+            return builder.build()
 
         # sorted() so discovery logs, catalog responses, and "first wins" duplicate
         # resolution are deterministic (contracts.md §21.2 item 2).
@@ -262,14 +587,17 @@ class ProviderRegistry:
                 continue
             if entry.startswith('_') or entry.startswith('.'):
                 continue
-            
+
             manifest_file = os.path.join(provider_path, 'manifest.py')
             if not os.path.isfile(manifest_file):
                 logger.debug("[registry] No manifest.py in {}, skipping", entry)
                 continue
-            
-            self._load_provider(entry, provider_path, manifest_file)
 
+            instance = self._load_provider(builder, entry, provider_path, manifest_file)
+            if instance is not None:
+                builder.add(instance)
+
+        return builder.build()
 
     def _load_module_from_file(self, file_path: str, module_name: str) -> Any:
         """Load a Python module from a file path. Returns module or None on failure."""
@@ -284,93 +612,94 @@ class ProviderRegistry:
             logger.warning("[registry] Failed to load {}: {}", file_path, e)
             return None
 
-    def _load_provider(self, provider_id: str, provider_path: str, manifest_file: str) -> None:
-        """Load a provider's manifest + optional provider.py + optional settings_schema.py.
+    def _load_provider(
+        self,
+        builder: _CatalogBuilder,
+        provider_id: str,
+        provider_path: str,
+        manifest_file: str,
+    ) -> ProviderInstance | None:
+        """Validate one provider package.
 
-        Applies broken-provider isolation: any exclusion logs WARN and returns.
+        Records an exclusion and returns `None` on failure; the caller adds the
+        instance to the private snapshot on success.
         """
         module_prefix = f"_sts_provider_{self.domain}_{provider_id}"
 
         try:
-            spec = importlib.util.spec_from_file_location(f"{module_prefix}_manifest", manifest_file)
+            spec = importlib.util.spec_from_file_location(
+                f"{module_prefix}_manifest", manifest_file
+            )
             if spec is None or spec.loader is None:
-                logger.warning("[registry] [EXCLUDED] {}: could not load manifest (spec failed)", provider_id)
-                return
-
+                builder.exclude(
+                    provider_id, v.MANIFEST_LOAD_FAILED, "could not load manifest.py (spec failed)"
+                )
+                return None
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-        except SyntaxError as e:
-            logger.warning("[registry] [EXCLUDED] {}: SyntaxError in manifest.py: {}", provider_id, e)
-            return
-        except ImportError as e:
-            logger.warning("[registry] [EXCLUDED] {}: ImportError in manifest.py: {}", provider_id, e)
-            return
         except Exception as e:
-            logger.warning("[registry] [EXCLUDED] {}: failed to load manifest.py: {}", provider_id, e)
-            return
+            builder.exclude(
+                provider_id, v.MANIFEST_LOAD_FAILED, f"{type(e).__name__} in manifest.py: {e}"
+            )
+            return None
 
-        if not hasattr(module, 'manifest'):
-            logger.warning("[registry] [EXCLUDED] {}: manifest() function not found", provider_id)
-            return
+        manifest_fn = getattr(module, 'manifest', None)
+        if not callable(manifest_fn):
+            builder.exclude(provider_id, v.MANIFEST_MISSING, "manifest() function not found")
+            return None
 
         try:
-            manifest_data = module.manifest()
+            payload = manifest_fn()
         except Exception as e:
-            logger.warning("[registry] [EXCLUDED] {}: manifest() call raised: {}", provider_id, e)
-            return
+            builder.exclude(provider_id, v.MANIFEST_RAISED, f"manifest() raised: {e}")
+            return None
 
-        if not isinstance(manifest_data, ProviderManifest):
-            if isinstance(manifest_data, dict):
-                try:
-                    manifest_data = ProviderManifest(**manifest_data)
-                except Exception as e:
-                    logger.warning("[registry] [EXCLUDED] {}: invalid manifest dict: {}", provider_id, e)
-                    return
-            else:
-                logger.warning("[registry] [EXCLUDED] {}: manifest() must return ProviderManifest or dict", provider_id)
-                return
+        result = v.validate_manifest(
+            folder_id=provider_id,
+            domain=self.domain,
+            payload=payload,
+            manifest_cls=ProviderManifest,
+            capability_vocabulary=self.capability_vocabulary,
+        )
+        if not result.ok:
+            builder.exclude(provider_id, result.reason_code, result.message)
+            return None
 
-        required_fields = ['id', 'label', 'domain', 'kind', 'version', 'capabilities']
-        missing = [f for f in required_fields if not getattr(manifest_data, f, None)]
-        if missing:
-            logger.warning("[registry] [EXCLUDED] {}: missing required fields: {}", provider_id, missing)
-            return
-
-        if manifest_data.id != provider_id:
-            logger.warning("[registry] [EXCLUDED] {}: manifest.id '{}' != folder name",
-                         provider_id, manifest_data.id)
-            return
+        instance = ProviderInstance(
+            provider_id, module, result.manifest, warnings=result.warnings
+        )
 
         provider_file = os.path.join(provider_path, 'provider.py')
-        schema_file = os.path.join(provider_path, 'settings_schema.py')
-        provider_module = None
-        schema_module = None
-
         if os.path.isfile(provider_file):
             provider_module = self._load_module_from_file(
                 provider_file, f"{module_prefix}_provider"
             )
             if provider_module is None:
-                logger.warning("[registry] {}: provider.py failed to load — functions will fall back to manifest", provider_id)
+                # Not fatal on its own: callables may live in manifest.py and
+                # `_resolve` falls back across modules (§21.4 partial degradation).
+                instance.add_warning("provider.py failed to load")
+            instance.provider_module = provider_module
 
+        schema_file = os.path.join(provider_path, 'settings_schema.py')
         if os.path.isfile(schema_file):
             schema_module = self._load_module_from_file(
                 schema_file, f"{module_prefix}_schema"
             )
             if schema_module is None:
-                logger.warning("[registry] {}: settings_schema.py failed to load", provider_id)
+                instance.add_warning("settings_schema.py failed to load")
+            instance.schema_module = schema_module
 
-        self.register(
-            provider_id, module, manifest_data,
-            provider_module=provider_module,
-            schema_module=schema_module,
-        )
-    
+        if instance.create_callable is None:
+            instance.add_warning("no create() factory found in the provider package")
+
+        return instance
+
     def to_dict(self, selected_provider: str | None = None) -> dict:
-        """Serialize registry state for API response."""
+        """Serialize registry state for API response (contracts.md §25)."""
         return {
             'domain': self.domain,
             'providers': [p.to_dict() for p in self.list_providers()],
             'selected': selected_provider,
             'count': len(self),
+            'excluded': self.excluded(),
         }
