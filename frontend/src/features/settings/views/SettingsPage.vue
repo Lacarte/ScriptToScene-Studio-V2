@@ -27,6 +27,12 @@ const modalOpen = ref(false)
 const modalDomain = ref('')
 const modalProviderId = ref('')
 
+// The About row reads the catalog like everything else; it used to compare the
+// legacy selection key against two literal provider ids.
+const ttsEngineName = computed(
+  () => providerCatalog.selectedProvider('tts')?.label || 'Not configured',
+)
+
 function onProviderConfigure({ domain, providerId }) {
   modalDomain.value = domain
   modalProviderId.value = providerId
@@ -457,7 +463,7 @@ function featureLabel(val) {
         </div>
         <div class="about-row">
           <span class="about-label">TTS Engine</span>
-          <span class="about-value mono">{{ (settings['sts-tts-provider'] ?? 'kokoro') === 'inworld' ? 'Inworld Voice' : 'kokoro-onnx' }}</span>
+          <span class="about-value mono">{{ ttsEngineName }}</span>
         </div>
         <div class="about-row">
           <span class="about-label">Sample Rate</span>
@@ -481,11 +487,13 @@ function featureLabel(val) {
       @close="onModalClose"
       @saved="onProviderSaved"
     >
-      <template #form="{ formData, schema, errors, updateField }">
+      <template #form="{ formData, schema, errors, domain, providerId }">
         <ProviderSettingsForm
           :model-value="formData"
           :schema="schema"
           :errors="errors"
+          :domain="domain"
+          :provider-id="providerId"
           @update:model-value="val => Object.assign(formData, val)"
         />
       </template>

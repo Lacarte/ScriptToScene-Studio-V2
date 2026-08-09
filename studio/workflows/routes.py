@@ -12,6 +12,7 @@ from flask import Blueprint, Response, jsonify, request, send_file, send_from_di
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from config import BRANDING_DIR
+from studio.io_utils import now_iso
 from studio.security import is_loopback_remote, sanitize_folder_name
 from .models import copy_draft
 from .events import TERMINAL_STATUSES, sse_frame
@@ -31,7 +32,7 @@ from .persistence import (
     load_workflow_state,
     update_workflow,
 )
-from .options import resolve_options
+from .options import OptionContextError, resolve_options
 from .project_archive import (
     MAX_ARCHIVE_BYTES,
     ProjectArchiveError,
@@ -188,17 +189,30 @@ def workflow_templates():
 
 @workflows_bp.route("/api/workflow/options/<source>", methods=["GET"])
 def workflow_options(source):
-    """Resolve an allowlisted async option source (contracts §11)."""
+    """Resolve an allowlisted async option source (contracts §11, §23).
+
+    Query parameters are a second allowlist: only the names the source declares
+    are accepted, and each is validated before it reaches a resolver. The
+    response echoes the **normalized** context so the client keys its cache on
+    the server's interpretation rather than on its own query string (§23.2).
+    """
     denied = _require_loopback()
     if denied:
         return denied
     try:
-        options = resolve_options(source)
+        options, context = resolve_options(source, request.args.to_dict())
+    except OptionContextError as exc:
+        return _error("OPTION_CONTEXT_INVALID", str(exc), 400)
     except RuntimeError as exc:
         return _error("PROVIDER_UNAVAILABLE", str(exc), 503)
     if options is None:
         return _error("NOT_FOUND", f"Unknown option source: {source[:80]}", 404)
-    return jsonify({"source": source, "options": options})
+    return jsonify({
+        "source": source,
+        "context": context,
+        "options": options,
+        "generated_at": now_iso(),
+    })
 
 
 def _branding_asset(filename):

@@ -4,7 +4,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import ConfigField from '../components/ConfigField.vue'
 import NodeInspector from '../components/NodeInspector.vue'
 import { useWorkflowStore } from '../stores/workflow.js'
-import { clearOptionSourceCache } from '../composables/useOptionSources.js'
+import { clearOptionSourceCache } from '@/shared/composables/useOptionSources.js'
 import { api } from '@/shared/api/client.js'
 
 function mountField(field, value) {

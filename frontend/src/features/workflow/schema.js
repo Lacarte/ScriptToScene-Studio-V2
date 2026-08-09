@@ -6,19 +6,15 @@
 
 import { validateStubPayload } from './stubPayloads.js'
 import { expressionSyntaxError, isExpressionValue } from './expressions.js'
+import { isDisplayed } from '@/shared/schema/visibility.js'
 
-/** n8n-style display_options: {show: {field: [values]}, hide: {...}}. */
+/**
+ * n8n-style display_options: {show: {field: [values]}, hide: {...}}.
+ * Delegates to the shared rule that provider settings `ui.show_if` also uses,
+ * so a node field and a provider field can never disagree about visibility.
+ */
 export function shouldDisplayField(field, configuration) {
-  const display = field.display_options
-  if (!display) return true
-  const config = configuration || {}
-  for (const [ref, values] of Object.entries(display.show || {})) {
-    if (!values.includes(config[ref])) return false
-  }
-  for (const [ref, values] of Object.entries(display.hide || {})) {
-    if (values.includes(config[ref])) return false
-  }
-  return true
+  return isDisplayed(field.display_options, configuration || {})
 }
 
 function configIssue(name, message) {

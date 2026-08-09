@@ -1,33 +1,257 @@
-"""Backend-approved async option sources (step 2.3, contracts §11).
+"""Backend-approved async option sources (step 2.3, parameterized in step 12.2).
 
-Every `options_source` identifier in the registry resolves through this
-allowlist — schema-provided URLs are never fetched. Resolvers import
-their data sources lazily so importing this module stays cheap.
+Every `options_source` identifier in the registry and every provider settings
+`ui.options_source` resolves through this allowlist — a schema-provided URL is
+never fetched (contracts.md §11).
+
+Step 12.2 implements the parameterized envelope frozen in §23: a resolver now
+receives a **validated, normalized** context (domain, provider, node type,
+project) rather than nothing at all, which is what lets one dropdown depend on
+the selected provider. Two consequences follow directly:
+
+  - `_provider_options` stops hardcoding storyboard and animator (P32). One
+    resolver serves all five `*_providers` sources, reading the domain off the
+    source's `OptionSourceSpec`, so a sixth domain is a spec entry and nothing
+    else.
+  - the cache key is `(source, normalized_context)` rather than the bare source
+    (§23.4). A per-source cache was already wrong the moment options depend on
+    settings: changing an API key has to make the voice list refetch.
+
+Resolvers import their data sources lazily so importing this module stays cheap.
 """
+
+from __future__ import annotations
+
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from threading import RLock
 
 from loguru import logger
 
-from .registry import ASYNC_OPTION_SOURCES
+from .registry import ASYNC_OPTION_SOURCES, OptionSourceSpec
 
 EXPORT_PROFILES = ["yt_shorts", "tiktok", "reels", "yt_landscape", "square"]
+
+# Node config fields that name a provider, newest first (contracts.md §40.1).
+# 12.3 converts all five provider-backed nodes to `provider_id`; until then a
+# saved `engine`/`provider` still has to answer "which provider is this node
+# configured for?" during save-time validation.
+PROVIDER_CONFIG_FIELDS = ("provider_id", "provider", "engine")
+
+# §23.4 — at most this many context variations are cached per source, so query
+# parameters cannot grow the cache without limit.
+MAX_CACHE_ENTRIES_PER_SOURCE = 64
+# §23.4 — `cache="settings"` entries also expire on their own, so an out-of-band
+# settings edit is picked up without an explicit invalidation.
+SETTINGS_CACHE_TTL_SECONDS = 300
+
+
+class OptionContextError(ValueError):
+    """A context parameter was unknown, malformed, or did not resolve (§23.3).
+
+    Surfaced as `OPTION_CONTEXT_INVALID` / 400. The message names the parameter
+    but never echoes a resolver's internals.
+    """
 
 
 def _opt(value, label=None):
     return {"value": value, "label": label or value}
 
 
-def _tts_voices():
+# ---------------------------------------------------------------------------
+# Context validation (contracts.md §23.1)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OptionContext:
+    """The validated, normalized context one resolver call runs under.
+
+    `values` holds only the parameters the source declares, already normalized —
+    a provider alias has become the canonical id — so it is both the cache key
+    and the `context` echoed to the client (§23.2).
+    """
+
+    source: str
+    spec: OptionSourceSpec
+    values: dict = field(default_factory=dict)
+
+    @property
+    def domain(self) -> str | None:
+        """The domain this resolution is scoped to, declared or implied."""
+        return self.values.get("domain") or self.spec.domain
+
+    @property
+    def provider(self) -> str | None:
+        return self.values.get("provider")
+
+    @property
+    def key(self) -> tuple:
+        return (self.source, tuple(sorted(self.values.items())))
+
+
+def _validate_domain(spec: OptionSourceSpec, value: str) -> str:
+    from studio.shared.providers_common.domains import DOMAINS
+
+    if value not in DOMAINS:
+        raise OptionContextError("domain is not a known provider domain")
+    # A source scoped to one domain accepts only that domain. Answering
+    # `tts_voices?domain=storyboard` with the TTS fallback list would be a
+    # nonsense pairing that the client could then cache and save.
+    if spec.domain is not None and value != spec.domain:
+        raise OptionContextError("domain is not valid for this option source")
+    return value
+
+
+def _validate_provider(domain: str | None, value: str) -> str:
+    """Resolve a provider id or alias to the canonical id within `domain`."""
+    from studio.shared.providers_common.hub import hub
+
+    if domain is None:
+        raise OptionContextError("provider requires a domain")
+    provider = hub.get(domain, value)
+    if provider is None:
+        raise OptionContextError("provider is not registered for this domain")
+    return provider.id
+
+
+def _validate_node_type(value: str) -> str:
+    from .registry import all_node_types
+
+    if value not in all_node_types():
+        raise OptionContextError("node_type is not a known node type")
+    return value
+
+
+def _validate_project_id(value: str) -> str:
+    from studio.security import sanitize_project_id
+
+    if sanitize_project_id(value) != value:
+        raise OptionContextError("project_id is not a valid project identifier")
+    return value
+
+
+def _selected_provider(domain: str) -> str | None:
+    """The domain's stored selection, then its catalog default (§24.1 rules 3-4)."""
+    from studio.shared.providers_common import settings_manager
+    from studio.shared.providers_common.domains import DOMAINS
+    from studio.shared.providers_common.hub import hub
+
+    stored = settings_manager.load_settings().get("domains", {})
+    candidate = (stored.get(domain) or {}).get("selected_provider")
+    spec = DOMAINS.get(domain)
+    for provider_id in (candidate, spec.default_provider if spec else None):
+        if provider_id:
+            provider = hub.get(domain, provider_id)
+            if provider is not None:
+                return provider.id
+    return None
+
+
+def build_context(source: str, params: dict | None = None) -> OptionContext:
+    """Validate raw query parameters against a source's context allowlist.
+
+    Raises `KeyError` for an unknown source and `OptionContextError` for a
+    parameter that is not accepted, not well-formed, or does not resolve. A
+    declared parameter may be omitted: `domain` then falls back to the source's
+    own domain and `provider` to that domain's selection, which is what keeps
+    every existing context-free caller working (§23.1).
+    """
+    spec = ASYNC_OPTION_SOURCES[source]
+    supplied = {k: v for k, v in (params or {}).items() if v not in (None, "")}
+
+    unknown = sorted(set(supplied) - set(spec.context))
+    if unknown:
+        raise OptionContextError(f"unsupported context parameter: {unknown[0]}")
+
+    values: dict = {}
+    for name in spec.context:
+        raw = supplied.get(name)
+        if raw is not None and not isinstance(raw, str):
+            raise OptionContextError(f"{name} must be a string")
+        if name == "domain":
+            values["domain"] = _validate_domain(spec, raw) if raw else spec.domain
+        elif name == "provider":
+            domain = values.get("domain") or spec.domain
+            values["provider"] = (
+                _validate_provider(domain, raw) if raw else _selected_provider(domain)
+            )
+        elif name == "node_type":
+            values["node_type"] = _validate_node_type(raw) if raw else None
+        elif name == "project_id":
+            values["project_id"] = _validate_project_id(raw) if raw else None
+        else:  # pragma: no cover - guarded by the spec/resolver parity assert
+            raise OptionContextError(f"unsupported context parameter: {name}")
+
+    # An unresolvable optional parameter stays out of the key entirely, so the
+    # "no provider selected" case shares one cache entry rather than one per
+    # spelling of absence.
+    return OptionContext(
+        source=source,
+        spec=spec,
+        values={k: v for k, v in values.items() if v is not None},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Resolvers — every one takes the validated context
+# ---------------------------------------------------------------------------
+
+
+def _provider_voice_options(domain: str, provider_id: str) -> list[dict] | None:
+    """Voices a provider declares in its own settings schema, or None.
+
+    Metadata only: no provider is constructed and no network call is made, so a
+    dropdown never pays for a model load. A provider owns its voice list by
+    declaring `voice.ui.options`, which is why adding a TTS provider needs no
+    edit here (contracts.md §26). 15.2 replaces this with the live per-provider
+    list for providers that can serve one.
+    """
+    from studio.shared.providers_common.hub import hub
+    from studio.shared.providers_common.settings_schema import properties
+
+    provider = hub.get(domain, provider_id)
+    if provider is None:
+        return None
+    voice = properties(provider.settings_schema()).get("voice")
+    options = ((voice or {}).get("ui") or {}).get("options")
+    if not isinstance(options, list) or not options:
+        return None
+    resolved = []
+    for option in options:
+        if isinstance(option, dict) and "value" in option:
+            resolved.append(_opt(option["value"], option.get("label")))
+        elif isinstance(option, str):
+            resolved.append(_opt(option))
+    return resolved or None
+
+
+def _tts_voices(ctx: OptionContext):
+    """Voices for the context's TTS provider, falling back to the local engine.
+
+    The fallback is load-bearing: with no provider resolved — an empty catalog, a
+    selection pointing at an uninstalled provider — the node must still offer the
+    voices the default engine actually accepts rather than an empty list.
+    """
+    if ctx.domain and ctx.provider:
+        options = _provider_voice_options(ctx.domain, ctx.provider)
+        if options is not None:
+            return options
     from studio.tts.routes import VOICES
+
     return [_opt(voice) for voice in VOICES]
 
 
-def _story_tones():
+def _story_tones(_ctx: OptionContext):
     from studio.music.selector import TONE_MUSIC_MAP
+
     return [_opt("", "—")] + [_opt(tone) for tone in sorted(TONE_MUSIC_MAP)]
 
 
-def _style_templates():
+def _style_templates(_ctx: OptionContext):
     from studio.build_scene_blueprints.templates import TEMPLATES_BY_ID
+
     options = []
     for template_id in sorted(TEMPLATES_BY_ID):
         template = TEMPLATES_BY_ID[template_id] or {}
@@ -35,23 +259,31 @@ def _style_templates():
     return options
 
 
-def _provider_options(domain):
-    if domain == "storyboard":
-        from studio.storyboard.providers import registry
-    else:
-        from studio.animator.providers import registry
-    options = []
-    for provider in registry.list_providers():
-        manifest = getattr(provider, "manifest", None)
-        provider_id = getattr(manifest, "id", None) or getattr(provider, "id", None)
-        label = getattr(manifest, "label", None) or provider_id
-        if provider_id:
-            options.append(_opt(provider_id, label))
-    return options
+def _provider_options(ctx: OptionContext):
+    """Registered providers for the source's domain (replaces P32).
+
+    Reads the domain off the spec, so all five `*_providers` sources — including
+    the three added in this step — share one resolver and a sixth domain needs
+    no code here. A provider that failed discovery is deliberately absent: an
+    excluded id is not a legal saved value.
+    """
+    from studio.shared.providers_common.hub import hub
+
+    if not ctx.domain:  # pragma: no cover - every *_providers spec sets a domain
+        raise RuntimeError(f"option source {ctx.source} has no domain")
+    return [
+        _opt(provider.id, provider.manifest.label or provider.id)
+        for provider in hub.list(ctx.domain)
+    ]
 
 
-def _caption_presets():
+def _export_profiles(_ctx: OptionContext):
+    return [_opt(profile) for profile in EXPORT_PROFILES]
+
+
+def _caption_presets(_ctx: OptionContext):
     from studio.captions.routes import CAPTION_PRESETS
+
     options = []
     for preset_id, preset in CAPTION_PRESETS.items():
         label = preset_id
@@ -63,11 +295,14 @@ def _caption_presets():
 
 _RESOLVERS = {
     "tts_voices": _tts_voices,
+    "script_providers": _provider_options,
+    "scene_blueprint_providers": _provider_options,
+    "tts_providers": _provider_options,
+    "storyboard_providers": _provider_options,
+    "animator_providers": _provider_options,
     "story_tones": _story_tones,
     "style_templates": _style_templates,
-    "storyboard_providers": lambda: _provider_options("storyboard"),
-    "animator_providers": lambda: _provider_options("animator"),
-    "export_profiles": lambda: [_opt(p) for p in EXPORT_PROFILES],
+    "export_profiles": _export_profiles,
     "caption_presets": _caption_presets,
 }
 
@@ -77,45 +312,191 @@ assert set(_RESOLVERS) == set(ASYNC_OPTION_SOURCES), (
 )
 
 
-# Process-lifetime cache of legal values per source: every resolver serves
-# static in-process data, and validation runs on each save (step 6.3).
-_VALUE_CACHE: dict[str, frozenset] = {}
+# ---------------------------------------------------------------------------
+# Cache (contracts.md §23.4)
+# ---------------------------------------------------------------------------
 
 
-def allowed_option_values(source: str):
-    """Frozen set of legal values for an allowlisted source, or None when the
-    source is unknown or currently unavailable.
+class _OptionCache:
+    """Bounded, per-source, context-keyed cache with three expiry policies.
 
-    Server-side validation of submitted option values (step 6.3) fails open on
-    resolver errors: bad values are rejected, but an unavailable provider must
-    never block saving otherwise-valid workflows.
+    Failures are never cached: a provider that is unreachable for one request
+    must be retried on the next, not remembered as empty for the process
+    lifetime.
     """
-    cached = _VALUE_CACHE.get(source)
+
+    def __init__(self):
+        self._entries: OrderedDict[tuple, tuple[float, list]] = OrderedDict()
+        self._lock = RLock()
+
+    def get(self, ctx: OptionContext):
+        expiry_policy = ctx.spec.cache
+        with self._lock:
+            entry = self._entries.get(ctx.key)
+            if entry is None:
+                return None
+            stored_at, options = entry
+            if (
+                expiry_policy == "settings"
+                and time.monotonic() - stored_at > SETTINGS_CACHE_TTL_SECONDS
+            ):
+                del self._entries[ctx.key]
+                return None
+            self._entries.move_to_end(ctx.key)
+            return options
+
+    def put(self, ctx: OptionContext, options: list):
+        with self._lock:
+            self._entries[ctx.key] = (time.monotonic(), options)
+            self._entries.move_to_end(ctx.key)
+            self._evict(ctx.source)
+
+    def _evict(self, source: str):
+        """LRU-evict within one source so a busy source cannot starve the rest."""
+        keys = [key for key in self._entries if key[0] == source]
+        for key in keys[: max(0, len(keys) - MAX_CACHE_ENTRIES_PER_SOURCE)]:
+            del self._entries[key]
+
+    def drop(self, predicate):
+        with self._lock:
+            for key in [key for key in self._entries if predicate(key)]:
+                del self._entries[key]
+
+    def clear(self):
+        with self._lock:
+            self._entries.clear()
+
+    def size(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+_CACHE = _OptionCache()
+
+
+def _sources_with_policy(policy: str) -> set[str]:
+    return {
+        source
+        for source, spec in ASYNC_OPTION_SOURCES.items()
+        if spec.cache == policy
+    }
+
+
+def invalidate_discovery_cache():
+    """Drop every `cache="discovery"` entry — a provider appeared or vanished."""
+    sources = _sources_with_policy("discovery")
+    _CACHE.drop(lambda key: key[0] in sources)
+
+
+def invalidate_settings_cache(domain: str | None = None):
+    """Drop `cache="settings"` entries after a settings or selection write.
+
+    Scoped to one domain when given (§23.4): changing a TTS API key must not
+    discard an unrelated domain's resolved options.
+    """
+    sources = _sources_with_policy("settings")
+
+    def matches(key):
+        source, context = key
+        if source not in sources:
+            return False
+        if domain is None:
+            return True
+        scoped = dict(context).get("domain") or ASYNC_OPTION_SOURCES[source].domain
+        return scoped == domain
+
+    _CACHE.drop(matches)
+
+
+def clear_option_cache():
+    """Drop every cached entry. Test hook and hard reset."""
+    _CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
+# Public resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve(ctx: OptionContext) -> list:
+    cached = _CACHE.get(ctx)
     if cached is not None:
         return cached
-    resolver = _RESOLVERS.get(source)
-    if resolver is None:
+    try:
+        options = _RESOLVERS[ctx.source](ctx)
+    except Exception as exc:  # data source unavailable — never a 500
+        logger.warning("option source {} failed: {}", ctx.source, exc)
+        raise RuntimeError(f"Option source {ctx.source} is unavailable") from exc
+    _CACHE.put(ctx, options)
+    return options
+
+
+def resolve_options(source: str, params: dict | None = None):
+    """Return `(options, context)` for an allowlisted source, or `(None, None)`.
+
+    Raises `OptionContextError` when the context is rejected and `RuntimeError`
+    when a known source fails to load (surfaced as `OPTION_CONTEXT_INVALID` and
+    `PROVIDER_UNAVAILABLE` by the route).
+    """
+    if source not in ASYNC_OPTION_SOURCES:
+        return None, None
+    ctx = build_context(source, params)
+    return _resolve(ctx), dict(ctx.values)
+
+
+def allowed_option_values(source: str, context: dict | None = None):
+    """Frozen set of legal values for a source, or None when it cannot answer.
+
+    Server-side validation of submitted option values (step 6.3) still fails
+    open: a bad value is rejected, but an unavailable provider — or a context
+    that no longer resolves — must never block saving an otherwise-valid
+    workflow (§23.3).
+    """
+    if source not in ASYNC_OPTION_SOURCES:
         return None
     try:
-        values = frozenset(option["value"] for option in resolver())
+        ctx = build_context(source, context)
+        return frozenset(option["value"] for option in _resolve(ctx))
     except Exception as exc:
         logger.warning("option source {} unavailable for validation: {}", source, exc)
         return None
-    _VALUE_CACHE[source] = values
-    return values
 
 
-def resolve_options(source: str):
-    """Return [{value, label}] for an allowlisted source, or None if unknown.
+def config_option_context(source: str, configuration: dict | None, fields: dict | None = None):
+    """Context for validating one node configuration's value for `source`.
 
-    Raises RuntimeError when a known source fails to load (surfaced as
-    PROVIDER_UNAVAILABLE by the route).
+    A context-sensitive value is checked against the provider **this node** will
+    run with, never against a union across providers — accepting one provider's
+    voice for another provider's node would defer a deterministic configuration
+    error until execution (§23.3).
+
+    The provider field's schema default counts. A node that never wrote `engine`
+    still runs on the default engine, so validating its voice against the global
+    selection instead would make changing that selection invalidate saved
+    workflows — exactly what §24.1 rule 2 forbids. Only a node type with no
+    provider field at all falls through to the domain selection.
     """
-    resolver = _RESOLVERS.get(source)
-    if resolver is None:
+    spec = ASYNC_OPTION_SOURCES.get(source)
+    if spec is None or "provider" not in spec.context:
         return None
-    try:
-        return resolver()
-    except Exception as exc:  # data source unavailable — never a 500
-        logger.warning("option source {} failed: {}", source, exc)
-        raise RuntimeError(f"Option source {source} is unavailable") from exc
+    for field_name in PROVIDER_CONFIG_FIELDS:
+        value = (configuration or {}).get(field_name)
+        if value is None:
+            value = ((fields or {}).get(field_name) or {}).get("default")
+        if isinstance(value, str) and value:
+            return {"provider": value}
+    return None
+
+
+__all__ = [
+    "EXPORT_PROFILES",
+    "OptionContext",
+    "OptionContextError",
+    "allowed_option_values",
+    "build_context",
+    "clear_option_cache",
+    "config_option_context",
+    "invalidate_discovery_cache",
+    "invalidate_settings_cache",
+    "resolve_options",
+]

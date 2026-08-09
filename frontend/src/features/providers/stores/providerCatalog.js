@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { api } from '@/shared/api/client.js'
 import { apiErrorText } from '@/shared/api/errors.js'
+import { invalidateOptionSources } from '@/shared/composables/useOptionSources.js'
 import { AVAILABLE, UNAVAILABLE } from '../availability.js'
 
 /**
@@ -227,6 +228,10 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
 
     // The server answers with the canonical id — an alias is never stored.
     applySelection(domain, result)
+    // Any dropdown resolved against this domain now has a different answer: a
+    // context-free caller follows the selection (§23.4). Keeping the old list
+    // is how one provider's voices end up offered for another provider's node.
+    invalidateOptionSources({ domain })
     return {
       switched: true,
       availability: result.availability,
@@ -261,12 +266,37 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     const result = await api.put(`${CATALOG_URL}/${domain}/${providerId}/settings`, {
       body: settings,
     })
+    // Changing an API key changes what the provider can offer (§23.4).
+    invalidateOptionSources({ domain })
     await refresh()
     return result
   }
 
   function validateProviderSettings(domain, providerId, settings = {}) {
     return api.post(`${CATALOG_URL}/${domain}/${providerId}/validate`, { body: settings })
+  }
+
+  // ── Unsaved drafts (one per provider, never containing a secret) ────────
+
+  /**
+   * Editing provider A, switching to B to compare, and coming back must not
+   * silently discard A's edits — so a draft is keyed by provider and outlives
+   * the modal. Secrets are stripped by the caller before they get here (§22.6).
+   */
+  const drafts = ref({})
+
+  function draftFor(domain, providerId) {
+    return drafts.value[healthKey(domain, providerId)] || null
+  }
+
+  function setDraft(domain, providerId, values) {
+    drafts.value = { ...drafts.value, [healthKey(domain, providerId)]: { ...values } }
+  }
+
+  function clearDraft(domain, providerId) {
+    const next = { ...drafts.value }
+    delete next[healthKey(domain, providerId)]
+    drafts.value = next
   }
 
   // ── Developer hot reload ───────────────────────────────────────────────
@@ -316,6 +346,10 @@ export const useProviderCatalogStore = defineStore('providerCatalog', () => {
     getProviderSettings,
     saveProviderSettings,
     validateProviderSettings,
+    drafts,
+    draftFor,
+    setDraft,
+    clearDraft,
     watchCatalogReloads,
     closeCatalogReloads,
   }

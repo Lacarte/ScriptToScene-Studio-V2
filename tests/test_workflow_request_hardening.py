@@ -146,11 +146,11 @@ class OptionValueValidationTests(unittest.TestCase):
 
     def test_unavailable_source_fails_open(self):
         # A missing provider must never block saving — only bad values do.
-        def _boom():
+        def _boom(_ctx):
             raise RuntimeError("provider offline")
 
-        workflow_options._VALUE_CACHE.clear()
-        self.addCleanup(workflow_options._VALUE_CACHE.clear)
+        workflow_options.clear_option_cache()
+        self.addCleanup(workflow_options.clear_option_cache)
         with patch.dict(workflow_options._RESOLVERS, {"export_profiles": _boom}):
             problems = validation_errors(
                 validate_workflow(_export_workflow("anything_goes"), require_identity=False)
@@ -160,7 +160,7 @@ class OptionValueValidationTests(unittest.TestCase):
         ))
 
     def test_non_string_option_value_is_rejected(self):
-        workflow_options._VALUE_CACHE.clear()
+        workflow_options.clear_option_cache()
         problems = validation_errors(
             validate_workflow(_export_workflow(True), require_identity=False)
         )

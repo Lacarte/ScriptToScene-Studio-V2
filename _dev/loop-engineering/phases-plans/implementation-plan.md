@@ -1457,6 +1457,102 @@ changes; unknown sources and unvalidated context are still rejected server-side;
 echoed; switching providers preserves each provider's unsaved non-secret draft independently; health
 and validation feedback name the provider; and no provider ID appears in component control flow.
 
+#### Step 12.2 review status — 2026-08-09
+
+- **Complete.** `ASYNC_OPTION_SOURCES` is now the §23.1 dict of `OptionSourceSpec`
+  (`registry.py:29-72`) with ten entries — the three new `*_providers` sources
+  (`script`, `scene_blueprint`, `tts`) join the two that existed. Every consumer used
+  `set(...)` or `in`, so the module-level parity assert and
+  `test_workflow_options.test_resolver_table_matches_allowlist` survive untouched, as the
+  contract predicted. A second assert checks every spec's cache policy.
+- D16 is closed. `options.py` is rewritten around `OptionContext`: `build_context()` validates
+  the query string against the source's own `context` tuple, rejects any other parameter,
+  resolves `domain` through `DOMAINS`, normalizes `provider` through id-then-alias to the
+  canonical id, checks `node_type` against the registry and `project_id` through
+  `sanitize_project_id`, and fills an omitted `domain`/`provider` from the source's scope and
+  the §24.1 selection chain — which is what keeps every existing context-free caller working.
+  The response carries `{source, context, options, generated_at}`.
+- D17 is closed: `OPTION_CONTEXT_INVALID` is added to the §7 list in `contracts.md`, exactly
+  the additive change §23.3 authorizes.
+- P32 is closed. `_provider_options` reads the domain off the spec, so one resolver serves all
+  five `*_providers` sources and a sixth domain is a spec entry with no code. The old function
+  branched on `storyboard` vs `animator` and could serve nothing else.
+- The cache is the §23.4 replacement: keyed `(source, normalized_context)`, LRU-bounded at 64
+  entries **per source**, `static` for process lifetime, `discovery` dropped by
+  `hub.reload()` through the dev reloader, `settings` given a 300 s TTL **and** dropped for one
+  domain by `PUT /api/providers/<d>/<p>/settings` and `PUT /api/providers/<d>/selection`.
+  Failures are never cached, so an unreachable provider is retried rather than remembered as
+  empty.
+- **Adjustment recorded — `tts_voices` is per-provider from metadata, not from provider code.**
+  §23 needs the source to answer differently per provider, but constructing a TTS provider to
+  ask it can load an ONNX model, which a dropdown must never pay for. `_provider_voice_options`
+  therefore reads the provider's own `settings_schema()` `voice.ui.options` — pure metadata,
+  no `create()`, no network — and falls back to the local engine list when a provider declares
+  none. Kokoro and Inworld already declare disjoint lists, so the shipped source is per-provider
+  today and 15.2 inherits a working mechanism instead of building one. A new TTS provider gets
+  its voices into the node dropdown by declaring them, with no edit here (§26).
+- **Adjustment recorded — a scoped source rejects a foreign domain.** §23.1 lists `domain` in
+  `tts_voices`'s context tuple; left literal, `tts_voices?domain=storyboard` would resolve and
+  the client could cache and save the result. An explicit `domain` must now equal the spec's
+  scope.
+- **Defect found and fixed — save-time validation followed the global selection.** Wiring
+  context in immediately broke 17 existing tests: a saved `tts.generate` with no explicit
+  `engine` had its `voice` validated against whatever provider was globally selected, so
+  switching the selection invalidated saved workflows — precisely what §24.1 rule 2 forbids.
+  `config_option_context()` now resolves the node's provider field **including its schema
+  default** (`provider_id`, then the legacy `provider`/`engine` of §40.1), and only a node type
+  with no provider field at all defers to the selection.
+- **Adjustment recorded — 12.2 implements the settings renderer that D18/§22.3 assign to 12.4.**
+  The step text explicitly names `ProviderSettingsForm.vue` and "conditional visibility", and
+  15.2 depends on `ui.options_source` reaching a real widget. `ProviderSettingsForm.vue` is
+  rewritten to render the whole frozen §22.2 vocabulary — including `textarea` — plus
+  `ui.show_if`, `ui.options`/`ui.options_source` (source wins), descriptions, per-field issues
+  with severity, and required marks taken from `schema.required` rather than from "is a
+  password", which the old form got wrong. 12.4 now only has to adopt the component on the
+  legacy pages.
+- **Adjustment recorded — an absent `ui.type` on a boolean renders a toggle.** §22.2's literal
+  fallback is a text input, but a text input can only produce a string and
+  `validate_against_schema` rejects that for a `boolean` property, so such a field could never
+  hold a legal value. A property that declares options likewise renders as a dropdown without
+  spelling `ui.type`.
+- **Adjustment recorded — "reuse `ConfigField.vue` primitives" is honored as shared rules, not
+  a shared widget.** The two schemas are different shapes (node `config_schema` vs the
+  JSON-Schema subset) and ConfigField has no password/slider/toggle widget, so reusing it
+  literally would have lost secret handling. Instead the two *rules* are now shared and cannot
+  drift: `shared/schema/visibility.js` is the single AND-across-keys/OR-within-list
+  implementation behind both `display_options` and `ui.show_if`, and
+  `shared/composables/useOptionSources.js` (moved out of the workflow feature) is the single
+  option-source client behind both. A test asserts the two spellings give the same answer.
+- Secret write behavior is driven by the sentinel itself rather than a local "am I editing
+  this" flag: a field holding `"***"` renders as *Saved — hidden* with a **Replace** action,
+  and **Keep current** restores the sentinel. The two can therefore never disagree with what
+  the server will do with the value, and a parent reset restores the masked display for free.
+- Unsaved drafts live in the catalog store keyed by `(domain, provider_id)` and pass through
+  `withoutSecrets()`, so switching providers to compare two configurations loses neither and a
+  typed credential never outlives the modal. A test asserts a typed secret appears nowhere in
+  the stored draft.
+- **Defect found and fixed in the 12.1 modal.** Its `watch(() => props.visible)` was
+  change-only, but `SettingsPage` guards the modal with `v-if` *and* passes `visible` already
+  true — so the watcher never fired and the modal rendered against a null schema. It is now
+  `immediate`. The draft watcher also recorded edits under the provider being switched *to*;
+  it now takes the previous identity explicitly.
+- The selector gained an explicit health probe (still zero I/O at rest, §21.5), capability
+  badges, and provider-named status text; the modal gained capability badges, the manifest
+  `description`, and `docs_url`/`open_url` links — all from `public_dict()`. Every health and
+  validation message now names the provider, because three selectors share one page.
+- P47 is closed early: the Settings About row compared the legacy selection key against the
+  literals `inworld`/`kokoro`; it reads the catalog label now. A test walks every provider
+  component and shared schema helper and fails on any shipped provider id, which is the
+  automated form of the step's last acceptance criterion.
+- Verification passes with 585 backend tests (10 live-provider tests skipped, 219 subtests),
+  226 frontend tests across 31 files, the Vite production build, and generated-document drift
+  checks. Two guards were mutation-checked: collapsing the cache key to the bare source and
+  disabling the context allowlist each fail their tests.
+- **Deferred as already assigned:** converting the five nodes to `provider_id` +
+  `provider_options` and retiring the `engine` static list and `display_options.show.provider`
+  gating (P26/P27, 12.3); adopting this selector/renderer on the legacy pages and retiring
+  `useSettings.DEFAULTS` (P35, 12.4/16.1); live per-provider voice lists (15.2).
+
 ### 12.3 Provider-aware generic node configuration
 Add a generic provider field/schema primitive keyed only by `provider_domain`. Convert the **five**
 provider-backed nodes — `story.generate`, `scenes.blueprint`, `tts.generate`, `storyboard.generate`,

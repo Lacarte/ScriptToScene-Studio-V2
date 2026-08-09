@@ -1,8 +1,9 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { apiErrorText } from '@/shared/api/errors.js'
+import { withoutSecrets } from '@/shared/schema/providerSettings.js'
 import { useProviderCatalogStore } from '../stores/providerCatalog.js'
-import { healthInfo, toneColor } from '../availability.js'
+import { availabilityInfo, healthInfo, toneColor } from '../availability.js'
 
 const props = defineProps({
   domain: { type: String, required: true },
@@ -12,8 +13,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'saved'])
 
-// The schema, the label, and the health vocabulary all come from the catalog —
-// this modal knows nothing about any particular provider.
+// The schema, the label, the capabilities, the links, and the health vocabulary
+// all come from the catalog — this modal knows nothing about any provider.
 const catalog = useProviderCatalogStore()
 
 const loading = ref(false)
@@ -27,7 +28,28 @@ const loadError = ref('')
 const testResult = ref(null)
 const originalData = ref({})
 
-const isValid = computed(() => errors.value.filter(e => e.severity === 'error').length === 0)
+const providerName = computed(() => manifest.value?.label || props.providerId)
+const blockingIssues = computed(() => errors.value.filter((e) => e.severity === 'error'))
+const isValid = computed(() => blockingIssues.value.length === 0)
+const isDirty = computed(
+  () => JSON.stringify(formData.value) !== JSON.stringify(originalData.value),
+)
+
+/** Declared capabilities, as badges. Purely manifest metadata (§20.4). */
+const capabilities = computed(() =>
+  Object.entries(manifest.value?.capabilities || {})
+    .filter(([, enabled]) => enabled === true)
+    .map(([name]) => name)
+    .sort(),
+)
+
+const availability = computed(() => availabilityInfo(manifest.value?.availability))
+const links = computed(() =>
+  [
+    { label: 'Documentation', url: manifest.value?.docs_url },
+    { label: 'Open provider', url: manifest.value?.open_url },
+  ].filter((link) => Boolean(link.url)),
+)
 
 async function loadProviderData() {
   loading.value = true
@@ -36,24 +58,47 @@ async function loadProviderData() {
     const data = await catalog.getProviderSettings(props.domain, props.providerId)
     schema.value = data.schema
     manifest.value = data.manifest
-    formData.value = { ...data.settings }
     originalData.value = { ...data.settings }
+    // An unsaved draft from an earlier visit wins over the stored values, so
+    // switching providers to compare two configurations loses neither. Secrets
+    // are never part of a draft (§22.6), so they always come from the server.
+    const draft = catalog.draftFor(props.domain, props.providerId)
+    formData.value = { ...data.settings, ...(draft || {}) }
     errors.value = []
     testResult.value = null
   } catch (e) {
-    loadError.value = apiErrorText(e, 'Failed to load provider settings')
+    loadError.value = apiErrorText(e, `Failed to load ${providerName.value} settings`)
   } finally {
     loading.value = false
   }
 }
 
+/**
+ * Remember the non-secret edits so this provider's draft survives a switch.
+ * The provider is passed in: by the time the watcher runs, the props already
+ * name the provider being switched *to*.
+ */
+function rememberDraft(domain, providerId) {
+  if (!isDirty.value) {
+    catalog.clearDraft(domain, providerId)
+    return
+  }
+  catalog.setDraft(domain, providerId, withoutSecrets(formData.value, schema.value))
+}
+
 async function validateForm() {
   try {
-    const result = await catalog.validateProviderSettings(props.domain, props.providerId, formData.value)
+    const result = await catalog.validateProviderSettings(
+      props.domain, props.providerId, formData.value,
+    )
     errors.value = result.issues || []
     return result.valid
   } catch (e) {
-    errors.value = [{ field: 'root', severity: 'error', message: apiErrorText(e, 'Validation failed') }]
+    errors.value = [{
+      field: 'root',
+      severity: 'error',
+      message: apiErrorText(e, `Could not validate ${providerName.value} settings`),
+    }]
     return false
   }
 }
@@ -65,22 +110,33 @@ async function handleSave() {
   saving.value = true
   try {
     await catalog.saveProviderSettings(props.domain, props.providerId, formData.value)
-    emit('saved', { domain: props.domain, providerId: props.providerId, settings: formData.value })
+    catalog.clearDraft(props.domain, props.providerId)
+    emit('saved', { domain: props.domain, providerId: props.providerId })
     emit('close')
   } catch (e) {
-    errors.value = [{ field: 'root', severity: 'error', message: apiErrorText(e, 'Failed to save settings') }]
+    errors.value = [{
+      field: 'root',
+      severity: 'error',
+      message: apiErrorText(e, `Failed to save ${providerName.value} settings`),
+    }]
   } finally {
     saving.value = false
   }
 }
 
+/** Probe the candidate settings without saving them (§21.5). */
 async function handleTest() {
   testing.value = true
   testResult.value = null
   try {
-    testResult.value = await catalog.testProvider(props.domain, props.providerId, formData.value)
+    testResult.value = await catalog.testProvider(
+      props.domain, props.providerId, formData.value,
+    )
   } catch (e) {
-    testResult.value = { status: 'fail', message: apiErrorText(e, 'Test failed') }
+    testResult.value = {
+      status: 'fail',
+      message: apiErrorText(e, `${providerName.value} could not be reached`),
+    }
   } finally {
     testing.value = false
   }
@@ -88,19 +144,30 @@ async function handleTest() {
 
 function handleReset() {
   formData.value = { ...originalData.value }
+  catalog.clearDraft(props.domain, props.providerId)
   errors.value = []
   testResult.value = null
 }
 
 function handleCancel() {
+  rememberDraft(props.domain, props.providerId)
   emit('close')
 }
 
-watch(() => props.visible, (val) => {
-  if (val) {
-    loadProviderData()
-  }
-})
+// `immediate` matters: the modal is created with `visible` already true (the
+// page guards it with `v-if`), so a change-only watcher would never fire and
+// the form would render against a null schema.
+watch(
+  () => [props.visible, props.providerId, props.domain],
+  ([visible], previous) => {
+    // Leaving a provider keeps its draft; arriving at one restores it.
+    if (previous?.[0] && (!visible || previous[1] !== props.providerId)) {
+      rememberDraft(previous[2], previous[1])
+    }
+    if (visible) loadProviderData()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -108,59 +175,90 @@ watch(() => props.visible, (val) => {
     <div v-if="visible" class="modal-overlay" @click.self="handleCancel">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>Configure {{ manifest?.label || providerId }}</h3>
+          <div class="header-main">
+            <h3>Configure {{ providerName }}</h3>
+            <span
+              class="availability-pill"
+              :style="{ color: toneColor(availability.tone) }"
+            >{{ availability.label }}</span>
+          </div>
           <button class="close-btn" @click="handleCancel">&times;</button>
         </div>
 
         <div class="modal-body">
-          <div v-if="loading" class="loading-state">
-            Loading...
-          </div>
+          <div v-if="loading" class="loading-state">Loading…</div>
 
-          <div v-else-if="loadError" class="validation-banner error">
-            <span>⚠️</span>
-            <span>{{ loadError }}</span>
-          </div>
+          <template v-else>
+            <p v-if="manifest?.description" class="provider-description">
+              {{ manifest.description }}
+            </p>
 
-          <div v-else-if="errors.length" class="validation-banner error">
-            <span>⚠️</span>
-            <span>This provider needs configuration before it can be used.</span>
-          </div>
+            <div v-if="capabilities.length" class="capability-badges">
+              <span v-for="name in capabilities" :key="name" class="badge">{{ name }}</span>
+            </div>
 
-          <div
-            v-if="testResult"
-            class="test-result"
-            :style="{ borderColor: toneColor(healthInfo(testResult.status).tone) }"
-          >
-            <span
-              class="status-dot"
-              :style="{ background: toneColor(healthInfo(testResult.status).tone) }"
-            ></span>
-            <span>{{ testResult.message || healthInfo(testResult.status).label }}</span>
-            <span v-if="testResult.latency_ms">({{ testResult.latency_ms }}ms)</span>
-          </div>
+            <p v-if="links.length" class="provider-links">
+              <a
+                v-for="link in links"
+                :key="link.url"
+                :href="link.url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ link.label }}</a>
+            </p>
 
-          <slot
-            name="form"
-            :formData="formData"
-            :schema="schema"
-            :errors="errors"
-            :updateField="(key, val) => formData[key] = val"
-          />
+            <div v-if="loadError" class="validation-banner error">
+              <span>⚠️</span>
+              <span>{{ loadError }}</span>
+            </div>
+
+            <div v-else-if="blockingIssues.length" class="validation-banner error">
+              <span>⚠️</span>
+              <span>{{ providerName }} needs configuration before it can be used.</span>
+            </div>
+
+            <div
+              v-if="testResult"
+              class="test-result"
+              :style="{ borderColor: toneColor(healthInfo(testResult.status).tone) }"
+            >
+              <span
+                class="status-dot"
+                :style="{ background: toneColor(healthInfo(testResult.status).tone) }"
+              ></span>
+              <span>
+                {{ providerName }}:
+                {{ testResult.message || healthInfo(testResult.status).label }}
+              </span>
+              <span v-if="testResult.latency_ms">({{ testResult.latency_ms }}ms)</span>
+            </div>
+
+            <slot
+              name="form"
+              :formData="formData"
+              :schema="schema"
+              :errors="errors"
+              :domain="domain"
+              :providerId="providerId"
+              :updateField="(key, val) => (formData[key] = val)"
+            />
+          </template>
         </div>
 
         <div class="modal-footer">
-          <button class="btn btn-secondary" @click="handleReset" :disabled="saving || testing">
+          <button
+            class="btn btn-secondary"
+            :disabled="saving || testing || !isDirty"
+            @click="handleReset"
+          >
             Reset
           </button>
-          <button class="btn btn-secondary" @click="handleTest" :disabled="saving || testing">
-            {{ testing ? 'Testing...' : 'Test Connection' }}
+          <button class="btn btn-secondary" :disabled="saving || testing" @click="handleTest">
+            {{ testing ? 'Testing…' : 'Test connection' }}
           </button>
-          <button class="btn btn-secondary" @click="handleCancel">
-            Cancel
-          </button>
-          <button class="btn btn-primary" @click="handleSave" :disabled="saving || !isValid">
-            {{ saving ? 'Saving...' : 'Save' }}
+          <button class="btn btn-secondary" @click="handleCancel">Cancel</button>
+          <button class="btn btn-primary" :disabled="saving || !isValid" @click="handleSave">
+            {{ saving ? 'Saving…' : 'Save' }}
           </button>
         </div>
       </div>
@@ -184,7 +282,7 @@ watch(() => props.visible, (val) => {
   border: 1px solid var(--border, #3f3f46);
   border-radius: 12px;
   width: 90%;
-  max-width: 500px;
+  max-width: 520px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -198,10 +296,20 @@ watch(() => props.visible, (val) => {
   border-bottom: 1px solid var(--border, #3f3f46);
 }
 
+.header-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
 .modal-header h3 {
   margin: 0;
   font-size: 18px;
   color: var(--text, #e5e5e5);
+}
+
+.availability-pill {
+  font-size: 12px;
 }
 
 .close-btn {
@@ -222,6 +330,39 @@ watch(() => props.visible, (val) => {
   padding: 20px;
   overflow-y: auto;
   flex: 1;
+}
+
+.provider-description {
+  font-size: 13px;
+  color: var(--text-secondary, #9ca3af);
+  margin: 0 0 12px;
+}
+
+.capability-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated, #2a2a2f);
+  border: 1px solid var(--border, #3f3f46);
+  color: var(--text-secondary, #9ca3af);
+}
+
+.provider-links {
+  display: flex;
+  gap: 14px;
+  margin: 0 0 16px;
+  font-size: 12px;
+}
+
+.provider-links a {
+  color: var(--accent, #4ECDC4);
 }
 
 .modal-footer {

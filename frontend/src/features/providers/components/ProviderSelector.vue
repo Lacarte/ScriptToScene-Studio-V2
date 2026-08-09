@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useProviderCatalogStore } from '../stores/providerCatalog.js'
 import { availabilityInfo, healthInfo, isSelectable, toneColor } from '../availability.js'
 
@@ -12,11 +12,16 @@ const props = defineProps({
 const emit = defineEmits(['select', 'configure'])
 
 // Everything rendered here comes from the catalog: the list, the labels, the
-// state, and the selection. No provider id appears in this component.
+// state, the capabilities, and the selection. No provider id appears in this
+// component.
 const catalog = useProviderCatalogStore()
 
+const probing = ref(false)
+
 const providerList = computed(() => catalog.catalogEntriesFor(props.domain))
-const selectedId = computed(() => catalog.selectedProvider(props.domain)?.id || '')
+const selected = computed(() => catalog.selectedProvider(props.domain))
+const selectedId = computed(() => selected.value?.id || '')
+const selectedName = computed(() => selected.value?.label || selectedId.value)
 const availability = computed(
   () => catalog.resolveProvider(props.domain, selectedId.value)?.availability,
 )
@@ -29,6 +34,20 @@ const status = computed(() =>
 )
 const needsAttention = computed(() => status.value.tone !== 'ok')
 
+/** Capabilities the selected provider declares, straight from the manifest. */
+const capabilities = computed(() =>
+  Object.entries(selected.value?.capabilities || {})
+    .filter(([, enabled]) => enabled === true)
+    .map(([name]) => name)
+    .sort(),
+)
+
+// Feedback names the provider it is about: three selectors share this page and
+// "Health check failed" alone says nothing about which one failed.
+const statusText = computed(() =>
+  `${selectedName.value}: ${probed.value?.message || status.value.label}`,
+)
+
 async function onSelect(event) {
   const providerId = event.target.value
   const result = await catalog.selectProvider(props.domain, providerId)
@@ -37,6 +56,15 @@ async function onSelect(event) {
     emit('configure', { domain: props.domain, providerId })
   } else {
     emit('select', { domain: props.domain, providerId })
+  }
+}
+
+async function checkHealth() {
+  probing.value = true
+  try {
+    await catalog.checkHealth(props.domain, selectedId.value)
+  } finally {
+    probing.value = false
   }
 }
 
@@ -82,13 +110,23 @@ watch(() => props.domain, () => catalog.loadCatalog(), { immediate: true })
             <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l-1.42-1.42"/>
           </svg>
         </button>
-        <span
-          class="health-dot"
-          :style="{ background: toneColor(status.tone) }"
-          :title="status.label"
-        />
+        <button
+          class="health-btn"
+          :disabled="!selectedId || probing"
+          :title="`Check ${selectedName}`"
+          @click="checkHealth"
+        >
+          <span class="health-dot" :style="{ background: toneColor(status.tone) }" />
+          <span class="health-text">{{ probing ? 'Checking…' : status.label }}</span>
+        </button>
       </div>
     </div>
+    <p v-if="capabilities.length" class="selector-capabilities">
+      <span v-for="name in capabilities" :key="name" class="badge">{{ name }}</span>
+    </p>
+    <p v-if="probed" class="selector-status" :style="{ color: toneColor(status.tone) }">
+      {{ statusText }}
+    </p>
     <p v-if="catalog.error" class="selector-error">{{ catalog.error }}</p>
   </div>
 </template>
@@ -182,10 +220,58 @@ watch(() => props.domain, () => catalog.loadCatalog(), { immediate: true })
   border-color: var(--accent-warning, #f59e0b);
 }
 
+.health-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #3f3f46);
+  border-radius: 6px;
+  background: var(--bg-surface, #1f1f23);
+  color: var(--text-secondary, #9ca3af);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.health-btn:hover:not(:disabled) {
+  background: var(--bg-surface-hover, #3a3a3f);
+  color: var(--text, #e5e5e5);
+}
+
+.health-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .health-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.health-text {
+  white-space: nowrap;
+}
+
+.selector-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated, #2a2a2f);
+  border: 1px solid var(--border, #3f3f46);
+  color: var(--text-secondary, #9ca3af);
+}
+
+.selector-status {
+  font-size: 12px;
+  margin: 6px 0 0;
 }
 </style>

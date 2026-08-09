@@ -20,6 +20,7 @@ from studio.security import is_loopback_remote
 from studio.shared.providers_common import hub, settings_manager
 from studio.shared.providers_common.domains import DOMAINS
 from studio.workflows.dev_reload import dev_reload_enabled
+from studio.workflows.options import invalidate_settings_cache
 
 providers_bp = Blueprint("providers", __name__)
 
@@ -289,6 +290,9 @@ def put_provider_settings(domain, provider_id):
         return _error("SETTINGS_INVALID", "Validation failed", 400, {"issues": issues})
 
     settings_manager.set_provider_settings(domain, provider.id, merged)
+    # Options that depend on settings must refetch — changing an API key changes
+    # what the provider can offer (contracts.md §23.4).
+    invalidate_settings_cache(domain)
     return jsonify({
         "ok": True,
         "issues": issues,
@@ -331,6 +335,9 @@ def put_domain_selection(domain):
     stored = settings_manager.get_provider_settings(domain, provider.id)
     # Always the canonical id — an alias is never written to settings (§19.3).
     settings_manager.set_selected_provider(domain, provider.id)
+    # A context-free caller resolves options against the selection, so the old
+    # provider's answers must not survive the switch (§23.4).
+    invalidate_settings_cache(domain)
     return jsonify({
         "domain": domain,
         "selected": provider.id,

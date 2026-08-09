@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from .expressions import is_expression, validate_expressions
-from .options import allowed_option_values
+from .options import allowed_option_values, config_option_context
 from .registry import DYNAMIC_PORT_TYPES, get_node_type, is_supported
 from .sample_data import validate_stub_payload
 
@@ -282,9 +282,13 @@ def _validate_config(
                     problems.append(_problem("WORKFLOW_INVALID", "value is not an allowed option", field_path))
             elif source:
                 # Async sources resolve through the backend allowlist only
-                # (step 6.3). None = source unavailable right now: fail open
-                # so a missing provider never blocks saving.
-                allowed = allowed_option_values(source)
+                # (step 6.3). A context-sensitive source is resolved against the
+                # provider saved in *this* node, never a union across providers
+                # (§23.3). None = source unavailable right now: fail open so a
+                # missing provider never blocks saving.
+                allowed = allowed_option_values(
+                    source, config_option_context(source, config, fields)
+                )
                 if allowed is not None and (not isinstance(value, str) or value not in allowed):
                     problems.append(_problem("WORKFLOW_INVALID", "value is not an allowed option", field_path))
         elif widget == "json":

@@ -8,6 +8,7 @@ field, which is never serialized.
 """
 
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 from pathlib import Path
 
@@ -25,13 +26,50 @@ PORT_TYPES = [
 # Data types a dynamic port (workflow.output, stub.*) may resolve to.
 DYNAMIC_PORT_TYPES = [t for t in PORT_TYPES if t != "control"]
 
-# contracts.md §11 — backend-approved async option sources. `caption_presets`
+@dataclass(frozen=True)
+class OptionSourceSpec:
+    """One allowlisted async option source (contracts.md §23.1).
+
+    ``context`` is the allowlist of query parameters the source accepts; any
+    other parameter is rejected rather than ignored, because silently dropping a
+    misspelling resolves options for the wrong provider. ``cache`` picks the
+    invalidation policy in ``options.py``. ``domain`` scopes the source to one
+    provider domain: it is the default for an omitted ``domain`` parameter, and
+    it is what lets one resolver serve all five ``*_providers`` sources.
+    """
+
+    context: tuple[str, ...] = ()
+    cache: str = "static"
+    domain: str | None = None
+
+
+# Cache policies (contracts.md §23.4): process lifetime, invalidated on provider
+# discovery and dev reload, or TTL plus explicit invalidation on a settings or
+# selection write.
+CACHE_POLICIES = frozenset({"static", "discovery", "settings"})
+
+# contracts.md §11/§23.1 — backend-approved async option sources. `caption_presets`
 # reconciles §2 (captions.generate: "approved preset id") with the allowlist.
-ASYNC_OPTION_SOURCES = [
-    "tts_voices", "story_tones", "style_templates",
-    "storyboard_providers", "animator_providers", "export_profiles",
-    "caption_presets",
-]
+ASYNC_OPTION_SOURCES = {
+    "tts_voices": OptionSourceSpec(
+        context=("domain", "provider"), cache="settings", domain="tts"
+    ),
+    "script_providers": OptionSourceSpec(cache="discovery", domain="script"),
+    "scene_blueprint_providers": OptionSourceSpec(
+        cache="discovery", domain="scene_blueprint"
+    ),
+    "tts_providers": OptionSourceSpec(cache="discovery", domain="tts"),
+    "storyboard_providers": OptionSourceSpec(cache="discovery", domain="storyboard"),
+    "animator_providers": OptionSourceSpec(cache="discovery", domain="animator"),
+    "story_tones": OptionSourceSpec(),
+    "style_templates": OptionSourceSpec(),
+    "export_profiles": OptionSourceSpec(),
+    "caption_presets": OptionSourceSpec(),
+}
+
+assert all(spec.cache in CACHE_POLICIES for spec in ASYNC_OPTION_SOURCES.values()), (
+    "unknown option-source cache policy"
+)
 
 CATEGORIES = {
     "input":   {"label": "Input",   "color": "#4ECDC4"},

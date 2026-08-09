@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useOptionSource } from '../composables/useOptionSources.js'
+import { useOptionSource } from '@/shared/composables/useOptionSources.js'
 import MediaAssetField from './MediaAssetField.vue'
 import { isExpressionValue } from '../expressions.js'
 
