@@ -225,6 +225,11 @@ class JobStatus:
 SCENE_DONE = frozenset({"ready", "done"})
 SCENE_FAILED = frozenset({"error", "failed"})
 
+# `gemini_ws.py:396-398` writes a job-level completion marker into the per-scene
+# map under key "-1". It is not a unit: counting it inflated both `total` and
+# `ready`, which every legacy counter excludes by hand (`routes.py:389-391`).
+SCENE_SENTINEL_KEY = "-1"
+
 
 def status_from_scenes(job_id: str, scenes: Mapping[str, Any]) -> JobStatus:
     """Derive a `JobStatus` from a persisted per-scene status map.
@@ -235,7 +240,8 @@ def status_from_scenes(job_id: str, scenes: Mapping[str, Any]) -> JobStatus:
     """
     entries = [
         entry if isinstance(entry, Mapping) else {}
-        for entry in (scenes or {}).values()
+        for key, entry in (scenes or {}).items()
+        if str(key) != SCENE_SENTINEL_KEY
     ]
     total = len(entries)
     ready = sum(1 for entry in entries if entry.get("status") in SCENE_DONE)
@@ -387,6 +393,7 @@ __all__ = [
     "POLL_JITTER",
     "SCENE_DONE",
     "SCENE_FAILED",
+    "SCENE_SENTINEL_KEY",
     "status_from_scenes",
     "PUSH_WATCHDOG_INTERVAL_S",
     "RUNNING",

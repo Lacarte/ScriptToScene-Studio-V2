@@ -37,7 +37,6 @@ from studio.io_utils import safe_json_read, safe_json_write
 from studio.shared.providers_common.boundary import Deadline, wrap_exception
 from studio.shared.providers_common.errors import (
     PROVIDER_NOT_FOUND,
-    PROVIDER_TIMEOUT,
     PROVIDER_UNIT_FAILED,
     ProviderCancelled,
     ProviderError,
@@ -68,7 +67,6 @@ from studio.shared.providers_common.results import (
     ProviderResult,
     UnitResult,
     dedupe_refs,
-    derive_status,
 )
 
 
@@ -84,7 +82,8 @@ RECORD_FILENAME = "media_job.json"
 class AsyncMediaProvider(Protocol):
     """The minimum a provider must implement for the media-job service.
 
-    Matches the fixture_async / Contract v2 shape used by 14.2/14.3.
+    This is the Provider Contract v2 async shape the visual providers adopt in
+    14.2 / 14.3.
     """
 
     def submit(self, request: Any, invocation: ProviderInvocation) -> JobHandle: ...
@@ -969,6 +968,11 @@ def _request_total(
 ) -> int:
     """Best-effort total for the initial status; poll may raise it once later."""
     indices: list[int] = [unit.unit_index for unit in prior]
+    if isinstance(request, Mapping) and "unit_count" in request:
+        # An explicit count always wins: the index heuristic below guesses
+        # `max + 1`, which over-counts whenever the caller's unit indices are
+        # sparse — a filtered scene list is exactly that case.
+        return max(int(request["unit_count"]), len(indices))
     if isinstance(request, list):
         indices.extend(_request_unit_index(item) for item in request)
     elif isinstance(request, Mapping):
@@ -976,12 +980,6 @@ def _request_total(
             if isinstance(request.get(key), list):
                 indices.extend(_request_unit_index(item) for item in request[key])
                 break
-        else:
-            if "unit_count" in request:
-                return max(
-                    int(request["unit_count"]),
-                    (max(indices) + 1) if indices else 0,
-                )
     indices = [index for index in indices if index >= 0]
     if not indices:
         if isinstance(request, list):
@@ -1000,6 +998,17 @@ def _request_total(
 # the orchestration itself stays domain-free.
 
 
+def _legacy_ref(value: Any) -> str:
+    """Turn a legacy `/output/...` web path into a managed relative ref (§31.2).
+
+    Persisted job records must not carry absolute paths; the legacy stores write
+    browser-facing `/output/<domain>/...` strings, which is what the storyboard
+    adapter already strips by hand before recording artifacts.
+    """
+    ref = str(value or "").replace("\\", "/")
+    return ref.removeprefix("/output/").removeprefix("output/").lstrip("/")
+
+
 def legacy_progress(status: JobStatus) -> dict[str, int]:
     """The `{ready, total}` shape both SSE frames and legacy status routes share."""
     return {"ready": int(status.ready), "total": int(status.total)}
@@ -1013,14 +1022,18 @@ def units_from_legacy_scenes(
     Accepts both storyboard (`ready`/`done`/`error`/`failed`) and animator
     (`ready`/`error`) vocabularies so adapters do not need a domain branch.
     """
-    from studio.shared.providers_common.jobs import SCENE_DONE, SCENE_FAILED
+    from studio.shared.providers_common.jobs import (
+        SCENE_DONE,
+        SCENE_FAILED,
+        SCENE_SENTINEL_KEY,
+    )
 
     units: list[UnitResult] = []
     for key, entry in sorted(
         (scene_statuses or {}).items(),
         key=lambda item: int(item[0]) if str(item[0]).lstrip("-").isdigit() else 0,
     ):
-        if str(key) == "-1":
+        if str(key) == SCENE_SENTINEL_KEY:
             continue
         if not isinstance(entry, Mapping):
             continue
@@ -1034,12 +1047,12 @@ def units_from_legacy_scenes(
             for field_name in ("local_path", "local_files", "path"):
                 value = entry.get(field_name)
                 if isinstance(value, str) and value:
-                    # Prefer a relative managed ref when the legacy path is absolute.
-                    refs.append(value.replace("\\", "/"))
+                    refs.append(_legacy_ref(value))
                     break
                 if isinstance(value, list):
-                    refs.extend(str(item).replace("\\", "/") for item in value if item)
+                    refs.extend(_legacy_ref(item) for item in value if item)
                     break
+            refs = [ref for ref in refs if ref]
             units.append(
                 UnitResult(
                     unit_index=index,

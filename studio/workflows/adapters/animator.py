@@ -1,15 +1,8 @@
 import os
-import time
 from config import ANIMATOR_DIR
-from studio.io_utils import now_iso, safe_json_read
-from studio.shared.providers_common.errors import (
-    PROVIDER_TIMEOUT,
-    ProviderCancelled,
-    ProviderError,
-)
+from studio.io_utils import now_iso
 from .common import (
     AdapterError,
-    context_value,
     inherited_config,
     outputs,
     project_id,
@@ -18,12 +11,19 @@ from .common import (
     provider_run_options,
     with_artifacts,
 )
+from .media_job import read_manifest, run_manifest_job
 
 DOMAIN = "animator"
 
 
 def _step_assets(scenes_result, config, project_id, context):
-    """Create animator jobs directly; provider callbacks update the shared store."""
+    """Create the animator job; the shared media-job service owns the wait.
+
+    As with storyboard, 14.1 moved the deadline, poll cadence, cancellation,
+    progress reporting, per-scene aggregation, and job persistence into
+    `MediaJobService`. The provider-ID branch below moves into the providers
+    themselves in 14.3.
+    """
     from studio.animator import animation_routes as service
 
     scenes = [
@@ -54,12 +54,15 @@ def _step_assets(scenes_result, config, project_id, context):
             # today (§40.2 O4 / §47 C4 — the correction belongs to 14.3).
             **settings_manager.portable_provider_settings("animator", "kie_ai"),
         }
-    service._set_job(project_id, job)
-    service._save_job(job)
-    if provider == "kie_ai":
-        job["status"] = "generating"
-        service._kie_ai_generate_all(project_id, job)
-    else:
+    manifest = os.path.join(ANIMATOR_DIR, project_id, "grabber_job.json")
+
+    def start():
+        service._set_job(project_id, job)
+        service._save_job(job)
+        if provider == "kie_ai":
+            job["status"] = "generating"
+            service._kie_ai_generate_all(project_id, job)
+            return
         from studio.animator.routes import add_job
         # mode/quality/duration moved out of the node config into this
         # provider's own settings (§41.3 M3), so their defaults now come from
@@ -72,32 +75,28 @@ def _step_assets(scenes_result, config, project_id, context):
             provider_option(DOMAIN, provider, options, "duration"),
         )
 
-    manifest = os.path.join(ANIMATOR_DIR, project_id, "grabber_job.json")
-    deadline = time.monotonic() + 2 * 60 * 60
-    while time.monotonic() < deadline:
-        status = service._get_job(project_id)
-        if status is None and os.path.isfile(manifest):
-            status = safe_json_read(manifest)
-        if status:
-            statuses = status.get("scene_statuses", {})
-            total = len(statuses)
-            ready = sum(1 for item in statuses.values() if item.get("status") == "ready")
-            errors = sum(1 for item in statuses.values() if item.get("status") == "error")
-            if status.get("status") in ("done", "completed") or ready + errors >= total:
-                return {"total": total, "ready": ready, "errors": errors, "provider": provider}
-        stop = context_value(context, "stop_requested")
-        if stop and stop():
-            # See the storyboard adapter: `EXECUTION_CANCELLED` was recognized
-            # nowhere and recorded a cancelled node as `failed` (§35.1, D36).
-            raise ProviderCancelled(
-                "Animator generation was cancelled", domain="animator"
-            ).as_adapter_error()
-        time.sleep(1)
-    raise ProviderError(
-        PROVIDER_TIMEOUT,
-        "Animator generation timed out after 120 minutes",
-        domain="animator",
-    ).as_adapter_error()
+    def read():
+        # The in-memory store stays authoritative while the process lives; the
+        # manifest is the restart path. Order preserved from the legacy loop.
+        return service._get_job(project_id) or read_manifest(manifest)
+
+    result = run_manifest_job(
+        domain=DOMAIN,
+        provider=provider,
+        project_id=project_id,
+        context=context,
+        scenes=scenes,
+        manifest_path=manifest,
+        start=start,
+        read=read,
+        failure_code="ANIMATOR_FAILED",
+        failure_details={"provider": provider},
+    )
+    # The animator node has never exposed the raw per-scene map on its port,
+    # and those entries still carry remote URLs (D38 belongs to 14.3).
+    result.pop("scene_statuses", None)
+    result["provider"] = provider
+    return result
 
 
 def generate(inputs, config, context):

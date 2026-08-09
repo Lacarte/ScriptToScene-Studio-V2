@@ -1,15 +1,8 @@
 import os
-import time
 from config import STORYBOARD_DIR
-from studio.io_utils import now_iso, safe_json_read
-from studio.shared.providers_common.errors import (
-    PROVIDER_TIMEOUT,
-    ProviderCancelled,
-    ProviderError,
-)
+from studio.io_utils import now_iso
 from .common import (
     AdapterError,
-    context_value,
     inherited_config,
     outputs,
     project_id,
@@ -18,12 +11,20 @@ from .common import (
     provider_run_options,
     with_artifacts,
 )
+from .media_job import run_manifest_job
 
 DOMAIN = "storyboard"
 
 
 def _step_storyboard(scenes_result, config, project_id, context):
-    """Start providers directly and reconcile status from the managed manifest."""
+    """Start the selected provider; the shared media-job service owns the wait.
+
+    The deadline, poll cadence, cancellation, progress reporting, per-scene
+    aggregation, and job persistence all moved into `MediaJobService` in 14.1 —
+    this adapter only knows how to *start* a storyboard job. Cancellation still
+    surfaces as `CANCELLED` and a deadline as `POLL_TIMEOUT` (§35.1, D35/D36);
+    the provider-ID branch below moves into the providers themselves in 14.2.
+    """
     from studio.storyboard import routes as service
 
     scenes = [
@@ -36,17 +37,19 @@ def _step_storyboard(scenes_result, config, project_id, context):
     provider = config.get("storyboard_provider_override", "wavespeed_webhook")
     options = config.get("storyboard_provider_options") or {}
     manifest = os.path.join(STORYBOARD_DIR, project_id, "storyboard.json")
-    if provider == "gemini_ws":
-        from studio.storyboard.gemini_ws import add_job
-        # `auto_type` moved out of the node config into this provider's own
-        # settings (§41.3 M2), so its default now comes from the schema that
-        # declares it rather than from a literal here.
-        add_job(
-            project_id,
-            [{"index": s["scene"], "prompt": s["prompt"]} for s in scenes],
-            provider_option(DOMAIN, provider, options, "auto_type"),
-        )
-    else:
+
+    def start():
+        if provider == "gemini_ws":
+            from studio.storyboard.gemini_ws import add_job
+            # `auto_type` moved out of the node config into this provider's own
+            # settings (§41.3 M2), so its default now comes from the schema that
+            # declares it rather than from a literal here.
+            add_job(
+                project_id,
+                [{"index": s["scene"], "prompt": s["prompt"]} for s in scenes],
+                provider_option(DOMAIN, provider, options, "auto_type"),
+            )
+            return
         job = {
             "project_id": project_id, "status": "running", "total": len(scenes),
             "ready": 0, "errors": 0, "aspect_ratio": config.get("aspect_ratio", "9:16"),
@@ -60,32 +63,16 @@ def _step_storyboard(scenes_result, config, project_id, context):
             config.get("style"), config.get("image_model") or None,
         )
 
-    deadline = time.monotonic() + 30 * 60
-    while time.monotonic() < deadline:
-        if os.path.isfile(manifest):
-            status = safe_json_read(manifest)
-            total = int(status.get("total", len(scenes)))
-            ready = int(status.get("ready", 0))
-            errors = int(status.get("errors", 0))
-            if status.get("status") == "done" or ready + errors >= total:
-                return {"total": total, "ready": ready, "errors": errors, "scene_statuses": status.get("scene_statuses", {})}
-        stop = context_value(context, "stop_requested")
-        if stop and stop():
-            # `CANCELLED` is the only code the scheduler recognizes as
-            # cancellation. The previous `EXECUTION_CANCELLED` fell through the
-            # ordinary failure path, so a cancelled node was recorded `failed`
-            # inside an execution the same scheduler marked `cancelled`
-            # (contracts.md §35.1, D36).
-            raise ProviderCancelled(
-                "Storyboard generation was cancelled", domain="storyboard"
-            ).as_adapter_error()
-        time.sleep(1)
-    # `POLL_TIMEOUT` is the §7 stable code; `NODE_TIMEOUT` never was (D35).
-    raise ProviderError(
-        PROVIDER_TIMEOUT,
-        "Storyboard generation timed out after 30 minutes",
-        domain="storyboard",
-    ).as_adapter_error()
+    return run_manifest_job(
+        domain=DOMAIN,
+        provider=provider,
+        project_id=project_id,
+        context=context,
+        scenes=scenes,
+        manifest_path=manifest,
+        start=start,
+        failure_code="STORYBOARD_FAILED",
+    )
 
 
 def generate(inputs, config, context):
