@@ -227,54 +227,47 @@ def put_settings_v2():
     return jsonify({"ok": True, "issues": issues})
 
 
+def _resolve_provider(domain, provider_id):
+    """Resolve one provider through the hub.
+
+    Returns `(provider, None)` or `(None, (json_body, status))`.
+    """
+    from studio.shared.providers_common import hub
+
+    if domain not in hub.domains():
+        return None, (jsonify({"error": f"Unknown domain: {domain}"}), 400)
+    provider = hub.get(domain, provider_id)
+    if provider is None:
+        return None, (jsonify({"error": f"Provider '{provider_id}' not found"}), 404)
+    return provider, None
+
+
 @editor_bp.route("/api/providers", methods=["GET"])
 def list_providers():
     """Return registered providers by domain.
-    
+
     Returns real registry contents with provider details and selected provider per domain.
     """
-    from studio.tts.providers import registry as tts_registry
-    from studio.storyboard.providers import registry as storyboard_registry
-    from studio.animator.providers import registry as animator_registry
-    from studio.shared.providers_common import settings_manager
+    from studio.shared.providers_common import hub, settings_manager
 
-    tts_settings = settings_manager.get_domain_settings('tts')
-    storyboard_settings = settings_manager.get_domain_settings('storyboard')
-    animator_settings = settings_manager.get_domain_settings('animator')
+    selected = {
+        domain: settings_manager.get_domain_settings(domain).get("selected_provider")
+        for domain in hub.domains()
+    }
 
-    return jsonify({
-        "domains": {
-            "tts": tts_registry.to_dict(selected_provider=tts_settings.get("selected_provider")),
-            "storyboard": storyboard_registry.to_dict(selected_provider=storyboard_settings.get("selected_provider")),
-            "animator": animator_registry.to_dict(selected_provider=animator_settings.get("selected_provider")),
-        }
-    })
+    return jsonify({"domains": hub.catalog(selected=selected)})
 
 
 @editor_bp.route("/api/providers/<domain>/<provider_id>/validate", methods=["POST"])
 def validate_provider_settings(domain, provider_id):
     """Validate provider settings without saving.
-    
+
     Validates the provider's settings and returns validation issues.
     """
-    from studio.tts.providers import registry as tts_registry
-    from studio.storyboard.providers import registry as storyboard_registry
-    from studio.animator.providers import registry as animator_registry
-    
-    domainRegistries = {
-        'tts': tts_registry,
-        'storyboard': storyboard_registry,
-        'animator': animator_registry,
-    }
-    
-    if domain not in domainRegistries:
-        return jsonify({"error": f"Unknown domain: {domain}"}), 400
-    
-    registry = domainRegistries[domain]
-    provider = registry.get(provider_id)
-    if provider is None:
-        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
-    
+    provider, err = _resolve_provider(domain, provider_id)
+    if err is not None:
+        return err
+
     data = request.get_json(silent=True) or {}
     current_settings = settings_manager.get_provider_settings(domain, provider_id)
     merged_settings = {**current_settings, **data}
@@ -302,24 +295,10 @@ def test_provider_settings(domain, provider_id):
     
     Runs health_check on the provider's current settings.
     """
-    from studio.tts.providers import registry as tts_registry
-    from studio.storyboard.providers import registry as storyboard_registry
-    from studio.animator.providers import registry as animator_registry
-    
-    domainRegistries = {
-        'tts': tts_registry,
-        'storyboard': storyboard_registry,
-        'animator': animator_registry,
-    }
-    
-    if domain not in domainRegistries:
-        return jsonify({"error": f"Unknown domain: {domain}"}), 400
-    
-    registry = domainRegistries[domain]
-    provider = registry.get(provider_id)
-    if provider is None:
-        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
-    
+    provider, err = _resolve_provider(domain, provider_id)
+    if err is not None:
+        return err
+
     data = request.get_json(silent=True) or {}
     current_settings = settings_manager.get_provider_settings(domain, provider_id)
     merged_settings = {**current_settings, **data}
@@ -339,24 +318,10 @@ def get_provider_settings(domain, provider_id):
     
     Returns the provider's settings merged with defaults from schema.
     """
-    from studio.tts.providers import registry as tts_registry
-    from studio.storyboard.providers import registry as storyboard_registry
-    from studio.animator.providers import registry as animator_registry
-    
-    domainRegistries = {
-        'tts': tts_registry,
-        'storyboard': storyboard_registry,
-        'animator': animator_registry,
-    }
-    
-    if domain not in domainRegistries:
-        return jsonify({"error": f"Unknown domain: {domain}"}), 400
-    
-    registry = domainRegistries[domain]
-    provider = registry.get(provider_id)
-    if provider is None:
-        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
-    
+    provider, err = _resolve_provider(domain, provider_id)
+    if err is not None:
+        return err
+
     settings = settings_manager.get_provider_settings(domain, provider_id)
     schema = provider.settings_schema()
     
@@ -375,24 +340,10 @@ def put_provider_settings(domain, provider_id):
     
     Merges provided settings with existing and saves to settings.json.
     """
-    from studio.tts.providers import registry as tts_registry
-    from studio.storyboard.providers import registry as storyboard_registry
-    from studio.animator.providers import registry as animator_registry
-    
-    domainRegistries = {
-        'tts': tts_registry,
-        'storyboard': storyboard_registry,
-        'animator': animator_registry,
-    }
-    
-    if domain not in domainRegistries:
-        return jsonify({"error": f"Unknown domain: {domain}"}), 400
-    
-    registry = domainRegistries[domain]
-    provider = registry.get(provider_id)
-    if provider is None:
-        return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
-    
+    provider, err = _resolve_provider(domain, provider_id)
+    if err is not None:
+        return err
+
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Expected JSON object"}), 400

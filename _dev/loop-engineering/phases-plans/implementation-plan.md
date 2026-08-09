@@ -976,6 +976,42 @@ touch `app.py` or the workflow registry.
 still work; duplicate domains/providers fail deterministically; discovery order is stable; and tests
 prove one broken or duplicate provider cannot hide healthy providers or stop application startup.
 
+#### Step 11.1 review status — 2026-08-09
+
+- **Complete.** `studio/shared/providers_common/domains.py` holds the five-domain catalog
+  (contracts §19.1) and is now the only place a domain name is written down. D1 is closed:
+  `ProviderRegistry.VALID_DOMAINS` is `DOMAIN_IDS`, `settings_manager.validate_settings` tests
+  membership in `DOMAINS`, and `_default_settings()` generates its `domains` block from the
+  catalog, so all three derive from one source and a test asserts it.
+- `providers_common/hub.py` adds the process-wide `ProviderHub` with the frozen §27 surface
+  (`domains`, `registry`, `get`, `list`, `catalog`, `shutdown`) plus `discover`/`discover_all`/
+  `bind_runtimes`. D3 is closed: the three 57-line `providers/__init__.py` copies are now
+  three-line `bind_domain(<domain>)` facades that still export `registry`, `discover`,
+  `get_provider`, `list_providers`, and `init_<domain>_registry`, and `registry` is literally the
+  hub's registry object. D2 is closed — discovery iterates `sorted(os.listdir(...))`.
+- D4 is done for the five literal `{tts, storyboard, animator}` dicts in `editor/routes.py`
+  (P28): the four lookup handlers share one `_resolve_provider()` over the hub, and
+  `/api/providers` returns `hub.catalog()`. That response now carries all five domains;
+  `script` and `scene_blueprint` list zero providers until 12.3 lands their bridges. The
+  frontend reads `data.domains[<domain>]` by key and never iterates, so the extra keys are inert.
+  `app.py` replaces the fixed three-call startup sequence with `init_providers(app, sock)`, which
+  discovers in catalog order and binds extension runtimes only after every domain is discovered
+  (contracts §21.2 items 1 and 4).
+- **Adjustment recorded:** discovery is re-entrant. `inworld/provider.py` imports
+  `studio.tts.providers.base`, which executes the `studio.tts.providers` package body mid-scan;
+  once startup — not the package body — triggers the first scan, that re-entry ran a second full
+  scan and re-registered every provider. `discovery_scan` now marks `_discovered` *before* the
+  scan rather than after. `hub.get`/`list`/`catalog` discover lazily so callers that never went
+  through startup still see the catalog, and `hub.shutdown()` clears registries in place instead
+  of dropping the objects the facades hold.
+- **Deferred as already assigned:** alias resolution in `hub.get` (D5, 11.2), exclusion records
+  (D7, 11.2), the `create()` factory and real provider `shutdown()` (D8, 11.2), and atomic
+  snapshot publication (D21, 11.2). `ProviderRegistry` takes an optional `valid_domains` so a hub
+  over a custom catalog can prove a sixth domain is a data-only change.
+- Verification passes with 252 backend tests (10 live-provider tests skipped, 62 subtests), all
+  154 frontend tests across 25 files, the Vite production build, and generated-document drift
+  checks.
+
 ### 11.2 Provider discovery, factories, and lifecycle isolation
 Upgrade discovery to validate the whole provider package (`manifest.py`, `provider.py`, optional
 `settings_schema.py` and runtime hooks) before atomic registration. Instantiate providers through a

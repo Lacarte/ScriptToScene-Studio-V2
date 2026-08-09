@@ -87,14 +87,11 @@ app.register_blueprint(workflows_bp)
 from studio.orchestrator_ws import init_orchestrator_ws
 init_orchestrator_ws(sock)
 
-from studio.tts.providers import registry as tts_reg, init_tts_registry
-from studio.storyboard.providers import registry as storyboard_reg, init_storyboard_registry
-from studio.animator.providers import registry as animator_reg, init_animator_registry
-init_tts_registry(app=app, sock=sock)
-init_storyboard_registry(app=app, sock=sock)
-init_animator_registry(app=app, sock=sock)
-logger.info("[providers] tts: {} registered, storyboard: {} registered, animator: {} registered",
-           len(tts_reg), len(storyboard_reg), len(animator_reg))
+from studio.shared.providers_common import hub, init_providers
+init_providers(app=app, sock=sock)
+logger.info("[providers] {} domains: {}",
+           len(hub.domains()),
+           {d: len(hub.registry(d)) for d in hub.domains()})
 
 
 # ---------------------------------------------------------------------------

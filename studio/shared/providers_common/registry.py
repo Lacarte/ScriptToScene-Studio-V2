@@ -13,6 +13,8 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from studio.shared.providers_common.domains import DOMAIN_IDS
+
 
 @dataclass
 class ProviderManifest:
@@ -174,11 +176,13 @@ class ProviderInstance:
 class ProviderRegistry:
     """Domain-scoped provider registry with discovery."""
     
-    VALID_DOMAINS = {'tts', 'storyboard', 'animator'}
-    
-    def __init__(self, domain: str):
-        if domain not in self.VALID_DOMAINS:
-            raise ValueError(f"Invalid domain: {domain}. Must be one of {self.VALID_DOMAINS}")
+    # Derived from the domain catalog — never write a domain name here (§19.1).
+    VALID_DOMAINS = DOMAIN_IDS
+
+    def __init__(self, domain: str, valid_domains: frozenset[str] | None = None):
+        allowed = self.VALID_DOMAINS if valid_domains is None else valid_domains
+        if domain not in allowed:
+            raise ValueError(f"Invalid domain: {domain}. Must be one of {sorted(allowed)}")
         self.domain = domain
         self._providers: dict[str, ProviderInstance] = {}
         self._lock = threading.RLock()
@@ -222,7 +226,16 @@ class ProviderRegistry:
     def list_ids(self) -> list[str]:
         """List all provider IDs."""
         return list(self._providers.keys())
-    
+
+    def reset(self) -> None:
+        """Drop every registration so the next discovery re-scans from disk.
+
+        Clears in place: the per-module compatibility facades hold this object.
+        """
+        with self._lock:
+            self._providers.clear()
+            self._discovered = False
+
     def __len__(self) -> int:
         return len(self._providers)
     
@@ -232,11 +245,18 @@ class ProviderRegistry:
         Args:
             providers_base: Base path like 'studio/tts/providers'
         """
+        # Marked before the scan, not after: a provider module that imports its own
+        # package (e.g. `from studio.tts.providers.base import ...`) re-enters
+        # discovery, and the second scan would re-register every provider.
+        self._discovered = True
+
         if not os.path.isdir(providers_base):
             logger.debug("[registry] Provider base not found: {}", providers_base)
             return
-        
-        for entry in os.listdir(providers_base):
+
+        # sorted() so discovery logs, catalog responses, and "first wins" duplicate
+        # resolution are deterministic (contracts.md §21.2 item 2).
+        for entry in sorted(os.listdir(providers_base)):
             provider_path = os.path.join(providers_base, entry)
             if not os.path.isdir(provider_path):
                 continue
@@ -249,9 +269,8 @@ class ProviderRegistry:
                 continue
             
             self._load_provider(entry, provider_path, manifest_file)
-        
-        self._discovered = True
-    
+
+
     def _load_module_from_file(self, file_path: str, module_name: str) -> Any:
         """Load a Python module from a file path. Returns module or None on failure."""
         try:

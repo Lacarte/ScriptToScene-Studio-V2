@@ -1,15 +1,23 @@
 """Shared provider utilities — Phase 9.
 
 Modules:
+  - domains: the domain catalog — the single declaration of supported domains
   - settings_migrations: version-to-version migrations
   - settings_manager: canonical load/save/validate for settings.json
   - registry: provider discovery and domain-scoped registries
+  - hub: process-wide hub resolving (domain, provider_id) across all domains
   - runtime: base class for extension provider runtimes
   - http_client: retry/backoff wrapped requests
   - file_download: normalized file download to output dirs
   - progress: status.json writer for job progress
 """
 
+from studio.shared.providers_common.domains import (
+    DOMAINS,
+    DOMAIN_IDS,
+    DomainSpec,
+    get_domain,
+)
 from studio.shared.providers_common.settings_migrations import apply_migrations
 from studio.shared.providers_common.settings_manager import (
     load_settings,
@@ -35,6 +43,13 @@ from studio.shared.providers_common.runtime import (
     Runtime,
     call_provider_runtime,
 )
+from studio.shared.providers_common.hub import (
+    ProviderHub,
+    DomainBinding,
+    bind_domain,
+    hub,
+    init_providers,
+)
 from studio.shared.providers_common.http_client import (
     HttpClient,
     get_http_client,
@@ -50,6 +65,10 @@ from studio.shared.providers_common.progress import (
 )
 
 __all__ = [
+    "DOMAINS",
+    "DOMAIN_IDS",
+    "DomainSpec",
+    "get_domain",
     "apply_migrations",
     "load_settings",
     "save_settings",
@@ -69,6 +88,11 @@ __all__ = [
     "ValidationIssue",
     "Runtime",
     "call_provider_runtime",
+    "ProviderHub",
+    "DomainBinding",
+    "bind_domain",
+    "hub",
+    "init_providers",
     "HttpClient",
     "get_http_client",
     "close_http_client",

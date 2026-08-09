@@ -15,6 +15,7 @@ from typing import Any
 from loguru import logger
 
 from config import ROOT_DIR
+from studio.shared.providers_common.domains import DOMAINS
 from studio.shared.providers_common.settings_migrations import apply_migrations
 
 
@@ -135,7 +136,11 @@ def save_settings(data: dict) -> None:
 
 
 def _default_settings() -> dict:
-    """Return default settings structure (v1)."""
+    """Return default settings structure (v1).
+
+    The `domains` block is generated from the domain catalog (§19.1) so it can never
+    drift from `ProviderRegistry.VALID_DOMAINS` or `validate_settings`.
+    """
     return {
         "version": 1,
         "general": {
@@ -144,18 +149,11 @@ def _default_settings() -> dict:
             "auto_sync": False
         },
         "domains": {
-            "tts": {
-                "selected_provider": "kokoro",
-                "per_provider": {}
-            },
-            "storyboard": {
-                "selected_provider": "gemini_ws",
-                "per_provider": {}
-            },
-            "animator": {
-                "selected_provider": "grok_automa",
+            spec.id: {
+                "selected_provider": spec.default_provider,
                 "per_provider": {}
             }
+            for spec in DOMAINS.values()
         }
     }
 
@@ -267,9 +265,8 @@ def validate_settings(data: dict) -> list[dict]:
     if not isinstance(domains, dict):
         issues.append({"field": "domains", "severity": "error", "message": "domains must be an object"})
     else:
-        valid_domains = {"tts", "storyboard", "animator"}
         for domain in domains:
-            if domain not in valid_domains:
+            if domain not in DOMAINS:
                 issues.append({
                     "field": f"domains.{domain}",
                     "severity": "warning",

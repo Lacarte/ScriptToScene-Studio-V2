@@ -1,57 +1,12 @@
-"""Storyboard Provider Registry — Phase 2-3.
+"""Storyboard provider package — compatibility facade over the provider hub.
 
-Performs discovery scan on module import to register all Storyboard providers.
-Providers are discovered by scanning this directory for subfolders containing manifest.py.
+The registry, discovery, and lookup logic lives in
+`studio.shared.providers_common.hub`; this module only binds the `storyboard` domain
+and keeps the historical import surface working.
 """
 
-import os
+from studio.shared.providers_common.hub import bind_domain
 
-from loguru import logger
-
-from config import ROOT_DIR
-from studio.shared.providers_common import ProviderRegistry, call_provider_runtime
-
-registry = ProviderRegistry(domain='storyboard')
-
-_PROVIDERS_BASE = os.path.join(ROOT_DIR, "studio", "storyboard", "providers")
-
-def discover():
-    """Scan for and register all Storyboard providers (idempotent)."""
-    if registry._discovered:
-        return registry
-    registry.discovery_scan(_PROVIDERS_BASE)
-    return registry
-
-
-def get_provider(provider_id: str):
-    """Get a Storyboard provider by ID."""
-    return registry.get(provider_id)
-
-
-def list_providers():
-    """List all registered Storyboard providers."""
-    return registry.list_providers()
-
-
-def init_storyboard_registry(app=None, sock=None):
-    """Called at app startup to discover and register all Storyboard providers.
-    
-    Args:
-        app: Flask application instance
-        sock: Flask-Sock instance
-    """
-    discover()
-    logger.info("[providers] storyboard: {} registered, ids={}", 
-               len(registry), registry.list_ids())
-    
-    if app is not None and sock is not None:
-        for provider_id in registry.list_ids():
-            provider = registry.get(provider_id)
-            if provider and provider.kind == 'extension':
-                runtime_mod = provider.provider_module or provider.module
-                call_provider_runtime(provider_id, runtime_mod, app, sock)
-
-
-discover()
+registry, discover, get_provider, list_providers, init_storyboard_registry = bind_domain('storyboard')
 
 __all__ = ['registry', 'discover', 'get_provider', 'list_providers', 'init_storyboard_registry']

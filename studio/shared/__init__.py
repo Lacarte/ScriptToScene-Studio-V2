@@ -3,6 +3,10 @@
 from studio.shared.providers_common import *
 
 __all__ = [
+    "DOMAINS",
+    "DOMAIN_IDS",
+    "DomainSpec",
+    "get_domain",
     "apply_migrations",
     "load_settings",
     "save_settings",
@@ -22,6 +26,11 @@ __all__ = [
     "ValidationIssue",
     "Runtime",
     "call_provider_runtime",
+    "ProviderHub",
+    "DomainBinding",
+    "bind_domain",
+    "hub",
+    "init_providers",
     "HttpClient",
     "get_http_client",
     "close_http_client",
