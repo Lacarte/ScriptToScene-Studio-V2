@@ -57,6 +57,11 @@ class ProviderHub:
         self._registries: dict[str, ProviderRegistry] = {}
         self._lock = threading.RLock()
         self._runtime_target = None
+        # `(domain, provider_id)` pairs whose `register_runtime()` already ran. A
+        # WebSocket route may only be registered once per process, so binding has
+        # to survive a repeated startup call and a catalog reload that rebuilds
+        # the `ProviderInstance` objects (step 11.5).
+        self._runtime_bound: set[tuple[str, str]] = set()
 
     # -- catalog -----------------------------------------------------------
 
@@ -116,14 +121,24 @@ class ProviderHub:
             for provider in self.registry(domain).list_providers():
                 self._bind_runtime(provider, app, sock)
 
-    @staticmethod
-    def _bind_runtime(provider: ProviderInstance, app, sock) -> None:
+    def _bind_runtime(self, provider: ProviderInstance, app, sock) -> None:
         if provider.kind != RUNTIME_KIND:
             if provider.capabilities.get(RUNTIME_CAPABILITY):
                 provider.add_warning(
                     f"declares {RUNTIME_CAPABILITY} but kind is {provider.kind!r}; "
                     "no runtime was bound"
                 )
+            return
+        key = (provider.domain, provider.id)
+        with self._lock:
+            already_bound = key in self._runtime_bound
+            self._runtime_bound.add(key)
+        if already_bound:
+            # Exactly once per process (step 11.5): `register_runtime()` claims a
+            # WebSocket route, and a second claim on the same path is an error
+            # rather than a no-op. The guard is keyed on `(domain, id)` because a
+            # reload rebuilds the `ProviderInstance` objects.
+            logger.debug("[providers] runtime for {}/{} already bound", *key)
             return
         runtime_module = provider.provider_module or provider.module
         binding = call_provider_runtime(provider.id, runtime_module, app, sock)
@@ -263,6 +278,10 @@ class ProviderHub:
         """
         with self._lock:
             registries = list(self._registries.values())
+            # A fresh process (or a test that rebuilds the app) must be able to
+            # bind runtimes again after teardown.
+            self._runtime_bound.clear()
+            self._runtime_target = None
         for registry in registries:
             registry.shutdown_instances()
             registry.reset()

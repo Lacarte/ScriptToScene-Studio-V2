@@ -245,10 +245,10 @@ class ProviderRoutesUseTheHubTests(unittest.TestCase):
     def setUp(self):
         from flask import Flask
 
-        from studio.editor.routes import editor_bp
+        from studio.providers import providers_bp
 
         app = Flask(__name__)
-        app.register_blueprint(editor_bp)
+        app.register_blueprint(providers_bp)
         self.client = app.test_client()
 
         patcher = patch.object(

@@ -1,0 +1,42 @@
+"""Catalog assembly and versioning for the provider API (contracts.md §25).
+
+The catalog is *content*-versioned rather than URL-versioned: `catalog_version` is
+a digest of the browser-safe payload, so a client can cache by it and refetch when
+a provider is added, removed, relabeled, excluded, or changes availability.
+"""
+
+import hashlib
+import json
+
+from studio.shared.providers_common import hub, settings_manager
+from studio.shared.providers_common.domains import DOMAINS
+
+
+def selected_providers() -> dict[str, str | None]:
+    """`domain -> selected_provider_id` from the one authoritative store (§24)."""
+    stored = settings_manager.load_settings().get("domains", {})
+    return {
+        domain: (stored.get(domain) or {}).get("selected_provider")
+        for domain in hub.domains()
+    }
+
+
+def build_catalog() -> dict:
+    """The full `domain -> serialized registry` map, enriched with catalog data."""
+    catalog = hub.catalog(selected=selected_providers())
+    for domain, payload in catalog.items():
+        spec = DOMAINS.get(domain)
+        if spec is not None:
+            payload["label"] = spec.label
+            payload["default_provider"] = spec.default_provider
+    return catalog
+
+
+def catalog_version(catalog: dict) -> str:
+    """A stable digest of the catalog payload.
+
+    Deterministic across processes: the payload is dumped with sorted keys, so an
+    unchanged catalog always hashes to the same value.
+    """
+    canonical = json.dumps(catalog, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]

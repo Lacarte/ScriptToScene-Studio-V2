@@ -1332,6 +1332,97 @@ domain; settings and health use only registry metadata; old provider endpoints r
 answers; startup/shutdown initializes each runtime exactly once; and backend tests cover auth,
 redaction, invalid domains/IDs, unavailable providers, and mixed healthy/broken catalogs.
 
+#### Step 11.5 review status — 2026-08-09
+
+- **Complete.** `studio/providers/` is a new top-level blueprint package —
+  `routes.py` (thirteen handlers) plus `catalog.py` (catalog assembly and versioning) — and is
+  registered in `app.py` beside the other fifteen blueprints. D4 is closed on the API side: the
+  five editor handlers that each re-imported three registries and built a literal
+  `{tts, storyboard, animator}` dict are gone, and every handler resolves through
+  `hub`/`DOMAINS`. `studio/editor/routes.py` shrinks by 189 lines and no longer imports
+  `settings_manager` at all; a test asserts the editor blueprint owns zero `/api/providers*`
+  rules and no `/api/settings/v2`.
+- The startup half of the step was already done by 11.1/11.2 — `app.py:90-95` has called
+  `init_providers(app, sock)` since then, and the three `init_<domain>_registry` compatibility
+  functions still exist and still work. What 11.5 adds is the *exactly-once* half.
+- **Defect found: every catalog reload rebound every runtime.** `_rebind_new_runtimes` iterated
+  the whole new snapshot and called `_bind_runtime` on each provider, so a dev reload re-ran
+  `register_runtime()` for `gemini_ws` and `grok_automa` — a second claim on an already-claimed
+  `@sock.route` path. `ProviderHub` now keeps a `_runtime_bound` ledger keyed on
+  `(domain, provider_id)` rather than on the instance, because a reload rebuilds the
+  `ProviderInstance` objects; `shutdown()` clears it so a torn-down process can bind again. The
+  capability-mismatch warning stays unguarded (it is pure metadata and `add_warning` de-dupes),
+  so it survives a reload. Reverting the guard fails two tests.
+- **The runtime count had to be taken at the `call_provider_runtime` boundary.** The obvious
+  assertion — the provider module's own `bound` list — silently passes a duplicate bind, because
+  a reload re-imports `provider.py` under a fresh synthetic module and its module-level state
+  resets. The test spies on the hub's seam instead.
+- D13 is closed. `PUT /api/providers/<domain>/selection` is the §24.2 write path and is
+  `set_selected_provider()`'s first call site since it was written. It validates the domain
+  against `DOMAINS`, resolves id-then-alias, answers `409 PROVIDER_EXCLUDED` for a discovered
+  but unloadable id and `404 PROVIDER_NOT_FOUND` for an unknown one, stores the **canonical** id
+  even when an alias was sent, and returns `{domain, selected, availability, issues}`. Selection
+  is non-blocking: a `needs_configuration` provider is written and the issues travel back.
+  `PATCH /api/settings/v2` is added for field-level deep merge; `PUT` remains for whole-document
+  import and reset.
+- The frontend half of D13 is done: `useProviders.selectProvider` no longer does
+  `GET /api/settings/v2` → spread → `PUT`. That was a genuine lost-update window plus a second
+  round trip (`validateProviderSettings`) purely to learn whether the provider was configured.
+  Six Vitest cases cover the targeted write, the absence of any `/api/settings/v2` traffic, the
+  alias-to-canonical echo, the non-blocking unconfigured case, the already-selected no-op, and a
+  rejected write leaving the store untouched. No Vue component changed — `ProviderSelector`
+  still reads `result.needsConfiguration`.
+- The catalog is content-versioned, not URL-versioned: `catalog_version` is a 16-character
+  SHA-256 of the canonical JSON of the payload, which is what 12.1 caches on. A test proves it
+  is stable across identical reads and changes when a provider folder appears.
+- New read surface, all from registry metadata and all loopback-only: `GET /api/providers`
+  (`{catalog_version, domains}`), `GET /api/providers/<domain>`,
+  `GET /api/providers/<domain>/<provider_id>`, `.../capabilities` (manifest only — no provider
+  code runs), and `.../health` (probes the stored settings, where `POST .../test` probes a
+  candidate patch).
+- **Adjustment recorded — the "thin deprecated facade" is a no-op, because the paths did not
+  move.** The step text asks to keep the old provider paths as deprecated facades, but the old
+  paths *are* the canonical ones (`/api/providers`, `/api/settings/v2`); only the owning module
+  changed. Two blueprints cannot register the same rule, so a facade would have had to invent a
+  second URL for the same handler. Nothing consumes such a URL, and inventing one would create
+  the compatibility surface 16.1 would then have to remove.
+- **Adjustment recorded — "deprecated" providers are enumerated as `aliases`.** §20.1 declares
+  no `deprecated` manifest field, and §20.3 ignores unknown top-level keys, so a manifest could
+  not set one without amending a frozen field table. The deprecated identities are exactly the
+  retired legacy wire strings that 11.2 moved into `aliases` — `gemini`, `webhook`, `direct`,
+  `grok`, `midjourney`, `kie-ai` — and the catalog already ships them per provider. A test
+  asserts each maps to its canonical id and that `GET /api/providers/storyboard/gemini` resolves
+  to `gemini_ws`.
+- **Adjustment recorded — the provider API became loopback-only.** It was not before: the editor
+  blueprint's five handlers had no `is_loopback_remote` check while serving and mutating the
+  credential store. This is stricter than the surface it replaces, matching the workflow
+  blueprint's policy; a sub-tested case covers all thirteen routes.
+- **Adjustment recorded — provider failures now use the §6 envelope.** The old handlers answered
+  `{"error": "<string>"}`. Status codes are unchanged (400 unknown domain, 404 unknown provider),
+  409 is added for an excluded provider, and the shipped `api` client already parses the envelope
+  and falls back for anything else — so the observable change is a *better* message, not a break.
+  Codes: `FORBIDDEN`, `INVALID_REQUEST`, `UNKNOWN_DOMAIN`, `PROVIDER_NOT_FOUND`,
+  `PROVIDER_EXCLUDED`, `SETTINGS_INVALID`. Per §34.2 the §7 stable list gains nothing.
+- **Adjustment recorded — `needsConfiguration` now derives from `availability`, not validation.**
+  §21.5 names that conflation as the current bug source. A validation error and "a `requires` key
+  is empty after env fallback" are different questions, and the selection response answers the
+  second one directly.
+- **Adjustment recorded — `PUT /api/settings/v2` is not server-side blocked from carrying a
+  selection.** §24.2 says it "must no longer be used to change a selection", but a whole-document
+  import legitimately contains one, and rejecting it would break reset/import. The client no
+  longer uses it for selection; the server stays permissive.
+- **Deferred as already assigned:** the `cache="settings"` invalidation on a selection change
+  (§23.4) is 12.2's — today's `_VALUE_CACHE` is keyed by source alone and no source depends on
+  settings yet, so there is nothing to invalidate; the option-source endpoint itself and
+  `OptionSourceSpec` are 12.2 (D16/D17); the frontend catalog store keyed on `catalog_version` is
+  12.1; the legacy `app-config.json` key read-through and deletion are 12.4 and 16.1 (D14).
+- Both new guards were mutation-checked: forcing `_bind_runtime`'s already-bound branch off fails
+  the exactly-once tests, and short-circuiting `_require_loopback` fails thirteen sub-tests.
+- Verification passes with 545 backend tests (10 live-provider tests skipped, 198 subtests), 160
+  frontend tests across 26 files, the Vite production build, and the generated-document drift
+  check. `app.py` boots, registers all twenty provider/settings rules without collision, and
+  logs exactly one runtime initialization for each of `gemini_ws` and `grok_automa`.
+
 ---
 
 ## Phase 12 — Generic provider UI and generic workflow nodes

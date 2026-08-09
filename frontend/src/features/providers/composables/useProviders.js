@@ -63,35 +63,29 @@ export function useProviders() {
     }
   }
 
+  // One targeted write, not a read-modify-write of the whole settings document
+  // (contracts.md §24.2). The old GET+spread+PUT of /api/settings/v2 had a real
+  // lost-update window and needed a second round trip just to learn whether the
+  // provider was configured; the endpoint answers both in one call.
   async function selectProvider(domain, providerId) {
     try {
       const current = providers.value[domain]?.selected
       if (current === providerId) return { switched: false }
 
-      const validation = await validateProviderSettings(domain, providerId)
-
-      const current_settings = await api.get('/api/settings/v2')
-      const next_settings = {
-        ...current_settings,
-        domains: {
-          ...current_settings.domains,
-          [domain]: {
-            ...current_settings.domains?.[domain],
-            selected_provider: providerId,
-          },
-        },
-      }
-      await api.put('/api/settings/v2', { body: next_settings })
+      const result = await api.put(`/api/providers/${domain}/selection`, {
+        body: { provider_id: providerId },
+      })
 
       providers.value[domain] = {
         ...providers.value[domain],
-        selected: providerId,
+        selected: result.selected,
       }
 
       return {
         switched: true,
-        needsConfiguration: !validation.valid,
-        validation,
+        needsConfiguration: result.availability !== 'available',
+        availability: result.availability,
+        issues: result.issues || [],
       }
     } catch (e) {
       console.error('[Providers] Failed to select provider:', e)
