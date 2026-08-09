@@ -411,6 +411,13 @@ def _request_unit_index(item: Any) -> int:
         for key in ("unit_index", "index", "scene"):
             if key in item:
                 return int(item[key])
+    for key in ("unit_index", "index", "scene"):
+        value = getattr(item, key, None)
+        if value is not None and not callable(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
     return -1
 
 
@@ -968,20 +975,21 @@ class MediaJobService:
 def _request_total(
     request: Any, prior: tuple[UnitResult, ...]
 ) -> int:
-    """Best-effort total for the initial status; poll may raise it once later."""
+    """Best-effort total for the initial status; poll may raise it once later.
+
+    Accepts dict/list requests and the domain pydantic models (StoryboardRequest /
+    AnimatorRequest) so progress events after submit already carry the real unit
+    count instead of `0` until the first poll.
+    """
     indices: list[int] = [unit.unit_index for unit in prior]
-    if isinstance(request, Mapping) and "unit_count" in request:
-        # An explicit count always wins: the index heuristic below guesses
-        # `max + 1`, which over-counts whenever the caller's unit indices are
-        # sparse — a filtered scene list is exactly that case.
-        return max(int(request["unit_count"]), len(indices))
+    explicit = _request_unit_count(request)
+    if explicit is not None:
+        return max(explicit, len(indices))
     if isinstance(request, list):
         indices.extend(_request_unit_index(item) for item in request)
-    elif isinstance(request, Mapping):
-        for key in ("units", "scenes"):
-            if isinstance(request.get(key), list):
-                indices.extend(_request_unit_index(item) for item in request[key])
-                break
+    else:
+        for collection in _request_unit_collections(request):
+            indices.extend(_request_unit_index(item) for item in collection)
     indices = [index for index in indices if index >= 0]
     if not indices:
         if isinstance(request, list):
@@ -989,6 +997,37 @@ def _request_total(
         return 0
     # 0-based dense indices → max+1; sparse still gives a safe upper bound.
     return max(len(indices), max(indices) + 1)
+
+
+def _request_unit_count(request: Any) -> int | None:
+    """Return an explicit unit count when the request declares one."""
+    if isinstance(request, Mapping) and "unit_count" in request:
+        return int(request["unit_count"])
+    count = getattr(request, "unit_count", None)
+    if callable(count):
+        try:
+            count = count()
+        except TypeError:
+            count = None
+    if isinstance(count, int) and not isinstance(count, bool):
+        return count
+    return None
+
+
+def _request_unit_collections(request: Any) -> list[list[Any]]:
+    """Yield unit/scene lists from a mapping or a domain request model."""
+    collections: list[list[Any]] = []
+    if isinstance(request, Mapping):
+        for key in ("units", "scenes"):
+            value = request.get(key)
+            if isinstance(value, list):
+                collections.append(value)
+        return collections
+    for key in ("units", "scenes"):
+        value = getattr(request, key, None)
+        if isinstance(value, list):
+            collections.append(value)
+    return collections
 
 
 # -- legacy bridge (public job IDs preserved) -------------------------------

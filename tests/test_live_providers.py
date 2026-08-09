@@ -1,9 +1,13 @@
-"""Step 6.1 — Live-provider verification.
+"""Steps 6.1 + 14.5 — Live-provider verification (opt-in).
 
 Runs the Full Video template through the real workflow runner
 (ExecutionManager -> WorkflowScheduler -> adapters) against the real
 providers, then asserts each provider's verified behavior on the single
 resulting execution record and its on-disk artifacts.
+
+Phase 14.5 reuses this suite as the live half of the visual-provider gate.
+Deterministic fixture coverage lives in `test_visual_provider_gate.py` and
+does not require credentials; this module stays skipped unless `STS_LIVE=1`.
 
 Providers exercised by the single module-scoped run:
   - TTS:        Kokoro ONNX (local models/, free)

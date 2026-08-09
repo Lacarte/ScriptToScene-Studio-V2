@@ -27,7 +27,7 @@ class FixtureAsyncProvider:
         from studio.shared.providers_common.jobs import JobHandle, JobStatus, RUNNING
 
         options = {**dict(invocation.settings), **dict(invocation.options)}
-        total = int(options.get("unit_count") or len(request.get("units") or ()) or 3)
+        total = _unit_count(request, options)
         handle = JobHandle(
             job_id=f"fixture-async-{invocation.invocation_id[:12]}",
             domain=invocation.domain,
@@ -95,6 +95,26 @@ class FixtureAsyncProvider:
         self.shutdown_calls += 1
 
 
+def _unit_count(request, options: dict) -> int:
+    """Count units from a dict request or a domain pydantic model."""
+    if options.get("unit_count") is not None:
+        return int(options["unit_count"])
+    count = getattr(request, "unit_count", None)
+    if callable(count):
+        try:
+            count = count()
+        except TypeError:
+            count = None
+    if isinstance(count, int) and not isinstance(count, bool) and count > 0:
+        return count
+    if isinstance(request, dict):
+        return int(len(request.get("units") or request.get("scenes") or ()) or 3)
+    scenes = getattr(request, "scenes", None)
+    if isinstance(scenes, (list, tuple)) and scenes:
+        return len(scenes)
+    return 3
+
+
 def _write_unit(invocation, index: int) -> str:
     from studio.shared.providers_common.results import normalize_ref
 
@@ -104,10 +124,13 @@ def _write_unit(invocation, index: int) -> str:
         if invocation.stage_artifact is not None
         else destination
     )
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "wb") as handle:
         handle.write(_PNG)
-    return normalize_ref(destination)
+    try:
+        return normalize_ref(destination)
+    except Exception:
+        return f"unit-{index}.png"
 
 
 def _unit_error():
