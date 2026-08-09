@@ -85,8 +85,10 @@ def normalize_ref(path: str, *, output_dir: str | None = None) -> str:
 def resolve_ref(ref: str, *, output_dir: str | None = None) -> str:
     """Resolve a relative ref back to an absolute path (§30.2).
 
-    The one shared helper every consumer uses, so the deprecated absolute keys on
-    TTS port payloads have a replacement to migrate onto in 15.3.
+    The one shared helper every consumer uses. Step 15.3 retired the absolute
+    `wav_path` / `path` keys on TTS port payloads; `timing.align` and every
+    later consumer read `artifact_refs` (or a relative `wav_path`) and resolve
+    here.
     """
     from studio.security import safe_join
 

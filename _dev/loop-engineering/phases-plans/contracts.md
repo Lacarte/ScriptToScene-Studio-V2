@@ -1726,18 +1726,14 @@ already refuses to reference one (`ARTIFACT_UNMANAGED`, `adapters/common.py:74-8
 | deletion | a provider may delete only files it created during this invocation. |
 | concurrency | two invocations for the same `(domain, project_id)` may not run concurrently; the caller enforces it (workflow: `ProjectLock`, `scheduler.py:61`). |
 
-**Recorded divergence to resolve in 10.4, not here.** Today three port payloads carry
-absolute filesystem paths and a downstream node depends on one: `tts` returns
-`metadata["wav_path"]` and `audio["path"]` (`pipeline/services.py:263`,
-`adapters/tts.py:15`), and `adapters/timing.py:11` reads `audio.get("wav_path") or
-audio.get("path")` to call `_step_timing`. The v2 rule is that `artifact_refs` is the
-authority and consumers resolve a ref through one shared helper
-(`providers_common.results:resolve_ref(ref) -> str`). The absolute keys survive as deprecated
-compatibility fields on the *port payload* only; 10.4 freezes the mapping and 15.3 removes
-them once `timing.align` reads the ref. They are already absent from execution records
-because `_summarize` reduces every string to `{"chars": n}` (`scheduler.py:198-199`) — but
-they are present in the node output cache, which is why the deprecation has an owner rather
-than being waved through.
+**Resolved in 15.3.** Absolute `wav_path` / `path` keys no longer leave `tts.generate`
+on either port. Port payloads carry relative `artifact_refs` (authoritative) plus a
+relative `wav_path` matching the sample-fixture shape; `adapters/timing.py` resolves
+through `providers_common.results:resolve_ref`. The in-process `_step_tts` /
+`_step_timing` service layer still uses an absolute path between those two functions
+only — it never re-enters a port payload, cache entry, or API response. Removing the
+absolute keys changed the TTS adapter output shape, so `ADAPTER_CACHE_SCHEMA_VERSION`
+was bumped to 2 in the same commit (invalidate, never migrate — §45).
 
 ### 30.3 Cancellation token (frozen)
 
@@ -2425,7 +2421,7 @@ exported template, or any API response. Enforcement points and the current viola
 | L4 | raw exception | `registry.py:135` `ValidationIssue(message=str(e))` and `:156` `HealthResult(message=str(e))` | already frozen by §22.5 / §21.1 as generic messages | 11.3 |
 | L5 | credential | `GET /api/settings/v2` and `GET /api/providers/*/settings` return unredacted `api_key` (§22.6) | `redacted_provider_settings` on both routes | 11.5 |
 | L6 | credential | provider settings reaching a result | `settings` are input-only; `provenance.resolved_settings_redacted` is the only echo (§31.3) | 11.4 |
-| L7 | filesystem path | `tts` ports carry absolute `wav_path` / `path` (`services.py:263`, `adapters/tts.py:15`), consumed by `adapters/timing.py:11` | `artifact_refs` are authoritative; absolute keys deprecated with an owner (§30.2) | 10.4 / 15.3 |
+| L7 | filesystem path | `tts` ports carried absolute `wav_path` / `path` | **resolved 15.3** — relative `artifact_refs` (+ relative `wav_path`); `timing.align` uses `resolve_ref` (§30.2 / §44) | 15.3 |
 | L8 | filesystem path | `scheduler.py:158` `ARTIFACT_MISSING: Staged artifact was not created: {staged}` | messages are basename-only (§34.4) | 11.4 |
 | L9 | provider response | remote `image_url` (`storyboard/routes.py:233`) and `urls` (`animator/routes.py:457,532`) cross into port payloads | dropped from results; downloaded files are the output (§32.4, §32.5) | 14.2 / 14.3 |
 | L10 | provider response | `scene_statuses` returned verbatim on the `images` port | replaced by `units[]`; `scene_statuses` stays inside the legacy status route only | 14.2 |
@@ -2779,17 +2775,14 @@ cache entry through `upstream_artifact_fingerprints` for zero contract benefit. 
 `artifact_refs` (relative, `output/`-rooted) authoritative; what changes is only *which key the
 consumer reads*, not where the bytes live.
 
-The one live incompatibility is L7 in §36: `tts` ports carry an absolute `wav_path` /
-`path` (`services.py:263`, `adapters/tts.py:15`) consumed by `adapters/timing.py:11`. Frozen
-resolution — **passthrough with a deprecation, not removal**:
+L7 is resolved (step 15.3):
 
-1. `artifact_refs` becomes authoritative immediately (11.4).
-2. The absolute keys keep being emitted for one migration window so `adapters/timing.py` and any
-   cached upstream payload keep resolving. Removing them changes the TTS output payload, which
-   changes the downstream node's `inputs` fingerprint component (`cache.py:53`) and silently
-   invalidates every alignment cache entry — acceptable, but it must be a deliberate act.
-3. **15.3** removes them and converts `adapters/timing.py` to `resolve_ref`, in one commit, with
-   the cache invalidation acknowledged in that step's record.
+1. `artifact_refs` is authoritative (11.4 onward).
+2. Absolute `wav_path` / `path` no longer leave `tts.generate` on either port; relative
+   `wav_path` remains for sample-fixture / `tts_metadata` shape compatibility.
+3. `adapters/timing.py` resolves through `resolve_ref`. `ADAPTER_CACHE_SCHEMA_VERSION`
+   bumped to 2 in the same commit so every prior TTS/alignment cache entry is a clean miss
+   rather than a silent shape mismatch.
 
 ## 45. Execution and cache records (frozen)
 

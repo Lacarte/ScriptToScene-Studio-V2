@@ -335,9 +335,11 @@ def run_pipeline(data: PipelineRunRequest):
     config["niche"] = resolved_niche["niche"]
     config["voice"] = resolved_niche["voice"]
     config["speed"] = resolved_niche["speed"]
-    # Auto-resolve Inworld voice from niche if not explicitly set
-    if config.get("tts_provider") == "inworld" and not config.get("tts_voice"):
-        config["tts_voice"] = resolved_niche.get("inworld_voice", "Dennis")
+    # When the request left `tts_voice` blank, fill the niche's alternate voice
+    # field. Dispatch's resolve_voice then picks the candidate the *selected*
+    # provider accepts — no concrete provider-id branch here (step 15.3).
+    if not config.get("tts_voice") and resolved_niche.get("inworld_voice"):
+        config["tts_voice"] = resolved_niche["inworld_voice"]
 
     # Record this story in the per-preset history so the next Gemini call
     # in the same preset combo can dodge its hook/opening. Runs after niche

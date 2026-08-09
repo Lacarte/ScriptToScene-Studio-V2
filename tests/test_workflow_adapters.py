@@ -21,25 +21,76 @@ def test_project_setup_emits_validated_managed_logo(monkeypatch, tmp_path):
 
 
 def test_tts_adapter_translates_ports_and_inherited_defaults(monkeypatch, tmp_path):
-    wav = tmp_path / "voice.wav"
-    meta = tmp_path / "tts.json"
+    # Absolute paths must live under OUTPUT_DIR so artifact_ref accepts them.
+    import studio.workflows.adapters.common as adapter_common
+
+    managed = tmp_path / "tts" / "pm_ABC123"
+    managed.mkdir(parents=True)
+    wav = managed / "voice.wav"
+    (managed / "tts.json").write_text("{}")
     wav.write_bytes(b"wav")
-    meta.write_text("{}")
+    monkeypatch.setattr(adapter_common, "OUTPUT_DIR", str(tmp_path))
     monkeypatch.setattr(tts, "_step_tts", lambda cfg, pid, ctx=None: {
         "wav_path": str(wav), "filename": "voice.wav", "folder": pid,
-        "duration_seconds": 1.2, "voice": cfg["voice"],
+        "duration_seconds": 1.2, "sample_rate": 24000, "voice": cfg["voice"],
     })
-    monkeypatch.setattr(tts, "with_artifacts", lambda payload, *paths: {**payload, "artifact_refs": list(paths)})
-    result = tts.generate({"script": "hello", "settings": {"tone": "dramatic"}}, {"engine": "kokoro", "voice": "af_heart"}, CTX)
+    result = tts.generate(
+        {"script": "hello", "settings": {"tone": "dramatic"}},
+        {"engine": "kokoro", "voice": "af_heart"},
+        CTX,
+    )
     assert result["metadata"]["voice"] == "af_heart"
     assert result["audio"]["duration_seconds"] == 1.2
+    # §36 L7 (15.3): absolute paths never leave the TTS ports.
+    assert not os.path.isabs(result["audio"]["wav_path"])
+    assert not os.path.isabs(result["metadata"]["wav_path"])
+    assert "path" not in result["audio"]
+    assert result["audio"]["artifact_refs"]
+    assert result["audio"]["wav_path"] == result["audio"]["artifact_refs"][0]
 
 
 def test_timing_maps_empty_alignment_to_stable_error(monkeypatch):
     monkeypatch.setattr(timing, "_step_timing", Mock(side_effect=RuntimeError("empty")))
+    monkeypatch.setattr(
+        timing, "resolve_ref",
+        lambda ref, **kwargs: f"/managed/{ref}",
+    )
     with pytest.raises(AdapterError, match="empty") as raised:
-        timing.align({"audio": {"path": "voice.wav"}, "script": "hello"}, {}, CTX)
+        timing.align({
+            "audio": {"artifact_refs": ["tts/pm_ABC123/voice.wav"], "wav_path": "tts/pm_ABC123/voice.wav"},
+            "script": "hello",
+        }, {}, CTX)
     assert raised.value.code == "ALIGNMENT_EMPTY"
+
+
+def test_timing_resolves_audio_through_artifact_refs(monkeypatch):
+    seen = {}
+
+    def capture(metadata, config, pid):
+        seen.update(metadata)
+        return {"folder": pid, "alignment": [{"word": "hi", "begin": 0, "end": 0.2}]}
+
+    monkeypatch.setattr(timing, "_step_timing", capture)
+    monkeypatch.setattr(timing, "ALIGN_DIR", "/tmp/align")
+    monkeypatch.setattr(
+        timing, "with_artifacts",
+        lambda payload, *paths: {**payload, "artifact_refs": list(paths)},
+    )
+    monkeypatch.setattr(
+        timing, "resolve_ref",
+        lambda ref, **kwargs: f"D:/managed/{ref.replace('/', os.sep)}",
+    )
+    result = timing.align({
+        "audio": {
+            "artifact_refs": ["tts/pm_ABC123/voice.wav", "tts/pm_ABC123/tts.json"],
+            "filename": "voice.wav",
+            "folder": "pm_ABC123",
+        },
+        "script": "hello",
+    }, {}, CTX)
+    assert seen["wav_path"].endswith(os.path.join("tts", "pm_ABC123", "voice.wav"))
+    assert seen["filename"] == "voice.wav"
+    assert result["alignment"]["folder"] == CTX.project_id
 
 
 def test_segmenter_adapter_uses_service_result(monkeypatch):

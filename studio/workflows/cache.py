@@ -20,7 +20,10 @@ from studio.security import safe_join
 
 
 CACHE_SCHEMA_VERSION = 1
-ADAPTER_CACHE_SCHEMA_VERSION = 1
+# Bumped in step 15.3: tts.generate no longer emits absolute wav_path/path on
+# port payloads (contracts.md §36 L7 / §44). Cache entries written under v1
+# carry the old absolute shape in their inputs fingerprint chain and must miss.
+ADAPTER_CACHE_SCHEMA_VERSION = 2
 
 
 def _canonical(value: Any) -> str:
