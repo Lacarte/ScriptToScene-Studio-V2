@@ -8,6 +8,7 @@ import time
 from loguru import logger
 
 from config import WAVESPEED_API_KEY
+from studio.shared.providers_common.jobs import status_from_scenes, unknown_job_status
 from studio.storyboard.providers.base import (
     StoryboardProvider,
     JobHandle,
@@ -47,26 +48,21 @@ class WaveSpeedDirectProvider(StoryboardProvider):
         
         return JobHandle(
             job_id=project_id,
-            status="pending",
+            domain="storyboard",
+            provider_id="wavespeed_direct",
+            project_id=project_id,
         )
 
     def poll(self, job_id: str, settings: dict) -> JobStatus:
         from studio.storyboard import routes as sb_routes
-        
+
         job = sb_routes._jobs.get(job_id)
         if not job:
-            return JobStatus(job_id=job_id, status="unknown")
-        
-        statuses = job.get("scene_statuses", {})
-        done = sum(1 for s in statuses.values() if s.get("status") == "complete")
-        total = len(statuses)
-        progress = done / total if total > 0 else 0.0
-        
-        return JobStatus(
-            job_id=job_id,
-            status="complete" if done == total else "processing",
-            progress=progress,
-        )
+            return unknown_job_status(job_id)
+        # This body counted `status == "complete"`, a value the storyboard route
+        # has never written — it writes ready/error (`routes.py:390`). Found by
+        # first-time test in step 11.4.
+        return status_from_scenes(job_id, job.get("scene_statuses", {}))
 
     def shutdown(self) -> None:
         pass

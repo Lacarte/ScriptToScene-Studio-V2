@@ -9,6 +9,12 @@ Modules:
   - registry: provider discovery and domain-scoped registries
   - hub: process-wide hub resolving (domain, provider_id) across all domains
   - runtime: base class for extension provider runtimes
+  - errors: ProviderError, the stable code catalog, and retryability
+  - invocation: ProviderInvocation, cancellation, progress, redacted logging
+  - results: the ProviderResult envelope, units, provenance, egress validation
+  - jobs: the one asynchronous job contract shared by both visual domains
+  - boundary: the single exception boundary and the deadline helpers
+  - legacy: adapters from today's dict payloads onto the v2 envelope
   - http_client: retry/backoff wrapped requests
   - file_download: normalized file download to output dirs
   - progress: status.json writer for job progress
@@ -72,6 +78,46 @@ from studio.shared.providers_common.runtime import (
     Runtime,
     RuntimeBinding,
     call_provider_runtime,
+)
+from studio.shared.providers_common.errors import (
+    PROVIDER_CODES,
+    ProviderCancelled,
+    ProviderError,
+    ProviderErrorPayload,
+    is_retryable,
+    workflow_code,
+)
+from studio.shared.providers_common.invocation import (
+    CancellationToken,
+    ProgressReporter,
+    ProviderInvocation,
+    ProviderLogger,
+    build_invocation,
+    domain_deadline,
+)
+from studio.shared.providers_common.results import (
+    Provenance,
+    ProviderResult,
+    UnitResult,
+    coerce_result,
+    derive_status,
+    normalize_ref,
+    resolve_ref,
+    validate_egress,
+)
+from studio.shared.providers_common.jobs import (
+    JobHandle,
+    JobRecord,
+    JobStatus,
+    poll_interval,
+    terminal_outcome,
+    unknown_job_status,
+)
+from studio.shared.providers_common.boundary import (
+    Deadline,
+    invoke,
+    wait_until,
+    wrap_exception,
 )
 from studio.shared.providers_common.hub import (
     ProviderHub,
@@ -141,6 +187,36 @@ __all__ = [
     "Runtime",
     "RuntimeBinding",
     "call_provider_runtime",
+    "PROVIDER_CODES",
+    "ProviderCancelled",
+    "ProviderError",
+    "ProviderErrorPayload",
+    "is_retryable",
+    "workflow_code",
+    "CancellationToken",
+    "ProgressReporter",
+    "ProviderInvocation",
+    "ProviderLogger",
+    "build_invocation",
+    "domain_deadline",
+    "Provenance",
+    "ProviderResult",
+    "UnitResult",
+    "coerce_result",
+    "derive_status",
+    "normalize_ref",
+    "resolve_ref",
+    "validate_egress",
+    "JobHandle",
+    "JobRecord",
+    "JobStatus",
+    "poll_interval",
+    "terminal_outcome",
+    "unknown_job_status",
+    "Deadline",
+    "invoke",
+    "wait_until",
+    "wrap_exception",
     "ProviderHub",
     "DomainBinding",
     "ReloadReport",

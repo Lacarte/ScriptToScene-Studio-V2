@@ -2,6 +2,11 @@ import os
 import time
 from config import STORYBOARD_DIR
 from studio.io_utils import now_iso, safe_json_read
+from studio.shared.providers_common.errors import (
+    PROVIDER_TIMEOUT,
+    ProviderCancelled,
+    ProviderError,
+)
 from .common import AdapterError, context_value, inherited_config, outputs, project_id, with_artifacts
 
 
@@ -46,9 +51,21 @@ def _step_storyboard(scenes_result, config, project_id, context):
                 return {"total": total, "ready": ready, "errors": errors, "scene_statuses": status.get("scene_statuses", {})}
         stop = context_value(context, "stop_requested")
         if stop and stop():
-            raise AdapterError("EXECUTION_CANCELLED", "Storyboard generation was cancelled")
+            # `CANCELLED` is the only code the scheduler recognizes as
+            # cancellation. The previous `EXECUTION_CANCELLED` fell through the
+            # ordinary failure path, so a cancelled node was recorded `failed`
+            # inside an execution the same scheduler marked `cancelled`
+            # (contracts.md §35.1, D36).
+            raise ProviderCancelled(
+                "Storyboard generation was cancelled", domain="storyboard"
+            ).as_adapter_error()
         time.sleep(1)
-    raise AdapterError("NODE_TIMEOUT", "Storyboard generation timed out after 30 minutes")
+    # `POLL_TIMEOUT` is the §7 stable code; `NODE_TIMEOUT` never was (D35).
+    raise ProviderError(
+        PROVIDER_TIMEOUT,
+        "Storyboard generation timed out after 30 minutes",
+        domain="storyboard",
+    ).as_adapter_error()
 
 
 def generate(inputs, config, context):

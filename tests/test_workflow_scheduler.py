@@ -468,3 +468,156 @@ def test_scheduler_promotes_staged_artifact_only_after_adapter_success(tmp_path)
                                output_dir=str(tmp_path), executor_resolver=resolver).run()
     assert result.status == "succeeded"
     assert destination.read_text(encoding="utf-8") == "published"
+
+
+# -- step 11.4: the error boundary at the scheduler edge ---------------------
+
+
+def _failing_scheduler(tmp_path, exception, *, on_error=None, **kwargs):
+    workflow = _retry_workflow(on_error or {"policy": "stop"})
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            if node["id"] == "work":
+                raise exception
+            return {"control": {"ok": True}, "script": "hello"}
+        return execute
+
+    return WorkflowScheduler(
+        workflow, project_id="pm_ABC123", lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path), executor_resolver=resolver, **kwargs,
+    ).run()
+
+
+def test_an_unhandled_adapter_exception_never_persists_its_text(tmp_path):
+    """contracts.md §34.4 / §36 L1: `_failure_payload` no longer copies str(exc)."""
+    result = _failing_scheduler(
+        tmp_path, RuntimeError("key sk-abc123def456 at C:\\secret\\file.txt")
+    )
+    error = result.errors["work"]
+    record = result.execution_record["nodes"]["work"]
+    assert error["code"] == "NODE_EXECUTION_FAILED"
+    for blob in (str(error), str(record)):
+        assert "sk-abc123def456" not in blob
+        assert "C:\\secret" not in blob
+        assert "file.txt" not in blob
+    assert error["message"] == "The node failed with an internal RuntimeError."
+
+
+def test_an_authored_adapter_error_keeps_its_message_but_is_still_sanitized(tmp_path):
+    from studio.workflows.adapters.common import AdapterError
+
+    result = _failing_scheduler(
+        tmp_path, AdapterError("SCENES_EMPTY", "No scenes at C:\\projects\\p\\scenes.json")
+    )
+    error = result.errors["work"]
+    assert error["code"] == "SCENES_EMPTY"
+    assert "C:\\projects" not in error["message"]
+    assert "scenes.json" in error["message"]
+
+
+def test_a_non_retryable_provider_error_stops_the_attempt_loop(tmp_path):
+    """contracts.md §34.3 / D27: three attempts on a bad API key is waste."""
+    from studio.shared.providers_common.errors import PROVIDER_AUTH_FAILED, ProviderError
+
+    policy = {"policy": "retry", "max_attempts": 3, "delay_ms": 0, "backoff_multiplier": 1}
+    terminal = ProviderError(PROVIDER_AUTH_FAILED, "credentials rejected").as_adapter_error()
+    result = _failing_scheduler(tmp_path, terminal, on_error=policy)
+    assert result.execution_record["nodes"]["work"]["attempts"] == 1
+    assert result.errors["work"]["details"]["provider_code"] == "PROVIDER_AUTH_FAILED"
+
+    retryable = ProviderError("PROVIDER_RATE_LIMITED", "slow down").as_adapter_error()
+    retried = _failing_scheduler(tmp_path, retryable, on_error=policy, sleeper=lambda s: None)
+    assert retried.execution_record["nodes"]["work"]["attempts"] == 3
+
+
+def test_a_provider_cancellation_records_the_node_as_cancelled(tmp_path):
+    """contracts.md §35.1 / D36: `EXECUTION_CANCELLED` was recognized nowhere."""
+    from studio.shared.providers_common.errors import ProviderCancelled
+
+    result = _failing_scheduler(tmp_path, ProviderCancelled().as_adapter_error())
+    assert result.node_statuses["work"] == "cancelled"
+    assert result.execution_record["nodes"]["work"]["error"]["code"] == "CANCELLED"
+    assert "work" not in result.errors
+
+
+def _cancelling_context():
+    return type("Ctx", (), {
+        "project_id": "pm_ABC123", "stop_requested": staticmethod(lambda: True),
+        "execution_id": "", "node_id": "", "stage_artifact": None,
+    })()
+
+
+SCENES = {"scenes": [{"index": 0, "image_prompt": "a lighthouse"}]}
+
+
+def test_a_cancelled_storyboard_node_is_recorded_as_cancelled(tmp_path, monkeypatch):
+    """contracts.md §35.1: this raised `EXECUTION_CANCELLED` and recorded `failed`."""
+    from studio.storyboard import routes as sb_routes
+    from studio.workflows.adapters import storyboard
+
+    monkeypatch.setattr(storyboard, "STORYBOARD_DIR", str(tmp_path / "storyboard"))
+    monkeypatch.setattr(sb_routes._jobs, "set", lambda *a, **k: None)
+    monkeypatch.setattr(sb_routes, "_save_storyboard_json", lambda *a, **k: None)
+    monkeypatch.setattr(sb_routes, "_generate_storyboard", lambda *a, **k: None)
+
+    with pytest.raises(Exception) as caught:
+        storyboard._step_storyboard(
+            SCENES, {"provider": "wavespeed_webhook"}, "pm_ABC123", _cancelling_context()
+        )
+    assert caught.value.code == "CANCELLED"
+
+
+def test_a_cancelled_animator_node_is_recorded_as_cancelled(tmp_path, monkeypatch):
+    from studio.animator import animation_routes, routes as animator_routes
+    from studio.workflows.adapters import animator
+
+    monkeypatch.setattr(animator, "ANIMATOR_DIR", str(tmp_path / "animator"))
+    monkeypatch.setattr(animation_routes, "_set_job", lambda *a, **k: None)
+    monkeypatch.setattr(animation_routes, "_save_job", lambda *a, **k: None)
+    monkeypatch.setattr(animation_routes, "_get_job", lambda *a, **k: None)
+    monkeypatch.setattr(animator_routes, "add_job", lambda *a, **k: None)
+
+    with pytest.raises(Exception) as caught:
+        animator._step_assets(
+            SCENES, {"provider": "grok_automa"}, "pm_ABC123", _cancelling_context()
+        )
+    assert caught.value.code == "CANCELLED"
+
+
+def test_a_cancelled_visual_node_records_cancelled_not_failed(tmp_path):
+    """The end-to-end shape: the scheduler recognizes only `CANCELLED`."""
+    from studio.shared.providers_common.errors import (
+        PROVIDER_TIMEOUT, ProviderCancelled, ProviderError,
+    )
+
+    cancelled = _failing_scheduler(tmp_path, ProviderCancelled("x").as_adapter_error())
+    assert cancelled.node_statuses["work"] == "cancelled"
+
+    # The timeout code moved from the ad-hoc `NODE_TIMEOUT` to §7's POLL_TIMEOUT.
+    timed_out = _failing_scheduler(
+        tmp_path, ProviderError(PROVIDER_TIMEOUT, "took too long").as_adapter_error()
+    )
+    assert timed_out.errors["work"]["code"] == "POLL_TIMEOUT"
+
+
+def test_a_missing_staged_artifact_reports_only_a_basename(tmp_path):
+    """contracts.md §36 L8: the message is persisted into the execution record."""
+    workflow = _workflow([_node("root")], [])
+    destination = tmp_path / "projects" / "pm_ABC123" / "result.txt"
+
+    def resolver(node):
+        def execute(inputs, config, context):
+            context.stage_artifact(str(destination))  # staged, never written
+            return {"control": {"ok": True}}
+        return execute
+
+    result = WorkflowScheduler(
+        workflow, project_id="pm_ABC123", lock_root=str(tmp_path / "locks"),
+        output_dir=str(tmp_path), executor_resolver=resolver,
+    ).run()
+    error = result.errors["root"]
+    assert error["code"] == "ARTIFACT_MISSING"
+    assert error["message"].endswith("result.txt")
+    assert str(tmp_path) not in error["message"]
+    assert "artifact_" not in error["message"]

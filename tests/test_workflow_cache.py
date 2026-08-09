@@ -78,6 +78,28 @@ def test_fingerprint_is_canonical_for_mapping_order():
     assert canonical_fingerprint(left) == canonical_fingerprint(right)
 
 
+def test_an_adapter_schema_bump_makes_every_prior_entry_a_clean_miss():
+    """Step 11.4 / acceptance A9, proved without bumping the shipped constant.
+
+    contracts.md §45 makes `ADAPTER_CACHE_SCHEMA_VERSION` part of the
+    fingerprint, so an output-shape change invalidates rather than migrates.
+    Later steps bump the constant; this asserts the mechanism they rely on, and
+    that the version is *only* reachable through the fingerprint — a cache entry
+    written before a bump can never be read after one.
+    """
+    node = {"type": "tts.generate", "type_version": 1}
+    before = fingerprint_components(node, {"voice": "af_heart"}, {}, {},
+                                    adapter_schema_version=1)
+    after = fingerprint_components(node, {"voice": "af_heart"}, {}, {},
+                                   adapter_schema_version=2)
+    assert before["adapter_cache_schema_version"] == 1
+    assert canonical_fingerprint(before) != canonical_fingerprint(after)
+    # An older entry must never be revived by bumping back down, either.
+    again = fingerprint_components(node, {"voice": "af_heart"}, {}, {},
+                                   adapter_schema_version=1)
+    assert canonical_fingerprint(again) == canonical_fingerprint(before)
+
+
 def test_unchanged_run_executes_zero_nodes_and_force_bypasses_cache(tmp_path):
     workflow = _workflow()
     first_calls = []

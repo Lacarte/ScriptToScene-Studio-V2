@@ -2,40 +2,24 @@
 
 Abstract base class defining the animator provider interface.
 All animator providers must implement these methods.
+
+Step 11.4 deleted this module's copies of `JobHandle`, `JobStatus`, and
+`SceneResult` — the storyboard copies were field-for-field identical
+(contracts.md §14.6). The one shared definition lives in
+`providers_common.jobs`; `SceneResult`'s `video_url`/`video_path` split is
+replaced by the media-neutral `UnitResult` that both visual domains now produce
+(§33.1).
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Callable
 
-
-@dataclass
-class JobHandle:
-    """Handle for a submitted animator job."""
-    job_id: str
-    status: str
-    created_at: str | None = None
-
-
-@dataclass
-class JobStatus:
-    """Status of an animator job."""
-    job_id: str
-    status: str
-    progress: float = 0.0
-    message: str | None = None
-    result: dict | None = None
-    error: str | None = None
-
-
-@dataclass
-class SceneResult:
-    """Result for a single scene's animation."""
-    scene_index: int
-    video_url: str | None = None
-    video_path: str | None = None
-    thumbnail_url: str | None = None
-    metadata: dict | None = None
+from studio.shared.providers_common.jobs import (  # noqa: F401  (re-exported)
+    JobHandle,
+    JobStatus,
+    SceneResult,
+    UnitResult,
+)
 
 
 class AnimatorProvider(ABC):

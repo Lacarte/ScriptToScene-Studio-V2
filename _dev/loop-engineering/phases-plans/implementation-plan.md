@@ -1206,6 +1206,116 @@ test that actually invokes it; recorded legacy-path fixtures match the new envel
 each difference is explicitly approved; and workflow-facing errors keep stable codes and never expose
 raw provider objects or traceback text.
 
+#### Step 11.4 review status — 2026-08-09
+
+- **Complete.** Six new modules implement the 10.3 contract in one import chain with no
+  cycles: `errors` (a leaf, on `validation` only) → `invocation` / `results` → `jobs` →
+  `boundary`, plus `legacy` and `fixtures` beside them. Nothing imports `studio.workflows.*`
+  at module level — `redaction`, `AdapterError`, and `safe_join` are all reached lazily, so
+  the provider layer and the workflow layer still do not depend on each other's package
+  (§34.4).
+- D22 is closed: `ProviderInvocation` is frozen, carries the §30.1 field set, and `cancel`,
+  `progress`, and `log` are never `None`. `build_invocation()` is the one construction site
+  and maps `AdapterContext` field for field (§30.6); passing `context=None` builds the same
+  object for a legacy route with no scheduler. `CancellationToken` latches, so re-probing
+  after the scheduler tears its event down cannot un-cancel a call, and a probe that raises
+  is swallowed rather than failing the invocation.
+- D29 is closed: `ProgressReporter` rate-limits to one event per second per invocation,
+  coalesces intermediate values, always emits the last value before a terminal state,
+  enforces monotonic `ready` and write-once `total`, clamps `fraction`, and pushes every
+  message through redaction, path stripping, and the 200-character cap. It never raises, and
+  a sink that raises is logged and dropped.
+- D23 and D28 are closed. `ProviderResult` derives `status` from `units` rather than trusting
+  the provider (§31.5 rule 3, cancellation first), rejects a duplicate `unit_index` and a
+  `failed` unit with no error, and unions unit refs into the envelope. `validate_egress()`
+  runs at the boundary over both the envelope and the platform-authored provenance, and
+  rejects absolute/UNC paths, sensitive keys, `bytes`, non-JSON values, and the §31.1 caps.
+- D24 is closed: the two field-for-field duplicate `JobHandle`/`JobStatus`/`SceneResult`
+  blocks in `storyboard/providers/base.py` and `animator/providers/base.py` are deleted, and
+  both modules re-export the one definition in `providers_common/jobs.py`. `status` became
+  `state` over a closed vocabulary, `result: dict | None` became `units`, and `SceneResult`
+  *is* `UnitResult` — the `image_url`/`video_url` split is gone. `terminal_outcome()` maps
+  each of the five terminal states onto exactly one invocation outcome, including "zero
+  produced units can never be `succeeded`".
+- D25, D26, and D35/D36 are closed. `ProviderError` sanitizes its message on construction, so
+  no subclass can build a leaky one; `wrap_exception()` logs the traceback through the
+  internal-only channel and returns a generic per-domain sentence, never `str(exc)`.
+  `scheduler._failure_payload` now uses `safe_failure_message()`, which copies text only from
+  `SchedulerError`/`AdapterError`/`ExpressionError`/`ProviderError`, and even then strips
+  paths and masks `key=value` pairs. Both visual adapters raise `ProviderCancelled` →
+  `CANCELLED` and `PROVIDER_TIMEOUT` → `POLL_TIMEOUT`, retiring `EXECUTION_CANCELLED` and
+  `NODE_TIMEOUT`.
+- D27 is closed: `is_retryable_failure()` ends the attempt loop on a `retryable=False`
+  provider error. An exception that declares nothing is still retried, so no existing node
+  changes behavior.
+- Egress: L1 (`str(exc)` in `_failure_payload`), L6 (settings echoed into a result), and L8
+  (the absolute staged path in `ARTIFACT_MISSING`) are closed here. L4 is extended — 11.3
+  fixed a health hook that *raises*, and three shipped hooks *return* `{"status": "fail",
+  "message": str(e)}`, which `ProviderInstance.health_check` now sanitizes too. L3's machinery
+  exists (`legacy._unit_error` turns the persisted `str(e)` into a bounded
+  `ProviderErrorPayload`); wiring it into the live route stays 14.2's.
+- §46's second fixture layer exists: `tests/fixtures/providers/<domain>/<provider_id>/` with
+  `request.json` / `raw_response.json` / `expected_result.json`, a SHA-256 manifest, a
+  `generate.py`, and two deliberately different validators — record-time `validate_sanitation`
+  over all three files, and the stricter §36 `validate_egress` over `expected_result.json`
+  only, so a raw response may keep the synthetic remote URL that exercises the code removing
+  it. Three legacy boundaries are recorded (`tts/kokoro`, `storyboard/wavespeed_webhook`,
+  `animator/kie_ai`) and each is asserted to reach the envelope field for field; a per-key
+  test proves the only two dropped TTS keys are the ones with a named owner (`wav_path`,
+  §36 L7; `job_meta`, D39).
+- The `fixture_provider` of §46.3 is written and load-bearing: it is the first manifest in the
+  repo to declare `contract_version=2`, it appears in no hardcoded list, and every runtime
+  contract test drives it — sync success, async submit/poll/cancel, progress, cancellation,
+  timeout, retryable and terminal errors, malformed and unknown-key results, partial and
+  all-failed units, unmanaged and missing artifacts, and a secret-bearing exception.
+- **Two defects found by first-time test, in code that had never executed.** Both animator
+  providers read `studio.animator.routes._asset_jobs`, an attribute that module has never
+  defined — every `poll()` and every Kie AI `submit()` would have raised `AttributeError`.
+  And all five visual `poll()` bodies counted `scene_statuses[...]["status"] == "complete"`, a
+  value neither domain has ever written (both write ready/error). They are corrected onto the
+  real store and one shared `status_from_scenes()`, which also applies the zero-produced-units
+  rule in one place. `kie_ai._generate_images` also persisted a raw `str(e)` into a file under
+  `output/`; it is sanitized now.
+- **Adjustment recorded — `JobStatus(status="unknown")` became `failed`/`PROVIDER_NOT_FOUND`.**
+  The old provider-defined `"unknown"` is not in the §33.2 vocabulary and no caller could
+  branch on it: a poll loop treated it as neither done nor failed and waited out the whole
+  deadline. A job the provider has no record of will never complete, so `unknown_job_status()`
+  returns the same shape §33.4 already mandates for a rehydrated job whose provider is gone.
+- **Adjustment recorded — the redaction sentinel is `***`, not `[REDACTED]`.** §31.3's example
+  shows `[REDACTED]`, but provenance is produced by `settings_manager.redact_settings`, whose
+  frozen sentinel is `***` (§22.6). The producer wins. Consequently `validate_egress` has to
+  allow a sensitive *key* whose value is nothing but a redaction marker — otherwise §31.2 and
+  §31.3 contradict each other, since `resolved_settings_redacted` necessarily keeps the
+  original key names.
+- **Adjustment recorded — artifact existence needed a staging-aware check.** §34.2 defines
+  `PROVIDER_ARTIFACT_MISSING`, but a staged write does not exist at its destination until the
+  node succeeds, so a naive check would fail every staged artifact. `ArtifactStager` wraps
+  `stage_path` and records destinations; `check_artifacts()` accepts a ref that either exists
+  or was staged.
+- **`ADAPTER_CACHE_SCHEMA_VERSION` is deliberately not bumped.** No workflow adapter's output
+  shape changed in this step — only the error codes on two failure paths, which are never
+  cached. Bumping would invalidate every existing entry for no reason, and the step text
+  forbids inventing a version change to test the machinery. A test instead proves the
+  mechanism the later bumps rely on, through the injectable `adapter_schema_version` parameter
+  rather than the shipped constant (acceptance A9).
+- **Adjustment recorded — the fixture provider package lives outside the fixture JSON root.**
+  §46.3 lists `fixture_provider` in the same table as the recorded boundaries, but it is a
+  Python package, not a `<domain>/<provider_id>` JSON triple; keeping it under
+  `tests/fixtures/providers/` would make the manifest and the sanitation validator hash and
+  scan source files. It is at `tests/fixture_providers/` and is registered by pointing a
+  `DomainSpec.providers_base` at that directory, so it never enters the shipped catalog.
+- **Deferred as already assigned:** `boundary.invoke()` has no production call site yet — the
+  domain steps (13.1–13.4, 14.2, 14.3, 15.2) switch onto it, which is also why the shipped
+  manifests stay at `contract_version=1`; the poll loop with jitter and the three-strike limit
+  (D31, 14.1); job persistence and rehydration (D33, 14.1); push correlation and duplicate-
+  status idempotence (D32, 14.4); per-unit retry (D34, 14.1); and the five
+  `providers/contract.py` request/result models (D30).
+- Verification passes with 510 backend tests (10 live-provider tests skipped, 161 subtests),
+  all 154 frontend tests across 25 files, the Vite production build, and generated-document
+  drift checks. Three guards were mutation-checked: reverting `safe_failure_message` to
+  `str(exc)`, forcing `is_retryable_failure` to `True`, and disabling progress rate limiting
+  each fail their tests. No Vue component and no frontend file changed.
+
 ### 11.5 Unified provider API and application startup
 Replace the three startup-specific initialization blocks in `app.py:90-95` with hub initialization while
 preserving their compatibility functions. Serve one versioned provider catalog plus domain/provider

@@ -21,9 +21,13 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
+from loguru import logger
+
 from config import OUTPUT_DIR
 from studio.io_utils import now_iso
 from studio.security import safe_join
+from studio.shared.providers_common.errors import ProviderError
+from studio.shared.providers_common.validation import sanitize_message
 
 from .adapters import AdapterContext, AdapterError
 from .adapters.common import PROJECT_ID_RE
@@ -42,6 +46,39 @@ class SchedulerError(RuntimeError):
         self.code = code
         self.message = message
         self.details = details
+
+
+# Exceptions whose text was authored by this codebase for a human reader.
+# Everything else is a plugin exception whose `str()` may embed a third-party
+# response body, an absolute path, or a stack frame (contracts.md §34.4, §36 L1).
+_AUTHORED_EXCEPTIONS = (SchedulerError, AdapterError, ExpressionError, ProviderError)
+
+
+def safe_failure_message(exc: BaseException) -> str:
+    """The message a failure is allowed to persist (contracts.md §34.4).
+
+    `str(exc)` is copied only for exceptions this codebase raised deliberately,
+    and even then it is path-stripped and secret-masked. For anything else the
+    class name is the only diagnostic that survives; the full text goes to the
+    log, which is redacted, and never to the execution record.
+    """
+    if isinstance(exc, _AUTHORED_EXCEPTIONS):
+        return sanitize_message(getattr(exc, "message", None) or str(exc))
+    logger.error(
+        "[scheduler] unhandled {} in a node executor: {}", type(exc).__name__, exc
+    )
+    return f"The node failed with an internal {type(exc).__name__}."
+
+
+def is_retryable_failure(exc: BaseException) -> bool:
+    """Whether the attempt loop may try again (contracts.md §34.3, D27).
+
+    A `retryable=False` provider error stops the loop immediately instead of
+    burning all three attempts on a permanently invalid API key. Anything that
+    does not declare retryability keeps today's behavior and is retried.
+    """
+    declared = getattr(exc, "retryable", None)
+    return True if declared is None else bool(declared)
 
 
 class ProjectLockedError(SchedulerError):
@@ -155,7 +192,14 @@ class ArtifactPromoter:
     def promote(self) -> None:
         for staged, destination in self._pending:
             if not os.path.isfile(staged):
-                raise SchedulerError("ARTIFACT_MISSING", f"Staged artifact was not created: {staged}")
+                # Basename only: the staging path is absolute and this message
+                # is persisted into the execution record (contracts.md §36 L8).
+                raise SchedulerError(
+                    "ARTIFACT_MISSING",
+                    "Staged artifact was not created: "
+                    f"{os.path.basename(destination)}",
+                    details={"artifact": os.path.basename(destination)},
+                )
             os.makedirs(os.path.dirname(destination), exist_ok=True)
             # Copy into the destination directory first.  os.replace then
             # publishes on the destination filesystem in one atomic step.
@@ -767,7 +811,14 @@ class WorkflowScheduler:
 
             attempt_error = self._failure_payload(node, failure, node_record.attempts)
             node_record.attempt_errors.append(attempt_error)
-            if policy["policy"] == "retry" and node_record.attempts < max_attempts:
+            # A non-retryable provider error ends the loop here rather than
+            # spending the remaining attempts on a failure that cannot change
+            # (contracts.md §34.3, D27).
+            if (
+                policy["policy"] == "retry"
+                and node_record.attempts < max_attempts
+                and is_retryable_failure(failure)
+            ):
                 delay_ms = min(
                     60_000,
                     round(policy["delay_ms"] * (
@@ -886,12 +937,14 @@ class WorkflowScheduler:
 
     def _failure_payload(self, node: Mapping[str, Any], exc: Exception, attempt: int) -> dict[str, Any]:
         code = getattr(exc, "code", "NODE_EXECUTION_FAILED")
-        message = "Execution was cancelled" if code == "CANCELLED" else str(exc)
-        suggestion = (
-            "Start a new run when ready."
-            if code == "CANCELLED"
-            else "Review the node inputs and settings, then retry the failed node."
-        )
+        if code == "CANCELLED":
+            message = "Execution was cancelled"
+            suggestion = "Start a new run when ready."
+        else:
+            message = safe_failure_message(exc)
+            suggestion = getattr(exc, "recovery_suggestion", None) or (
+                "Review the node inputs and settings, then retry the failed node."
+            )
         return self.redactor({
             "node_id": node["id"],
             "node_name": node.get("name") or node["id"],

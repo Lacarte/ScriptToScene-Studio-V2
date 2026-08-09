@@ -133,6 +133,7 @@ def settings_schema() -> dict:
 
 from typing import Optional, Callable
 
+from studio.shared.providers_common.jobs import unknown_job_status
 from studio.storyboard.providers.base import (
     StoryboardProvider,
     JobHandle,
@@ -154,7 +155,7 @@ class {name_cap}Provider(StoryboardProvider):
         raise NotImplementedError("{name_cap}Provider.submit not implemented")
 
     def poll(self, job_id: str, settings: dict) -> JobStatus:
-        return JobStatus(job_id=job_id, status="unknown")
+        return unknown_job_status(job_id)
 
     def shutdown(self) -> None:
         pass
@@ -210,6 +211,7 @@ from studio.animator.providers.base import (
     JobStatus,
     SceneResult,
 )
+from studio.shared.providers_common.jobs import unknown_job_status
 
 
 class {name_cap}Provider(AnimatorProvider):
@@ -225,7 +227,7 @@ class {name_cap}Provider(AnimatorProvider):
         raise NotImplementedError("{name_cap}Provider.submit not implemented")
 
     def poll(self, job_id: str, settings: dict) -> JobStatus:
-        return JobStatus(job_id=job_id, status="unknown")
+        return unknown_job_status(job_id)
 
     def shutdown(self) -> None:
         pass

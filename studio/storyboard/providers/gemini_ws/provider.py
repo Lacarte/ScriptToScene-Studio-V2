@@ -5,6 +5,7 @@ Bridges to studio.storyboard.gemini_ws for WebSocket handling.
 
 from loguru import logger
 
+from studio.shared.providers_common.jobs import SUBMITTED
 from studio.storyboard.providers.base import (
     StoryboardProvider,
     JobHandle,
@@ -36,18 +37,18 @@ class GeminiWSProvider(StoryboardProvider):
         auto_type = settings.get("auto_type", False)
         
         gw.add_job(project_id, scenes, auto_type=auto_type)
-        
+
         return JobHandle(
             job_id=f"{project_id}",
-            status="pending",
+            domain="storyboard",
+            provider_id="gemini_ws",
+            project_id=project_id,
         )
 
     def poll(self, job_id: str, settings: dict) -> JobStatus:
-        return JobStatus(
-            job_id=job_id,
-            status="pending",
-            progress=0.0,
-        )
+        # gemini_ws pushes through its WebSocket runtime; the poll is the §33.3
+        # watchdog and reports no state of its own.
+        return JobStatus(job_id=job_id, state=SUBMITTED, fraction=0.0)
 
     def generate_one(
         self,

@@ -2,40 +2,24 @@
 
 Abstract base class defining the storyboard provider interface.
 All storyboard providers must implement these methods.
+
+Step 11.4 deleted this module's copies of `JobHandle`, `JobStatus`, and
+`SceneResult`. They were field-for-field duplicates of the animator ones
+(contracts.md §14.6) and now have one shared definition in
+`providers_common.jobs`; the names are re-exported here so existing
+`from studio.storyboard.providers.base import JobHandle` imports keep resolving,
+and `SceneResult` is the media-neutral `UnitResult` (§33.1).
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
 
-
-@dataclass
-class JobHandle:
-    """Handle for a submitted storyboard job."""
-    job_id: str
-    status: str
-    created_at: str | None = None
-
-
-@dataclass
-class JobStatus:
-    """Status of a storyboard job."""
-    job_id: str
-    status: str
-    progress: float = 0.0
-    message: str | None = None
-    result: dict | None = None
-    error: str | None = None
-
-
-@dataclass
-class SceneResult:
-    """Result for a single scene's storyboard."""
-    scene_index: int
-    image_url: str | None = None
-    image_path: str | None = None
-    thumbnail_url: str | None = None
-    metadata: dict | None = None
+from studio.shared.providers_common.jobs import (  # noqa: F401  (re-exported)
+    JobHandle,
+    JobStatus,
+    SceneResult,
+    UnitResult,
+)
 
 
 class StoryboardProvider(ABC):

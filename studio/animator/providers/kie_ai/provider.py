@@ -21,6 +21,8 @@ from studio.animator.providers.base import (
     JobStatus,
     SceneResult,
 )
+from studio.shared.providers_common.jobs import status_from_scenes, unknown_job_status
+from studio.shared.providers_common.validation import sanitize_message
 
 
 POLL_INTERVAL = 3
@@ -134,14 +136,19 @@ class KieAIProvider(AnimatorProvider):
             raise ValueError("KIE_AI_API_KEY not configured")
         
         job_id = f"{project_id}"
-        
-        # Set up job tracking
-        animator_routes._asset_jobs.set(job_id, {
-            "project_id": project_id,
-            "status": "running",
-            "scene_statuses": {},
-        })
-        
+
+        # Set up job tracking. This wrote to `animator_routes._asset_jobs`,
+        # an attribute the module has never defined; the real store is the
+        # `_jobs` dict guarded by `_jobs_lock` (`routes.py:38-39`, `:676`).
+        # Found by first-time test in step 11.4.
+        with animator_routes._jobs_lock:
+            animator_routes._jobs[job_id] = {
+                "project_id": project_id,
+                "status": "running",
+                "scenes": {},
+            }
+
+
         # Start background generation
         t = threading.Thread(
             target=self._generate_images,
@@ -150,20 +157,28 @@ class KieAIProvider(AnimatorProvider):
         )
         t.start()
         
-        return JobHandle(job_id=job_id, status="pending")
+        return JobHandle(
+            job_id=job_id,
+            domain="animator",
+            provider_id="kie_ai",
+            project_id=project_id,
+        )
 
     def _generate_images(self, project_id, scenes, api_key, model, resolution):
         from studio.animator import routes as animator_routes
-        
-        job = animator_routes._asset_jobs.get(project_id)
+
+        with animator_routes._jobs_lock:
+            job = animator_routes._jobs.get(project_id)
         if not job:
             return
-        
+
         for scene in scenes:
             scene_key = str(scene.get("scene", scene.get("index", 0)))
-            job["scene_statuses"][scene_key] = {"status": "generating", "urls": [], "local_paths": []}
-            animator_routes._asset_jobs.set(project_id, job)
-            
+            with animator_routes._jobs_lock:
+                job["scenes"][scene_key] = {
+                    "status": "generating", "urls": [], "local_files": []
+                }
+
             try:
                 result = generate_image(
                     prompt=scene.get("prompt", ""),
@@ -171,39 +186,28 @@ class KieAIProvider(AnimatorProvider):
                     model=model,
                     api_key=api_key,
                 )
-                urls = [result.get("url", "")]
-                
-                job["scene_statuses"][scene_key] = {
-                    "status": "complete",
-                    "urls": urls,
-                    "local_paths": [],
+                entry = {
+                    # `ready` is the vocabulary the animator route persists;
+                    # `complete` was written here and read nowhere.
+                    "status": "ready",
+                    "urls": [result.get("url", "")],
+                    "local_files": [],
                 }
             except Exception as e:
                 logger.error("[{}] Kie AI failed: {}", project_id, e)
-                job["scene_statuses"][scene_key] = {
-                    "status": "error",
-                    "error": str(e),
-                }
-            
-            animator_routes._asset_jobs.set(project_id, job)
+                entry = {"status": "error", "error": sanitize_message(e)}
+
+            with animator_routes._jobs_lock:
+                job["scenes"][scene_key] = entry
 
     def poll(self, job_id: str, settings: dict) -> JobStatus:
         from studio.animator import routes as animator_routes
-        
-        job = animator_routes._asset_jobs.get(job_id)
+
+        with animator_routes._jobs_lock:
+            job = animator_routes._jobs.get(job_id)
         if not job:
-            return JobStatus(job_id=job_id, status="unknown")
-        
-        statuses = job.get("scene_statuses", {})
-        done = sum(1 for s in statuses.values() if s.get("status") == "complete")
-        total = len(statuses)
-        progress = done / total if total > 0 else 0.0
-        
-        return JobStatus(
-            job_id=job_id,
-            status="complete" if done == total else "processing",
-            progress=progress,
-        )
+            return unknown_job_status(job_id)
+        return status_from_scenes(job_id, job.get("scenes", {}))
 
     def shutdown(self) -> None:
         pass

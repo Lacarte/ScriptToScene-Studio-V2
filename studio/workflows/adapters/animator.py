@@ -2,6 +2,11 @@ import os
 import time
 from config import ANIMATOR_DIR
 from studio.io_utils import now_iso, safe_json_read
+from studio.shared.providers_common.errors import (
+    PROVIDER_TIMEOUT,
+    ProviderCancelled,
+    ProviderError,
+)
 from .common import AdapterError, context_value, inherited_config, outputs, project_id, with_artifacts
 
 
@@ -58,9 +63,17 @@ def _step_assets(scenes_result, config, project_id, context):
                 return {"total": total, "ready": ready, "errors": errors, "provider": provider}
         stop = context_value(context, "stop_requested")
         if stop and stop():
-            raise AdapterError("EXECUTION_CANCELLED", "Animator generation was cancelled")
+            # See the storyboard adapter: `EXECUTION_CANCELLED` was recognized
+            # nowhere and recorded a cancelled node as `failed` (§35.1, D36).
+            raise ProviderCancelled(
+                "Animator generation was cancelled", domain="animator"
+            ).as_adapter_error()
         time.sleep(1)
-    raise AdapterError("NODE_TIMEOUT", "Animator generation timed out after 120 minutes")
+    raise ProviderError(
+        PROVIDER_TIMEOUT,
+        "Animator generation timed out after 120 minutes",
+        domain="animator",
+    ).as_adapter_error()
 
 
 def generate(inputs, config, context):

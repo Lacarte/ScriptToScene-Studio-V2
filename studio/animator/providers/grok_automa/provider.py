@@ -11,6 +11,7 @@ from studio.animator.providers.base import (
     JobStatus,
     SceneResult,
 )
+from studio.shared.providers_common.jobs import status_from_scenes, unknown_job_status
 
 
 class GrokAutomaProvider(AnimatorProvider):
@@ -49,25 +50,22 @@ class GrokAutomaProvider(AnimatorProvider):
         
         return JobHandle(
             job_id=f"{project_id}",
-            status="pending",
+            domain="animator",
+            provider_id="grok_automa",
+            project_id=project_id,
         )
 
     def poll(self, job_id: str, settings: dict) -> JobStatus:
         animator = self._get_animator()
-        job = animator._asset_jobs.get(job_id)
+        # Two defects found by first-time test in step 11.4: this read
+        # `animator._asset_jobs`, an attribute `studio.animator.routes` has
+        # never defined, and then counted `status == "complete"`, which the
+        # route has never written — it writes ready/error under `scenes`
+        # (`routes.py:365-410`, `:575-592`).
+        job = animator._jobs.get(job_id)
         if not job:
-            return JobStatus(job_id=job_id, status="unknown")
-        
-        statuses = job.get("scene_statuses", {})
-        done = sum(1 for s in statuses.values() if s.get("status") == "complete")
-        total = len(statuses)
-        progress = done / total if total > 0 else 0.0
-        
-        return JobStatus(
-            job_id=job_id,
-            status="complete" if done == total else "processing",
-            progress=progress,
-        )
+            return unknown_job_status(job_id)
+        return status_from_scenes(job_id, job.get("scenes", {}))
 
     def shutdown(self) -> None:
         pass

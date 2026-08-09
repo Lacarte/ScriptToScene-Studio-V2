@@ -335,10 +335,14 @@ class ProviderInstance:
             logger.warning("[registry] health_check failed for {}: {}", self.id, e)
             return HealthResult(status='fail', message=v.sanitize_message(e))
         if isinstance(result, dict):
+            message = result.get('message')
             return HealthResult(
                 status=result.get('status', 'unknown'),
                 latency_ms=result.get('latency_ms'),
-                message=result.get('message'),
+                # A *returned* message is as untrusted as a raised one: several
+                # shipped hooks answer `{"status": "fail", "message": str(e)}`,
+                # which can carry a URL, a path, or a response body (§36 L4).
+                message=v.sanitize_message(message) if message else message,
                 details=result.get('details'),
             )
         if isinstance(result, str):
