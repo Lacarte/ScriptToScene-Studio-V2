@@ -640,7 +640,7 @@ diverge on the next write. Animator is worse than a two-store disagreement: sele
 provider modal changes catalog state but does not change legacy route, pipeline, or workflow
 dispatch at all.
 
-**Recommendation carried into 10.2 (decision, not yet frozen):** make
+**Recommendation carried into 10.2 — accepted and frozen in §24:** make
 `settings/settings.json` `domains.*.selected_provider` authoritative — it is the intended
 backend store, it is already per-domain, and it is the v4 design's stated source of truth.
 First wire the missing animator dispatch read. Migrate all three legacy keys by having the legacy
@@ -819,7 +819,7 @@ Consequence today: `_tts_voices()` (`options.py:19-21`) returns `studio.tts.rout
 static Kokoro list, regardless of the selected engine, so an Inworld node still offers Kokoro
 voice IDs. There is no `tts_providers` source at all. `allowed_option_values`
 (`options.py:85-105`) caches per source for the process lifetime and fails open. Owner: 10.2
-freezes the extended envelope, 12.2 implements it, 15.2 consumes it.
+froze the extended envelope in **§23**, 12.2 implements it, 15.2 consumes it.
 
 ## 16. Never-executed provider code paths — owner assignment
 
@@ -925,5 +925,664 @@ provider-decision entries (§15) each carry an owner step. No item in §13–§1
 an owner.
 
 Open decisions deliberately deferred: the authoritative selection store (recommendation in
-§14.2 → 10.2), the parameterized option-source envelope (§15.1 → 10.2), the unified
-job/result/error contract (§14.6 → 10.3), and fixture ownership (§17.4 → 10.4).
+§14.2 → **now frozen in §24**), the parameterized option-source envelope (§15.1 → **now frozen
+in §23**), the unified job/result/error contract (§14.6 → 10.3), and fixture ownership
+(§17.4 → 10.4).
+
+---
+
+# Provider Contract v2 (Phase 10.2 frozen)
+
+> Produced by step 10.2 of [implementation-plan.md](implementation-plan.md).
+> Grounded in code at commit `e79ac1c` (2026-08-08); §13–§18 above is the audit this
+> contract is built on. Every `file:line` reference was read at that commit.
+>
+> **Reuse rule.** This contract *extends* the shipped
+> `studio/shared/providers_common/` (registry, manifest, settings manager, discovery,
+> migrations, runtime hooks, broken-provider isolation). Nothing here authorizes a parallel
+> framework. Where v2 differs from today's code the delta is stated with an owner step, so
+> Phase 11 is a set of edits to existing modules, never a rewrite.
+>
+> **What 10.2 does not freeze.** Invocation context, request/result envelopes, job handles,
+> and `ProviderError` belong to 10.3. Legacy field/alias mapping tables and fixtures belong
+> to 10.4. This section stops at *what a provider is, how it is found, how it is configured,
+> and what the browser may see*.
+
+## 19. Domains, packages, identity
+
+### 19.1 Domain catalog — data, not code
+
+Exactly **five** domains are supported. Music and Captions are excluded by owner decision
+(§17.7) and have no `DomainSpec`.
+
+| domain id | label | provider package | discovery base | default provider | legacy selection key |
+|---|---|---|---|---|---|
+| `script` | Script / Story | `studio.story.providers` | `studio/story/providers` | `random_template` | *(none)* |
+| `scene_blueprint` | Scene Blueprint | `studio.build_scene_blueprints.providers` | `studio/build_scene_blueprints/providers` | `n8n_webhook` | *(none)* |
+| `tts` | Text to Speech | `studio.tts.providers` | `studio/tts/providers` | `kokoro` | `sts-tts-provider` |
+| `storyboard` | Storyboard | `studio.storyboard.providers` | `studio/storyboard/providers` | `gemini_ws` | `sts-storyboard-provider` |
+| `animator` | Animator | `studio.animator.providers` | `studio/animator/providers` | `grok_automa` | `sts-asset-provider` |
+
+The catalog lives in **one** new module, `studio/shared/providers_common/domains.py`,
+exporting `DOMAINS: dict[str, DomainSpec]` in the declaration order above.
+
+```python
+@dataclass(frozen=True)
+class DomainSpec:
+    id: str                      # catalog key; also settings.json domains.<id>
+    label: str                   # human label for the provider modal
+    package: str                 # dotted import path of the provider package
+    providers_base: str          # absolute path, built with os.path.join(ROOT_DIR, ...)
+    default_provider: str        # last-resort selection; must exist after discovery
+    capability_vocabulary: frozenset[str]   # §20.4
+    legacy_selection_key: str | None        # app-config.json key being retired (§24)
+    request_model: str | None = None        # dotted path — filled by 10.3
+    result_model: str | None = None         # dotted path — filled by 10.3
+```
+
+Adding a sixth domain is one `DomainSpec` entry plus a provider folder. It must not require
+editing the registry class, the settings manager, a route, or a Vue component.
+
+**This catalog replaces both hardcoded three-domain sets.** `ProviderRegistry.VALID_DOMAINS`
+(`registry.py:177`, P29) becomes `frozenset(DOMAINS)`; the duplicate `valid_domains`
+in `settings_manager.validate_settings` (`settings_manager.py:270`, P30) reads the same
+constant; `_default_settings()` (`settings_manager.py:137-160`, P31) is generated by
+iterating `DOMAINS` instead of listing three literals. Owner: **11.1**, in one step, so the
+two can never drift again. A test must assert all three derive from `DOMAINS` and that
+`settings.json` accepts every catalog domain.
+
+### 19.2 Package layout (frozen)
+
+```
+studio/<module>/providers/
+  __init__.py            one shared binding (§27) — not a per-domain copy
+  <provider_id>/
+    manifest.py          REQUIRED — def manifest() -> ProviderManifest
+    provider.py          optional — factory + validate_settings + health_check + impl
+    settings_schema.py   optional — def settings_schema() -> dict
+    __init__.py          optional; MUST NOT be required for discovery
+```
+
+Discovery keys on `manifest.py` only (`registry.py:246-249`); folders starting with `_` or
+`.` are skipped (`registry.py:243`). Modules are loaded from file paths under synthetic names
+`_sts_provider_{domain}_{id}_{manifest|provider|schema}` (`registry.py:273`), which is why
+blocker **B8** stands: consumers resolve providers with `registry.get(id)` and never `import`
+a provider module. `kie_ai/__init__.py` re-exporting `get_provider` (§14.1) is the one
+existing violation and is deleted by 14.3.
+
+Provider folders stay owned by their module. One hub (§27) exposes all domain registries;
+it does not move the folders.
+
+### 19.3 Provider identity and versions (frozen)
+
+| field | rule |
+|---|---|
+| `id` | `^[a-z][a-z0-9_]{1,31}$`; **must equal the folder name** (already enforced, `registry.py:320-323`); unique within its domain. The registry key is the pair `(domain, id)` — the same id may exist in two domains. |
+| `aliases` | **new, optional** `list[str]`, same charset as `id`. Legacy wire strings (`gemini`, `webhook`, `direct`, `grok`, `kie-ai`, `midjourney`) move here, retiring the hand-written tables at `pipeline/services.py:550`/`:644` and `animator/schemas.py:30-36` (P7, P8, P34). Resolution order: exact `id` first, then alias. An alias that collides with a real id **loses**, and the collision is logged WARN and recorded in `excluded()` metadata. Aliases are never written to settings and never returned as `selected`. The concrete mapping table is 10.4's deliverable; 10.2 freezes only the mechanism. |
+| `version` | semver `MAJOR.MINOR.PATCH`, the *implementation* version. Informational: it is never used to gate compatibility, and it is carried into result provenance (10.3). |
+| `contract_version` | **new, optional** `int`, default `2`. `1` = the legacy ABC shape (all seven providers today; never executed, §14.1/§16). The registry loads both; only `2` may be invoked through the 10.3 invocation contract. A value above the build's maximum excludes the provider with reason `MANIFEST_UNSUPPORTED_CONTRACT`. |
+| `domain` | must equal the owning registry's domain or registration is refused (`registry.py:196-199`). |
+
+Provider IDs in node configurations and `settings.json` are **canonical ids only**; legacy
+strings are accepted on input and normalized through the alias table (§8, "registry ids are
+canonical").
+
+## 20. Manifest contract
+
+### 20.1 Fields
+
+`ProviderManifest` (`registry.py:17-27`) is the frozen carrier. Required and optional fields:
+
+| field | required | type | default | notes |
+|---|---|---|---|---|
+| `id` | yes | str | — | §19.3 |
+| `label` | yes | str | — | shown in the provider modal and every dropdown |
+| `domain` | yes | str | — | must be a `DOMAINS` key |
+| `kind` | yes | enum | — | `local` \| `cloud` \| `extension` \| `webhook` (§20.2) |
+| `version` | yes | str | — | semver |
+| `capabilities` | yes | `dict[str,bool]` | — | **must be non-empty**: `registry.py:314-318` treats a falsy value as missing, so `capabilities={}` silently excludes the provider. This trap is frozen as-is and documented in the author guide (owner 16.2). |
+| `requires` | no | `list[str]` | `[]` | settings **key names** that must be non-empty for the provider to be usable (§21.5). Never values. |
+| `open_url` | no | `str \| None` | `None` | URL the UI may offer to open for `extension` providers |
+| `aliases` | no | `list[str]` | `[]` | new (§19.3); owner 11.2 |
+| `contract_version` | no | `int` | `2` | new (§19.3); owner 11.2 |
+| `description` | no | `str \| None` | `None` | new; one sentence, browser-safe |
+| `docs_url` | no | `str \| None` | `None` | new; must be `http(s)` |
+
+### 20.2 `kind` semantics (frozen)
+
+- `local` — runs in-process, no network (today: `kokoro`). May own heavy singletons; must
+  implement `shutdown()`.
+- `cloud` — outbound HTTPS to a third-party API with credentials in settings (today:
+  `inworld`, `wavespeed_direct`, `kie_ai`).
+- `webhook` — outbound HTTP to a user-supplied URL, validated by `is_safe_webhook_url`
+  (today `wavespeed_webhook` is declared `cloud`; 14.2 reclassifies it).
+- `extension` — needs a browser extension and a WebSocket runtime; the **only** kind whose
+  `register_runtime(app, sock)` is called at boot (`<domain>/providers/__init__.py:47-52`)
+  (today: `gemini_ws`, `grok_automa`). The two WS URLs are frozen public surface (§17.1).
+
+### 20.3 Validation and unknown-field policy (frozen)
+
+Manifest validation runs at discovery, in this order — each failure excludes only that
+provider (§21.4):
+
+1. `manifest.py` imports without raising.
+2. A module-level `manifest` attribute exists and is callable.
+3. `manifest()` returns a `ProviderManifest` **or** a dict coercible to one.
+4. All required fields of §20.1 are present and truthy.
+5. `manifest.id == folder name`.
+6. `manifest.domain` is a `DOMAINS` key and matches the owning registry.
+7. `kind` is in the §20.2 enum; `version` parses as semver; `capabilities` values are `bool`.
+8. `contract_version` ≤ the build's maximum.
+
+**Unknown fields — the one behavioral change here.** Today `ProviderManifest(**dict)` raises
+`TypeError` on any unrecognized key and the provider is excluded (`registry.py:304-309`), so a
+provider folder written against a newer build cannot load on an older one. Frozen v2 policy:
+unknown top-level manifest keys are **ignored, logged WARN once, and surfaced** in the
+provider's browser payload as `warnings: ["unknown manifest field: <name>"]`. Unknown
+*capability* keys and unknown *`kind`* values follow the same ignore-and-warn rule, except
+that an unknown `kind` falls back to `cloud` for scheduling purposes and never to `extension`
+(so an unrecognized provider can never claim a WebSocket route). Steps 7 and 8 above remain
+hard failures because they are identity, not vocabulary. Owner: **11.2**.
+
+### 20.4 Capability vocabulary (frozen)
+
+Capabilities are declarative booleans the platform and UI may branch on **generically** — they
+are the replacement for branching on a provider id. Values must be `bool`; a missing key means
+`False`. Each domain's `DomainSpec.capability_vocabulary` is the closed set for that domain;
+unknown keys are ignored and warned (§20.3).
+
+Shared by all five domains:
+
+| capability | meaning | in use today |
+|---|---|---|
+| `test_connection` | `health_check` performs a real probe worth exposing as a button | all seven |
+| `single_scene` | can produce one unit in isolation (one scene, one take) | all seven |
+| `batch` | can accept a multi-unit request | all seven |
+| `async_job` | returns a job handle and is polled rather than returning inline | storyboard + animator providers (implicit today) |
+| `push_callbacks` | pushes progress over an existing transport instead of being polled | `gemini_ws` |
+| `cancel` | honors the cancellation token | none yet (10.3 defines the token) |
+| `progress` | reports fractional progress, not just terminal states | none yet |
+
+Domain-specific additions:
+
+| domain | capabilities |
+|---|---|
+| `script` | `structured_sections` (returns hook/build/climax/cta), `language_select`, `offline` (no network — the `random_template` provider from 13.1) |
+| `scene_blueprint` | `chaptering` (can split oversized inputs, cf. `chapters.py:31-34`), `coherence_scoring`, `sfx_report` |
+| `tts` | `streaming`, `voice_list`, `voice_blend`, `speed_control`, `model_download` |
+| `storyboard` | `image_edit`, `watermark_removal`, `prompt_prefix` |
+| `animator` | `image_to_video`, `duration_control`, `resolution_select` |
+
+`streaming`, `voice_list`, and `model_download` are already declared by the shipped TTS
+manifests; the rest are frozen names for capabilities that exist in the legacy code as
+provider-id branches (P5–P25) and become declarative during Phases 14–15.
+
+## 21. Lifecycle, discovery, and isolation
+
+### 21.1 Lifecycle hooks (frozen)
+
+| phase | hook | when | failure policy |
+|---|---|---|---|
+| discover | *(none — filesystem scan)* | once per process, or on dev reload under `STS_WORKFLOW_DEV_RELOAD` | per-provider exclusion |
+| describe | `manifest()` | discovery | exclusion |
+| describe | `settings_schema()` | lazy, first request, memoized (`registry.py:107-117`) | returns `None`, WARN; provider still listed with `has_settings: false` |
+| configure | `validate_settings(settings) -> list[dict]` | on save, on select, on demand | exception → single root `error` issue (`registry.py:133-135`) |
+| probe | `health_check(settings) -> dict \| str \| HealthResult` | explicit user action or TTL cache (§21.5) | exception → `HealthResult(status="fail", message=str(e))` (`registry.py:154-156`) |
+| construct | **`create(context) -> Provider`** (new v2 factory) | lazily, at first invocation | exception → `ProviderError` at the registry boundary (10.3); provider marked `degraded` |
+| serve | domain-specific invocation | per request | 10.3 |
+| bind | `register_runtime(app, sock)` | once at boot, `kind == "extension"` only | caught and logged (`runtime.py:63-65`); boot continues |
+| release | `shutdown()` | registry teardown, dev reload, process exit | best-effort; exceptions logged, never raised; **must be idempotent** |
+
+The v2 factory replaces the eight zero-argument `get_provider()` functions, none of which has
+ever executed (§14.1, §16). Frozen rules: `create()` is called **at most once per
+`(domain, provider_id)` per process**, memoized under the registry lock, never at import time,
+and never during discovery — so importing a provider package can never start a model load, a
+thread, or a socket. `context` is the invocation context frozen by 10.3. Owner: **11.2**.
+
+`shutdown()` today exists on `Runtime` (`runtime.py:45-47`) and on `TTSProvider` with **zero
+callers**. v2 requires the registry to call it for every constructed provider on teardown, in
+reverse construction order. Owner: **11.2**.
+
+### 21.2 Registration and discovery order (frozen)
+
+1. Domains initialize in `DOMAINS` declaration order: `script`, `scene_blueprint`, `tts`,
+   `storyboard`, `animator` — replacing the fixed three-call sequence at `app.py:90-95`.
+2. Within a domain, providers are loaded in **`sorted()` order of folder name**. Today
+   `os.listdir` order is used unsorted (`registry.py:239`); sorting is required so discovery
+   logs, catalog responses, and "first wins" duplicate resolution are deterministic.
+   Owner: **11.1**.
+3. Discovery is idempotent — a second `discover()` on a registry that already scanned is a
+   no-op (`<domain>/providers/__init__.py:20-23`). Dev reload explicitly resets the flag after
+   calling `shutdown()` on constructed providers.
+4. Extension runtimes bind after **all** domains have been discovered, never interleaved with
+   discovery, so a runtime can rely on the full catalog being present.
+5. Registration never touches `app.py` or `studio/workflows/registry.py`.
+
+### 21.3 Duplicate IDs (frozen)
+
+Within a domain, **first registration wins**; the later one is skipped with a WARN
+(`registry.py:202-205`, already correct) and recorded as an exclusion with reason
+`DUPLICATE_ID`. Cross-domain duplicates are legal (the key is `(domain, id)`). An alias that
+duplicates any real id in the same domain is dropped, not the provider. Duplicate registration
+must never raise, must never replace the incumbent, and must never abort discovery.
+
+### 21.4 Broken-plugin isolation (frozen)
+
+Every exclusion is *local*: it logs a WARN and continues. A broken provider must never
+(a) abort discovery, (b) abort application startup, (c) hide or unregister a healthy provider,
+or (d) leak a stack trace or filesystem path into an API response.
+
+Frozen exclusion reason codes, all currently implemented as bare log lines
+(`registry.py:278-323`):
+
+| code | condition | current line |
+|---|---|---|
+| `MANIFEST_LOAD_FAILED` | spec/loader is `None`, `SyntaxError`, `ImportError`, or any other exception importing `manifest.py` | `:278`, `:284`, `:287`, `:290` |
+| `MANIFEST_MISSING` | no `manifest` attribute | `:294` |
+| `MANIFEST_RAISED` | `manifest()` raised | `:300` |
+| `MANIFEST_INVALID_TYPE` | not a `ProviderManifest` and not a coercible dict | `:308`, `:311` |
+| `MANIFEST_FIELDS_MISSING` | a required field is absent or falsy | `:317` |
+| `MANIFEST_ID_MISMATCH` | `manifest.id != folder` | `:321` |
+| `MANIFEST_DOMAIN_MISMATCH` | wrong domain | `:197` |
+| `MANIFEST_UNSUPPORTED_CONTRACT` | `contract_version` too new | new (§19.3) |
+| `DUPLICATE_ID` | id already registered | `:203` |
+
+**Exclusions become data, not just logs.** `ProviderRegistry.excluded() -> [{id, reason_code,
+message}]` is new and is surfaced in `to_dict()` so the provider modal can show "3 providers
+loaded, 1 excluded" instead of the current silent disappearance. `message` is truncated to
+200 characters, stripped to a basename if it contains a path, and passed through
+`redact_settings` semantics. Owner: **11.2**.
+
+**Partial degradation.** When `manifest.py` loads but `provider.py` does not, the provider is
+still registered and its callables fall back across modules (`_resolve`, `registry.py:73-81`,
+warned at `:335`). Frozen: this state is `availability: "degraded"` (§21.5) with a warning
+string, not a silent success. A degraded provider may be listed and configured but must not be
+constructed or invoked.
+
+### 21.5 Availability vs health (frozen)
+
+Two orthogonal axes. Conflating them is the current bug source: `useProviders.selectProvider`
+runs a *validation* call to decide whether a provider "needs configuration"
+(`useProviders.js:71`), while the catalog exposes no state at all.
+
+**Availability** — cheap, synchronous, no network, safe to compute on every catalog request:
+
+| state | meaning |
+|---|---|
+| `available` | registered, `provider.py` loaded, every `requires` key non-empty after env fallback |
+| `needs_configuration` | registered and loadable, but a `requires` key is empty |
+| `degraded` | registered, but `provider.py` or `settings_schema.py` failed to load, or `create()` previously raised |
+| `unavailable` | discovered but excluded (§21.4); present only in the `excluded[]` list |
+
+**Health** — may perform I/O; runs on explicit user action (`POST /api/providers/<d>/<p>/test`)
+or from a TTL cache. Frozen states are exactly today's values: `ok`, `warn`, `fail`, `unknown`
+— the first three are what the seven shipped `health_check` bodies return
+(`kokoro/provider.py:295-300`, `inworld/provider.py:195-210`, `gemini_ws/provider.py:80`,
+`wavespeed_webhook/provider.py:91-102`, `wavespeed_direct/provider.py:90-92`,
+`grok_automa/provider.py:97`, `kie_ai/provider.py:227-240`), and `unknown` is the registry's
+coercion default (`registry.py:146`). `HealthResult` fields stay
+`status, latency_ms, message, details` (`registry.py:30-36`); `details` is passed through
+redaction before it leaves the process.
+
+Two frozen corrections: a provider with **no** `health_check` returns `unknown`, not the
+current `ok` (`registry.py:157`) — no live provider hits that branch today, since all seven
+define the hook, so this is safe. And health **never blocks** selection or execution: a `fail`
+provider may still be selected, with the failure surfaced as a warning. Owner: **11.3**.
+
+"Configured" is computed from `requires` after env fallback, never from key presence: the
+live `settings.json` stores present-but-empty `api_key` values for `kie_ai`,
+`wavespeed_direct`, and `inworld` (§14.3).
+
+## 22. Settings contract
+
+### 22.1 Schema shape
+
+`settings_schema()` returns a JSON-Schema subset object — `{"type": "object", "properties":
+{...}, "required": [...]}` — exactly the shape shipped today
+(`tts/providers/inworld/settings_schema.py`). Per-property keys: `type`
+(`string|number|integer|boolean`), `label`, `description`, `default`, `minimum`, `maximum`,
+`multipleOf`, `enum`, and `ui`.
+
+### 22.2 Widget vocabulary (frozen)
+
+| `ui.type` | rendered today | source |
+|---|---|---|
+| *(absent)* | text input (or number input when `type` is numeric) | fallback |
+| `password` | masked input, marked required | `ProviderSettingsForm.vue:30,138` |
+| `dropdown` / `select` | select from `ui.options` (strings or `{value,label}`) | `:33-36,46-55` |
+| `slider` | range using `minimum`/`maximum`/`multipleOf` | `:38-40,57-67` |
+| `toggle` | checkbox | `:42-44` |
+| `textarea` | **new** — multi-line text | owner 12.4 |
+
+An unrecognized `ui.type` falls back to a text input and adds a warning; it is never an error.
+This is the settings-form counterpart of §20.3.
+
+### 22.3 Conditional fields (frozen)
+
+`ui.show_if: {field_name: [allowed_values]}` — identical semantics to the workflow node
+`display_options.show` already in the registry (`registry.py:263,288`): **AND** across keys,
+**OR** within a list. Frozen behavior for a hidden field: its stored value is **preserved**,
+it is **not** validated as required, and it is **not** sent in the invocation config. The
+renderer is new work (owner **12.4**); the shape is frozen now because 15.2 needs it for
+provider-specific TTS fields.
+
+### 22.4 Dynamic options in provider settings (frozen)
+
+`ui.options_source: {"source": "<allowlisted id>", "context": {...}}` resolves through the
+same envelope as workflow node fields (§23). This is the mechanism that lets the Inworld voice
+list appear in the provider modal without a Vue edit. `ui.options` and `ui.options_source` are
+mutually exclusive; if both are present, `options_source` wins and a warning is recorded.
+
+### 22.5 Validation, severities, and unknown keys (frozen)
+
+`validate_settings(settings) -> list[dict]`, each `{field, severity, message}` with
+`severity ∈ {error, warning, info}`; a raising implementation yields one
+`{field: "root", severity: "error", message: str(e)}` (`registry.py:133-135`). `error` blocks
+saving (`editor/routes.py:410-412`); `warning` and `info` never do.
+
+Unknown keys in *saved* provider settings are **preserved and reported as a `warning`**, never
+dropped. Today `put_provider_settings` merges anything with no check
+(`editor/routes.py:400-401`); dropping would silently destroy configuration when a user rolls
+back to an older provider version. Required-but-empty is an `error`; a hidden field (§22.3) is
+exempt.
+
+### 22.6 Secrets and environment (frozen)
+
+A field is a secret if `ui.type == "password"` **or** its key matches `SENSITIVE_KEYS_RE`
+(`api_key|token|secret|password|auth|bearer|credential`, `settings_manager.py:214-217`).
+
+- Secrets are stored in `settings/settings.json` in plaintext (unchanged; the file is
+  local-only). The contract governs **egress**, not at-rest encryption.
+- Secrets must never appear in an API response, log line, error message, execution record, SSE
+  frame, exported template, or archive. Every settings payload leaving the process passes
+  through `redact_settings` / `redacted_provider_settings`.
+- **Live defect recorded here, not fixed by 10.2:** `GET /api/settings/v2`
+  (`editor/routes.py:211-212`) and `GET /api/providers/<domain>/<provider_id>/settings`
+  (`editor/routes.py:360-366`) return **unredacted** provider settings, including `api_key`.
+  `redacted_provider_settings` exists (`settings_manager.py:247-249`) with **zero call sites**
+  outside `__all__`. Owner: **11.5**, which must also decide how the modal round-trips a
+  redacted value without overwriting the real one (rule: a field whose submitted value is
+  exactly the redaction sentinel `"***"` is ignored on save).
+- **Env vars are a read-time fallback, never a seed for secrets.** A provider resolves a
+  credential as `settings[key] or os.environ[ENV_NAME]`, and the resolved value is never
+  written back to `settings.json` and never returned. This replaces copying values in
+  `_seed_from_env` (`settings_manager.py:85-104`). Owner: **11.3**.
+- **The `INWORLD_API_KEY` selection side effect is frozen as removed.** First-run seeding may
+  populate values but must never write `selected_provider` (`settings_manager.py:88`, §14.3).
+  Migration: existing installs keep whatever selection is already persisted — no rewrite, no
+  reset. Owner: **11.3**.
+
+## 23. Parameterized option sources (frozen)
+
+Freezes §15.1. `GET /api/workflow/options/<source>` currently calls `resolve_options(source)`
+with no context (`options.py:108`, `routes.py:196`), which is why `_tts_voices()` returns the
+static Kokoro list regardless of engine (`options.py:19-21`) and why no `tts_providers` source
+exists at all. 12.2 implements this; 15.2 depends on it.
+
+### 23.1 Request
+
+```
+GET /api/workflow/options/<source>?domain=<d>&provider=<p>&node_type=<t>&project_id=<id>
+```
+
+The source stays **allowlisted** — `<source>` must be a key of `ASYNC_OPTION_SOURCES`; a
+schema-supplied URL is still never fetched (§11). `ASYNC_OPTION_SOURCES`
+(`registry.py:30-34`) changes from a list to a dict of specs. Every existing consumer uses
+`set(...)` or `in` (`options.py:75`, `tests/test_workflow_options.py:60`,
+`tests/test_workflow_registry.py:81`), so the parity assert and its test survive unchanged.
+
+```python
+ASYNC_OPTION_SOURCES = {
+    "tts_voices": OptionSourceSpec(context=("domain", "provider"), cache="settings"),
+    "tts_providers": OptionSourceSpec(context=(), cache="discovery"),      # new (P26)
+    "storyboard_providers": OptionSourceSpec(context=(), cache="discovery"),
+    "animator_providers": OptionSourceSpec(context=(), cache="discovery"),
+    "script_providers": OptionSourceSpec(context=(), cache="discovery"),          # new
+    "scene_blueprint_providers": OptionSourceSpec(context=(), cache="discovery"), # new
+    "story_tones": OptionSourceSpec(context=(), cache="static"),
+    "style_templates": OptionSourceSpec(context=(), cache="static"),
+    "export_profiles": OptionSourceSpec(context=(), cache="static"),
+    "caption_presets": OptionSourceSpec(context=(), cache="static"),
+}
+```
+
+**Context validation is an allowlist too.** Only the parameter names in that source's
+`context` tuple are accepted; any other query parameter is ignored. `domain` must be a
+`DOMAINS` key; `provider` must resolve in that domain's registry (id or alias, normalized to
+the canonical id before it reaches the resolver); `node_type` must be a registry node type;
+`project_id` must survive `sanitize_project_id` unchanged. A declared parameter may be
+omitted — the resolver then falls back to the domain's selected provider (§24), which is what
+makes existing single-argument callers keep working.
+
+The five per-domain `*_providers` sources make P26 and P32 disappear: the TTS node's `engine`
+field stops being a static `["kokoro","inworld"]` list (`registry.py:186`) and
+`_provider_options` stops hardcoding two domains (`options.py:38-50`).
+
+### 23.2 Response
+
+```json
+{
+  "source": "tts_voices",
+  "context": {"domain": "tts", "provider": "inworld"},
+  "options": [{"value": "Ashley", "label": "Ashley", "group": null, "disabled": false}],
+  "generated_at": "2026-08-08T00:00:00Z"
+}
+```
+
+`context` echoes the **validated, normalized** context so the client can key its cache on the
+server's interpretation rather than on its own query string. `group` and `disabled` are
+optional and default to `null`/`false`; `{value, label}` remains the minimum, so today's
+`_opt()` helper (`options.py:15-16`) is unchanged and the existing client
+(`useOptionSources.js:14`, reads `data.options`) keeps working without edits.
+
+### 23.3 Failure semantics (frozen)
+
+| condition | HTTP | code |
+|---|---|---|
+| unknown `<source>` | 404 | `NOT_FOUND` (unchanged, `routes.py:200`) |
+| context parameter invalid, unknown domain/provider, or fails sanitization | 400 | `OPTION_CONTEXT_INVALID` |
+| resolver raised — provider unreachable, model missing, extension offline | 503 | `PROVIDER_UNAVAILABLE` (unchanged, `routes.py:198`) |
+
+`OPTION_CONTEXT_INVALID` is the only addition to the stable error-code list in §7; it is
+additive and no existing code changes meaning. The 503 body carries a redacted message and
+never the provider's raw exception.
+
+**Save-time validation still fails open.** `allowed_option_values` (`options.py:85-105`)
+becomes context-aware but keeps its contract from step 6.3: a bad value is rejected, an
+unavailable resolver returns `None` and never blocks saving an otherwise-valid workflow. For
+a context-sensitive source the legal set is the **union** over the currently registered
+providers of that domain, so switching provider can never retroactively invalidate a saved
+workflow.
+
+### 23.4 Caching and invalidation (frozen)
+
+The current process-lifetime cache keyed by source alone (`_VALUE_CACHE`, `options.py:82`) is
+wrong once options depend on settings. Frozen replacement:
+
+- Cache key: `(source, tuple(sorted(normalized_context.items())))`.
+- `cache="static"` — process lifetime, as today.
+- `cache="discovery"` — invalidated on discovery and on dev reload.
+- `cache="settings"` — TTL 300 s **and** explicitly invalidated on
+  `PUT /api/providers/<domain>/<provider_id>/settings` and on a selection change (§24.2), for
+  that domain only. Changing an API key must make the voice list refetch.
+- Bounded: at most 64 entries per source, LRU eviction, so context parameters cannot grow the
+  cache without limit.
+- The browser cache in `useOptionSources.js` keys on the full request URL rather than the bare
+  source string; `clearOptionSourceCache()` stays the test hook.
+
+## 24. Authoritative selection store (frozen)
+
+Freezes §14.2. `settings/settings.json` → `domains.<domain>.selected_provider` is the
+**single authority** for every domain. The `app-config.json` keys `sts-tts-provider`,
+`sts-storyboard-provider`, and `sts-asset-provider` (`useSettings.js:12-14`) are the losers and
+are retired.
+
+### 24.1 Precedence chain (frozen, all five domains)
+
+1. An explicit provider field on the request (`provider_override`, `provider_id`, `engine`).
+2. For workflow execution: the node's **saved** `configuration` value.
+3. `settings.json` `domains.<domain>.selected_provider`.
+4. `DomainSpec.default_provider`.
+
+Environment variables never appear in this chain (§22.6). Rule 2 is load-bearing: switching
+the global selection must **not** change how an existing saved workflow runs (§17.1, "old
+workflows must run unedited"). Rule 3 is what `animation_routes.py:194` fails to do today —
+its comment claims it reads the animator selection and it does not, so selecting an animator
+in the modal changes nothing. Wiring that read is a precondition for calling this store
+authoritative. Owner: **14.3**.
+
+### 24.2 Write path (frozen)
+
+The whole-blob read-modify-write in `useProviders.js:73-84` (`GET /api/settings/v2` → spread →
+`PUT` the entire document, a genuine lost-update window since `put_settings_v2` calls
+`save_settings` with no concurrency check, `editor/routes.py:215-227`) is replaced by:
+
+```
+PUT /api/providers/<domain>/selection      body: {"provider_id": "inworld"}
+→ 200 {"domain", "selected", "availability", "issues": [...]}
+```
+
+The handler validates the domain against `DOMAINS`, resolves `provider_id` through id-then-
+alias, refuses an id that is not registered (404) or is `unavailable` (409), and calls
+`settings_manager.set_selected_provider()` (`settings_manager.py:189-198`) — which finally
+gains its first call site (§14.2). It then invalidates the `cache="settings"` option entries
+for that domain (§23.4). A `needs_configuration` or `fail`-health provider **may** be selected;
+the response carries the issues so the modal can prompt (matching today's non-blocking
+behavior at `useProviders.js:71-95`).
+
+`PUT /api/settings/v2` remains for import/reset of the whole document and must no longer be
+used to change a selection. `PATCH /api/settings/v2` is added for field-level deep merge of
+everything else. Owner: **11.5**.
+
+### 24.3 Migration of the three legacy keys (frozen)
+
+One-time, on first load after upgrade, per domain, for each of the three keys:
+
+1. If `settings.json` has no explicit `selected_provider` for the domain **and**
+   `app-config.json` holds the legacy key, adopt the legacy value, normalized through the
+   alias table (`gemini→gemini_ws`, `grok→grok_automa`, `kie-ai→kie_ai`), and write it once.
+2. Otherwise `settings.json` wins; the legacy key is ignored from that moment on.
+3. Legacy pages read the selection from `GET /api/providers` instead of `useSettings`, keeping
+   a read-through fallback to the legacy key for one release (owner **12.4**).
+4. The three keys are deleted from `app-config.json` and from `useSettings.DEFAULTS` (owner
+   **16.1**).
+
+Today's values agree semantically (`inworld`, `gemini↔gemini_ws`, `grok↔grok_automa`), so this
+migration is a no-op on the current machine — but it must still run, because the two stores can
+diverge on the next write.
+
+## 25. Frontend-safe serialization (frozen)
+
+Exactly these fields may cross to the browser.
+
+`ProviderInstance.to_dict()` v2 — extends the eight fields at `registry.py:159-171`:
+
+```json
+{
+  "id": "inworld", "label": "Inworld", "domain": "tts", "kind": "cloud",
+  "version": "1.0.0", "contract_version": 2, "aliases": [],
+  "requires": ["api_key"], "capabilities": {"streaming": false},
+  "open_url": null, "docs_url": null, "description": null,
+  "has_settings": true, "availability": "needs_configuration", "warnings": []
+}
+```
+
+`ProviderRegistry.to_dict()` v2 — extends `registry.py:350-357`:
+
+```json
+{"domain": "tts", "providers": [...], "selected": "kokoro", "count": 2,
+ "excluded": [{"id": "broken", "reason_code": "MANIFEST_RAISED", "message": "..."}]}
+```
+
+`requires` carries settings **key names only** — never values, which is what makes it safe to
+ship while the values themselves are secrets.
+
+**Never serialized to the browser, under any route:** settings values for secret fields
+(§22.6), absolute or relative filesystem paths, module objects or synthetic module names
+(`_sts_provider_*`), stack traces, raw provider exception text, environment variable values,
+raw third-party API responses, and the `provider_module` / `schema_module` handles. Exclusion
+`message` strings are truncated to 200 characters and path-stripped to a basename before they
+enter `excluded[]`.
+
+## 26. Zero-touch assertion
+
+Adding a provider to an existing domain must require creating exactly one folder —
+`studio/<module>/providers/<id>/` with `manifest.py` and optionally `provider.py` and
+`settings_schema.py` — and editing **nothing** else. Specifically it must not require an edit
+to:
+
+| surface | why it is satisfied | owner of the remaining gap |
+|---|---|---|
+| `app.py` | domains initialize from `DOMAINS` through the hub (§27) | 11.1 |
+| `studio/workflows/registry.py` | provider dropdowns use `options_source: "<domain>_providers"` (§23.1); the static `engine` list is replaced | 12.3 / 15.2 |
+| `studio/workflows/options.py` | `_provider_options(domain)` becomes catalog-driven instead of a two-branch `if` (P32) | 12.2 |
+| any route dispatcher | dispatch is `registry.get(id)` + the 10.3 invocation contract, not `if provider_id == …` (P5–P25) | 14.2 / 14.3 / 15.2 |
+| any Vue component | the provider modal renders from `settings_schema()` (§22.2) and the node inspector from `config_schema` | 12.4 |
+| `settings_manager._default_settings` | generated from `DOMAINS` (P31) | 11.1 |
+
+**The one genuine obstacle, frozen.** Provider-specific *node* fields gated by
+`display_options.show.provider: ["gemini_ws"]` / `["grok_automa"]` (`registry.py:263,288-294`,
+P27) mean a new storyboard or animator provider today needs a workflow-registry edit to expose
+its own options. Frozen resolution: a node's `config_schema` keeps only **provider-agnostic**
+fields; every provider-specific field moves into that provider's `settings_schema()` and is
+rendered by the inspector as a per-provider sub-form resolved from the node's selected
+provider. The existing gated fields keep their current config keys so saved workflows load
+unchanged. Owner: **12.3**.
+
+## 27. Registry hub (shape only — 11.1 owns the implementation)
+
+One process-wide hub resolves `(domain, provider_id)` across all five domains and replaces the
+five handlers in `editor/routes.py` that each re-import three registries and build a literal
+`{tts, storyboard, animator}` dict (`:236-238, 260-262, 305-307, 342-344, 397-399`, P28).
+Frozen surface: `hub.domains()`, `hub.registry(domain)`, `hub.get(domain, provider_id)`
+(id-then-alias), `hub.list(domain)`, `hub.catalog()`, `hub.shutdown()`. The existing per-module
+`registry`, `get_provider`, and `list_providers` imports remain as compatibility facades
+(§17.1). The three 57-line `studio/<domain>/providers/__init__.py` copies (§14.6 — three, not
+four) collapse into one shared binding parameterized by `DomainSpec`.
+
+## 28. Deltas this contract requires of shipped code
+
+Nothing in §19–§27 is implemented yet. Every delta, with its owner:
+
+| # | delta | current state | owner |
+|---|---|---|---|
+| D1 | `domains.py` catalog; `VALID_DOMAINS`, `validate_settings`, `_default_settings` derive from it | three hardcoded sets (P29, P30, P31) | 11.1 |
+| D2 | sorted discovery order | `os.listdir` order (`registry.py:239`) | 11.1 |
+| D3 | one shared `providers/__init__.py` binding | three near-identical copies (§14.6) | 11.1 |
+| D4 | registry hub replacing the five literal domain dicts | P28 | 11.1 / 11.5 |
+| D5 | `aliases` + `contract_version` in the manifest | hand-written alias tables (P7, P8, P34) | 11.2 |
+| D6 | unknown manifest/capability fields ignored + warned | `TypeError` → exclusion (`registry.py:304-309`) | 11.2 |
+| D7 | `excluded()` recorded and serialized | WARN log only | 11.2 |
+| D8 | v2 `create(context)` factory, memoized, plus real `shutdown()` calls | eight never-executed `get_provider()` factories; `shutdown` never called | 11.2 |
+| D9 | `availability` computed and serialized | not present | 11.3 |
+| D10 | missing `health_check` → `unknown` | returns `ok` (`registry.py:157`) | 11.3 |
+| D11 | env as read-time fallback; no secret seeding; no selection flip | `_seed_from_env` copies values and flips TTS selection (`settings_manager.py:85-88`) | 11.3 |
+| D12 | redaction on `GET /api/settings/v2` and `GET /api/providers/*/settings`; `"***"` sentinel ignored on save | both return raw `api_key`; `redacted_provider_settings` has zero call sites | 11.5 |
+| D13 | `PUT /api/providers/<domain>/selection`; `PATCH /api/settings/v2` | whole-blob `PUT` from `useProviders.js:73-84` | 11.5 |
+| D14 | legacy-key migration + read-through fallback + deletion | two independent stores (§14.2) | 12.4 / 16.1 |
+| D15 | animator route reads `domains.animator.selected_provider` | never read (`animation_routes.py:194`) | 14.3 |
+| D16 | `OptionSourceSpec` map, context validation, new `*_providers` sources, keyed cache | single-argument `resolve_options`; source-only cache | 12.2 |
+| D17 | `OPTION_CONTEXT_INVALID` added to §7 | not present | 12.2 |
+| D18 | `ui.show_if`, `ui.options_source`, `textarea` in the settings form | none supported | 12.4 |
+| D19 | provider-specific node fields move to provider settings schemas | `display_options.show.provider` gating (P27) | 12.3 |
+
+## 29. Phase 10.2 coverage assertion
+
+Frozen by this section: the five-domain catalog and its data shape; package layout; provider
+id, alias, and version rules; every required and optional manifest field with its type and
+default; the `kind` and capability vocabularies; manifest validation order and the
+unknown-field policy; the full lifecycle from discovery through `create()` to `shutdown()`;
+registration and discovery order; duplicate-ID resolution; the nine broken-plugin exclusion
+reason codes and the isolation guarantees; settings-schema widgets, conditional fields, and
+dynamic options; validation severities and the unknown-key policy; secret classification, the
+redaction obligation, and env-fallback rules; the availability and health state machines; the
+exact browser-safe serialization allowlist and its prohibitions; the parameterized
+option-source envelope with its context allowlist, response shape, three failure codes, and
+cache invalidation rules; and the authoritative selection store with its precedence chain,
+replacement write path, and three-key migration.
+
+Both hardcoded three-domain sets (P29, P30) are replaced by the catalog, and §26 shows that
+adding a provider to an existing domain touches no workflow node, route dispatcher, or Vue
+component — with the one real obstacle (P27) resolved rather than waved through. Deferred by
+design: invocation context, request/result envelopes, job handles, and `ProviderError`
+(10.3); alias mapping tables, legacy field compatibility, and fixtures (10.4).
