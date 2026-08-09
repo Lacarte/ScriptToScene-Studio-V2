@@ -16,4 +16,7 @@ def manifest() -> ProviderManifest:
             "single_scene": True,
             "batch": True,
         },
+        aliases=["webhook"],
+        description="Storyboard frames via a user-supplied n8n webhook.",
+        environment={"webhook_url": "N8N_STORYBOARD_WEBHOOK_URL"},
     )

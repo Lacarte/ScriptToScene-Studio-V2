@@ -16,4 +16,7 @@ def manifest() -> ProviderManifest:
             "single_scene": True,
             "batch": True,
         },
+        aliases=["direct"],
+        description="Storyboard frames from the WaveSpeed API, called directly.",
+        environment={"api_key": "WAVESPEED_API_KEY"},
     )

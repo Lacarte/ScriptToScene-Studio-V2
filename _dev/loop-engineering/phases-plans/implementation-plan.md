@@ -1094,6 +1094,88 @@ only and redacted from logs, workflow snapshots, archives, APIs, and errors; exi
 and provider-settings files migrate losslessly; and every manifest can round-trip through its public
 metadata representation without leaking internal callables or paths.
 
+#### Step 11.3 review status — 2026-08-09
+
+- **Complete.** `providers_common/settings_schema.py` is new and is the leaf of the settings import
+  chain: it owns `SENSITIVE_KEYS_RE`, the `"***"` sentinel, the §22.2 widget vocabulary (including
+  the frozen `textarea`), `ui.show_if` evaluation, schema validation, `split_settings`, `redact`,
+  `apply_settings_patch`, and `invocation_config`. `settings_manager` and `validation` now build on
+  it, so nothing imports settings *storage* to learn what a secret is.
+- `ProviderManifest` gains `description`, `docs_url`, and `environment`, plus `public_dict()` — the
+  §25 representation, which is asserted to round-trip through `validate_manifest` for every shipped
+  manifest and to carry no `environment` names, callables, or paths. Validation rejects a
+  non-`https` `docs_url` (loopback `http` excepted), a >500-character or control-character
+  `description`, and an environment name that is not `^[A-Z][A-Z0-9_]{0,127}$`.
+- D9 is closed: `ProviderInstance.availability()` implements §21.5 — `available`,
+  `needs_configuration` (a `requires` key empty *after* env fallback), `degraded` (no resolvable
+  factory, a `create()` that already raised, or a present-but-failed settings schema). It is
+  serialized in `to_dict()` and reaches `/api/providers` through `hub.catalog(settings_for=…)`,
+  which reads the settings document once rather than once per provider. The fourth frozen state
+  `unavailable` has no producer by construction: an excluded provider is an `excluded[]` entry,
+  never a `ProviderInstance`.
+- D10 is closed: a provider with no `health_check` now answers `unknown`, not `ok`.
+- `resolve_settings()` implements the §22.6 read-time fallback. It is applied to provider
+  validation, health, and invocation only; a resolved value is never written back and never
+  serialized, which is asserted against `/api/settings/v2`, the provider-settings read, and
+  `/api/providers`. `_seed_from_env` no longer copies `INWORLD_API_KEY`, `WAVESPEED_API_KEY`, or
+  `KIE_AI_API_KEY` into `settings.json`, and the `INWORLD_API_KEY` → `selected_provider` side
+  effect is gone (§14.3, §22.6).
+- Server-side settings validation now runs from the provider schema before the provider hook:
+  required-but-empty is an `error`, an unknown saved key is a preserved `warning`, a hidden
+  (`ui.show_if`) field is exempt from `required` and excluded from the invocation config, an
+  unrecognized `ui.type` is a `warning`, and `ui.options` + `ui.options_source` together warn with
+  `options_source` winning. Issues are sorted, so the same settings always produce the same list.
+  A raising `validate_settings` now yields the frozen `{root, error, "Settings validation failed"}`
+  instead of `str(e)`, which could contain the submitted key.
+- The §22.6 live defect is fixed rather than deferred. `GET /api/settings/v2` and
+  `GET /api/providers/<d>/<p>/settings` are redacted, and the three write paths
+  (`PUT /api/settings/v2`, `PUT`/`POST` provider settings and validate/test) restore a sentinel
+  submission from the stored value, so the whole-blob round-trip in `useProviders.js` cannot erase
+  a key. `redacted_provider_settings` finally has call sites. `/test` also stopped trying to
+  `jsonify` a `HealthResult` dataclass and redacts provider-authored `details`.
+- **Leak found and closed while covering "archives".** `_kie_ai_options` merged the whole `kie_ai`
+  settings dict — including `api_key` — into `grabber_job.json` under `output/`, which project
+  archives copy. `kie_ai_generate()` resolves the key itself and never read it from there, so both
+  call sites (`animation_routes.py:305`, `workflows/adapters/animator.py:33`) now merge
+  `portable_provider_settings()`, the non-secret half of `split_settings`.
+- `apply_migrations` is corrected: it keys on the **target** version, runs every target greater
+  than the stored one, and stamps the version per step. The v2 migration adopts the three legacy
+  `app-config.json` selections through the alias table, backfills domain blocks added to the
+  catalog after the file was written, and is a no-op when `settings.json` already holds a
+  selection. The legacy file is read through an injected
+  `settings_manager._read_legacy_user_settings()` rather than the editor blueprint's private
+  helper. Tests cover v1→v2, alias normalization, explicit-selection precedence, losslessness,
+  already-v2 idempotence, an odd/missing version, and an interrupted write (`os.replace` fails →
+  v1 stays on disk, no temp file leaks, the next load retries and completes).
+- The repository's own `settings/settings.json` migrated on this run: version 1→2, all three
+  existing selections preserved verbatim, `per_provider` untouched, `script` and `scene_blueprint`
+  backfilled from the catalog. The `sts-tts-provider: inworld` legacy key was correctly ignored
+  because `settings.json` already held an explicit selection.
+- **Adjustment recorded — the shipped manifests stay at `contract_version=1`.** §19.3 says a v2
+  manifest writes `2` explicitly and that only `2` may be invoked through the 10.3 invocation
+  contract, which 11.4 implements. Declaring `2` now would claim an invocability that does not yet
+  exist, so the seven providers gain the v2 *metadata* fields and keep `contract_version=1` until
+  11.4/14.x rewrites their bodies.
+- **Adjustment recorded — no `deprecated` manifest field was invented.** The step text names
+  "deprecation/alias metadata", but the §20.1 field table and the §25 serialization list are frozen
+  without one. Deprecation is therefore carried by `aliases`: the legacy wire strings from §14.4
+  (`gemini`, `webhook`, `direct`, `grok`, `midjourney`, `kie-ai`) are now declared on the five
+  providers that own them. The hand-written tables in `pipeline/services.py` and
+  `animator/schemas.py` are untouched — retiring them is 14.2/14.3's work.
+- **Adjustment recorded — schema validation checks `enum`, not `ui.options`.** Only a declared
+  `enum` gates a value. The live `settings.json` stores a Kokoro voice (`af_bella`) under the
+  Inworld provider, whose voice list is a `ui.options` dropdown; treating widget options as a
+  closed set would have started rejecting saves of pre-existing configuration.
+- Verification passes with 372 backend tests (10 live-provider tests skipped, 112 subtests), all
+  154 frontend tests across 25 files, the Vite production build, and generated-document drift
+  checks. Three guards were mutation-checked: reverting the migration comparison, the sentinel
+  drop, and the `unknown` health default each fail their tests. No Vue component changed — the
+  existing generic `ProviderSettingsForm` renders the redacted secret and round-trips it unchanged.
+- **Deferred as already assigned:** moving the provider API into its own blueprint and the targeted
+  `PUT /api/providers/<domain>/selection` endpoint (11.5), `ui.options_source` resolution and the
+  `textarea`/`show_if` renderers (12.2/12.4), and folding validation issues into the shared
+  `ProviderError` boundary (11.4).
+
 ### 11.4 Standard provider runtime and error boundary
 Implement the contract from 10.3 in `providers_common`: invocation context, typed result envelope,
 artifact normalization, progress events, job handle/status, cancellation/timeout helpers, and the

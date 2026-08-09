@@ -18,4 +18,6 @@ def manifest() -> ProviderManifest:
             "push_callbacks": True,
         },
         open_url=None,
+        aliases=["gemini"],
+        description="Storyboard frames driven by the browser extension over a WebSocket.",
     )

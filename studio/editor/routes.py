@@ -207,14 +207,22 @@ def delete_settings():
 
 @editor_bp.route("/api/settings/v2", methods=["GET"])
 def get_settings_v2():
-    """Return nested settings from settings/settings.json."""
+    """Return nested settings from settings/settings.json, with secrets redacted.
+
+    Secret values are write-only (contracts.md §22.6): they leave the process only
+    as the `"***"` sentinel, which `PUT` treats as "unchanged".
+    """
     settings = settings_manager.load_settings()
-    return jsonify(settings)
+    return jsonify(settings_manager.redact_settings(settings))
 
 
 @editor_bp.route("/api/settings/v2", methods=["PUT"])
 def put_settings_v2():
-    """Replace all settings in settings/settings.json."""
+    """Replace all settings in settings/settings.json.
+
+    The client round-trips the redacted document, so every secret submitted as the
+    sentinel is restored from the stored value rather than overwritten (§22.6).
+    """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Expected JSON object"}), 400
@@ -223,7 +231,10 @@ def put_settings_v2():
         errors = [i for i in issues if i["severity"] == "error"]
         if errors:
             return jsonify({"error": "Invalid settings", "issues": issues}), 400
-    settings_manager.save_settings(data)
+    stored = settings_manager.load_settings()
+    settings_manager.save_settings(
+        settings_manager.restore_redacted_secrets(stored, data)
+    )
     return jsonify({"ok": True, "issues": issues})
 
 
@@ -240,6 +251,15 @@ def _resolve_provider(domain, provider_id):
     if provider is None:
         return None, (jsonify({"error": f"Provider '{provider_id}' not found"}), 404)
     return provider, None
+
+
+def _issue_dicts(issues):
+    """Normalize `ValidationIssue` objects to the frozen `{field, severity, message}`."""
+    return [
+        {"field": i.field, "severity": i.severity, "message": i.message}
+        if hasattr(i, 'field') else i
+        for i in issues
+    ]
 
 
 @editor_bp.route("/api/providers", methods=["GET"])
@@ -268,19 +288,14 @@ def validate_provider_settings(domain, provider_id):
     if err is not None:
         return err
 
-    data = request.get_json(silent=True) or {}
-    current_settings = settings_manager.get_provider_settings(domain, provider_id)
-    merged_settings = {**current_settings, **data}
-    
-    issues = provider.validate_settings(merged_settings)
-    issues_list = [
-        {"field": i.field, "severity": i.severity, "message": i.message}
-        if hasattr(i, 'field') else i
-        for i in issues
-    ]
-    
+    patch = request.get_json(silent=True) or {}
+    merged_settings = settings_manager.merge_provider_settings(
+        domain, provider_id, patch, provider.settings_schema()
+    )
+
+    issues_list = _issue_dicts(provider.validate_settings(merged_settings))
     has_errors = any(i.get('severity') == 'error' for i in issues_list)
-    
+
     return jsonify({
         "valid": not has_errors,
         "issues": issues_list,
@@ -299,16 +314,23 @@ def test_provider_settings(domain, provider_id):
     if err is not None:
         return err
 
-    data = request.get_json(silent=True) or {}
-    current_settings = settings_manager.get_provider_settings(domain, provider_id)
-    merged_settings = {**current_settings, **data}
-    
+    patch = request.get_json(silent=True) or {}
+    merged_settings = settings_manager.merge_provider_settings(
+        domain, provider_id, patch, provider.settings_schema()
+    )
+
     health = provider.health_check(merged_settings)
-    
+
     return jsonify({
         "provider_id": provider_id,
         "domain": domain,
-        "health": health,
+        "health": {
+            "status": health.status,
+            "latency_ms": health.latency_ms,
+            "message": health.message,
+            # `details` is provider-authored and may echo a submitted secret (§21.5).
+            "details": settings_manager.redact_settings(health.details or {}),
+        },
     })
 
 
@@ -322,15 +344,17 @@ def get_provider_settings(domain, provider_id):
     if err is not None:
         return err
 
-    settings = settings_manager.get_provider_settings(domain, provider_id)
+    stored = settings_manager.get_provider_settings(domain, provider_id)
     schema = provider.settings_schema()
-    
+
     return jsonify({
         "provider_id": provider_id,
         "domain": domain,
-        "settings": settings,
+        # Secrets leave as the sentinel; environment fallbacks are never resolved
+        # into this payload (contracts.md §22.6).
+        "settings": settings_manager.redact_settings(stored, schema),
         "schema": schema,
-        "manifest": provider.to_dict(),
+        "manifest": provider.to_dict(stored),
     })
 
 
@@ -344,20 +368,16 @@ def put_provider_settings(domain, provider_id):
     if err is not None:
         return err
 
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
+    patch = request.get_json(silent=True)
+    if not isinstance(patch, dict):
         return jsonify({"error": "Expected JSON object"}), 400
-    
-    merged = settings_manager.get_provider_settings(domain, provider_id)
-    merged.update(data)
-    
-    issues = provider.validate_settings(merged)
-    issues_list = [
-        {"field": i.field, "severity": i.severity, "message": i.message}
-        if hasattr(i, 'field') else i
-        for i in issues
-    ]
-    
+
+    # A secret submitted as the redaction sentinel leaves the stored value alone.
+    merged = settings_manager.merge_provider_settings(
+        domain, provider_id, patch, provider.settings_schema()
+    )
+
+    issues_list = _issue_dicts(provider.validate_settings(merged))
     has_errors = any(i.get('severity') == 'error' for i in issues_list)
     if has_errors:
         return jsonify({"error": "Validation failed", "issues": issues_list}), 400

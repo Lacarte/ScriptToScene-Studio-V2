@@ -2,6 +2,7 @@
 
 Modules:
   - domains: the domain catalog — the single declaration of supported domains
+  - settings_schema: provider settings schema validation, secrets, and visibility
   - settings_migrations: version-to-version migrations
   - settings_manager: canonical load/save/validate for settings.json
   - validation: manifest validation, exclusion reason codes, message sanitization
@@ -19,7 +20,22 @@ from studio.shared.providers_common.domains import (
     DomainSpec,
     get_domain,
 )
-from studio.shared.providers_common.settings_migrations import apply_migrations
+from studio.shared.providers_common.settings_schema import (
+    REDACTION_SENTINEL,
+    SENSITIVE_KEYS_RE,
+    WIDGET_TYPES,
+    apply_settings_patch,
+    invocation_config,
+    is_secret_field,
+    secret_keys,
+    split_settings,
+    validate_against_schema,
+    visible_fields,
+)
+from studio.shared.providers_common.settings_migrations import (
+    SETTINGS_VERSION,
+    apply_migrations,
+)
 from studio.shared.providers_common.settings_manager import (
     load_settings,
     save_settings,
@@ -29,8 +45,11 @@ from studio.shared.providers_common.settings_manager import (
     set_selected_provider,
     get_general_settings,
     set_general_settings,
+    merge_provider_settings,
+    portable_provider_settings,
     redact_settings,
     redacted_provider_settings,
+    restore_redacted_secrets,
     validate_settings,
 )
 from studio.shared.providers_common.validation import (
@@ -81,6 +100,17 @@ __all__ = [
     "DOMAIN_IDS",
     "DomainSpec",
     "get_domain",
+    "REDACTION_SENTINEL",
+    "SENSITIVE_KEYS_RE",
+    "WIDGET_TYPES",
+    "apply_settings_patch",
+    "invocation_config",
+    "is_secret_field",
+    "secret_keys",
+    "split_settings",
+    "validate_against_schema",
+    "visible_fields",
+    "SETTINGS_VERSION",
     "apply_migrations",
     "load_settings",
     "save_settings",
@@ -90,8 +120,11 @@ __all__ = [
     "set_selected_provider",
     "get_general_settings",
     "set_general_settings",
+    "merge_provider_settings",
+    "portable_provider_settings",
     "redact_settings",
     "redacted_provider_settings",
+    "restore_redacted_secrets",
     "validate_settings",
     "EXCLUSION_REASON_CODES",
     "ManifestValidation",

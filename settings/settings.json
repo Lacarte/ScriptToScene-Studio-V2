@@ -47,6 +47,14 @@
         }
       },
       "selected_provider": "inworld"
+    },
+    "script": {
+      "selected_provider": "builtin",
+      "per_provider": {}
+    },
+    "scene_blueprint": {
+      "selected_provider": "builtin",
+      "per_provider": {}
     }
   },
   "general": {
@@ -54,5 +62,5 @@
     "default_style": "cinematic",
     "sync_folder": "D:/@Sync/PHONE-S24-PC"
   },
-  "version": 1
+  "version": 2
 }

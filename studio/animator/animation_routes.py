@@ -301,8 +301,13 @@ def grabber_start(data: GrabberStartRequest):
             "resolution": data.resolution or "1",
             "output_format": data.output_format or "jpg",
         }
-        # Merge provider settings
-        job["_kie_ai_options"].update(provider_settings)
+        # Merge the portable half of the provider settings only: this job is
+        # persisted to grabber_job.json under output/ and may be archived, so a
+        # credential must never reach it (contracts.md §22.6). `kie_ai_generate`
+        # resolves the API key itself.
+        job["_kie_ai_options"].update(
+            settings_manager.portable_provider_settings("animator", provider_id)
+        )
 
     grabber_jobs.set(project_id, job)
     _save_job(job)

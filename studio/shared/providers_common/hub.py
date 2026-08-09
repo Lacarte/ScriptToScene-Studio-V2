@@ -162,15 +162,35 @@ class ProviderHub:
             return None
         return provider.create()
 
-    def catalog(self, selected: dict[str, str | None] | None = None) -> dict:
+    def catalog(
+        self,
+        selected: dict[str, str | None] | None = None,
+        settings_for: Callable[[str, str], dict] | None = None,
+    ) -> dict:
         """Serialize every domain for API responses.
 
         Args:
             selected: optional `domain -> selected_provider_id` mapping.
+            settings_for: optional `(domain, provider_id) -> dict` lookup used to
+                compute availability. Defaults to the canonical settings store;
+                pass an explicit callable to serialize against other settings.
         """
         selected = selected or {}
+        if settings_for is None:
+            from studio.shared.providers_common import settings_manager
+
+            # One read for the whole catalog, not one per provider.
+            stored = settings_manager.load_settings().get("domains", {})
+
+            def settings_for(domain: str, provider_id: str) -> dict:
+                per_provider = (stored.get(domain) or {}).get("per_provider") or {}
+                return per_provider.get(provider_id) or {}
+
         return {
-            domain: self.discover(domain).to_dict(selected_provider=selected.get(domain))
+            domain: self.discover(domain).to_dict(
+                selected_provider=selected.get(domain),
+                settings_for=lambda provider_id, d=domain: settings_for(d, provider_id),
+            )
             for domain in self.domains()
         }
 

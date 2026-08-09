@@ -30,7 +30,9 @@ def _step_assets(scenes_result, config, project_id, context):
         job["_kie_ai_options"] = {
             "aspect_ratio": config.get("aspect_ratio", "9:16"),
             "resolution": options.get("resolution", "1"), "output_format": options.get("output_format", "jpg"),
-            **settings_manager.get_provider_settings("animator", "kie_ai"),
+            # Portable options only: the job manifest is written under output/ and
+            # may be archived, so a credential must never reach it (§22.6).
+            **settings_manager.portable_provider_settings("animator", "kie_ai"),
         }
     service._set_job(project_id, job)
     service._save_job(job)

@@ -18,4 +18,8 @@ def manifest() -> ProviderManifest:
             "push_callbacks": True,
         },
         open_url=None,
+        # `midjourney` is the third legacy wire value normalized here today
+        # (animator/schemas.py:30-36, contracts.md §14.4).
+        aliases=["grok", "midjourney"],
+        description="Animator takes driven by the browser extension over a WebSocket.",
     )

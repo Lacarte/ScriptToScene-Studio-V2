@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from studio.shared.providers_common.settings_manager import SENSITIVE_KEYS_RE
+from studio.shared.providers_common.settings_schema import SENSITIVE_KEYS_RE
 
 
 # -- exclusion reason codes (contracts.md §21.4, frozen) --------------------
@@ -58,6 +58,13 @@ SEMVER_RE = re.compile(
 
 KINDS = frozenset({"local", "cloud", "extension", "webhook"})
 
+# Environment-variable names are internal metadata, never public settings keys.
+ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+
+# A description is rendered as text in the provider modal; control characters have
+# no legitimate place in it and would survive JSON encoding.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
 REQUIRED_FIELDS = ("id", "label", "domain", "kind", "version", "capabilities")
 
 # `1` is the legacy ABC shape every shipped manifest implies; `2` is the v2
@@ -65,6 +72,7 @@ REQUIRED_FIELDS = ("id", "label", "domain", "kind", "version", "capabilities")
 SUPPORTED_CONTRACT_VERSIONS = frozenset({1, 2})
 
 LABEL_MAX = 80
+DESCRIPTION_MAX = 500
 URL_MAX = 2048
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
@@ -259,13 +267,43 @@ def validate_manifest(
         aliases.append(alias)
     data["aliases"] = aliases
 
-    open_url = data.get("open_url")
-    if open_url is not None:
-        if not isinstance(open_url, str):
-            return _fail(MANIFEST_FIELDS_INVALID, "open_url must be a string")
-        problem = _validate_url(open_url, "open_url")
+    for url_field in ("open_url", "docs_url"):
+        url = data.get(url_field)
+        if url is None:
+            continue
+        if not isinstance(url, str):
+            return _fail(MANIFEST_FIELDS_INVALID, f"{url_field} must be a string")
+        problem = _validate_url(url, url_field)
         if problem:
             return _fail(MANIFEST_FIELDS_INVALID, problem)
+
+    description = data.get("description")
+    if description is not None:
+        if not isinstance(description, str):
+            return _fail(MANIFEST_FIELDS_INVALID, "description must be a string")
+        if len(description) > DESCRIPTION_MAX:
+            return _fail(
+                MANIFEST_FIELDS_INVALID, f"description exceeds {DESCRIPTION_MAX} characters"
+            )
+        if _CONTROL_CHARS_RE.search(description):
+            return _fail(MANIFEST_FIELDS_INVALID, "description contains control characters")
+
+    # `environment` maps a settings key to the environment variable it falls back
+    # to. Only names are declared here; a value never enters the manifest (§22.6).
+    environment = data.get("environment")
+    if environment is None:
+        environment = {}
+    if not isinstance(environment, dict):
+        return _fail(MANIFEST_FIELDS_INVALID, "environment must be an object")
+    for setting_key, env_name in environment.items():
+        if not isinstance(setting_key, str) or not setting_key:
+            return _fail(MANIFEST_FIELDS_INVALID, "environment keys must be setting names")
+        if not isinstance(env_name, str) or not ENV_NAME_RE.match(env_name):
+            return _fail(
+                MANIFEST_FIELDS_INVALID,
+                f"environment[{setting_key!r}] must match {ENV_NAME_RE.pattern}",
+            )
+    data["environment"] = dict(environment)
 
     # 8. contract_version supported by this build.
     contract_version = data.get("contract_version", 1)
@@ -303,7 +341,9 @@ __all__ = [
     "ID_RE",
     "ALIAS_RE",
     "SEMVER_RE",
+    "ENV_NAME_RE",
     "KINDS",
+    "DESCRIPTION_MAX",
     "SUPPORTED_CONTRACT_VERSIONS",
     "ManifestValidation",
     "sanitize_message",

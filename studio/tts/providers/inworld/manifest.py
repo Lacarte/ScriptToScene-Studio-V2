@@ -19,4 +19,7 @@ def manifest() -> ProviderManifest:
             "batch": True,
             "voice_list": True,
         },
+        description="Cloud text-to-speech with named voices and selectable models.",
+        # Read-time fallback only — a value is never copied into settings.json.
+        environment={"api_key": "INWORLD_API_KEY", "model": "INWORLD_TTS_MODEL"},
     )

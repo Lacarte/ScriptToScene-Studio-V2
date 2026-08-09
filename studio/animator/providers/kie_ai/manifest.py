@@ -16,4 +16,7 @@ def manifest() -> ProviderManifest:
             "single_scene": True,
             "batch": True,
         },
+        aliases=["kie-ai"],
+        description="Image-to-video and image generation through the Kie AI API.",
+        environment={"api_key": "KIE_AI_API_KEY", "model": "KIE_AI_MODEL"},
     )

@@ -19,4 +19,5 @@ def manifest() -> ProviderManifest:
             "batch": True,
             "voice_list": True,
         },
+        description="Offline text-to-speech running in-process from a local model.",
     )

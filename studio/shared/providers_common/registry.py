@@ -19,8 +19,18 @@ from typing import Any
 
 from loguru import logger
 
+from studio.shared.providers_common import settings_schema as schema_tools
 from studio.shared.providers_common import validation as v
 from studio.shared.providers_common.domains import DOMAIN_IDS
+
+
+# Availability states (contracts.md §21.5). Cheap, synchronous, no network — the
+# orthogonal axis to health, which may perform I/O. The fourth frozen state,
+# `unavailable`, has no value here: a discovered-but-excluded provider is never a
+# `ProviderInstance` at all, it is an entry in `excluded[]` (§21.4).
+AVAILABLE = "available"
+NEEDS_CONFIGURATION = "needs_configuration"
+DEGRADED = "degraded"
 
 
 @dataclass
@@ -38,6 +48,33 @@ class ProviderManifest:
     # `contract_version` 1 is the legacy ABC shape, 2 the 11.4 invocation contract.
     aliases: list[str] = field(default_factory=list)
     contract_version: int = 1
+    # v2 metadata (§20.1, step 11.3). `description` and `docs_url` are browser-safe
+    # UI hints; `environment` maps a settings key to the environment variable it
+    # falls back to at read time and is *never* serialized (§22.6, §25).
+    description: str | None = None
+    docs_url: str | None = None
+    environment: dict[str, str] = field(default_factory=dict)
+
+    def public_dict(self) -> dict:
+        """The manifest's public metadata representation (contracts.md §25).
+
+        Round-trips through `validate_manifest`, and carries no callables, no
+        module handles, no filesystem paths, and no environment-variable names.
+        """
+        return {
+            "id": self.id,
+            "label": self.label,
+            "domain": self.domain,
+            "kind": self.kind,
+            "version": self.version,
+            "contract_version": self.contract_version,
+            "aliases": list(self.aliases),
+            "requires": list(self.requires),
+            "capabilities": dict(self.capabilities),
+            "open_url": self.open_url,
+            "docs_url": self.docs_url,
+            "description": self.description,
+        }
 
 
 @dataclass
@@ -173,6 +210,11 @@ class ProviderInstance:
     def requires(self) -> list[str]:
         return self.manifest.requires
 
+    @property
+    def schema_failed(self) -> bool:
+        """True when a `settings_schema.py` is present but produced no schema."""
+        return self.schema_module is not None and self.settings_schema() is None
+
     def add_warning(self, message: str) -> None:
         """Record a browser-safe warning, de-duplicated (contracts.md §25)."""
         safe = v.sanitize_message(message)
@@ -193,49 +235,115 @@ class ProviderInstance:
                     self._settings_schema = None
         return self._settings_schema
 
-    def validate_settings(self, settings: dict) -> list[ValidationIssue]:
-        """Validate provider settings. Never cached — the settings differ per call."""
-        fn = self._resolve('validate_settings')
-        if fn is not None:
-            try:
-                raw_issues = fn(settings)
-                return [
-                    ValidationIssue(
-                        field=i.get('field', ''),
-                        severity=i.get('severity', 'warning'),
-                        message=i.get('message', '')
-                    ) if isinstance(i, dict) else i
-                    for i in raw_issues
-                ]
-            except Exception as e:
-                logger.warning("[registry] validate_settings failed for {}: {}", self.id, e)
-                return [
-                    ValidationIssue(
-                        field='root', severity='error', message=v.sanitize_message(e)
-                    )
-                ]
-        return []
+    # -- settings (contracts.md §22) ---------------------------------------
 
-    def health_check(self, settings: dict) -> HealthResult:
-        """Check provider health."""
+    def resolve_settings(self, settings: dict | None) -> dict:
+        """Apply the manifest's environment fallbacks for provider-internal use.
+
+        `settings[key] or os.environ[manifest.environment[key]]` (§22.6). The
+        resolved value is never written back to `settings.json` and never
+        returned to a caller that serializes it — only provider validation,
+        health, and invocation see it.
+        """
+        resolved = dict(settings or {})
+        for key, env_name in self.manifest.environment.items():
+            if not schema_tools.is_empty(resolved.get(key)):
+                continue
+            from_env = os.environ.get(env_name)
+            if from_env:
+                resolved[key] = from_env
+        return resolved
+
+    def is_configured(self, settings: dict | None = None) -> bool:
+        """Every `requires` key is non-empty after env fallback (§21.5).
+
+        Computed from `requires`, never from key presence: the live settings file
+        stores present-but-empty `api_key` values (§14.3).
+        """
+        resolved = self.resolve_settings(settings)
+        return all(
+            not schema_tools.is_empty(resolved.get(key)) for key in self.requires
+        )
+
+    def availability(self, settings: dict | None = None) -> str:
+        """Cheap, synchronous availability state (contracts.md §21.5)."""
+        if self.create_callable is None or self._create_error is not None:
+            return DEGRADED
+        if self.schema_failed:
+            return DEGRADED
+        if not self.is_configured(settings):
+            return NEEDS_CONFIGURATION
+        return AVAILABLE
+
+    def validate_settings(self, settings: dict | None) -> list[ValidationIssue]:
+        """Validate settings against the schema, then through the provider hook.
+
+        Never cached — the settings differ per call. Schema validation is the
+        server-side half the provider cannot skip; the hook adds whatever the
+        provider knows that the schema cannot express.
+        """
+        resolved = self.resolve_settings(settings)
+        issues = [
+            ValidationIssue(**issue)
+            for issue in schema_tools.validate_against_schema(
+                self.settings_schema(), resolved
+            )
+        ]
+
+        fn = self._resolve('validate_settings')
+        if fn is None:
+            return issues
+
+        try:
+            raw_issues = fn(resolved)
+        except Exception as e:
+            # Never `str(e)`: a provider exception can contain a submitted secret
+            # (§22.5). The raw exception goes only to the redacted logger.
+            logger.warning("[registry] validate_settings failed for {}: {}", self.id, e)
+            issues.append(ValidationIssue(
+                field='root', severity='error', message='Settings validation failed'
+            ))
+            return issues
+
+        seen = {(i.field, i.severity, i.message) for i in issues}
+        for raw in raw_issues or []:
+            issue = (
+                ValidationIssue(
+                    field=raw.get('field', ''),
+                    severity=raw.get('severity', 'warning'),
+                    message=raw.get('message', ''),
+                )
+                if isinstance(raw, dict)
+                else raw
+            )
+            key = (issue.field, issue.severity, issue.message)
+            if key not in seen:
+                seen.add(key)
+                issues.append(issue)
+        return issues
+
+    def health_check(self, settings: dict | None) -> HealthResult:
+        """Check provider health. May perform I/O; runs on explicit user action."""
         fn = self._resolve('health_check')
-        if fn is not None:
-            try:
-                result = fn(settings)
-                if isinstance(result, dict):
-                    return HealthResult(
-                        status=result.get('status', 'unknown'),
-                        latency_ms=result.get('latency_ms'),
-                        message=result.get('message'),
-                        details=result.get('details')
-                    )
-                elif isinstance(result, str):
-                    return HealthResult(status=result)
-                return result
-            except Exception as e:
-                logger.warning("[registry] health_check failed for {}: {}", self.id, e)
-                return HealthResult(status='fail', message=v.sanitize_message(e))
-        return HealthResult(status='ok')
+        if fn is None:
+            # A provider with no hook is `unknown`, not `ok` (§21.5, frozen
+            # correction): claiming health it never reported is a lie.
+            return HealthResult(status='unknown', message='No health check implemented')
+        try:
+            result = fn(self.resolve_settings(settings))
+        except Exception as e:
+            logger.warning("[registry] health_check failed for {}: {}", self.id, e)
+            return HealthResult(status='fail', message=v.sanitize_message(e))
+        if isinstance(result, dict):
+            return HealthResult(
+                status=result.get('status', 'unknown'),
+                latency_ms=result.get('latency_ms'),
+                message=result.get('message'),
+                details=result.get('details'),
+            )
+        if isinstance(result, str):
+            return HealthResult(status=result)
+        return result
 
     # -- construction (contracts.md §21.1) ---------------------------------
 
@@ -359,22 +467,20 @@ class ProviderInstance:
 
     # -- serialization (contracts.md §25) ----------------------------------
 
-    def to_dict(self) -> dict:
-        """Browser-safe projection. Never exposes modules, paths, or settings values."""
-        return {
-            'id': self.id,
-            'label': self.label,
-            'domain': self.domain,
-            'kind': self.kind,
-            'version': self.version,
-            'contract_version': self.contract_version,
-            'aliases': self.aliases,
-            'requires': self.requires,
-            'capabilities': self.capabilities,
-            'open_url': self.manifest.open_url,
+    def to_dict(self, settings: dict | None = None) -> dict:
+        """Browser-safe projection (contracts.md §25).
+
+        Never exposes modules, paths, settings values, or the manifest's internal
+        `environment` map. `settings` is read only to compute `availability` and
+        is never echoed back.
+        """
+        payload = self.manifest.public_dict()
+        payload.update({
             'has_settings': self.settings_schema() is not None,
+            'availability': self.availability(settings),
             'warnings': list(self.warnings),
-        }
+        })
+        return payload
 
 
 @dataclass(frozen=True)
@@ -694,11 +800,23 @@ class ProviderRegistry:
 
         return instance
 
-    def to_dict(self, selected_provider: str | None = None) -> dict:
-        """Serialize registry state for API response (contracts.md §25)."""
+    def to_dict(
+        self,
+        selected_provider: str | None = None,
+        settings_for: Any = None,
+    ) -> dict:
+        """Serialize registry state for API response (contracts.md §25).
+
+        `settings_for` is an optional `(provider_id) -> dict` lookup used only to
+        compute each provider's availability. Injected rather than imported so the
+        registry stays independent of the settings store.
+        """
         return {
             'domain': self.domain,
-            'providers': [p.to_dict() for p in self.list_providers()],
+            'providers': [
+                p.to_dict(settings_for(p.id) if settings_for is not None else None)
+                for p in self.list_providers()
+            ],
             'selected': selected_provider,
             'count': len(self),
             'excluded': self.excluded(),
