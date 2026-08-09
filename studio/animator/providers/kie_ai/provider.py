@@ -28,16 +28,33 @@ from config import KIE_AI_API_KEY, KIE_AI_BASE_URL, KIE_AI_MODEL
 from studio.animator import generation, jobs
 from studio.animator.providers.base import AnimatorProvider, AnimatorRequest
 from studio.shared.providers_common.jobs import JobHandle, JobStatus
+from studio.shared.providers_common.transports.direct_api import (
+    DirectApiClient,
+    DirectApiError,
+    classify_http_error,
+)
 
 PROVIDER_ID = "kie_ai"
 POLL_INTERVAL = 3
 POLL_TIMEOUT = 180
 
 
-def _create_task(prompt, aspect_ratio, resolution, output_format, model, api_key):
-    """POST /jobs/createTask -> returns taskId."""
-    url = f"{KIE_AI_BASE_URL}/jobs/createTask"
+def _client(api_key: str) -> DirectApiClient:
+    """Shared direct-API client for this provider (step 14.4)."""
+    return DirectApiClient(
+        base_url=KIE_AI_BASE_URL,
+        default_headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        timeout=30,
+        domain="animator",
+        provider_id=PROVIDER_ID,
+    )
 
+
+def _create_task(prompt, aspect_ratio, resolution, output_format, model, api_key):
+    """POST /jobs/createTask -> returns taskId. Submit is never transport-retried (D40)."""
     if model == "google/nano-banana":
         fmt = "jpeg" if output_format in ("jpg", "jpeg") else output_format
         input_params = {
@@ -55,58 +72,74 @@ def _create_task(prompt, aspect_ratio, resolution, output_format, model, api_key
         }
 
     payload = {"model": model, "input": input_params}
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    resp = http_requests.post(url, json=payload, headers=headers, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    client = _client(api_key)
+    try:
+        data = client.post_json("/jobs/createTask", payload, timeout=30)
+    finally:
+        client.close()
 
     task_id = data.get("taskId") or (data.get("data") or {}).get("taskId")
     if not task_id:
-        raise RuntimeError(f"Kie AI createTask returned no taskId: {data}")
+        raise DirectApiError(
+            "PROVIDER_RESPONSE_MALFORMED",
+            "The API returned an unusable response",
+            domain="animator",
+            provider_id=PROVIDER_ID,
+        )
     return task_id
 
 
 def _poll_result(task_id, api_key):
     """GET /jobs/recordInfo?taskId=... -> poll until result ready."""
-    url = f"{KIE_AI_BASE_URL}/jobs/recordInfo"
-    headers = {"Authorization": f"Bearer {api_key}"}
+    client = _client(api_key)
+    try:
+        deadline = time.time() + POLL_TIMEOUT
+        while time.time() < deadline:
+            data = client.get_json(
+                "/jobs/recordInfo",
+                params={"taskId": task_id},
+                timeout=30,
+                retries=2,
+            )
+            record = data if "status" in data else data.get("data", {})
+            if not isinstance(record, dict):
+                record = {}
+            status = record.get("status", "")
 
-    start = time.time()
-    while time.time() - start < POLL_TIMEOUT:
-        resp = http_requests.get(
-            url, params={"taskId": task_id}, headers=headers, timeout=30
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        record = data if "status" in data else data.get("data", {})
-        status = record.get("status", "")
-
-        if status in ("failed", "error"):
-            raise RuntimeError(f"Kie AI task {task_id} failed: {record}")
-
-        result_json = record.get("resultJson")
-        if result_json:
-            if isinstance(result_json, str):
-                result_json = json.loads(result_json)
-            result_urls = result_json.get("resultUrls", [])
-            if result_urls:
-                logger.success(
-                    "Kie AI task {} complete: {} image(s)", task_id, len(result_urls)
+            if status in ("failed", "error"):
+                raise DirectApiError(
+                    "PROVIDER_TRANSPORT_FAILED",
+                    "The remote job failed",
+                    domain="animator",
+                    provider_id=PROVIDER_ID,
                 )
-                return {
-                    "url": result_urls[0],
-                    "task_id": task_id,
-                    "all_urls": result_urls,
-                }
 
-        time.sleep(POLL_INTERVAL)
+            result_json = record.get("resultJson")
+            if result_json:
+                if isinstance(result_json, str):
+                    result_json = json.loads(result_json)
+                result_urls = result_json.get("resultUrls", [])
+                if result_urls:
+                    logger.success(
+                        "Kie AI task {} complete: {} image(s)", task_id, len(result_urls)
+                    )
+                    return {
+                        "url": result_urls[0],
+                        "task_id": task_id,
+                        "all_urls": result_urls,
+                    }
 
-    raise TimeoutError(f"Kie AI task {task_id} timed out after {POLL_TIMEOUT}s")
+            time.sleep(POLL_INTERVAL)
+    finally:
+        client.close()
+
+    raise DirectApiError(
+        "PROVIDER_TIMEOUT",
+        "The remote job timed out",
+        retryable=True,
+        domain="animator",
+        provider_id=PROVIDER_ID,
+    )
 
 
 def generate_image(
@@ -121,16 +154,23 @@ def generate_image(
     key = api_key or KIE_AI_API_KEY
     if not key:
         raise ValueError("KIE_AI_API_KEY not configured")
-    task_id = _create_task(
-        prompt=prompt,
-        aspect_ratio=aspect_ratio,
-        resolution=resolution,
-        output_format=output_format,
-        model=model or KIE_AI_MODEL,
-        api_key=key,
-    )
-    logger.info("Kie AI task created: {}", task_id)
-    return _poll_result(task_id, api_key=key)
+    try:
+        task_id = _create_task(
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            output_format=output_format,
+            model=model or KIE_AI_MODEL,
+            api_key=key,
+        )
+        logger.info("Kie AI task created: {}", task_id)
+        return _poll_result(task_id, api_key=key)
+    except DirectApiError:
+        raise
+    except Exception as exc:
+        raise classify_http_error(
+            exc, domain="animator", provider_id=PROVIDER_ID
+        ) from exc
 
 
 class KieAIProvider(AnimatorProvider):

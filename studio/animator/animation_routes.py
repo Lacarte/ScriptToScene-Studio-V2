@@ -302,25 +302,68 @@ def grabber_pending():
     return jsonify(latest["payload"])
 
 
+def _extension_callback_scope():
+    """Identity + aliases for the extension Automa transport (step 14.4).
+
+    Resolved from the extension runtime module and its manifest so this route
+    never embeds a concrete provider id (the 14.3 source-level scan).
+    """
+    from studio.animator import routes as ext_runtime
+    from studio.shared.providers_common.hub import hub as provider_hub
+
+    provider_id = ext_runtime.PROVIDER_ID
+    aliases: dict[str, str] = {}
+    instance = provider_hub.get("animator", provider_id)
+    if instance is not None:
+        for alias in instance.manifest.aliases or []:
+            aliases[str(alias)] = provider_id
+    return provider_id, aliases
+
+
 @animation_bp.route("/api/animator/grabber/results", methods=["POST"])
 def grabber_results():
-    """Receive scraped image URLs from Automa and download them."""
+    """Receive scraped image URLs from Automa and download them.
+
+    Compatibility facade for the existing Automa callback URL (step 14.4).
+    Correlation is scoped to the extension provider so a push cannot
+    contaminate a direct-API job for the same project.
+    """
     if not is_loopback_remote(request.remote_addr):
         return jsonify({"error": "Forbidden"}), 403
 
+    raw = request.get_data(cache=True, as_text=False) or b""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
+    from studio.shared.providers_common.transports.callbacks import (
+        MAX_MEDIA_CALLBACK_BYTES,
+        default_callback_intake,
+    )
+
     results = data if isinstance(data, list) else [data]
+    intake = default_callback_intake()
+    provider_id, aliases = _extension_callback_scope()
 
     for project in results:
         project_id = sanitize_project_id(project.get("projectId", ""))
         if not project_id:
             continue
         job = jobs.read(project_id)
-        if not job:
-            logger.warning("Grabber results for unknown project: {}", project_id)
+        disposition = intake.accept_legacy_job(
+            domain="animator",
+            provider_id=provider_id,
+            project_id=project_id,
+            job=job,
+            body=raw,
+            max_body_bytes=MAX_MEDIA_CALLBACK_BYTES,
+            aliases=aliases,
+            source="grabber_results",
+        )
+        if not disposition.ok:
+            logger.warning(
+                "Grabber results rejected for {}: {}", project_id, disposition.message
+            )
             continue
 
         jobs.clear_completion(project_id)
@@ -390,10 +433,15 @@ def grabber_results():
 
 @animation_bp.route("/api/animator/grabber/upload", methods=["POST"])
 def grabber_upload():
-    """Receive base64 image/video data from Automa (for CDN URLs that require auth)."""
+    """Receive base64 image/video data from Automa (for CDN URLs that require auth).
+
+    Compatibility facade for the existing Automa callback URL (step 14.4).
+    Oversized or cross-provider payloads are rejected without writing assets.
+    """
     if not is_loopback_remote(request.remote_addr):
         return jsonify({"error": "Forbidden"}), 403
 
+    raw = request.get_data(cache=True, as_text=False) or b""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -403,7 +451,34 @@ def grabber_upload():
     if not project_id or not scenes:
         return jsonify({"error": "Missing projectId or scenes"}), 400
 
+    from studio.shared.providers_common.transports.callbacks import (
+        MAX_MEDIA_CALLBACK_BYTES,
+        REJECTED_OVERSIZED,
+        default_callback_intake,
+    )
+
     job = jobs.read(project_id)
+    provider_id, aliases = _extension_callback_scope()
+    disposition = default_callback_intake().accept_legacy_job(
+        domain="animator",
+        provider_id=provider_id,
+        project_id=project_id,
+        job=job,
+        body=raw,
+        max_body_bytes=MAX_MEDIA_CALLBACK_BYTES,
+        aliases=aliases,
+        source="grabber_upload",
+    )
+    if disposition.outcome == REJECTED_OVERSIZED:
+        return jsonify({"error": "Payload too large"}), 413
+    # Unknown project is still accepted for Automa's "upload then seed" race;
+    # only a live job owned by another provider is a hard reject.
+    if disposition.outcome == "dropped_mismatch":
+        logger.warning(
+            "Grabber upload rejected for {}: {}", project_id, disposition.message
+        )
+        return jsonify({"error": disposition.message or "Callback rejected"}), 409
+
     if job:
         jobs.clear_completion(project_id)
         jobs.mark_status(project_id, "downloading")

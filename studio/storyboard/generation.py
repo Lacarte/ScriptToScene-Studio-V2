@@ -16,21 +16,17 @@ a raw exception here becomes browser-visible provider response text (§36 L2).
 
 from __future__ import annotations
 
-import os
-import time
 from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
 
-import requests as http_requests
 from loguru import logger
 
 from config import N8N_STORYBOARD_WEBHOOK_URL, WAVESPEED_API_KEY
-from studio.shared.providers_common.errors import (
-    PROVIDER_AUTH_FAILED,
-    PROVIDER_RESPONSE_MALFORMED,
-    PROVIDER_TIMEOUT,
-    PROVIDER_TRANSPORT_FAILED,
-    ProviderError,
+from studio.shared.providers_common.errors import ProviderError
+from studio.shared.providers_common.file_download import download_file
+from studio.shared.providers_common.transports.webhook import (
+    classify_webhook_error,
+    post_webhook,
 )
 from studio.shared.providers_common.validation import sanitize_message
 from studio.storyboard import jobs
@@ -46,39 +42,18 @@ _DL_HEADERS = {
     "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
 }
 
-# Substrings that mark a WaveSpeed/n8n rejection as a credential problem rather
-# than a transient one, so an invalid key becomes an isolated, non-retryable
-# unit failure instead of three download retries and a generic error.
-_AUTH_MARKERS = ("401", "403", "unauthorized", "forbidden", "invalid api key")
-
 
 def download_image(url: str, destination: str) -> bool:
     """Download an image URL to a local file with retries."""
     parsed = urlparse(url)
     headers = {**_DL_HEADERS, "Referer": f"{parsed.scheme}://{parsed.netloc}/"}
-
-    for attempt in range(1, MAX_DL_RETRIES + 1):
-        try:
-            response = http_requests.get(url, headers=headers, timeout=120, stream=True)
-            response.raise_for_status()
-            with open(destination, "wb") as handle:
-                for chunk in response.iter_content(chunk_size=65536):
-                    handle.write(chunk)
-            logger.info(
-                "[storyboard] downloaded {:.0f} KB → {}",
-                os.path.getsize(destination) / 1024, destination,
-            )
-            return True
-        except (OSError, http_requests.RequestException) as exc:
-            logger.warning(
-                "[storyboard] download attempt {}/{} failed for {}: {}",
-                attempt, MAX_DL_RETRIES, destination, exc,
-            )
-            if os.path.isfile(destination):
-                os.remove(destination)
-            if attempt < MAX_DL_RETRIES:
-                time.sleep(DL_RETRY_DELAY * attempt)
-    return False
+    return download_file(
+        url,
+        destination,
+        headers=headers,
+        timeout=120,
+        max_retries=MAX_DL_RETRIES,
+    )
 
 
 def classify(exc: BaseException) -> ProviderError:
@@ -87,35 +62,26 @@ def classify(exc: BaseException) -> ProviderError:
     The original text never reaches the message: `wrap_exception`'s rule (§34.4)
     applies here too, because this message is persisted into `storyboard.json`.
     """
-    if isinstance(exc, http_requests.Timeout):
-        return ProviderError(PROVIDER_TIMEOUT, "The image request timed out", retryable=True)
-    if isinstance(exc, http_requests.ConnectionError):
-        return ProviderError(
-            PROVIDER_TRANSPORT_FAILED, "Could not reach the image service", retryable=True
-        )
-    text = str(exc).lower()
-    if any(marker in text for marker in _AUTH_MARKERS):
-        return ProviderError(
-            PROVIDER_AUTH_FAILED, "The image service rejected the credentials"
-        )
-    if isinstance(exc, ValueError):
-        return ProviderError(
-            PROVIDER_RESPONSE_MALFORMED, "The image service returned an unusable response"
-        )
-    return ProviderError(
-        PROVIDER_TRANSPORT_FAILED, "The image service failed", retryable=True
-    )
+    if isinstance(exc, ProviderError):
+        # Drop domain/provider identity so the persisted unit error stays small.
+        return ProviderError(exc.code, exc.message, retryable=exc.retryable)
+    return classify_webhook_error(exc)
 
 
 def webhook_transport(
     webhook_url: str | None = None, *, api_key: str | None = None
 ) -> Callable[[Mapping[str, Any], str, str], str]:
-    """The n8n webhook transport: one POST per scene, returns the image URL."""
+    """The n8n webhook transport: one POST per scene, returns the image URL.
+
+    Built on the shared ``post_webhook`` adapter (step 14.4). Domain-only pieces
+    are the payload shape and the `image_url` extraction.
+    """
     url = webhook_url or N8N_STORYBOARD_WEBHOOK_URL
     key = api_key or WAVESPEED_API_KEY
 
     def generate(scene: Mapping[str, Any], aspect_ratio: str, project_id: str) -> str:
-        result = call_webhook(
+        # Prefer the module-level name so tests can still patch `call_webhook`.
+        result = post_webhook(
             url,
             {
                 "image_prompt": scene["prompt"],
@@ -126,6 +92,9 @@ def webhook_transport(
             },
             timeout=WEBHOOK_TIMEOUT_S,
             label=f"Storyboard scene {scene['scene']}",
+            domain="storyboard",
+            provider_id="wavespeed_webhook",
+            caller=call_webhook,
         )
         image_url = (result or {}).get("image_url")
         if not image_url:
@@ -138,7 +107,12 @@ def webhook_transport(
 def direct_transport(
     *, style: str = "", image_model: str = ""
 ) -> Callable[[Mapping[str, Any], str, str], str]:
-    """The direct WaveSpeed API transport, model chosen by style or override."""
+    """The direct WaveSpeed API transport, model chosen by style or override.
+
+    Model selection and WaveSpeed payload construction stay in
+    ``studio.storyboard.wavespeed``; this only supplies the callable shape the
+    batch loop expects.
+    """
 
     def generate(scene: Mapping[str, Any], aspect_ratio: str, _project_id: str) -> str:
         # Resolved per call, not per transport: the model catalog is read from

@@ -337,7 +337,8 @@ def _merge_units_idempotent(
     """Merge by `unit_index`. A terminal existing unit is never overwritten.
 
     This is the rule that makes a duplicate callback for an already-ready scene
-    a no-op (D32 precondition; full transport lives in 14.4).
+    a no-op (D32). Inbound push validation and body bounds live in
+    `providers_common.transports.callbacks` (step 14.4).
     """
     by_index: dict[int, UnitResult] = {unit.unit_index: unit for unit in existing}
     for unit in incoming:
@@ -667,8 +668,9 @@ class MediaJobService:
         """Apply a pushed status. Returns True when applied, False when dropped.
 
         Duplicate status for a unit already terminal is idempotent (§33.3).
-        Full transport correlation for HTTP/WS callbacks is 14.4; this method
-        is the job-side half the transport will call.
+        Callers that receive raw HTTP/WS bodies should go through
+        `transports.callbacks.CallbackIntake` first so oversized, malformed,
+        and cross-provider pushes never reach this method.
         """
         if isinstance(status, Mapping):
             status = JobStatus.from_dict(status)

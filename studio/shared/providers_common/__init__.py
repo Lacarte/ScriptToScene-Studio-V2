@@ -19,6 +19,7 @@ Modules:
   - http_client: retry/backoff wrapped requests
   - file_download: normalized file download to output dirs
   - progress: status.json writer for job progress
+  - transports: extension WebSocket hub, webhook, direct API, callback intake
 """
 
 from studio.shared.providers_common.domains import (
