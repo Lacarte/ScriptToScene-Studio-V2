@@ -21,6 +21,8 @@ the domain default now differs (`storyboard` defaults to `gemini_ws`, while a v1
 
 from __future__ import annotations
 
+from studio.shared.providers_common.compatibility import normalize_selection_alias
+
 # The v1 config-schema defaults, frozen here so a later registry edit cannot
 # silently change what an old workflow migrates to.
 TTS_V1_DEFAULT_ENGINE = "kokoro"
@@ -34,8 +36,16 @@ STORYBOARD_V1_PROVIDER_KEYS = ("prompt_prefix", "auto_type")
 ANIMATOR_V1_PROVIDER_KEYS = ("mode", "quality", "duration", "auto_type")
 
 
-def _rename_provider(config: dict, legacy_key: str, default: str) -> None:
-    config["provider_id"] = config.pop(legacy_key, default)
+def _rename_provider(config: dict, legacy_key: str, default: str, *, domain: str) -> None:
+    """Pop the legacy key and persist the *canonical* provider id.
+
+    A saved v1 document may still carry a wire alias (`webhook`, `grok`, …).
+    contracts.md §40.3 rule 1: only the canonical id is written after upgrade.
+    """
+    raw = config.pop(legacy_key, default)
+    if not isinstance(raw, str) or not raw.strip():
+        raw = default
+    config["provider_id"] = normalize_selection_alias(raw, domain=domain)
 
 
 def _move_to_provider_options(config: dict, keys) -> None:
@@ -54,20 +64,24 @@ def _move_to_provider_options(config: dict, keys) -> None:
 
 def tts_generate_1_to_2(config: dict) -> dict:
     """M1 — `engine` becomes `provider_id`; `voice`/`speed`/options untouched."""
-    _rename_provider(config, "engine", TTS_V1_DEFAULT_ENGINE)
+    _rename_provider(config, "engine", TTS_V1_DEFAULT_ENGINE, domain="tts")
     return config
 
 
 def storyboard_generate_1_to_2(config: dict) -> dict:
     """M2 — `provider` becomes `provider_id`; the gemini_ws fields move."""
-    _rename_provider(config, "provider", STORYBOARD_V1_DEFAULT_PROVIDER)
+    _rename_provider(
+        config, "provider", STORYBOARD_V1_DEFAULT_PROVIDER, domain="storyboard"
+    )
     _move_to_provider_options(config, STORYBOARD_V1_PROVIDER_KEYS)
     return config
 
 
 def animator_generate_1_to_2(config: dict) -> dict:
     """M3 — `provider` becomes `provider_id`; the grok_automa fields move."""
-    _rename_provider(config, "provider", ANIMATOR_V1_DEFAULT_PROVIDER)
+    _rename_provider(
+        config, "provider", ANIMATOR_V1_DEFAULT_PROVIDER, domain="animator"
+    )
     _move_to_provider_options(config, ANIMATOR_V1_PROVIDER_KEYS)
     return config
 

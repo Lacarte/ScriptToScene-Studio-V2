@@ -14,6 +14,7 @@ import requests
 
 from studio.io_utils import now_iso, safe_json_read, safe_json_write
 from studio.security import safe_join
+from studio.shared.providers_common.validation import sanitize_message
 
 from .persistence import EXECUTION_ID_RE
 from .validation import WORKFLOW_ID_RE
@@ -119,7 +120,10 @@ def dispatch_run_notification(
             _windows_toast(title, message)
             deliveries["windows_toast"] = {"status": "sent" if os.name == "nt" else "unsupported"}
         except Exception as exc:  # a notification channel must never fail a run
-            deliveries["windows_toast"] = {"status": "failed", "error": str(exc)[:300]}
+            deliveries["windows_toast"] = {
+                "status": "failed",
+                "error": sanitize_message(exc),
+            }
     webhook = settings.get("webhook") or {}
     if webhook.get("enabled"):
         try:
@@ -127,7 +131,12 @@ def dispatch_run_notification(
             response.raise_for_status()
             deliveries["webhook"] = {"status": "sent", "http_status": response.status_code}
         except Exception as exc:
-            deliveries["webhook"] = {"status": "failed", "error": str(exc)[:300]}
+            # Channel errors may embed URLs, response bodies, or paths — never
+            # persist them raw (step 16.4, contracts.md §36).
+            deliveries["webhook"] = {
+                "status": "failed",
+                "error": sanitize_message(exc),
+            }
     if deliveries:
         with _LOCK:
             current = safe_json_read(path)

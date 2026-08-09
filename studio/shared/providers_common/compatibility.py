@@ -27,10 +27,37 @@ from typing import Mapping, MutableMapping
 
 
 # Retired ``app-config.json`` selection values → canonical registry ids.
-# Kept for the v2 settings migration only (§24.3). Not used at dispatch time.
+# Kept for the v2 settings migration and node-config upgrades (step 16.4).
+# Not used at dispatch time — the hub resolves manifest aliases there.
+#
+# Domain-aware: ``gemini`` is a *storyboard* wire alias for ``gemini_ws`` and
+# simultaneously the *canonical* script provider id. A flat map would rewrite
+# a correct script selection into a storyboard id (§40.3).
+DOMAIN_SELECTION_ALIASES: dict[str, dict[str, str]] = {
+    "script": {
+        "builtin": "gemini",
+    },
+    "scene_blueprint": {
+        "builtin": "n8n",
+    },
+    "storyboard": {
+        "gemini": "gemini_ws",
+        "webhook": "wavespeed_webhook",
+        "direct": "wavespeed_direct",
+    },
+    "animator": {
+        "grok": "grok_automa",
+        "midjourney": "grok_automa",
+        "kie-ai": "kie_ai",
+    },
+}
+
+# Cross-domain fallback used when the caller has no domain context (the retired
+# app-config keys each already imply one domain via LEGACY_SELECTION_KEYS).
 LEGACY_SELECTION_ALIASES: dict[str, str] = {
     "gemini": "gemini_ws",
     "grok": "grok_automa",
+    "midjourney": "grok_automa",
     "kie-ai": "kie_ai",
     "webhook": "wavespeed_webhook",
     "direct": "wavespeed_direct",
@@ -49,18 +76,17 @@ LEGACY_SELECTION_KEYS: frozenset[str] = frozenset({
 def normalize_selection_alias(value: str, *, domain: str | None = None) -> str:
     """Map a retired selection string onto a canonical provider id.
 
-    ``builtin`` is domain-aware: under ``script`` it becomes ``gemini``; under
-    ``scene_blueprint`` it becomes ``n8n``; elsewhere it is left alone so an
-    unknown domain cannot silently pick the wrong package.
+    When ``domain`` is known the domain table wins, so a script selection of
+    ``gemini`` stays ``gemini`` while a storyboard selection of ``gemini``
+    becomes ``gemini_ws``. Without a domain the cross-domain table is used.
     """
     raw = (value or "").strip()
     if not raw:
         return raw
-    if raw == "builtin":
-        if domain == "script":
-            return "gemini"
-        if domain == "scene_blueprint":
-            return "n8n"
+    if domain:
+        table = DOMAIN_SELECTION_ALIASES.get(domain)
+        if table is not None:
+            return table.get(raw, raw)
         return raw
     return LEGACY_SELECTION_ALIASES.get(raw, raw)
 
@@ -77,6 +103,7 @@ def strip_legacy_selection_keys(user: MutableMapping | Mapping) -> dict:
 
 
 __all__ = [
+    "DOMAIN_SELECTION_ALIASES",
     "LEGACY_SELECTION_ALIASES",
     "LEGACY_SELECTION_KEYS",
     "normalize_selection_alias",

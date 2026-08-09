@@ -86,6 +86,32 @@ class HealthResult:
     details: dict | None = None
 
 
+def _sanitize_health_details(details: Any) -> dict | None:
+    """Scrub provider-authored health `details` before they leave the registry.
+
+    Secrets are key-masked; every string value is path-stripped and size-capped
+    so a hook cannot smuggle credentials or absolute paths into the API
+    (contracts.md §21.5 / §36 L4, step 16.4).
+    """
+    if not isinstance(details, dict):
+        return None
+    cleaned = schema_tools.redact(details)
+    return _sanitize_detail_strings(cleaned)
+
+
+def _sanitize_detail_strings(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _sanitize_detail_strings(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_detail_strings(child) for child in value]
+    if isinstance(value, str):
+        return v.sanitize_message(value)
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    # Drop non-JSON values rather than leaking repr(object).
+    return None
+
+
 @dataclass
 class ValidationIssue:
     """A validation issue with provider settings."""
@@ -343,10 +369,17 @@ class ProviderInstance:
                 # shipped hooks answer `{"status": "fail", "message": str(e)}`,
                 # which can carry a URL, a path, or a response body (§36 L4).
                 message=v.sanitize_message(message) if message else message,
-                details=result.get('details'),
+                details=_sanitize_health_details(result.get('details')),
             )
         if isinstance(result, str):
             return HealthResult(status=result)
+        if isinstance(result, HealthResult):
+            return HealthResult(
+                status=result.status,
+                latency_ms=result.latency_ms,
+                message=v.sanitize_message(result.message) if result.message else result.message,
+                details=_sanitize_health_details(result.details),
+            )
         return result
 
     # -- construction (contracts.md §21.1) ---------------------------------

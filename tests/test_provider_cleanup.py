@@ -64,9 +64,19 @@ class ExtensionOpsTests(unittest.TestCase):
 
 class CompatibilityModuleTests(unittest.TestCase):
     def test_selection_aliases_normalize(self):
+        # Cross-domain (no domain context) — retired app-config wire spellings.
         self.assertEqual(compat.normalize_selection_alias("gemini"), "gemini_ws")
         self.assertEqual(compat.normalize_selection_alias("grok"), "grok_automa")
+        self.assertEqual(compat.normalize_selection_alias("midjourney"), "grok_automa")
         self.assertEqual(compat.normalize_selection_alias("kie-ai"), "kie_ai")
+        # Domain-aware: script's canonical id is also named gemini.
+        self.assertEqual(
+            compat.normalize_selection_alias("gemini", domain="script"), "gemini"
+        )
+        self.assertEqual(
+            compat.normalize_selection_alias("gemini", domain="storyboard"),
+            "gemini_ws",
+        )
         self.assertEqual(
             compat.normalize_selection_alias("builtin", domain="script"), "gemini"
         )
@@ -75,6 +85,9 @@ class CompatibilityModuleTests(unittest.TestCase):
         )
         # Unknown values pass through so a future plugin id is not rewritten.
         self.assertEqual(compat.normalize_selection_alias("fixture_x"), "fixture_x")
+        self.assertEqual(
+            compat.normalize_selection_alias("fixture_x", domain="tts"), "fixture_x"
+        )
 
     def test_strip_removes_only_the_three_keys(self):
         user = {

@@ -1997,6 +1997,20 @@ other providers or the Flask process.
 SSE, logs, records, archives, or notifications; provider failures are bounded and attributable;
 concurrent catalog reads remain consistent during reload; and all security regressions pass.
 
+#### Step 16.4 review status — 2026-08-09
+
+- **Complete.** Compatibility matrix (`tests/test_provider_compat_matrix.py`) covers every
+  documented alias (§40.3), legacy selection/settings formats (§42), M1–M3 node migrations
+  (+ M4 non-bump), §40.1 request fields, built-in templates, and frozen artifact roots (§44).
+- Failure-isolation + security suite (`tests/test_provider_hardening.py`) fuzzes malformed
+  manifests/results/callbacks, giant metadata, secret-bearing exceptions, concurrent reload
+  reads, and isolation of import/health/create/execute/shutdown failures.
+- Hardening: domain-aware selection-alias normalization (script `gemini` stays canonical);
+  M1–M3 rewrite wire aliases to canonical ids; settings v2 normalizes stored selections;
+  archive packaging re-redacts; notification channel errors and scheduler unhandled-exception
+  logs use `sanitize_message`; health `details` and `HealthResult` objects are scrubbed.
+- Automated verification: full backend suite green (`1068 passed, 12 skipped`).
+
 ### 16.5 Final provider-platform gate
 Run the full deterministic backend/frontend/build/doc suite, the generic no-node-edit provider proof,
 all built-in templates, legacy page/API smoke tests, and configured live providers. In the running app,

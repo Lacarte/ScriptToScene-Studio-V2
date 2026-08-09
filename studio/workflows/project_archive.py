@@ -19,6 +19,7 @@ from studio.io_utils import now_iso, safe_json_write
 
 from .adapters.common import PROJECT_ID_RE
 from .persistence import EXECUTION_ID_RE
+from .redaction import redact
 from .validation import WORKFLOW_ID_RE, validate_workflow, validation_errors
 
 
@@ -198,9 +199,11 @@ def create_archive(workflow_id: str, project_id: str, destination: BinaryIO, *, 
         if isinstance(snapshot, Mapping):
             refs.update(_pinned_workflow_refs(snapshot, output_dir))
 
-    members: dict[str, bytes] = {"workflow.json": _json_bytes(workflow)}
+    # Defense in depth: re-redact at the archive boundary even though save paths
+    # already scrub secrets. An archive is a portable egress surface (step 16.4).
+    members: dict[str, bytes] = {"workflow.json": _json_bytes(redact(workflow))}
     for filename, record in executions:
-        members[f"executions/{filename}"] = _json_bytes(record)
+        members[f"executions/{filename}"] = _json_bytes(redact(record))
     for ref in sorted(refs):
         source = os.path.join(output_dir, *PurePosixPath(ref).parts)
         if not os.path.isfile(source) or os.path.islink(source):

@@ -55,7 +55,13 @@ def migrate_to_v2(data: dict, legacy_user: dict) -> dict:
         block.setdefault("per_provider", {})
 
         if block.get("selected_provider"):
-            continue  # settings.json wins; the legacy key is ignored from now on
+            # settings.json wins over the legacy key, but an alias that was
+            # already stored is rewritten to its canonical id (§39 rule 1 /
+            # §40.3 rule 1 — only canonical ids persist).
+            block["selected_provider"] = normalize_selection_alias(
+                block["selected_provider"], domain=domain_id
+            )
+            continue
 
         legacy_key = spec.legacy_selection_key
         legacy_value = legacy_user.get(legacy_key) if legacy_key else None

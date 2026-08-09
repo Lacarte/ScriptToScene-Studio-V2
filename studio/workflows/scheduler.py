@@ -64,8 +64,12 @@ def safe_failure_message(exc: BaseException) -> str:
     """
     if isinstance(exc, _AUTHORED_EXCEPTIONS):
         return sanitize_message(getattr(exc, "message", None) or str(exc))
+    # Log only after path/secret scrubbing — a plugin exception may embed a
+    # credential or absolute path, and logs are an egress surface (step 16.4).
     logger.error(
-        "[scheduler] unhandled {} in a node executor: {}", type(exc).__name__, exc
+        "[scheduler] unhandled {} in a node executor: {}",
+        type(exc).__name__,
+        sanitize_message(exc),
     )
     return f"The node failed with an internal {type(exc).__name__}."
 
