@@ -114,7 +114,9 @@ class HubSurfaceTests(unittest.TestCase):
         self.assertIsNone(payload['animator']['selected'])
         self.assertEqual(
             [p['id'] for p in payload['script']['providers']],
-            ['gemini', 'random_template'],
+            # Discovery order is sorted folder names; scaffold_check is the
+            # step-16.2 demo package (folder drop, no hub/registry edit).
+            ['gemini', 'random_template', 'scaffold_check'],
         )
         self.assertEqual([p['id'] for p in payload['scene_blueprint']['providers']], ['n8n'])
 

@@ -1,75 +1,377 @@
-"""Provider Scaffolding CLI — Phase 9.
+"""Provider scaffolding CLI — Provider Contract v2 (step 16.2).
 
-Creates new provider folders from templates.
+Creates a complete provider package from the live domain catalog, emits a
+generated contract-test file, and refuses unsafe inputs without leaving
+partial files on disk.
 
 Usage:
-    python -m studio.shared.providers_common.scaffold tts my_new_provider
-    python -m studio.shared.providers_common.scaffold storyboard image_provider --kind cloud
-    python -m studio.shared.providers_common.scaffold animator video_provider --kind extension
+    python -m studio.shared.providers_common.scaffold script scaffold_check
+    python -m studio.shared.providers_common.scaffold tts my_provider --kind cloud
+    python -m studio.shared.providers_common.scaffold storyboard render_ext --kind extension
 """
 
-import sys
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
+from typing import Iterable
 
-from loguru import logger
+from studio.shared.providers_common.domains import DOMAINS, DOMAIN_IDS, get_domain
+from studio.shared.providers_common.validation import ID_RE, KINDS
 
-from config import ROOT_DIR
+
+class ScaffoldError(ValueError):
+    """A safe, user-correctable scaffolding error. Never leaves partial files."""
 
 
-# Each template is a Python str.format() template.
-# - `{id}` / `{label}` / `{kind}` / `{requires}` / `{name_cap}` are placeholders.
-# - Literal `{` and `}` are escaped as `{{` and `}}` (standard format() rules).
-_TEMPLATES = {
+# Execution shapes the platform understands (contracts.md §26 / step 12.5).
+SHAPE_SYNC_DOCUMENT = "sync_document"
+SHAPE_SYNC_ARTIFACT = "sync_artifact"
+SHAPE_ASYNC_MULTI = "async_multi_asset"
+
+DOMAIN_SHAPE = {
+    "script": SHAPE_SYNC_DOCUMENT,
+    "scene_blueprint": SHAPE_SYNC_DOCUMENT,
+    "tts": SHAPE_SYNC_ARTIFACT,
+    "storyboard": SHAPE_ASYNC_MULTI,
+    "animator": SHAPE_ASYNC_MULTI,
+}
+
+# Default capabilities declared for a brand-new package. Authors expand these
+# once the implementation supports them; unknown keys are warned at discovery.
+DEFAULT_CAPABILITIES = {
+    "script": {
+        "test_connection": True,
+        "offline": True,
+        "single_scene": True,
+        "structured_sections": False,
+        "language_select": True,
+        "batch": False,
+    },
+    "scene_blueprint": {
+        "test_connection": True,
+        "single_scene": True,
+        "batch": True,
+        "chaptering": False,
+        "coherence_scoring": False,
+        "sfx_report": False,
+    },
     "tts": {
-        "manifest.py": '''"""{label} TTS Provider Manifest."""
+        "test_connection": True,
+        "single_scene": True,
+        "batch": True,
+        "voice_list": True,
+        "speed_control": True,
+        "streaming": False,
+        "model_download": False,
+    },
+    "storyboard": {
+        "test_connection": True,
+        "single_scene": True,
+        "batch": True,
+        "async_job": True,
+        "progress": True,
+        "cancel": True,
+    },
+    "animator": {
+        "test_connection": True,
+        "single_scene": True,
+        "batch": True,
+        "async_job": True,
+        "progress": True,
+        "cancel": True,
+        "image_to_video": True,
+    },
+}
+
+# Package path fragments used when `--project-root` relocates the tree (tests).
+_PACKAGE_PARTS = {
+    domain: tuple(spec.package.split("."))
+    for domain, spec in DOMAINS.items()
+}
+
+
+def _name_cap(provider_id: str) -> str:
+    return "".join(part.capitalize() or "_" for part in provider_id.split("_"))
+
+
+def _title(provider_id: str) -> str:
+    return provider_id.replace("_", " ").title()
+
+
+def _providers_base(domain: str, project_root: Path | None) -> Path:
+    if project_root is None:
+        return Path(get_domain(domain).providers_base)
+    return project_root.joinpath(*_PACKAGE_PARTS[domain])
+
+
+def _tests_dir(project_root: Path | None) -> Path:
+    if project_root is None:
+        return Path(__file__).resolve().parents[3] / "tests"
+    return project_root / "tests"
+
+
+def _test_module_name(domain: str, provider_id: str) -> str:
+    return f"test_provider_{domain}_{provider_id}"
+
+
+def _env_key(provider_id: str, field: str = "API_KEY") -> str:
+    return f"STS_{provider_id.upper()}_{field}"
+
+
+def _format_dict(data: dict, *, indent: int = 8) -> str:
+    """Pretty-print a dict as a Python literal with the given base indent."""
+    pad = " " * indent
+    inner = " " * (indent + 4)
+    if not data:
+        return "{}"
+    lines = ["{"]
+    for key, value in data.items():
+        lines.append(f"{inner}{key!r}: {value!r},")
+    lines.append(f"{pad}}}")
+    return "\n".join(lines)
+
+
+def _manifest_source(
+    *,
+    domain: str,
+    provider_id: str,
+    label: str,
+    kind: str,
+    requires: list[str],
+    capabilities: dict[str, bool],
+    description: str,
+    environment: dict[str, str],
+) -> str:
+    env_literal = _format_dict(environment, indent=8) if environment else "{}"
+    caps_literal = _format_dict(capabilities, indent=8)
+    requires_literal = repr(requires)
+    return f'''"""{label} provider manifest — Provider Contract v2.
+
+Generated by `python -m studio.shared.providers_common.scaffold`.
+"""
 
 from studio.shared.providers_common import ProviderManifest
 
 
 def manifest() -> ProviderManifest:
     return ProviderManifest(
-        id="{id}",
+        id="{provider_id}",
         label="{label}",
-        domain="tts",
+        domain="{domain}",
         kind="{kind}",
         version="1.0.0",
-        requires={requires},
-        capabilities={{
-            "test_connection": True,
-            "streaming": False,
-            "model_download": False,
-            "single_scene": True,
-            "batch": True,
-            "voice_list": True,
-        }},
+        contract_version=2,
+        requires={requires_literal},
+        capabilities={caps_literal},
+        description=(
+            "{description}"
+        ),
+        environment={env_literal},
     )
-''',
-        "settings_schema.py": '''"""{label} TTS Settings Schema."""
+'''
+
+
+def _settings_schema_source(*, label: str, kind: str, requires: list[str]) -> str:
+    props: dict[str, dict] = {}
+    if "api_key" in requires or kind == "cloud":
+        props["api_key"] = {
+            "type": "string",
+            "label": "API Key",
+            "description": "Credential used by this provider. Never committed.",
+            "ui": {"type": "password"},
+        }
+    if kind == "webhook":
+        props["webhook_url"] = {
+            "type": "string",
+            "label": "Webhook URL",
+            "description": "HTTPS endpoint that receives generation requests.",
+            "ui": {"type": "text"},
+        }
+    # Every scaffolded package ships one non-secret field so the generic settings
+    # renderer has something to show without credentials.
+    props["label_prefix"] = {
+        "type": "string",
+        "label": "Label prefix",
+        "description": "Optional prefix applied to generated output for identification.",
+        "default": "",
+        "ui": {"type": "text"},
+    }
+    required = [k for k in requires if k in props]
+    # Build the schema as a Python literal rather than json.dumps so the file
+    # stays editable and matches the rest of the codebase style.
+    props_lines = []
+    for key, value in props.items():
+        props_lines.append(f'            "{key}": {{')
+        for pk, pv in value.items():
+            props_lines.append(f"                {pk!r}: {pv!r},")
+        props_lines.append("            },")
+    props_body = "\n".join(props_lines)
+    return f'''"""{label} settings schema.
+
+Generated by `python -m studio.shared.providers_common.scaffold`.
+Rendered by the generic provider settings UI — do not hardcode fields in Vue.
+"""
 
 
 def settings_schema() -> dict:
     return {{
         "type": "object",
         "properties": {{
-            # Add your fields here, e.g.:
-            # "api_key": {{
-            #     "type": "string",
-            #     "label": "API Key",
-            #     "ui": {{"type": "password"}},
-            # }},
+{props_body}
         }},
-        "required": [],
+        "required": {required!r},
     }}
-''',
-        "provider.py": '''"""{label} TTS Provider."""
+'''
 
-from typing import Optional, Callable
+
+def _provider_source_script(*, name_cap: str, label: str, provider_id: str) -> str:
+    """Working offline sync-document implementation (the 16.2 demo shape)."""
+    return f'''"""{label} script provider — Provider Contract v2.
+
+Generated by `python -m studio.shared.providers_common.scaffold`.
+A deterministic offline document producer so the package is discovered,
+API-visible, UI-configurable, and executable on `story.generate` without edits.
+"""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+from typing import Any, Mapping
+
+from config import STORIES_DIR
+from studio.io_utils import safe_json_write
+from studio.story.providers.base import ScriptProvider
+from studio.story.providers.contract import ScriptRequest, ScriptResultPayload
+
+
+class {name_cap}Provider(ScriptProvider):
+    """Offline scaffold demo: turns idea + optional prefix into a short script."""
+
+    def generate(self, configuration: Mapping[str, Any], *, project_id: str) -> dict:
+        request = ScriptRequest.from_configuration(configuration)
+        settings = dict(configuration or {{}})
+        prefix = str(settings.get("label_prefix") or "Scaffold check").strip() or "Scaffold check"
+        idea = (request.idea or "an offline scaffold demo").strip()
+        script_text = f"{{prefix}}: {{idea}}"
+        word_count = len(script_text.split())
+        estimated = max(1, round(word_count / 2.5))
+        language = request.language or str(settings.get("language") or "english")
+        payload = ScriptResultPayload(
+            script_text=script_text,
+            sections={{"hook": script_text, "cta": f"{{prefix}} complete"}},
+            word_count=word_count,
+            estimated_duration_s=estimated,
+            language=language,
+        )
+        generated_at = datetime.now(timezone.utc).isoformat()
+        story_data = {{
+            "project_id": project_id,
+            "story_text": payload.script_text,
+            "sections": dict(payload.sections),
+            "metadata": {{
+                "preset_style": request.style or "",
+                "language": payload.language,
+                "story_category": request.category or "",
+                "story_tone": request.tone or "",
+                "duration": request.target_duration_s,
+                "word_count": payload.word_count,
+                "estimated_duration": payload.estimated_duration_s,
+                "provider": "{provider_id}",
+                "timestamp": generated_at,
+            }},
+            "pipeline_ref": {{"tts_project_id": None, "scenes_project_id": None}},
+        }}
+        path = os.path.join(STORIES_DIR, project_id, "story.json")
+        safe_json_write(path, story_data, indent=2)
+        return {{**story_data, "path": path}}
+
+
+def create() -> {name_cap}Provider:
+    return {name_cap}Provider()
+
+
+def validate_settings(settings: dict) -> list[dict]:
+    issues: list[dict] = []
+    language = str((settings or {{}}).get("language") or "english").strip().lower()
+    if language and language not in ("english", "french", "spanish"):
+        issues.append({{
+            "field": "language",
+            "severity": "warning",
+            "message": f"Unsupported language '{{language}}'",
+        }})
+    return issues
+
+
+def health_check(settings: dict) -> dict:
+    return {{
+        "status": "ok",
+        "latency_ms": 0,
+        "message": "Offline scaffold provider ready",
+    }}
+'''
+
+
+def _provider_source_scene_blueprint(*, name_cap: str, label: str, provider_id: str) -> str:
+    return f'''"""{label} scene-blueprint provider — Provider Contract v2 skeleton.
+
+Generated by `python -m studio.shared.providers_common.scaffold`.
+Implement `generate()` (and optionally override `invoke()`) to produce scenes.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from studio.build_scene_blueprints.providers.base import SceneBlueprintProvider
+
+
+class {name_cap}Provider(SceneBlueprintProvider):
+    """{label} scene-blueprint provider implementation."""
+
+    def generate(
+        self,
+        segments: Mapping[str, Any],
+        configuration: Mapping[str, Any],
+        *,
+        project_id: str,
+    ) -> dict:
+        raise NotImplementedError("{name_cap}Provider.generate is not implemented")
+
+
+def create() -> {name_cap}Provider:
+    return {name_cap}Provider()
+
+
+def validate_settings(settings: dict) -> list[dict]:
+    return []
+
+
+def health_check(settings: dict) -> dict:
+    return {{"status": "warn", "message": "Not implemented yet", "latency_ms": 0}}
+'''
+
+
+def _provider_source_tts(*, name_cap: str, label: str, provider_id: str) -> str:
+    return f'''"""{label} TTS provider — Provider Contract v2 skeleton.
+
+Generated by `python -m studio.shared.providers_common.scaffold`.
+Implement `synthesize()` / `list_voices()`; the base `invoke()` bridges them
+into the standardized envelope.
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Optional
 
 from studio.tts.providers.base import TTSProvider, TTSResult, Voice
 
 
 class {name_cap}Provider(TTSProvider):
     """{label} TTS provider implementation."""
+
+    provider_id = "{provider_id}"
 
     def synthesize(
         self,
@@ -79,7 +381,7 @@ class {name_cap}Provider(TTSProvider):
         speed: float = 1.0,
         on_progress: Optional[Callable] = None,
     ) -> TTSResult:
-        raise NotImplementedError("{name_cap}Provider.synthesize not implemented")
+        raise NotImplementedError("{name_cap}Provider.synthesize is not implemented")
 
     def list_voices(self, settings: dict) -> list[Voice]:
         return []
@@ -88,77 +390,68 @@ class {name_cap}Provider(TTSProvider):
         pass
 
 
+def create() -> {name_cap}Provider:
+    return {name_cap}Provider()
+
+
 def validate_settings(settings: dict) -> list[dict]:
-    issues = []
+    issues: list[dict] = []
+    if not (settings or {{}}).get("api_key") and "{provider_id}" != "local":
+        # Cloud skeletons expect a key; local authors can drop this check.
+        pass
     return issues
 
 
 def health_check(settings: dict) -> dict:
-    return {{"status": "warn", "message": "Not implemented yet"}}
-''',
-    },
-    "storyboard": {
-        "manifest.py": '''"""{label} Storyboard Provider Manifest."""
-
-from studio.shared.providers_common import ProviderManifest
+    return {{"status": "warn", "message": "Not implemented yet", "latency_ms": 0}}
+'''
 
 
-def manifest() -> ProviderManifest:
-    return ProviderManifest(
-        id="{id}",
-        label="{label}",
-        domain="storyboard",
-        kind="{kind}",
-        version="1.0.0",
-        requires={requires},
-        capabilities={{
-            "test_connection": True,
-            "single_scene": True,
-            "batch": True,
-        }},
-    )
-''',
-        "settings_schema.py": '''"""{label} Storyboard Settings Schema."""
+def _provider_source_async(
+    *,
+    domain: str,
+    name_cap: str,
+    label: str,
+    provider_id: str,
+    base_import: str,
+    base_class: str,
+    request_type: str,
+) -> str:
+    return f'''"""{label} {domain} provider — Provider Contract v2 skeleton.
 
+Generated by `python -m studio.shared.providers_common.scaffold`.
+Implement `submit` / `poll` (and optionally `cancel_job`). The shared media-job
+service owns deadlines, cadence, progress, and aggregation.
+"""
 
-def settings_schema() -> dict:
-    return {{
-        "type": "object",
-        "properties": {{
-        }},
-        "required": [],
-    }}
-''',
-        "provider.py": '''"""{label} Storyboard Provider."""
+from __future__ import annotations
 
-from typing import Optional, Callable
-
+from {base_import} import {base_class}, JobHandle, JobStatus
+from studio.shared.providers_common.invocation import ProviderInvocation
 from studio.shared.providers_common.jobs import unknown_job_status
-from studio.storyboard.providers.base import (
-    StoryboardProvider,
-    JobHandle,
-    JobStatus,
-    SceneResult,
-)
+from {base_import.replace(".base", ".contract")} import {request_type}
 
 
-class {name_cap}Provider(StoryboardProvider):
-    """{label} storyboard provider implementation."""
+class {name_cap}Provider({base_class}):
+    """{label} {domain} provider implementation."""
 
     def submit(
-        self,
-        project_id: str,
-        scenes: list,
-        settings: dict,
-        on_progress: Optional[Callable] = None,
+        self, request: {request_type}, invocation: ProviderInvocation
     ) -> JobHandle:
-        raise NotImplementedError("{name_cap}Provider.submit not implemented")
+        raise NotImplementedError("{name_cap}Provider.submit is not implemented")
 
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
+    def poll(self, job_id: str, invocation: ProviderInvocation) -> JobStatus:
         return unknown_job_status(job_id)
+
+    def cancel_job(self, job_id: str, invocation: ProviderInvocation) -> None:
+        pass
 
     def shutdown(self) -> None:
         pass
+
+
+def create() -> {name_cap}Provider:
+    return {name_cap}Provider()
 
 
 def validate_settings(settings: dict) -> list[dict]:
@@ -166,178 +459,458 @@ def validate_settings(settings: dict) -> list[dict]:
 
 
 def health_check(settings: dict) -> dict:
-    return {{"status": "warn", "message": "Not implemented yet"}}
-''',
-    },
-    "animator": {
-        "manifest.py": '''"""{label} Animator Provider Manifest."""
-
-from studio.shared.providers_common import ProviderManifest
+    return {{"status": "warn", "message": "Not implemented yet", "latency_ms": 0}}
+'''
 
 
-def manifest() -> ProviderManifest:
-    return ProviderManifest(
-        id="{id}",
-        label="{label}",
-        domain="animator",
-        kind="{kind}",
-        version="1.0.0",
-        requires={requires},
-        capabilities={{
-            "test_connection": True,
-            "single_scene": True,
-            "batch": True,
-        }},
-    )
-''',
-        "settings_schema.py": '''"""{label} Animator Settings Schema."""
+def _runtime_source(*, provider_id: str, label: str) -> str:
+    return f'''"""Optional WebSocket runtime for the {label} extension provider.
+
+Generated by `python -m studio.shared.providers_common.scaffold`.
+Only loaded when kind='extension'. Keep route paths unique across providers.
+"""
 
 
-def settings_schema() -> dict:
-    return {{
-        "type": "object",
-        "properties": {{
-        }},
-        "required": [],
-    }}
-''',
-        "provider.py": '''"""{label} Animator Provider."""
-
-from typing import Optional, Callable
-
-from studio.animator.providers.base import (
-    AnimatorProvider,
-    JobHandle,
-    JobStatus,
-    SceneResult,
-)
-from studio.shared.providers_common.jobs import unknown_job_status
+def register_runtime(app, sock):
+    """Register WebSocket routes for this extension provider."""
+    # Example:
+    # @sock.route("/ws/{provider_id}")
+    # def _handler(ws):
+    #     ...
+    pass
+'''
 
 
-class {name_cap}Provider(AnimatorProvider):
-    """{label} animator provider implementation."""
-
-    def submit(
-        self,
-        project_id: str,
-        scenes: list,
-        settings: dict,
-        on_progress: Optional[Callable] = None,
-    ) -> JobHandle:
-        raise NotImplementedError("{name_cap}Provider.submit not implemented")
-
-    def poll(self, job_id: str, settings: dict) -> JobStatus:
-        return unknown_job_status(job_id)
-
-    def shutdown(self) -> None:
-        pass
-
-
-def validate_settings(settings: dict) -> list[dict]:
-    return []
-
-
-def health_check(settings: dict) -> dict:
-    return {{"status": "warn", "message": "Not implemented yet"}}
-''',
-    },
-}
-
-
-def _name_cap(provider_id: str) -> str:
-    """Convert snake_case provider id to CamelCase class name."""
-    return "".join(part.capitalize() or "_" for part in provider_id.split("_"))
-
-
-def create_provider(
+def _test_source(
+    *,
     domain: str,
     provider_id: str,
-    kind: str = "cloud",
-    label: str = None,
-) -> Path:
-    """Create a new provider from template.
+    shape: str,
+    package_parts: tuple[str, ...],
+) -> str:
+    rel_package = "/".join(package_parts + (provider_id,))
+    test_fn = f"test_{domain}_{provider_id}".replace("-", "_")
+    executable_block = ""
+    if shape == SHAPE_SYNC_DOCUMENT and domain == "script":
+        executable_block = f'''
 
-    Args:
-        domain: tts, storyboard, or animator
-        provider_id: ID for the provider (must be snake_case, matches folder name)
-        kind: local, cloud, or extension
-        label: Display label (defaults to provider_id title-cased)
+def {test_fn}_generate_is_executable_on_script_seam(tmp_path, monkeypatch):
+    """The concrete `story.generate` seam works without node/adapter edits."""
+    from studio.shared.providers_common.hub import hub
 
-    Returns:
-        Path to the created provider directory.
-    """
-    if domain not in _TEMPLATES:
-        raise ValueError(f"Domain must be one of: {list(_TEMPLATES.keys())}")
+    stories = tmp_path / "stories"
+    stories.mkdir()
 
-    if kind not in ("local", "cloud", "extension"):
-        raise ValueError("kind must be one of: local, cloud, extension")
+    instance = hub.get("{domain}", "{provider_id}")
+    assert instance is not None
+    # Discovery loads the package under a synthetic module name, so patch the
+    # bound name on that module object rather than a package-import path.
+    monkeypatch.setattr(instance.provider_module, "STORIES_DIR", str(stories))
+    provider = instance.create()
+    result = provider.generate(
+        {{"idea": "scaffold check idea", "label_prefix": "Demo"}},
+        project_id="pm_SCAFFOLD99",
+    )
+    assert result["story_text"].startswith("Demo:")
+    assert result["path"]
+    assert (stories / "pm_SCAFFOLD99" / "story.json").is_file()
 
-    if not provider_id.replace("_", "").isalnum():
-        raise ValueError(f"provider_id must be snake_case alphanumeric, got: {provider_id!r}")
 
-    if label is None:
-        label = provider_id.replace("_", " ").title()
+def {test_fn}_invoke_returns_clean_envelope(tmp_path, monkeypatch):
+    import config
+    from studio.shared.providers_common.contract_tests import assert_egress_clean
+    from studio.shared.providers_common.hub import hub
+    from studio.shared.providers_common.invocation import build_invocation
+    from studio.shared.providers_common.results import ProviderResult
+    from studio.story.providers.contract import ScriptRequest
 
-    providers_dir = Path(ROOT_DIR) / "studio" / domain / "providers" / provider_id
+    # Managed root is `tmp_path`; stories must live under it so normalize_ref works.
+    stories = tmp_path / "stories"
+    stories.mkdir()
+    monkeypatch.setattr(config, "OUTPUT_DIR", str(tmp_path), raising=False)
+    monkeypatch.setattr(
+        "studio.shared.providers_common.results.OUTPUT_DIR", str(tmp_path), raising=False
+    )
 
-    if providers_dir.exists():
-        raise FileExistsError(f"Provider already exists: {providers_dir}")
+    instance = hub.get("{domain}", "{provider_id}")
+    assert instance is not None
+    monkeypatch.setattr(instance.provider_module, "STORIES_DIR", str(stories))
+    provider = instance.create()
+    invocation = build_invocation(
+        None,
+        domain="{domain}",
+        provider_id="{provider_id}",
+        project_id="pm_SCAFFOLD99",
+        output_dir=str(tmp_path / "{domain}" / "pm_SCAFFOLD99"),
+        settings={{}},
+        options={{}},
+    )
+    result = provider.invoke(
+        ScriptRequest(idea="envelope check"),
+        invocation,
+    )
+    assert isinstance(result, ProviderResult)
+    assert result.artifact_refs
+    assert_egress_clean(result)
+'''
 
-    requires = ["api_key"] if kind == "cloud" else []
+    return f'''"""Generated contract tests for {domain}/{provider_id}.
 
-    providers_dir.mkdir(parents=True)
-    logger.info("Created provider directory: {}", providers_dir)
+Produced by `python -m studio.shared.providers_common.scaffold`.
+These cases must keep passing without hand-edits as the package evolves.
+"""
 
-    for filename, template in _TEMPLATES[domain].items():
-        content = template.format(
-            id=provider_id,
-            label=label,
-            kind=kind,
-            requires=repr(requires),
-            name_cap=_name_cap(provider_id),
+from pathlib import Path
+
+from studio.shared.providers_common.contract_tests import (
+    assert_health_shape,
+    assert_manifest_v2,
+    assert_settings_schema,
+    load_provider_modules,
+)
+from studio.shared.providers_common.domains import get_domain
+from studio.shared.providers_common.hub import hub
+
+
+DOMAIN = "{domain}"
+PROVIDER_ID = "{provider_id}"
+# Relative package path inside the repo (also the discovery folder).
+PACKAGE_REL = "{rel_package}"
+
+
+def {test_fn}_is_discovered_and_api_visible():
+    instance = hub.get(DOMAIN, PROVIDER_ID)
+    assert instance is not None, f"{{DOMAIN}}/{{PROVIDER_ID}} was not discovered"
+    assert instance.id == PROVIDER_ID
+    assert_manifest_v2(
+        instance.manifest,
+        folder_id=PROVIDER_ID,
+        domain=DOMAIN,
+        capability_vocabulary=get_domain(DOMAIN).capability_vocabulary,
+    )
+    catalog = hub.catalog()
+    assert DOMAIN in catalog
+    provider_ids = {{entry["id"] for entry in catalog[DOMAIN]["providers"]}}
+    assert PROVIDER_ID in provider_ids
+
+
+def {test_fn}_settings_schema_is_ui_configurable():
+    instance = hub.get(DOMAIN, PROVIDER_ID)
+    assert instance is not None
+    schema = instance.settings_schema()
+    assert_settings_schema(schema)
+    # At least one field so the generic settings renderer has something to show.
+    assert schema is not None
+    assert schema.get("properties")
+
+
+def {test_fn}_health_check_shape():
+    instance = hub.get(DOMAIN, PROVIDER_ID)
+    assert instance is not None
+    # Prefer the package hook; fall back to constructing the provider.
+    mod = instance.provider_module
+    if mod is not None and hasattr(mod, "health_check"):
+        result = mod.health_check({{}})
+    else:
+        result = {{"status": "warn", "message": "no health_check"}}
+    assert_health_shape(result)
+
+
+def {test_fn}_package_files_load_from_disk():
+    """The package is a plain folder — no central registration table."""
+    root = Path(__file__).resolve().parents[1]
+    modules = load_provider_modules(root / PACKAGE_REL)
+    assert "manifest" in modules
+    assert "provider" in modules
+    assert "settings_schema" in modules
+    manifest = modules["manifest"].manifest()
+    assert_manifest_v2(manifest, folder_id=PROVIDER_ID, domain=DOMAIN)
+    assert callable(modules["provider"].create)
+{executable_block}
+'''
+
+
+def _provider_body(
+    *,
+    domain: str,
+    provider_id: str,
+    label: str,
+    name_cap: str,
+) -> str:
+    if domain == "script":
+        return _provider_source_script(
+            name_cap=name_cap, label=label, provider_id=provider_id
         )
-        file_path = providers_dir / filename
-        file_path.write_text(content, encoding="utf-8", newline="\n")
-        logger.info("Created: {}", file_path)
+    if domain == "scene_blueprint":
+        return _provider_source_scene_blueprint(
+            name_cap=name_cap, label=label, provider_id=provider_id
+        )
+    if domain == "tts":
+        return _provider_source_tts(
+            name_cap=name_cap, label=label, provider_id=provider_id
+        )
+    if domain == "storyboard":
+        return _provider_source_async(
+            domain=domain,
+            name_cap=name_cap,
+            label=label,
+            provider_id=provider_id,
+            base_import="studio.storyboard.providers.base",
+            base_class="StoryboardProvider",
+            request_type="StoryboardRequest",
+        )
+    if domain == "animator":
+        return _provider_source_async(
+            domain=domain,
+            name_cap=name_cap,
+            label=label,
+            provider_id=provider_id,
+            base_import="studio.animator.providers.base",
+            base_class="AnimatorProvider",
+            request_type="AnimatorRequest",
+        )
+    raise ScaffoldError(f"no template for domain {domain!r}")
 
-    logger.success("Created {} provider '{}' at {}", domain, label, providers_dir)
-    logger.info("Restart the app to discover the new provider.")
-    return providers_dir
+
+def _planned_files(
+    *,
+    domain: str,
+    provider_id: str,
+    label: str,
+    kind: str,
+    project_root: Path | None,
+) -> list[tuple[Path, str]]:
+    name_cap = _name_cap(provider_id)
+    requires = ["api_key"] if kind in ("cloud", "webhook") else []
+    environment = {"api_key": _env_key(provider_id)} if "api_key" in requires else {}
+    capabilities = dict(DEFAULT_CAPABILITIES[domain])
+    if kind == "extension":
+        capabilities["push_callbacks"] = True
+    description = (
+        f"Scaffolded {label} provider for the {domain} domain. "
+        "Replace the implementation body; keep the package layout."
+    )
+
+    provider_dir = _providers_base(domain, project_root) / provider_id
+    test_path = _tests_dir(project_root) / f"{_test_module_name(domain, provider_id)}.py"
+    package_parts = _PACKAGE_PARTS[domain]
+    shape = DOMAIN_SHAPE[domain]
+
+    files: list[tuple[Path, str]] = [
+        (
+            provider_dir / "manifest.py",
+            _manifest_source(
+                domain=domain,
+                provider_id=provider_id,
+                label=label,
+                kind=kind,
+                requires=requires,
+                capabilities=capabilities,
+                description=description,
+                environment=environment,
+            ),
+        ),
+        (
+            provider_dir / "settings_schema.py",
+            _settings_schema_source(label=label, kind=kind, requires=requires),
+        ),
+        (
+            provider_dir / "provider.py",
+            _provider_body(
+                domain=domain,
+                provider_id=provider_id,
+                label=label,
+                name_cap=name_cap,
+            ),
+        ),
+        (
+            test_path,
+            _test_source(
+                domain=domain,
+                provider_id=provider_id,
+                shape=shape,
+                package_parts=package_parts,
+            ),
+        ),
+    ]
+    if kind == "extension":
+        files.append(
+            (
+                provider_dir / "runtime.py",
+                _runtime_source(provider_id=provider_id, label=label),
+            )
+        )
+    return files
 
 
-def main():
-    """CLI entry point."""
-    argv = sys.argv[1:]
-    if len(argv) < 2 or "--help" in argv or "-h" in argv:
-        print(__doc__)
-        print("\nArguments:")
-        print("  domain        tts | storyboard | animator")
-        print("  provider_id   snake_case provider identifier")
-        print("\nOptions:")
-        print("  --kind KIND   local | cloud (default) | extension")
-        print("  --label TEXT  Display label (default: provider_id title-cased)")
-        sys.exit(0 if "--help" in argv or "-h" in argv else 1)
+def _validate_args(
+    domain: str,
+    provider_id: str,
+    kind: str,
+    *,
+    project_root: Path | None,
+    check_live_collision: bool,
+) -> None:
+    if domain not in DOMAIN_IDS:
+        raise ScaffoldError(
+            f"unknown domain {domain!r}; choose from: {', '.join(sorted(DOMAIN_IDS))}"
+        )
+    if kind not in KINDS:
+        raise ScaffoldError(
+            f"unknown kind {kind!r}; choose from: {', '.join(sorted(KINDS))}"
+        )
+    if not ID_RE.fullmatch(provider_id):
+        raise ScaffoldError(
+            f"provider_id {provider_id!r} must match {ID_RE.pattern} "
+            "(lowercase snake_case, max 32 chars)"
+        )
+    # Path-safety: the id is the only path component we introduce.
+    if provider_id in {".", ".."} or "/" in provider_id or "\\" in provider_id:
+        raise ScaffoldError(f"provider_id {provider_id!r} is not a safe path segment")
 
-    domain = argv[0].lower()
-    provider_id = argv[1].lower()
+    provider_dir = _providers_base(domain, project_root) / provider_id
+    if provider_dir.exists():
+        raise ScaffoldError(f"provider already exists: {provider_dir}")
 
-    kind = "cloud"
-    label = None
-    if "--kind" in argv:
-        idx = argv.index("--kind")
-        if idx + 1 < len(argv):
-            kind = argv[idx + 1].lower()
-    if "--label" in argv:
-        idx = argv.index("--label")
-        if idx + 1 < len(argv):
-            label = argv[idx + 1]
+    test_path = _tests_dir(project_root) / f"{_test_module_name(domain, provider_id)}.py"
+    if test_path.exists():
+        raise ScaffoldError(f"refusing to overwrite existing file: {test_path}")
 
+    if check_live_collision and project_root is None:
+        try:
+            from studio.shared.providers_common.hub import hub
+
+            if hub.get(domain, provider_id) is not None:
+                raise ScaffoldError(
+                    f"provider id {provider_id!r} is already registered in domain {domain!r}"
+                )
+        except ScaffoldError:
+            raise
+        except Exception:
+            # Hub unavailable during early import or offline tooling — folder
+            # collision checks above still protect the tree.
+            pass
+
+
+def _atomic_write(files: list[tuple[Path, str]]) -> list[Path]:
+    """Write every file, cleaning up completely on any failure."""
+    created: list[Path] = []
+    created_dirs: list[Path] = []
     try:
-        create_provider(domain, provider_id, kind, label)
-    except Exception as e:
-        logger.error("{}: {}", type(e).__name__, e)
-        sys.exit(1)
+        for path, content in files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.parent not in created_dirs and not any(
+                path.parent == d or d in path.parent.parents for d in created_dirs
+            ):
+                # Track leaf dirs we created so failure can remove them.
+                created_dirs.append(path.parent)
+            if path.exists():
+                raise ScaffoldError(f"refusing to overwrite existing file: {path}")
+            path.write_text(content, encoding="utf-8", newline="\n")
+            created.append(path)
+    except Exception:
+        for path in reversed(created):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        # Remove empty provider dirs we introduced (deepest first).
+        for directory in sorted(
+            {p.parent for p in created},
+            key=lambda p: len(p.parts),
+            reverse=True,
+        ):
+            try:
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
+            except OSError:
+                pass
+        raise
+    return created
+
+
+def scaffold_provider(
+    domain: str,
+    provider_id: str,
+    *,
+    kind: str = "local",
+    label: str | None = None,
+    project_root: str | Path | None = None,
+    check_live_collision: bool = True,
+) -> list[Path]:
+    """Create a provider package + generated contract tests.
+
+    Returns the list of written paths. Raises `ScaffoldError` without leaving
+    partial files when validation or writing fails.
+    """
+    domain = (domain or "").strip().lower()
+    provider_id = (provider_id or "").strip().lower()
+    kind = (kind or "local").strip().lower()
+    root = Path(project_root).resolve() if project_root else None
+
+    _validate_args(
+        domain,
+        provider_id,
+        kind,
+        project_root=root,
+        check_live_collision=check_live_collision,
+    )
+
+    display = label if label else _title(provider_id)
+    files = _planned_files(
+        domain=domain,
+        provider_id=provider_id,
+        label=display,
+        kind=kind,
+        project_root=root,
+    )
+    return _atomic_write(files)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    domains = ", ".join(sorted(DOMAIN_IDS))
+    kinds = ", ".join(sorted(KINDS))
+    parser = argparse.ArgumentParser(
+        description=(
+            "Scaffold a Provider Contract v2 package for one domain. "
+            f"Domains: {domains}. Kinds: {kinds}."
+        )
+    )
+    parser.add_argument("domain", help=f"one of: {domains}")
+    parser.add_argument(
+        "provider_id",
+        help="lowercase snake_case id (folder name), matching ^[a-z][a-z0-9_]{0,31}$",
+    )
+    parser.add_argument(
+        "--kind",
+        default="local",
+        choices=sorted(KINDS),
+        help="provider lifecycle class (default: local)",
+    )
+    parser.add_argument("--label", help="display label (default: title-cased provider_id)")
+    parser.add_argument("--project-root", help=argparse.SUPPRESS)
+    return parser
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    try:
+        paths = scaffold_provider(
+            args.domain,
+            args.provider_id,
+            kind=args.kind,
+            label=args.label,
+            project_root=args.project_root,
+        )
+    except ScaffoldError as exc:
+        parser.error(str(exc))
+    print(f"Scaffolded {args.domain}/{args.provider_id}:")
+    for path in paths:
+        print(f"  {path}")
+    print("Restart the app (or enable STS_WORKFLOW_DEV_RELOAD) to discover it.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

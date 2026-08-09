@@ -1,46 +1,82 @@
 # Provider Templates
 
-Templates for creating new modular providers in ScriptToScene Studio.
+Scaffold a Provider Contract v2 package for any of the five supported domains.
+The CLI is the single source of the skeleton — this document describes what it
+emits and how to finish the package.
 
-## Quick Start
+## Quick start
 
 ```bash
-# Create a new TTS provider
-python -m studio.shared.providers_common.scaffold tts my_provider
+# Offline script demo (the step-16.2 reference package)
+python -m studio.shared.providers_common.scaffold script scaffold_check
 
-# Create a storyboard provider
-python -m studio.shared.providers_common.scaffold storyboard my_provider --kind extension
+# Cloud TTS provider
+python -m studio.shared.providers_common.scaffold tts my_provider --kind cloud
 
-# Create an animator provider
-python -m studio.shared.providers_common.scaffold animator my_video_provider --kind cloud
+# Extension storyboard provider
+python -m studio.shared.providers_common.scaffold storyboard my_renderer --kind extension
+
+# Webhook scene-blueprint provider
+python -m studio.shared.providers_common.scaffold scene_blueprint my_planner --kind webhook
 ```
 
-## Provider Structure
+Domains come from the live catalog (`studio.shared.providers_common.domains`):
+`script`, `scene_blueprint`, `tts`, `storyboard`, `animator`.
 
-Each provider needs:
+Kinds: `local` | `cloud` | `extension` | `webhook`.
 
-### `manifest.py` (required)
+The command refuses unknown domains, invalid ids, existing packages, and
+colliding test files. Failure is atomic — no partial provider folder is left
+behind.
+
+## Generated layout
+
+```
+studio/<domain-package>/providers/<provider_id>/
+  manifest.py          # ProviderManifest, contract_version=2
+  settings_schema.py   # JSON-schema object for the generic settings UI
+  provider.py          # create() + domain methods + health/validate hooks
+  runtime.py           # only when --kind extension
+tests/test_provider_<domain>_<provider_id>.py
+```
+
+No central registration table and no node or Vue edit. Discovery scans the
+domain's `providers/` folder on startup (and on reload when
+`STS_WORKFLOW_DEV_RELOAD=1`).
+
+## Manifest (Contract v2)
 
 ```python
 from studio.shared.providers_common import ProviderManifest
 
 def manifest() -> ProviderManifest:
     return ProviderManifest(
-        id="my_provider",           # Must match folder name
-        label="My Provider",        # Display name
-        domain="tts",              # tts | storyboard | animator
-        kind="cloud",             # local | cloud | extension
-        version="1.0.0",
-        requires=["api_key"],       # Required settings fields
+        id="my_provider",            # must equal the folder name
+        label="My Provider",
+        domain="tts",                # one of the five catalog domains
+        kind="cloud",                # local | cloud | extension | webhook
+        version="1.0.0",             # semver
+        contract_version=2,          # 2 = invocation/result envelope
+        requires=["api_key"],        # settings keys that must be present
+        aliases=[],                  # optional input aliases (legacy ids)
         capabilities={
             "test_connection": True,
             "single_scene": True,
             "batch": True,
+            # plus domain vocabulary (voice_list, async_job, offline, …)
         },
+        description="Short browser-safe summary.",
+        docs_url=None,               # https URL only
+        environment={"api_key": "STS_MY_PROVIDER_API_KEY"},  # never serialized
+        open_url=None,               # optional human-driven UI URL
     )
 ```
 
-### `settings_schema.py` (optional)
+Capabilities outside the domain vocabulary are dropped with a warning at
+discovery. See `DomainSpec.capability_vocabulary` in
+`studio/shared/providers_common/domains.py`.
+
+## Settings schema
 
 ```python
 def settings_schema() -> dict:
@@ -52,72 +88,98 @@ def settings_schema() -> dict:
                 "label": "API Key",
                 "ui": {"type": "password"},
             },
-            "voice": {
+            "label_prefix": {
                 "type": "string",
-                "label": "Default Voice",
-                "ui": {"type": "dropdown", "options": ["voice1", "voice2"]},
+                "label": "Label prefix",
+                "default": "",
+                "ui": {"type": "text"},
             },
         },
         "required": ["api_key"],
     }
 ```
 
-### `provider.py` (optional for cloud/local, required for extension)
+Widget types: `text`, `password`, `dropdown`, `slider`, `toggle`, `file_picker`,
+`path_picker`, `multi_select`. Password fields and keys matching
+`*_key` / `*_token` / `*_secret` are redacted everywhere they leave the process.
+
+## Provider body
+
+Every package exports:
+
+| Hook | Required | Purpose |
+|---|---|---|
+| `create()` | yes | Zero-arg factory returning the provider instance |
+| domain method | yes | `generate` / `synthesize` / `submit`+`poll` by domain |
+| `validate_settings(settings)` | recommended | Cross-field checks a schema cannot express |
+| `health_check(settings)` | recommended | Cheap `{status, message, latency_ms?}` probe |
+| `register_runtime(app, sock)` | extension only | WebSocket route registration |
+
+### Domain seams
+
+| Domain | Concrete seam | v2 entry | Shape |
+|---|---|---|---|
+| `script` | `generate(configuration, project_id=…)` | `invoke(request, invocation)` | sync document |
+| `scene_blueprint` | `generate(segments, configuration, project_id=…)` | `invoke(…)` | sync document |
+| `tts` | `synthesize(text, settings, …)` | `invoke(…)` | sync artifact |
+| `storyboard` | `submit` / `poll` | media-job service | async multi-asset |
+| `animator` | `submit` / `poll` | media-job service | async multi-asset |
+
+Bases live in `studio/<package>/providers/base.py`. Default `invoke()` on the
+sync bases bridges through the concrete seam into a `ProviderResult` envelope
+(contracts.md §30 / §31). Absolute filesystem paths never leave the envelope —
+use relative managed refs via `normalize_ref`.
+
+## Contract-test kit
+
+Reusable suites and offline fakes ship in
+`studio.shared.providers_common.contract_tests`:
 
 ```python
-from studio.tts.providers.base import TTSProvider, TTSResult, Voice
+from studio.shared.providers_common.contract_tests import (
+    SyncDocumentContractSuite,
+    SyncArtifactContractSuite,
+    AsyncMultiAssetContractSuite,
+    FakeSyncDocumentProvider,
+    FakeSyncArtifactProvider,
+    FakeAsyncMultiAssetProvider,
+    assert_manifest_v2,
+    assert_egress_clean,
+    run_suite_methods,
+)
 
-class MyProvider(TTSProvider):
-    def synthesize(self, text, settings, voice=None, speed=1.0, on_progress=None) -> TTSResult:
-        # Implementation
-        pass
-
-    def list_voices(self, settings) -> list[Voice]:
-        return []
-
-def validate_settings(settings) -> list[dict]:
-    issues = []
-    if not settings.get("api_key"):
-        issues.append({"field": "api_key", "severity": "error", "message": "API key required"})
-    return issues
-
-def health_check(settings) -> dict:
-    return {"status": "ok", "message": "Ready"}
+# Drive the shared suite against a fake (or your own make_provider):
+run_suite_methods(SyncDocumentContractSuite)
 ```
 
-### `runtime.py` (extension providers only)
+The scaffolder emits a generated test file that already covers discovery,
+catalog visibility, settings schema, health shape, and — for the working
+`script` skeleton — execution on the `story.generate` seam plus egress
+cleanliness. Those cases must keep passing without hand-edits.
 
-```python
-def register_runtime(app, sock):
-    @sock.route("/ws/my-provider")
-    def ws_handler(ws):
-        # WebSocket handling
-        pass
+```bash
+venv/Scripts/python.exe -m pytest tests/test_provider_script_scaffold_check.py -q
+venv/Scripts/python.exe -m pytest tests/test_provider_scaffold.py tests/test_provider_contract_kit.py -q
 ```
 
-## Provider Kinds
+## Kinds
 
-### `local`
-- Runs on the local machine (e.g., Kokoro ONNX)
-- No network required for synthesis
+| Kind | Meaning |
+|---|---|
+| `local` | In-process, no network required for the happy path |
+| `cloud` | External API; typically requires an API key |
+| `extension` | Browser extension over WebSocket; needs `register_runtime` |
+| `webhook` | Outbound HTTPS webhook; typically requires a URL + key |
 
-### `cloud`
-- Uses external API (e.g., Inworld, WaveSpeed)
-- Requires API key or credentials
+## Ship checklist
 
-### `extension`
-- Communicates via WebSocket with browser extension
-- Needs `register_runtime(app, sock)` hook
+1. `python -m studio.shared.providers_common.scaffold <domain> <id> …`
+2. Replace the skeleton body; keep `create()`, manifest id, and folder name aligned.
+3. Run the generated contract tests plus any domain-specific cases.
+4. Restart the app (or rely on dev reload). Confirm the provider appears in the
+   catalog, accepts settings, reports health, and runs on the generic node.
+5. Do **not** edit workflow nodes, adapters, or shared Vue components to add a
+   provider — that is the extensibility proof (contracts.md §26).
 
-## UI Widget Types
-
-Supported in `settings_schema`:
-
-- `text` - Basic text input
-- `password` - Masked text input
-- `dropdown` - Select from options
-- `slider` - Numeric range
-- `toggle` - Boolean switch
-- `file_picker` - File selection
-- `path_picker` - Folder selection
-- `multi_select` - Multiple selection
+The committed demo package is `script/scaffold_check`. Removing its folder and
+its generated test leaves no central registration entry behind.
