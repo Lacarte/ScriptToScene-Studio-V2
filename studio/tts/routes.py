@@ -28,6 +28,7 @@ import hashlib
 
 from config import TTS_DIR, TTS_CACHE_DIR, TRASH_DIR, MODELS_DIR, BIN_DIR, generate_project_id
 from studio.io_utils import move_to_unique_path, safe_json_write
+from studio.shared.providers_common.concurrency import exclusive_execution, exclusive_lock
 from studio.security import safe_join, sanitize_project_id
 from studio.validation import validate_json
 from studio.ffmpeg_utils import find_ffmpeg
@@ -46,162 +47,90 @@ from .audio import pad_audio, concatenate_chunks, run_loudnorm
 tts_bp = Blueprint("tts", __name__)
 
 # ---------------------------------------------------------------------------
-# Model / Voice configuration
+# Kokoro engine — owned by the provider package (contracts.md B5 / K1)
+#
+# This module used to declare its own `kokoro_instance`, `kokoro_lock`,
+# `generation_inference_lock`, misaki handle, model table, and voice catalog,
+# while `providers/kokoro/provider.py` declared a second, never-populated copy
+# of all of them. Two model caches were reachable and the two inference locks
+# guarded nothing in common. The provider package is now the single owner and
+# everything below delegates to it, so these routes and the workflow/pipeline
+# paths share one ONNX session, one G2P engine, and one exclusivity lock.
+#
+# `_voices()` and `_models()` are functions rather than constants on purpose:
+# `load_model()` replaces the voice catalog with the model's own list, and a
+# module-level copy taken at import time would freeze the shipped defaults.
 # ---------------------------------------------------------------------------
 
-MODELS = {
-    "kokoro": {
-        "name": "Kokoro v1.0",
-        "size": "~373MB",
-        "onnx_file": "kokoro-v1.0.onnx",
-        "voices_file": "voices-v1.0.bin",
-        "onnx_url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
-        "voices_url": "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
-    },
-}
+_ENGINE_ATTRS = frozenset({
+    "MODELS", "VOICES", "VOICE_LANG_MAP",
+    "kokoro_instance", "kokoro_lock",
+})
 
-VOICE_LANG_MAP = {
-    "af": "en-us", "am": "en-us",
-    "bf": "en-gb", "bm": "en-gb",
-    "jf": "ja",    "jm": "ja",
-    "zf": "cmn",   "zm": "cmn",
-    "ef": "es",    "em": "es",
-    "ff": "fr-fr",
-    "hf": "hi",    "hm": "hi",
-    "if": "it",    "im": "it",
-    "pf": "pt-br", "pm": "pt-br",
-}
 
-VOICES = [
-    # American Female
-    "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica",
-    "af_kore", "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
-    # American Male
-    "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam",
-    "am_michael", "am_onyx", "am_puck",
-    # British Female
-    "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
-    # British Male
-    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
-    # Japanese
-    "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo",
-    # Chinese
-    "zf_xiaobei", "zf_xiaoni", "zf_xiaoxuan", "zf_xiaoyi",
-    "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang",
-    # Spanish
-    "ef_dora", "em_alex", "em_santa",
-    # French
-    "ff_siwis",
-    # Hindi
-    "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
-    # Italian
-    "if_sara", "im_nicola",
-    # Portuguese
-    "pf_dora", "pm_alex", "pm_santa",
-]
+def _engine():
+    from studio.tts.providers import kokoro_engine
+
+    return kokoro_engine()
+
+
+def __getattr__(name):
+    """Re-export the engine's state so `from studio.tts.routes import VOICES` works.
+
+    Resolved on access, never at import: touching the registry while this module
+    is still being imported would run discovery before the app has booted.
+    """
+    if name in _ENGINE_ATTRS:
+        return getattr(_engine(), name)
+    if name == "generation_inference_lock":
+        return exclusive_lock("tts", "kokoro")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _voices() -> list:
+    return _engine().VOICES
+
+
+def _models() -> dict:
+    return _engine().MODELS
 
 
 def _voice_to_lang(voice_name: str) -> str:
-    prefix = voice_name.split("_")[0] if "_" in voice_name else voice_name[:2]
-    return VOICE_LANG_MAP.get(prefix, "en-us")
-
-
-# ---------------------------------------------------------------------------
-# Voice blending (SLERP / LERP)
-# ---------------------------------------------------------------------------
-
-def _slerp(v0: np.ndarray, v1: np.ndarray, t: float) -> np.ndarray:
-    v0 = v0.astype(np.float64)
-    v1 = v1.astype(np.float64)
-    if v0.ndim == 1:
-        n0, n1 = np.linalg.norm(v0), np.linalg.norm(v1)
-        dot = np.clip(np.dot(v0, v1) / (n0 * n1 + 1e-10), -1.0, 1.0)
-        omega = np.arccos(dot)
-        if abs(omega) < 1e-6:
-            return ((1.0 - t) * v0 + t * v1).astype(np.float32)
-        so = np.sin(omega)
-        return ((np.sin((1.0 - t) * omega) / so) * v0
-                + (np.sin(t * omega) / so) * v1).astype(np.float32)
-    result = np.empty_like(v0)
-    for i in range(v0.shape[0]):
-        result[i] = _slerp(v0[i], v1[i], t)
-    return result.astype(np.float32)
-
-
-def _lerp(v0: np.ndarray, v1: np.ndarray, t: float) -> np.ndarray:
-    return ((1.0 - t) * v0 + t * v1).astype(np.float32)
+    return _engine()._voice_to_lang(voice_name)
 
 
 def _blend_voices(kokoro_inst, voice_a: str, voice_b: str,
                   ratio: float, method: str = "slerp") -> np.ndarray:
-    embed_a = kokoro_inst.get_voice_style(voice_a)
-    embed_b = kokoro_inst.get_voice_style(voice_b)
-    if method == "slerp":
-        return _slerp(embed_a, embed_b, ratio)
-    return _lerp(embed_a, embed_b, ratio)
-
-
-# ---------------------------------------------------------------------------
-# Misaki G2P (pre-phonemizer for Kokoro pronunciation links)
-# ---------------------------------------------------------------------------
-
-_misaki_g2p = None
-_misaki_lock = threading.Lock()
-
-
-def _get_misaki_g2p(british=False):
-    """Lazy-load the misaki G2P engine (supports [word](+1) stress syntax)."""
-    global _misaki_g2p
-    with _misaki_lock:
-        if _misaki_g2p is None:
-            try:
-                from misaki import en
-                _misaki_g2p = en.G2P(trf=False, british=british)
-                logger.success("Misaki G2P loaded (british={})", british)
-            except ImportError:
-                logger.warning("misaki not installed — Kokoro pronunciation links will not work")
-                return None
-            except Exception:
-                logger.exception("Failed to load misaki G2P")
-                return None
-        return _misaki_g2p
+    return _engine()._blend_voices(kokoro_inst, voice_a, voice_b, ratio, method)
 
 
 def _phonemize_with_misaki(text: str, lang: str = "en-us") -> tuple[str | None, bool]:
-    """Convert text to phonemes using misaki G2P.
+    return _engine()._phonemize_with_misaki(text, lang)
 
-    Returns (phonemes, success).  If misaki is unavailable or fails,
-    returns (original_text, False) so the caller can fall back to
-    espeak via kokoro-onnx's default pipeline.
+
+def _model_files_present() -> bool:
+    return _engine()._model_files_present()
+
+
+def load_model():
+    return _engine().load_model()
+
+
+def _inference_lock():
+    """Serialize Kokoro inference iff the manifest declares it (§20.4).
+
+    The route no longer knows *that* Kokoro is exclusive — it asks, and the
+    capability answers. A provider without the capability pays nothing.
     """
-    # Only use misaki for English — other languages use kokoro's built-in G2P
-    if not lang.startswith("en"):
-        return text, False
-
-    british = lang == "en-gb"
-    g2p = _get_misaki_g2p(british=british)
-    if g2p is None:
-        return text, False
-
-    try:
-        phonemes, _tokens = g2p(text)
-        if phonemes and phonemes.strip():
-            return phonemes, True
-    except Exception:
-        logger.exception("Misaki G2P failed, falling back to espeak")
-    return text, False
+    return exclusive_execution("tts", "kokoro")
 
 
 # ---------------------------------------------------------------------------
 # Global state
 # ---------------------------------------------------------------------------
 
-kokoro_instance = None
-kokoro_lock = threading.Lock()
-
 generation_jobs = {}
 generation_jobs_lock = threading.Lock()
-generation_inference_lock = threading.Lock()
 
 _stream_active = threading.Event()
 
@@ -276,39 +205,6 @@ def generate_filename(prompt: str) -> str:
 # ---------------------------------------------------------------------------
 # Model management
 # ---------------------------------------------------------------------------
-
-def _model_files_present() -> bool:
-    cfg = MODELS["kokoro"]
-    onnx_path = os.path.join(MODELS_DIR, cfg["onnx_file"])
-    voices_path = os.path.join(MODELS_DIR, cfg["voices_file"])
-    return os.path.isfile(onnx_path) and os.path.isfile(voices_path)
-
-
-def load_model():
-    global kokoro_instance
-    if kokoro_instance is not None:
-        return kokoro_instance
-
-    from kokoro_onnx import Kokoro
-
-    cfg = MODELS["kokoro"]
-    onnx_path = os.path.join(MODELS_DIR, cfg["onnx_file"])
-    voices_path = os.path.join(MODELS_DIR, cfg["voices_file"])
-
-    with kokoro_lock:
-        if kokoro_instance is None:
-            logger.info("Loading Kokoro model ...")
-            kokoro_instance = Kokoro(onnx_path, voices_path)
-            try:
-                available = kokoro_instance.get_voices()
-                if available:
-                    global VOICES
-                    VOICES = sorted(available)
-            except Exception:
-                pass
-            logger.success("Kokoro model ready")
-    return kokoro_instance
-
 
 def _download_file_with_progress(url: str, dest_path: str, queue: Queue, label: str):
     tmp_path = dest_path + ".tmp"
@@ -387,7 +283,7 @@ def _background_chunked_generate(job_id, voice_param, voice_name, sentences, spe
 
             phonemes, is_ph = _phonemize_with_misaki(block, lang)
             start = time.perf_counter()
-            with generation_inference_lock:
+            with _inference_lock():
                 chunk_audio, _sr = kokoro.create(
                     text=phonemes, voice=voice_param, speed=speed,
                     lang=lang, is_phonemes=is_ph,
@@ -505,7 +401,7 @@ def normalize_text():
 @tts_bp.route("/api/tts/models")
 def models():
     out = []
-    for mid, m in MODELS.items():
+    for mid, m in _models().items():
         out.append({"id": mid, "name": m["name"], "size": m["size"]})
     return jsonify(out)
 
@@ -532,13 +428,13 @@ def voices():
         except Exception as e:
             logger.error("Inworld voices fetch failed: {}", e)
             return jsonify({"error": str(e)}), 502
-    return jsonify(VOICES)
+    return jsonify(_voices())
 
 
 # --- Model status ---
 @tts_bp.route("/api/tts/model-status/<model_id>")
 def model_status(model_id):
-    if model_id not in MODELS:
+    if model_id not in _models():
         return jsonify({"error": "Unknown model"}), 404
     cached = _model_files_present()
     return jsonify({"model_id": model_id, "cached": cached})
@@ -547,10 +443,10 @@ def model_status(model_id):
 # --- Download model with SSE progress ---
 @tts_bp.route("/api/tts/download-model/<model_id>")
 def download_model(model_id):
-    if model_id not in MODELS:
+    if model_id not in _models():
         return jsonify({"error": "Unknown model"}), 404
 
-    model_cfg = MODELS[model_id]
+    model_cfg = _models()[model_id]
 
     def _stream_download(url, dest, q, label):
         result = {}
@@ -637,7 +533,7 @@ def generate(data: TtsGenerateRequest):
     max_silence_ms = data.max_silence_ms
     blend = data.blend
 
-    if model_id not in MODELS:
+    if model_id not in _models():
         return jsonify({"error": "Unknown model"}), 404
 
     voice_for_metadata = voice
@@ -651,9 +547,9 @@ def generate(data: TtsGenerateRequest):
         method = blend.method
         if method not in ("slerp", "lerp"):
             method = "slerp"
-        if voice_a not in VOICES:
+        if voice_a not in _voices():
             return jsonify({"error": f"Unknown voice_a: {voice_a}"}), 400
-        if voice_b not in VOICES:
+        if voice_b not in _voices():
             return jsonify({"error": f"Unknown voice_b: {voice_b}"}), 400
 
         kokoro_inst = load_model()
@@ -664,8 +560,8 @@ def generate(data: TtsGenerateRequest):
         blend_meta = {"voice_a": voice_a, "voice_b": voice_b,
                       "ratio": ratio, "method": method}
     else:
-        if voice not in VOICES:
-            return jsonify({"error": f"Unknown voice. Choose from: {VOICES}"}), 400
+        if voice not in _voices():
+            return jsonify({"error": f"Unknown voice. Choose from: {_voices()}"}), 400
 
     if _stream_active.is_set():
         return jsonify({"error": "A stream is already in progress. Please wait."}), 429
@@ -685,7 +581,7 @@ def generate(data: TtsGenerateRequest):
     phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
     start = time.perf_counter()
     try:
-        with generation_inference_lock:
+        with _inference_lock():
             audio, _sr = kokoro.create(
                 text=phonemes, voice=voice_param, speed=speed,
                 lang=lang, is_phonemes=is_ph,
@@ -915,7 +811,7 @@ def stream_audio():
         return jsonify({"error": "Prompt must be a string"}), 400
     if not prompt.strip():
         return jsonify({"error": "Prompt is required"}), 400
-    if model_id not in MODELS:
+    if model_id not in _models():
         return jsonify({"error": "Unknown model"}), 404
 
     voice_param = voice
@@ -931,16 +827,16 @@ def stream_audio():
         method = blend.get("method", "slerp")
         if method not in ("slerp", "lerp"):
             method = "slerp"
-        if voice_a not in VOICES:
+        if voice_a not in _voices():
             return jsonify({"error": f"Unknown voice_a: {voice_a}"}), 400
-        if voice_b not in VOICES:
+        if voice_b not in _voices():
             return jsonify({"error": f"Unknown voice_b: {voice_b}"}), 400
         kokoro_inst = load_model()
         voice_param = _blend_voices(kokoro_inst, voice_a, voice_b, ratio, method)
         voice = voice_a
     else:
-        if voice not in VOICES:
-            return jsonify({"error": f"Unknown voice. Choose from: {VOICES}"}), 400
+        if voice not in _voices():
+            return jsonify({"error": f"Unknown voice. Choose from: {_voices()}"}), 400
 
     if _stream_active.is_set():
         return jsonify({"error": "A stream is already in progress."}), 429
@@ -972,7 +868,7 @@ def stream_audio():
         try:
             async def _produce():
                 nonlocal final_sr
-                with generation_inference_lock:
+                with _inference_lock():
                     stream = kokoro.create_stream(
                         text=stream_phonemes, voice=voice_param,
                         speed=speed, lang=lang, is_phonemes=stream_is_ph,
@@ -1262,13 +1158,13 @@ def _background_multivoice_generate(job_id, segments, speed, gap_ms, prompt, bas
                 vb = seg_blend.get("voice_b", "")
                 ratio = max(0.0, min(1.0, float(seg_blend.get("ratio", 0.5))))
                 method = seg_blend.get("method", "slerp")
-                if va in VOICES and vb in VOICES:
+                if va in _voices() and vb in _voices():
                     voice_param = _blend_voices(kokoro, va, vb, ratio, method)
 
             lang = _voice_to_lang(seg_voice)
             phonemes, is_ph = _phonemize_with_misaki(seg_text, lang)
             start = time.perf_counter()
-            with generation_inference_lock:
+            with _inference_lock():
                 chunk_audio, _sr = kokoro.create(
                     text=phonemes, voice=voice_param, speed=seg_speed,
                     lang=lang, is_phonemes=is_ph,
@@ -1363,7 +1259,7 @@ def generate_multivoice(data: TtsMultivoiceRequest):
     # Validate voices
     for i, seg in enumerate(segments):
         v = seg.get("voice", "")
-        if v and v not in VOICES:
+        if v and v not in _voices():
             return jsonify({"error": f"Unknown voice in segment {i + 1}: {v}"}), 400
 
     if _stream_active.is_set():

@@ -180,11 +180,17 @@ def _step_tts_inworld_pipeline(config, project_id, text, voice, speed, job_dir, 
 def _step_tts_kokoro_pipeline(config, project_id, text, voice, speed, job_dir, wav_path,
                               provider_id, provider_version, provider_kind, provider_settings):
     """Pipeline TTS via local Kokoro ONNX with caching."""
-    from studio.tts.routes import (
-        load_model, _voice_to_lang, _phonemize_with_misaki,
-        generation_inference_lock,
-        _cache_key, _cache_path,
-    )
+    # The engine comes from its owning provider package, not from the routes
+    # module that used to keep a second copy of it (contracts.md B5 / K1).
+    from studio.shared.providers_common.concurrency import exclusive_execution
+    from studio.tts.providers import kokoro_engine
+    from studio.tts.routes import _cache_key, _cache_path
+
+    engine = kokoro_engine()
+    load_model = engine.load_model
+    _voice_to_lang = engine._voice_to_lang
+    _phonemize_with_misaki = engine._phonemize_with_misaki
+
     from studio.tts.normalize import clean_for_tts
     from studio.tts.audio import pad_audio, run_loudnorm
     from studio.shared.providers_common import settings_manager
@@ -216,7 +222,8 @@ def _step_tts_kokoro_pipeline(config, project_id, text, voice, speed, job_dir, w
         phonemes, is_ph = _phonemize_with_misaki(tts_prompt, lang)
 
         start = time.perf_counter()
-        with generation_inference_lock:
+        # Serialization is declared by the manifest, not assumed here (§20.4).
+        with exclusive_execution("tts", provider_id):
             audio, _sr = kokoro.create(
                 text=phonemes, voice=voice, speed=speed,
                 lang=lang, is_phonemes=is_ph,

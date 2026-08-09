@@ -128,6 +128,12 @@ from studio.shared.providers_common.boundary import (
     wait_until,
     wrap_exception,
 )
+from studio.shared.providers_common.concurrency import (
+    EXCLUSIVE_EXECUTION,
+    exclusive_execution,
+    exclusive_lock,
+    is_exclusive,
+)
 from studio.shared.providers_common.hub import (
     ProviderHub,
     DomainBinding,
@@ -153,8 +159,12 @@ from studio.shared.providers_common.progress import (
 __all__ = [
     "DOMAINS",
     "DOMAIN_IDS",
+    "EXCLUSIVE_EXECUTION",
     "DomainSpec",
+    "exclusive_execution",
+    "exclusive_lock",
     "get_domain",
+    "is_exclusive",
     "REDACTION_SENTINEL",
     "SENSITIVE_KEYS_RE",
     "WIDGET_TYPES",

@@ -9,4 +9,35 @@ from studio.shared.providers_common.hub import bind_domain
 
 registry, discover, get_provider, list_providers, init_tts_registry = bind_domain('tts')
 
-__all__ = ['registry', 'discover', 'get_provider', 'list_providers', 'init_tts_registry']
+
+def kokoro_engine():
+    """The one Kokoro engine module in this process (contracts.md B5 / K1).
+
+    `studio/tts/routes.py` used to declare its own model handle, G2P handle,
+    inference lock, and voice catalog, and the provider package declared a
+    second, never-populated copy of all four. Both now come from here, so there
+    is exactly one ONNX session and one lock however a caller arrives.
+
+    Resolved through the registry rather than imported: the folder has no
+    `__init__.py` and loads under a synthetic module name, so `registry.get` is
+    the only way to reach the object the platform actually serves (B8).
+    """
+    instance = registry.get('kokoro')
+    if instance is None:
+        # Discovery is idempotent; a caller arriving before boot finished (a
+        # test, a CLI entry point) gets it on demand rather than an error.
+        discover()
+        instance = registry.get('kokoro')
+    if instance is None:
+        raise RuntimeError("The 'kokoro' TTS provider is not registered")
+    return instance.provider_module
+
+
+__all__ = [
+    'discover',
+    'get_provider',
+    'init_tts_registry',
+    'kokoro_engine',
+    'list_providers',
+    'registry',
+]

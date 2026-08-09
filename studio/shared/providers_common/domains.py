@@ -17,6 +17,12 @@ from config import ROOT_DIR
 
 
 # Capabilities every domain understands (contracts.md §20.4).
+#
+# `exclusive_execution` is added by step 15.1. It is a scheduling property, not a
+# feature: a provider owning a heavy in-process singleton (§20.2 `local`) declares
+# it, and the platform serializes that provider's invocations on one process-wide
+# lock. It belongs in the shared set rather than the `tts` vocabulary because
+# nothing about it is TTS-specific — any domain may ship a local provider.
 SHARED_CAPABILITIES = frozenset({
     "test_connection",
     "single_scene",
@@ -25,6 +31,7 @@ SHARED_CAPABILITIES = frozenset({
     "push_callbacks",
     "cancel",
     "progress",
+    "exclusive_execution",
 })
 
 
@@ -89,6 +96,8 @@ DOMAINS: dict[str, DomainSpec] = {
                 "streaming", "voice_list", "voice_blend", "speed_control", "model_download"
             ),
             legacy_selection_key="sts-tts-provider",
+            request_model="studio.tts.providers.contract:TTSRequest",
+            result_model="studio.tts.providers.contract:TTSResultPayload",
         ),
         DomainSpec(
             id="storyboard",
