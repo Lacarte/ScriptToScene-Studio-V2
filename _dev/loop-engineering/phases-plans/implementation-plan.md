@@ -2025,6 +2025,53 @@ only its provider package/registration and tests; standardized results/errors ar
 workflows/APIs/settings/artifacts remain compatible; docs are current; and every deterministic gate is
 green before Phase 17 begins.
 
+#### Step 16.5 review status — 2026-08-09
+
+- **Complete.** Final provider-platform gate is green. The eight-point Definition of Done
+  in `proposition-final.md` is machine-checked by `tests/test_provider_platform_gate.py`
+  and re-verified by the full deterministic suites.
+
+##### DoD checklist (recorded)
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | Five AI domains dispatch only through registered providers; Music/Captions stay local | Hub lists exact shipped sets (`script`: gemini/random_template/scaffold_check; `scene_blueprint`: n8n; `tts`: kokoro/inworld; `storyboard`: gemini_ws/wavespeed_*; `animator`: grok_automa/kie_ai). Music/captions adapter blobs still pinned to step-3.2 hashes; neither imports `providers_common`. |
+| 2 | Nodes/UI/adapters provider-agnostic (allowlist) | Platform gate + `test_provider_extensibility.ZeroTouchDiffTests` + `test_provider_cleanup`; five provider nodes use `type: provider` + domain default only. |
+| 3 | Conforming provider = package + tests only | Fixture ids never leak outside `tests/`; committed `script/scaffold_check` demo is discovered and runs on the unmodified `story.generate` node (16.2). |
+| 4 | Standard results/errors enforced | `ProviderError` → adapter bridge; every domain declares request/result models; result egress helper present. Covered deeper by runtime/hardening suites. |
+| 5 | Old workflows/APIs/settings/artifacts compatible | All four built-in templates validate + schedule; aliases resolve; full matrix in `test_provider_compat_matrix.py`. |
+| 6 | Catalog-driven selection/settings/health | `GET /api/providers` returns all five domains with `catalog_version`; per-provider settings + health 200 for every domain default. Frontend catalog/selector/legacy adoption suites green. |
+| 7 | Broken provider degrades only | Missing-provider raises attributable error; scheduler run with forced provider failure finishes `failed`/`partial` (not silent success). Isolation fuzz remains in `test_provider_hardening.py`; success/partial/retry diagnostics in `test_workflow_scheduler.py`. |
+| 8 | Docs current + drift-gated | `docs/providers.md` + `docs/provider-author-guide.md` present for all five domains; `python -m studio.workflows.docs --check` → OK. |
+
+##### Automated verification (2026-08-09)
+
+| Gate | Result |
+|---|---|
+| Backend `venv/Scripts/python.exe -m pytest tests/ -q` | **1088 passed, 12 skipped** (live marker), 470 subtests |
+| Frontend `cd frontend && npm run test` | **280 passed** (37 files) |
+| Frontend `cd frontend && npm run build` | **OK** → `static/dist/` |
+| Docs `venv/Scripts/python.exe -m studio.workflows.docs --check` | **OK** (workflow + provider docs match live sources) |
+| Live `tests/test_live_providers.py` without `STS_LIVE` | **10 skipped** (correct opt-in) |
+
+##### Live / external limitations (unchanged; not blocking Phase 17)
+
+| Provider | Status | Notes |
+|---|---|---|
+| Kokoro TTS (local) | Verified earlier (6.1) | Deterministic path green; keys not required |
+| Inworld TTS | Credential present; not re-run live this gate | Cloud spend gated behind `STS_LIVE` |
+| Scene blueprint n8n + OpenRouter | Hosted webhook retired; local n8n path previously verified | OpenRouter balance historically negative for paid models |
+| WaveSpeed storyboard | Still blocked historically (HTTP 401) | Key present in env; set `STS_LIVE_STORYBOARD=1` after key replacement |
+| gemini_ws / grok_automa | Not automatable | Need human-driven browser extension |
+| Kie AI animator | Verified earlier (14.5 live) | Key present; re-run with `STS_LIVE=1` spends credits |
+| FFmpeg export | Verified earlier | Local only |
+
+Interactive in-app smoke of the Settings + five legacy pages was not re-driven in a browser this
+session; catalog API + Vitest legacy/workflow provider adoption cover the same contracts
+deterministically. Re-open the running app before Phase 17 UX work if a visual check is desired.
+
+**Phase 16 is gated complete.** Next implementation step is 17.1 (desktop launcher).
+
 ---
 
 ## Phase 17 — Distribution & assistant
