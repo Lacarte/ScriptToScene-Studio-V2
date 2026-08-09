@@ -54,6 +54,41 @@ def elapsed(since: float) -> str:
     seconds = int(time.monotonic() - since)
     return f"{seconds // 60}m{seconds % 60:02d}s"
 
+
+def _completion_beep() -> None:
+    if sys.platform == "win32":
+        import winsound
+        winsound.Beep(1100, 220)
+    else:
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+
+
+def _show_completion_dialog(title: str, message: str) -> None:
+    if sys.platform != "win32":
+        return
+    import ctypes
+    # MB_ICONINFORMATION | MB_TASKMODAL | MB_SETFOREGROUND | MB_TOPMOST
+    flags = 0x00000040 | 0x00002000 | 0x00010000 | 0x00040000
+    ctypes.windll.user32.MessageBoxW(None, message, title, flags)
+
+
+def notify_loop_finished(title: str, message: str, *, enabled: bool = True) -> None:
+    """Beep three times and show a foreground, topmost completion dialog."""
+    if not enabled:
+        return
+    try:
+        for index in range(3):
+            _completion_beep()
+            if index < 2:
+                time.sleep(0.12)
+    except Exception as exc:
+        say(f"finish notification sound failed: {exc}", icon="!")
+    try:
+        _show_completion_dialog(title, message)
+    except Exception as exc:
+        say(f"finish notification dialog failed: {exc}", icon="!")
+
 ROOT = Path(__file__).resolve().parents[2]
 PLAN_PATH = ROOT / "_dev" / "loop-engineering" / "phases-plans" / "implementation-plan.md"
 LOOP_DIR = ROOT / "_dev" / "loop-engineering" / "runtime"
@@ -707,6 +742,8 @@ def main() -> None:
                     help="agent used for adversarial review (default: codex)")
     ap.add_argument("--max-fix-attempts", type=int, default=3)
     ap.add_argument("--no-push", action="store_true")
+    ap.add_argument("--no-finish-notification", action="store_true",
+                    help="do not beep or show the topmost completion dialog")
     ap.add_argument("--mark-done-through", metavar="STEP", help="mark all steps up to STEP as done")
     ap.add_argument("--sync-git", action="store_true", help="merge steps found in git log into done state")
     args = ap.parse_args()
@@ -788,8 +825,15 @@ def main() -> None:
             phase_steps = [s for s in targets if s.phase == phase]
             if not run_phase(phase, phase_steps, plan, state, args,
                              resume_baseline=unfinished_reviews.get(phase)):
-                say(f"LOOP STOPPED in phase {phase} after {elapsed(run_started)} — "
+                duration = elapsed(run_started)
+                say(f"LOOP STOPPED in phase {phase} after {duration} — "
                     f"completed before the halt: {', '.join(completed) or 'none'}", icon="✗")
+                notify_loop_finished(
+                    "Loop Engineering Stopped",
+                    f"The engineering loop stopped in Phase {phase} after {duration}.\n\n"
+                    f"Completed before the halt: {', '.join(completed) or 'none'}.",
+                    enabled=not args.no_finish_notification,
+                )
                 sys.exit(1)
             completed.extend(s.id for s in phase_steps)
     else:
@@ -797,9 +841,16 @@ def main() -> None:
             "→ CORRECT while red → REVIEW (adversarial audit) → commit + record")
         for step in targets:
             if not run_step(step, state, args):
-                say(f"LOOP STOPPED at step {step.id} after {elapsed(run_started)} — "
+                duration = elapsed(run_started)
+                say(f"LOOP STOPPED at step {step.id} after {duration} — "
                     f"{len(completed)} step(s) completed before the halt: "
                     f"{', '.join(completed) or 'none'}", icon="✗")
+                notify_loop_finished(
+                    "Loop Engineering Stopped",
+                    f"The engineering loop stopped at Step {step.id} after {duration}.\n\n"
+                    f"Completed before the halt: {', '.join(completed) or 'none'}.",
+                    enabled=not args.no_finish_notification,
+                )
                 sys.exit(1)
             completed.append(step.id)
 
@@ -808,6 +859,13 @@ def main() -> None:
         f"{', '.join(completed)}", icon="✓")
     say("last commits:")
     print(run_capture(["git", "log", "--oneline", "-8"]))
+    notify_loop_finished(
+        "Loop Engineering Complete",
+        f"The engineering loop finished successfully.\n\n"
+        f"Completed {len(completed)} step(s) in {elapsed(run_started)}:\n"
+        f"{', '.join(completed)}",
+        enabled=not args.no_finish_notification,
+    )
 
 
 if __name__ == "__main__":

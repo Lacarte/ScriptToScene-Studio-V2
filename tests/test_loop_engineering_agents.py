@@ -83,3 +83,32 @@ def test_non_limit_failure_does_not_fall_back(monkeypatch, tmp_path):
 
     assert result.returncode == 2
     assert len(calls) == 1
+
+
+def test_finish_notification_beeps_three_times_then_shows_dialog(monkeypatch):
+    events = []
+    monkeypatch.setattr(loop, "_completion_beep", lambda: events.append("beep"))
+    monkeypatch.setattr(
+        loop, "_show_completion_dialog",
+        lambda title, message: events.append((title, message)),
+    )
+    monkeypatch.setattr(loop.time, "sleep", lambda _seconds: None)
+
+    loop.notify_loop_finished("Complete", "Everything passed")
+
+    assert events == [
+        "beep", "beep", "beep", ("Complete", "Everything passed"),
+    ]
+
+
+def test_finish_notification_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(
+        loop, "_completion_beep",
+        lambda: (_ for _ in ()).throw(AssertionError("beep should not run")),
+    )
+    monkeypatch.setattr(
+        loop, "_show_completion_dialog",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("dialog should not run")),
+    )
+
+    loop.notify_loop_finished("Complete", "Everything passed", enabled=False)

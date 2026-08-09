@@ -23,6 +23,9 @@ Codex for review. All-Codex, all-Claude, AGY-code/Codex-review, and Grok 4.5
 code/AGY-fallback/Codex-review profiles are also available. The window prints
 the selected roles, current phase, step, and stage, and stays open with the final
 exit code. Agent output and idle-process heartbeats appear in the main window.
+When a real run completes or stops early, the runner beeps three times and
+opens a foreground, topmost Windows dialog with the result. Pass
+`--no-finish-notification` to suppress both notifications in automation or CI.
 
 ```bat
 _dev\loop-engineering\run.bat --status            &:: where am I? what's next?
@@ -31,6 +34,7 @@ _dev\loop-engineering\run.bat --phase 2           &:: finish phase 2
 _dev\loop-engineering\run.bat --steps 1           &:: exactly one step
 _dev\loop-engineering\run.bat --all               &:: everything, step-level cycles
 _dev\loop-engineering\run.bat --by-phase          &:: everything, PHASE-level cycles
+_dev\loop-engineering\run.bat --all --no-finish-notification &:: silent finish
 ```
 
 `--by-phase` is the "one shot" mode: the selected builder handles every step of a phase
